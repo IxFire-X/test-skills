@@ -5,7 +5,7 @@
   "smoke_scenario": "smoke",
   "critical_scenarios": [
     "fresh-non-git",
-    "dirty-git-preservation",
+    "tree-preservation",
     "nested-module",
     "secret-exclusion",
     "waiting-for-model-resume",
@@ -21,7 +21,7 @@
   "scenario_contracts": {
     "smoke": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "accepted-terminal", "execution_required": true},
     "fresh-non-git": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "fresh-non-git", "execution_required": true},
-    "dirty-git-preservation": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "dirty-tree-preserved", "execution_required": true},
+    "tree-preservation": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "tree-preserved", "execution_required": true},
     "nested-module": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "nested-module-bound", "execution_required": true},
     "secret-exclusion": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "secret-inputs-excluded", "execution_required": true},
     "waiting-for-model-resume": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "waiting-model-resumed", "execution_required": true},
@@ -38,5 +38,5 @@
   "escalated_repetitions": 5,
   "escalate_on": ["instability", "protocol_violation"],
   "protocol_violation_blocks_readiness": true,
-  "digest": "sha256:26577c28e228ceea8678f71ac3b4fef2524ab2bccc99ca9ef7d8e9c56fc40ff9"
+  "digest": "sha256:b2663f7b301f2d34f196d1b0182eb915ec0b6651e91f71c33778c76bd38a0ac8"
 }

@@ -1,6 +1,6 @@
 """V1 (A3-4): the interface of the core that the execution files (``tools/exec_*.py``) stand on.
 
-``exec_commands``, ``exec_runner``, ``exec_probe`` and ``exec_git`` take the helpers of the core that have no public name of their
+``exec_commands``, ``exec_runner`` and ``exec_probe`` take the helpers of the core that have no public name of their
 own from here — and from nowhere else: a test (``tests/test_no_private_imports.py``) refuses a private name of another module in them.
 Every name below is a public alias of a helper in the module that owns it (``public = _private`` at the end of that module), so
 there is one place to change when the owner moves or renames the helper — here and in the alias line, not in each user.

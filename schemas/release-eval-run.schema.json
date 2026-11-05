@@ -32,7 +32,7 @@
   "allOf": [{
     "if": {
       "properties": {
-        "scenario_id": {"enum": ["fresh-non-git", "dirty-git-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]}
+        "scenario_id": {"enum": ["fresh-non-git", "tree-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]}
       },
       "required": ["scenario_id"]
     },

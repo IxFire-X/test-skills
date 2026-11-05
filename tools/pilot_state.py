@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
@@ -369,11 +369,6 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
     manifest = _read_artifact(project, root, root / "run-manifest.json", "run manifest")
     receipt = _read_artifact(project, root, root / "run-authorization-receipt.json", "authorization receipt")
     if manifest.get("run_id") != root.name or (manifest.get("project") != str(project) and not _moved_project_ok(project, root)):
-        raise ValueError("invalid run boundary")
-    # FaT-RL: unique dirty paths are checked here, not by the schema's uniqueItems — quadratic on a large dirty tree
-    state = manifest.get("project_state")
-    if isinstance(state, Mapping) and state.get("kind") == "GIT_TREE" and any(
-            len(set(values)) != len(values) for values in (state["status"], [row["path"] for row in state["files"]])):
         raise ValueError("invalid run boundary")
     if receipt.get("run_id") != manifest["run_id"] or receipt.get("policy_profile") != manifest.get("policy_profile") or receipt.get("digest") != manifest.get("authorization_digest"):
         raise ValueError("invalid run boundary")
@@ -6623,7 +6618,7 @@ def publish_run_artifact_bytes(run_root: Path, attempt_id: str, relative_name: s
 
 def _scenario_observation_target(root: Path, attempt_id: str, scenario_id: str) -> Path:
     allowed = {
-        "fresh-non-git", "dirty-git-preservation", "waiting-for-model-resume",
+        "fresh-non-git", "tree-preservation", "waiting-for-model-resume",
         "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun",
     }
     if not re.fullmatch(r"[0-9a-f]{32}", attempt_id) or scenario_id not in allowed:
@@ -6631,19 +6626,48 @@ def _scenario_observation_target(root: Path, attempt_id: str, scenario_id: str) 
     return root / "scenario-observations" / f"{attempt_id}.{scenario_id}.json"
 
 
-def _project_state_for(policy_profile: str, project: Path, expected: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
-    """The project's git state for a run — only a ``local-pilot-v1`` run looks at git (``tools/exec_git.py``, through the gate).
+def _project_state_for(policy_profile: str, project: Path) -> dict[str, Any] | None:
+    """What a run says about git in the project at its start — by looking at the file system, never by starting ``git``.
 
-    A ``cases-only-v1`` run never starts ``git`` (``git status`` can run a clean filter or a hook of the project's own configuration),
-    so its manifest says ``project_state: null`` — "not taken", which no reader takes for "clean"."""
-    if policy_profile == "cases-only-v1":
+    A project without ``.git`` is sealed as ``GIT_DIRECTORY`` (the precondition of the scenario ``fresh-non-git``); a project with it, and
+    every ``cases-only-v1`` run, has ``project_state: null`` — "not taken", which no reader takes for "clean".  That the run did not touch
+    the user's files is proved at its end by the inventory (``_project_tree_state``), not by ``git status`` (V4a: a clean filter or a hook
+    of the project's own configuration runs there)."""
+    if policy_profile == "cases-only-v1" or (Path(project) / ".git").exists():
         return None
-    from tools import execution_gate
+    return _sealed({"kind": "GIT_DIRECTORY", "path": ".git", "entries": []})
 
-    module = execution_gate.load("exec_git")
-    if module is None:
-        raise ValueError("project state needs tools/exec_git.py: local-pilot-v1 is not offered by this package")
-    return module.project_state_snapshot(project, expected)
+
+def _project_tree_state(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """V4a: the user's tree as the inventory sees it — the number of files and the digest of their ``(path, content digest)`` pairs."""
+    pairs = sorted((str(row["project_path"]), str(row["content_digest"])) for row in rows)
+    return _sealed({"kind": "PROJECT_TREE", "files": len(pairs),
+                    "tree_digest": "sha256:" + hashlib.sha256(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()})
+
+
+def _owned_project_paths(root: Path, attempt: Mapping[str, Any]) -> set[str]:
+    """The project paths the pipeline owns in the attempt: the files of its generated delta (relative to the module, so prefixed here)."""
+    try:
+        delta = read_attempt_receipt(root, str(attempt["attempt_id"]), "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return set()
+    prefix = "" if attempt.get("module") == "." else str(attempt.get("module")).rstrip("/") + "/"
+    return {prefix + str(row["path"]) for row in delta.get("files", ()) if isinstance(row, Mapping)}
+
+
+def _project_tree_states(project: Path, root: Path, attempt: Mapping[str, Any], inventory: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V4a: ``(before, after)`` — the frozen inventory of the attempt, and the inventory rebuilt now, both without the files the pipeline
+    owns.  The same rebuild as ``run_pipeline._baseline_check`` (the same arguments), so what ``status`` calls a drift is what is compared."""
+    from tools.project_inventory import baseline_external_input_paths, build_inventory
+
+    owned = _owned_project_paths(root, attempt)
+    baseline = frozen_baseline(root, attempt)
+    module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
+    current = build_inventory(project, module_root, skill_pack_root=Path(__file__).resolve().parents[1], generated_roots=(root.parent,),
+                              proved_dependency_files=baseline_external_input_paths(project, baseline))
+    keep = lambda row: row.get("project_path") not in owned  # noqa: E731
+    return (_project_tree_state(row for row in inventory["files"] if keep(row)),
+            _project_tree_state(row for row in current["files"] if keep(row)))
 
 
 def _terminal_retry_snapshot(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -6922,7 +6946,7 @@ def _validate_scenario_observation(
 ) -> tuple[list[Mapping[str, Any]], Mapping[str, Any] | None]:
     expected = {
         "fresh-non-git": ("NON_GIT_PROJECT", "RUN_PIPELINE"),
-        "dirty-git-preservation": ("DIRTY_GIT_TREE", "RUN_PRESERVING_DIRTY_TREE"),
+        "tree-preservation": ("PROJECT_TREE", "RUN_PRESERVING_TREE"),
         "waiting-for-model-resume": ("MODEL_WAITING", "RESUME_MODEL_ATTEMPT"),
         "one-user-question-resume": ("USER_QUESTION_PENDING", "RESUME_AFTER_USER_ANSWER"),
         "terminal-idempotent-retry": ("TERMINAL_ATTEMPT", "RETRY_TERMINAL_ATTEMPT"),
@@ -6979,7 +7003,7 @@ def _validate_scenario_observation(
     ):
         raise ValueError("scenario observation publication binding is invalid")
     binding_event: Mapping[str, Any] | None = None
-    if scenario_id in {"fresh-non-git", "dirty-git-preservation"}:
+    if scenario_id in {"fresh-non-git", "tree-preservation"}:
         from tools.project_inventory import read_execution_baseline, read_inventory_receipt
 
         manifest = read_run(root)["manifest"]
@@ -7006,10 +7030,12 @@ def _validate_scenario_observation(
                 and after == _terminal_retry_snapshot(root, str(attempt["attempt_id"]))
             )
         else:
+            # V4a: no state in the manifest — the "before" is the frozen inventory of the attempt (without the files the pipeline owns)
+            owned = _owned_project_paths(root, attempt)
             valid = (
-                isinstance(initial, Mapping)
-                and initial.get("kind") == "GIT_TREE"
-                and before == after == initial
+                initial is None
+                and attempt.get("policy_profile") == "local-pilot-v1"
+                and before == after == _project_tree_state(row for row in inventory["files"] if row.get("project_path") not in owned)
             )
         if not selected_valid or not valid:
             raise ValueError("project state observation is invalid")
@@ -7233,7 +7259,10 @@ def publish_project_state_observation(
         return None
     manifest = read_run(root)["manifest"]
     before = manifest.get("project_state")
-    if not isinstance(before, Mapping):
+    if before is None:  # V4a: no state — the tree of a local-pilot run is compared by the inventory (below); a cases-only run takes none
+        if attempt.get("policy_profile") != "local-pilot-v1":
+            return None
+    elif not isinstance(before, Mapping) or before.get("kind") != "GIT_DIRECTORY":
         return None
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
 
@@ -7256,14 +7285,13 @@ def publish_project_state_observation(
             and row.get("attempt_id") == attempt_id
         ),
     ]
-    if before.get("kind") == "GIT_DIRECTORY":
+    if isinstance(before, Mapping) and before.get("kind") == "GIT_DIRECTORY":
         scenario_id, precondition, action = "fresh-non-git", "NON_GIT_PROJECT", "RUN_PIPELINE"
         after = _terminal_retry_snapshot(root, attempt_id)
-    elif before.get("kind") == "GIT_TREE":
-        scenario_id = "dirty-git-preservation"
-        precondition, action = "DIRTY_GIT_TREE", "RUN_PRESERVING_DIRTY_TREE"
-        after = _project_state_for(str(attempt["policy_profile"]), project, before)
-        if after != before:
+    elif before is None:
+        scenario_id, precondition, action = "tree-preservation", "PROJECT_TREE", "RUN_PRESERVING_TREE"
+        before, after = _project_tree_states(project, root, attempt, inventory)
+        if after != before:  # a foreign file changed, went or came during the run: no evidence, not a wrong evidence
             return None
     else:
         return None

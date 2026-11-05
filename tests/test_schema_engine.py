@@ -468,13 +468,12 @@ def test_a_final_newline_is_refused_by_every_pattern_of_the_schemas_that_ends_on
 
 
 _PATH_FIELDS = [  # (schema, path of the field inside it): the path fields that carry a pattern
-    ("run-manifest.schema.json", "$defs/file/properties/path"), ("release-manifest.schema.json", "$defs/path"),
+    ("release-manifest.schema.json", "$defs/path"),  # V4a: run-manifest $defs/file went with the GIT_TREE state
     ("compatibility-evidence.schema.json", "$defs/file/properties/path"), ("inventory-receipt.schema.json", "properties/files/items/properties/project_path"),
     ("exclusion-receipt.schema.json", "$defs/exclusion/properties/project_path"), ("execution-baseline.schema.json", "properties/test_root"),
     ("release-eval-run.schema.json", "$defs/ref/properties/path"), ("retained-native-rerun-receipt.schema.json", "$defs/relative_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/0/properties/source_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/1/properties/source_path"),
-    ("scenario-observation-receipt.schema.json", "$defs/observed_file/properties/path"),
     ("scenario-observation-receipt.schema.json", "$defs/retained_file/properties/path"),
 ]
 

@@ -156,20 +156,20 @@ def test_doctor_and_ready_pass_in_a_venv_without_packages(tmp_path: Path) -> Non
     assert _levels(json.loads(ready.stdout))["deps"] == "OK"
 
 
-def test_ready_checks_git_exactly_like_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import exec_git as ready  # P8a-2 B: the check moved with the git file; only local-pilot-v1 runs it
+def test_ready_has_a_git_row_that_never_starts_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """V4a: the row stays in the table, and a machine without ``git`` — or a project whose configuration would run a hook — does not matter."""
+    from tools import ready
 
     project = _python_project(tmp_path, runtime=False)
-    assert ready.check_git(project)["level"] == "OK" and "не git" in ready.check_git(project)["message"]
     subprocess.run(["git", "init", "-q", str(project)], check=True)
-    assert ready.check_git(project)["level"] == "OK"
 
     def missing(*_args, **_kwargs):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(ready.subprocess, "run", missing)
-    result = ready.check_git(project)
-    assert result["level"] == "STOP" and result.get("fix")
+    monkeypatch.setattr(subprocess, "run", missing)
+    for profile in ("cases-only-v1", "local-pilot-v1"):
+        row = ready._git_row(project, profile)
+        assert row["id"] == "git" and row["level"] == "OK", row
 
 
 def test_ready_offers_the_system_mvn_for_a_missing_wrapper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

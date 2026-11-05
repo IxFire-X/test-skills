@@ -1,7 +1,6 @@
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
@@ -9,7 +8,7 @@ from jsonschema import Draft202012Validator, ValidationError
 
 CRITICAL_SCENARIOS = (
     "fresh-non-git",
-    "dirty-git-preservation",
+    "tree-preservation",
     "nested-module",
     "secret-exclusion",
     "waiting-for-model-resume",
@@ -389,35 +388,6 @@ def test_fresh_non_git_observation_is_produced_by_public_finalizer(tmp_path: Pat
     assert loaded["verified"] is True
     assert loaded["record"]["precondition"]["kind"] == "NON_GIT_PROJECT"
     assert loaded["record"]["action"]["kind"] == "RUN_PIPELINE"
-
-
-def test_dirty_git_observation_proves_initial_user_bytes_are_preserved(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import read_scenario_observation
-
-    project = tmp_path / "project"
-    project.mkdir()
-    user_file = project / "user-note.txt"
-    user_file.write_text("keep this dirty byte sequence\n", encoding="utf-8")
-    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
-    expected = user_file.read_bytes()
-    run_root, attempt_id, report, request, _durable = _execution_facts(
-        tmp_path, project=project,
-    )
-    _publish_execution(run_root, attempt_id, report, request=request)
-
-    finalized = finalize_durable_execution_attempt(run_root, attempt_id)
-    published = finalized["scenario_observation_receipts"]["dirty-git-preservation"]
-    loaded = read_scenario_observation(
-        run_root, attempt_id, "dirty-git-preservation", published["digest"],
-    )
-
-    assert user_file.read_bytes() == expected
-    assert loaded["verified"] is True
-    assert loaded["record"]["before"] == loaded["record"]["after"]
-    assert any(row["path"] == "user-note.txt" for row in loaded["record"]["before"]["files"])
 
 
 def test_waiting_for_model_resume_observation_is_produced_after_real_model_pair(tmp_path: Path):

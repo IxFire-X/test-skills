@@ -64,7 +64,7 @@ def test_the_registry_carries_the_generated_documents_and_the_cases_only_profile
 def test_every_exec_module_is_left_out_and_the_gate_of_the_core_is_not() -> None:
     from tools import pack_registry
 
-    names = ["tools/exec_commands.py", "tools/exec_stand.py", "tools/exec_probe.py", "tools/exec_runner.py", "tools/exec_git.py"]
+    names = ["tools/exec_commands.py", "tools/exec_stand.py", "tools/exec_probe.py", "tools/exec_runner.py"]
     assert all(pack_registry.is_cases_only_excluded(name) for name in names)
     # F6: the nine modules of mode B are left out as well; the gate and the Java lexer they share with mode A stay
     assert not any(pack_registry.is_cases_only_excluded(name) for name in ("tools/execution_gate.py", "tools/java_text.py"))

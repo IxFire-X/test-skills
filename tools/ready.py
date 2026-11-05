@@ -75,14 +75,9 @@ def check_pack() -> dict[str, Any]:
 
 
 def _git_row(project: Path, profile: str) -> dict[str, Any]:
-    """The ``git`` row.  Only ``local-pilot-v1`` runs ``git`` (``tools/exec_git.py``): ``cases-only-v1`` never does — ``git status``
-    can run a clean filter or a hook of the project's own configuration."""
-    from tools import execution_gate
-
-    module = execution_gate.load("exec_git") if profile == "local-pilot-v1" else None
-    if module is None:
-        return _row("git", CASES, "OK", "git не вызывается: профиль cases-only-v1")
-    return module.check_git(project)
+    """The ``git`` row.  No profile runs ``git``: ``git status`` can run a clean filter or a hook of the project's own configuration.
+    The row stays because the table of ``ready`` has always had it; it says only what the package does."""
+    return _row("git", CASES, "OK", "git не нужен: git не вызывается, проект сравнивается по описи файлов")
 
 
 def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:

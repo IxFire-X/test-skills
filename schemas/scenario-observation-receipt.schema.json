@@ -10,12 +10,12 @@
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
-    "scenario_id": {"enum": ["fresh-non-git", "dirty-git-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]},
+    "scenario_id": {"enum": ["fresh-non-git", "tree-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]},
     "precondition": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "snapshot_digest"],
       "properties": {
-        "kind": {"enum": ["NON_GIT_PROJECT", "DIRTY_GIT_TREE", "MODEL_WAITING", "USER_QUESTION_PENDING", "TERMINAL_ATTEMPT", "RETAINED_FILE_SET"]},
+        "kind": {"enum": ["NON_GIT_PROJECT", "PROJECT_TREE", "MODEL_WAITING", "USER_QUESTION_PENDING", "TERMINAL_ATTEMPT", "RETAINED_FILE_SET"]},
         "snapshot_digest": {"$ref": "#/$defs/digest"}
       }
     },
@@ -23,7 +23,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "before_digest", "after_digest"],
       "properties": {
-        "kind": {"enum": ["RUN_PIPELINE", "RUN_PRESERVING_DIRTY_TREE", "RESUME_MODEL_ATTEMPT", "RESUME_AFTER_USER_ANSWER", "RETRY_TERMINAL_ATTEMPT", "PROJECT_NATIVE_RERUN"]},
+        "kind": {"enum": ["RUN_PIPELINE", "RUN_PRESERVING_TREE", "RESUME_MODEL_ATTEMPT", "RESUME_AFTER_USER_ANSWER", "RETRY_TERMINAL_ATTEMPT", "PROJECT_NATIVE_RERUN"]},
         "before_digest": {"$ref": "#/$defs/digest"},
         "after_digest": {"$ref": "#/$defs/digest"}
       }
@@ -42,14 +42,6 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
-    "observed_file": {
-      "type": "object", "additionalProperties": false,
-      "required": ["path", "digest"],
-      "properties": {
-        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
-        "digest": {"$ref": "#/$defs/digest"}
-      }
-    },
     "retained_file": {
       "type": "object", "additionalProperties": false,
       "required": ["file_id", "path", "digest"],
@@ -68,11 +60,11 @@
         },
         {
           "type": "object", "additionalProperties": false,
-          "required": ["kind", "status", "files", "digest"],
+          "required": ["kind", "files", "tree_digest", "digest"],
           "properties": {
-            "kind": {"const": "GIT_TREE"},
-            "status": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/observed_file"}},
+            "kind": {"const": "PROJECT_TREE"},
+            "files": {"type": "integer", "minimum": 1, "description": "V4a: the files of the inventory without those the pipeline owns"},
+            "tree_digest": {"$ref": "#/$defs/digest"},
             "digest": {"$ref": "#/$defs/digest"}
           }
         },

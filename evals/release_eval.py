@@ -61,7 +61,7 @@ _OBSERVED_TUPLE_LABELS = {
 }
 _OBSERVATION_SCENARIOS = frozenset({
     "fresh-non-git",
-    "dirty-git-preservation",
+    "tree-preservation",
     "waiting-for-model-resume",
     "one-user-question-resume",
     "terminal-idempotent-retry",
@@ -670,7 +670,7 @@ def _derive_record(
     else:
         required_digests.add(snapshot_events[0]["digest"])
         required_digests.update(row["digest"] for row in lifecycle_events)
-    if scenario_id in {"fresh-non-git", "dirty-git-preservation", "secret-exclusion"}:
+    if scenario_id in {"fresh-non-git", "tree-preservation", "secret-exclusion"}:
         required_digests.add(inventory["digest"])
     if scenario_id == "secret-exclusion":
         required_digests.update(receipt["digest"] for receipt in contexts)

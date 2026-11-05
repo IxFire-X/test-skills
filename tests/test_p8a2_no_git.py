@@ -1,8 +1,8 @@
 """P8a-2 B: a run of ``cases-only-v1`` never starts ``git`` — in the repository build and in the delivery of cases alike.
 
 ``git status`` can run a clean filter or a hook of the project's own configuration, so the cases-only profile does not call it:
-the manifest of such a run says ``project_state: null`` ("not taken"), the drift of the project is the inventory's.  Only
-``local-pilot-v1`` asks ``tools/exec_git.py``, through the gate.  The profile of cases has no process, network or library-loading
+the manifest of such a run says ``project_state: null`` ("not taken"), the drift of the project is the inventory's.  V4a: no profile
+starts ``git`` any more (``tools/exec_git.py`` is gone; see ``test_p8b_git``).  The profile of cases has no process, network or library-loading
 primitive, and one ``ctypes`` (the Windows calls of the confined writer)."""
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def test_the_drift_of_a_cases_only_run_is_the_inventorys_and_names_the_path(tmp_
     assert log.read_text(encoding="utf-8") == ""
 
 
-def test_the_project_state_of_a_cases_only_run_is_none_and_local_pilot_asks_exec_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_project_state_of_a_run_starts_no_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import pilot_state
 
     project, _marker = _git_project(tmp_path)
@@ -125,23 +125,13 @@ def test_the_project_state_of_a_cases_only_run_is_none_and_local_pilot_asks_exec
 
     monkeypatch.setattr(subprocess, "run", refuse)
     assert pilot_state._project_state_for("cases-only-v1", project) is None
-    monkeypatch.undo()
-    state = pilot_state._project_state_for("local-pilot-v1", project)
-    assert state is not None and state["kind"] == "GIT_TREE" and any(row["path"] == "dirty.txt" for row in state["files"])
-
-
-def test_local_pilot_without_the_git_file_is_refused_not_taken_for_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from tools import execution_gate, pilot_state
-
-    monkeypatch.setattr(execution_gate, "load", lambda name: None)
-    with pytest.raises(ValueError, match="exec_git"):
-        pilot_state._project_state_for("local-pilot-v1", tmp_path)
+    assert pilot_state._project_state_for("local-pilot-v1", project) is None  # V4a: the tree is compared by the inventory at the end
 
 
 def test_a_null_project_state_is_valid_and_is_not_a_scenario_observation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The readers of ``project_state``: the run boundary (an object of kind GIT_TREE is checked, anything else is not), the
-    observation (``None`` is not a Mapping: no observation is published, the answer is ``None``) and the observation's validation
-    (needs a Mapping of kind GIT_DIRECTORY / GIT_TREE: ``None`` is invalid, never clean)."""
+    """The readers of ``project_state``: the observation of a ``cases-only-v1`` run (``None`` is "not taken": no observation is
+    published, the answer is ``None``) and its validation.  A ``None`` state of a ``local-pilot-v1`` run is the precondition of
+    ``tree-preservation`` (V4a), which a cases-only attempt never takes."""
     from tools import pilot_state
     from tools.schema_validation import load_json_strict, schema_diagnostics
 
@@ -159,13 +149,13 @@ def test_a_null_project_state_is_valid_and_is_not_a_scenario_observation(monkeyp
     assert load_json_strict  # the strict reader is the one the run boundary uses for the manifest
 
 
-# ---- the gate lists five files -------------------------------------------------------------------------------------
+# ---- the gate lists four files -------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("missing", ["exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git"])
-def test_the_execution_is_available_only_with_all_five_files(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
+@pytest.mark.parametrize("missing", ["exec_commands", "exec_stand", "exec_probe", "exec_runner"])
+def test_the_execution_is_available_only_with_all_four_files(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     from tools import execution_gate
 
-    assert tuple(execution_gate.EXEC_MODULES) == ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
+    assert tuple(execution_gate.EXEC_MODULES) == ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
     assert execution_gate.execution_available() is True
     original = execution_gate._present
     monkeypatch.setattr(execution_gate, "_present", lambda name: False if name == missing else original(name))
@@ -232,11 +222,9 @@ def test_ctypes_is_in_one_file_of_the_profile_with_fixed_win32_libraries_and_no_
     assert libraries == WIN32_LIBRARIES
 
 
-def test_the_files_that_run_git_are_outside_the_profile_and_the_core_never_imports_them() -> None:
-    from tools import pack_registry
-
-    assert pack_registry.is_cases_only_excluded("tools/exec_git.py")
+def test_the_core_never_imports_an_execution_file() -> None:
+    assert not (ROOT / "tools" / "exec_git.py").exists()  # V4a: the one place that ran git is gone
     for path in sorted((ROOT / "tools").glob("*.py")):
         if path.name.startswith("exec_"):
             continue
-        assert not any(name.startswith("tools.exec_") or name == "tools.exec_git" for name in _imports(ast.parse(path.read_text(encoding="utf-8")))), path.name
+        assert not any(name.startswith("tools.exec_") for name in _imports(ast.parse(path.read_text(encoding="utf-8")))), path.name

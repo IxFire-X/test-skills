@@ -18,7 +18,7 @@ import importlib.util
 from types import ModuleType
 from typing import Any
 
-EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
+EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
 # F4b: the way into the review of before (the CLI of the nine commands) is a file of the development build only
 LEGACY_MODULES = ("review_legacy",)
 MODE_B_MODULES = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",

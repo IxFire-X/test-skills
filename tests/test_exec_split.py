@@ -21,7 +21,7 @@ from tests.test_first_run import _python_project
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
-EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
+EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
 GATE = "execution_gate"
 
 # the process and network primitives: where they may be imported (the exec files, and the explicit exceptions below)

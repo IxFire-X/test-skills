@@ -49,16 +49,18 @@ def _hooked_repo(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_ready_does_not_run_the_fsmonitor_hook_of_the_project(tmp_path: Path) -> None:
-    from tools.exec_git import check_git
+    from tools.ready import _git_row
 
     project, marker = _hooked_repo(tmp_path)
-    assert check_git(project)["level"] == "OK"
+    for profile in ("cases-only-v1", "local-pilot-v1"):
+        assert _git_row(project, profile)["level"] == "OK"
     assert not marker.exists()
 
 
 def test_scan_state_does_not_run_the_fsmonitor_hook_of_the_project(tmp_path: Path) -> None:
-    from tools.exec_git import project_state_snapshot
+    """V4a: the project state of a run no longer asks git at all; the hook of the project's own configuration has nothing to run on."""
+    from tools.pilot_state import _project_state_for
 
     project, marker = _hooked_repo(tmp_path)
-    assert project_state_snapshot(project)["kind"] == "GIT_TREE"
+    assert _project_state_for("local-pilot-v1", project) is None
     assert not marker.exists()
