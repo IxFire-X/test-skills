@@ -2,6 +2,7 @@
 """Validate frozen Pipeline 4.0 machine truth and deterministic projections."""
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import re
@@ -278,6 +279,116 @@ def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str
     _error_if_not_equal(errors, "exit priority", contract.get("exit_priority"), EXPECTED_EXIT_PRIORITY)
 
 
+# ---- V8 (A5-8): what the code publishes under a run is what ``published_artifacts`` lists — checked both ways ---------------------------------
+
+
+def _tools_source(root: Path, module: str) -> tuple[str, "ast.Module"] | None:
+    path = root / "tools" / f"{module.removeprefix('tools.')}.py"
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    return text, ast.parse(text)
+
+
+def _module_assignment(tree: "ast.Module", name: str) -> Any:
+    """The literal value of the module-level ``name = <literal>``, else None."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(target, "id", None) == name for target in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def _receipt_directories(tree: "ast.Module") -> dict[str, str]:
+    """The ``directories = {kind: folder}`` literal inside ``_receipt_target``."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_receipt_target":
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Assign) and any(getattr(target, "id", None) == "directories" for target in inner.targets):
+                    return dict(ast.literal_eval(inner.value))
+    return {}
+
+
+def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
+    rows = contract.get("published_artifacts")
+    if not isinstance(rows, list) or not rows:
+        errors.append("published_artifacts missing")
+        return
+    state = _tools_source(root, "pilot_state")
+    if state is None:
+        errors.append("published_artifacts: tools/pilot_state.py unavailable")
+        return
+    directories = _receipt_directories(state[1])
+    folders = set(_module_assignment(state[1], "_RECEIPT_FOLDERS") or ())
+    prefixes = {"prior-capabilities-<batch>": _module_assignment(state[1], "_PRIOR_KIND"), "imported-cases-<batch>": _module_assignment(state[1], "_SKELETON_KIND")}
+    registry_ids = {row.get("id") for row in contract.get("artifact_registry", []) if isinstance(row, Mapping)}
+    stages = {row.get("stage") for row in contract.get("stage_registry", []) if isinstance(row, Mapping)}
+    kinds, row_folders, seen_ids = set(), set(), []
+    for row in rows:
+        label = f"published_artifacts {row.get('path') or row.get('registry_id') or row.get('stage')}"
+        registry_id = row.get("registry_id")
+        if registry_id is not None and registry_id not in registry_ids:
+            errors.append(f"{label}: registry_id {registry_id} is not in artifact_registry")
+        if row.get("stage") is not None and row["stage"] not in stages:
+            errors.append(f"{label}: stage {row['stage']} is not in stage_registry")
+        path = row.get("path")
+        if path is None:  # a place of its own is none: where it lives is the note, and no code writes it
+            if row.get("writer") or row.get("kind") or not row.get("note"):
+                errors.append(f"{label}: a row without a path has a note and no writer or kind")
+            if registry_id is not None:
+                seen_ids.append(registry_id)
+                if registry_id.replace("_", "-") in directories or any(other is not row and other.get("registry_id") == registry_id for other in rows):
+                    errors.append(f"{label}: {registry_id} has a writer after all")
+            continue
+        kind = row.get("kind")
+        if kind is not None:
+            kinds.add(kind)
+            first = path.split("/", 1)[0]
+            row_folders.add(first)
+            if kind in prefixes:
+                prefix = prefixes[kind]
+                if not isinstance(prefix, str) or not kind.startswith(prefix):
+                    errors.append(f"{label}: the prefix of the kind {kind} is not the one of pilot_state")
+                elif directories.get(kind) is None and first != prefix.removesuffix("-"):
+                    errors.append(f"{label}: folder does not follow its kind")
+            elif kind == "imported-cases":
+                if first != "imported-cases":
+                    errors.append(f"{label}: folder does not follow its kind")
+            elif directories.get(kind) != first:
+                errors.append(f"{label}: kind {kind} is not written to {first} by _receipt_target")
+            elif kind.startswith("automation-review-boundary-r") and not path.endswith(f".{kind[-2:]}.json"):
+                errors.append(f"{label}: the suffix of {kind} is not {kind[-2:]}")
+        writer = row.get("writer")
+        if writer is None:
+            errors.append(f"{label}: no writer")
+            continue
+        module, _, name = writer.partition(":")
+        found = _tools_source(root, module)
+        if found is None:
+            if set(row.get("profiles", [])) != {"local-pilot-v1"}:
+                errors.append(f"{label}: writer module {module} is not in the pack")
+            continue
+        text, tree = found
+        value = _module_assignment(tree, name)
+        defined = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+        if value is None and name not in defined:
+            errors.append(f"{label}: {writer} does not exist")
+        elif isinstance(value, str):
+            if not path.rsplit("/", 1)[-1].endswith(value):
+                errors.append(f"{label}: {writer} is {value!r}, not the end of the path")
+        elif name != "_receipt_target":
+            literal = max(re.split(r"<[^>]*>", path.rsplit("/", 1)[-1] if "<" not in path.split("/")[0] else path), key=len).strip("/")
+            if literal not in text:
+                errors.append(f"{label}: {module} has no literal {literal!r}")
+    if folders != row_folders & folders or row_folders - folders:
+        errors.append(f"published_artifacts: the folders of the rows {sorted(row_folders)} are not the folders of _RECEIPT_FOLDERS {sorted(folders)}")
+    missing = sorted(set(directories) - kinds)
+    if missing:
+        errors.append(f"published_artifacts: kinds of _receipt_target without a row: {missing}")
+
+
 def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_drift: bool = False) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -287,6 +398,7 @@ def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_dr
         errors.append(f"pipeline schema unavailable: {exception}")
     _validate_schema_registry(contract, root, errors)
     _validate_registry_shape(contract, errors)
+    _validate_published_artifacts(contract, root, errors)
     _validate_bindings(contract, root, errors)
     if check_drift:
         from tools.render_contract_docs import _rendered_files
