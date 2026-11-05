@@ -233,7 +233,7 @@ def test_replay_revalidates_all_run_boundary_bindings(tmp_path: Path) -> None:
     copied_root = copied_project / ".pilot-runs" / root.name
     copied_root.parent.mkdir(parents=True)
     shutil.copytree(root, copied_root)
-    with pytest.raises(ValueError, match="boundary"):
+    with pytest.raises(ValueError, match="PROJECT_MOVED"):  # V9b: a run copied to another folder is refused by name, with the fix (it was "invalid run boundary")
         derive_state(copied_root)
     third_project = tmp_path / "third"
     third_project.mkdir()
