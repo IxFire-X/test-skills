@@ -19,9 +19,11 @@ pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD_SKILL_BYTES = 61838  # skills/orchestrate/SKILL.md before PT: the agent at work reads it whole into a window of 239k tokens
+# V4b: the same bytes of SKILL.md and README.md are in the delivery of mode B, so the one sentence about mode B is true in both: it names
+# the profile that `doctor` reports and, once, the file of mode B (the one exception to "the delivery names no file it does not carry").
 ALLOWED = (
-    "Автотесты (`local-pilot-v1`, режим Б) — только в сборке разработки, в эту поставку они не входят.",
-    "Режим автотестов (режим Б) в эту поставку не входит.",
+    "автотесты (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.",
+    "Режим автотестов (режим Б) входит в поставку профиля `mode-b`; в поставку `cases-only` он не входит. Профиль называет `doctor`.",
 )
 MODE_B_WORDS = [
     r"local-pilot", r"rerun-retained", r"run_pipeline exec", r"service_url_env", r"SERVICE_URL", r"SERVICE_UNREACHABLE", r"стенд", r"maven",
@@ -64,7 +66,8 @@ def test_the_one_sentence_about_mode_b_is_in_the_skill_and_the_readme() -> None:
     texts = _profile_texts()
     assert " ".join(ALLOWED[0].split()) in " ".join(texts["skills/orchestrate/SKILL.md"].split())
     assert " ".join(ALLOWED[1].split()) in " ".join(texts["README.md"].split())
-    assert "mode-b" not in " ".join(texts["skills/orchestrate/SKILL.md"].split()), "the delivery names no file it does not carry"
+    flat = " ".join(texts["skills/orchestrate/SKILL.md"].split())
+    assert flat.count("mode-b") == 2 and flat.replace(" ".join(ALLOWED[0].split()), "").count("mode-b") == 0, "the delivery names no other file it does not carry"
 
 
 def test_the_controller_skill_is_not_longer_than_before_and_the_mode_b_text_is_kept_for_the_development_build() -> None:
@@ -223,3 +226,12 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
         if name == "requirement":
             value = {**value, "display_order": 1}
         assert schema_diagnostics(fill(value), target, tmp_path) == [], name
+
+
+def test_in_the_delivery_of_mode_b_the_skill_leads_to_a_file_that_is_there(tmp_path: Path) -> None:
+    """V4b: SKILL.md and README.md are the same bytes in both deliveries; where the delivery has mode B, the file the sentence names exists."""
+    pack = copy_profile(tmp_path / "mode-b", "mode-b")
+    skill = " ".join((pack / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "`references/mode-b.md`" in skill and (pack / "skills" / "orchestrate" / "references" / "mode-b.md").is_file()
+    assert (pack / "skills" / "tc-to-autotest" / "SKILL.md").is_file() and (pack / "skills" / "autotest-reviewer" / "SKILL.md").is_file()
+    assert not (copy_profile(tmp_path / "cases", "cases-only") / "skills" / "orchestrate" / "references" / "mode-b.md").exists()

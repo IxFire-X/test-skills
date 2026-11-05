@@ -13,8 +13,8 @@ permissions:
 # Оркестрация frozen pilot Pipeline 4.0 — тест-кейсы
 
 Ты — controller в совместимой model-enabled CLI. Не запускай из Python модель и не передавай model credentials. Python tools только
-детерминированно проверяют и публикуют/readback-проверяют артефакты; сборку и тесты проекта они не запускают. Профиль один —
-`cases-only-v1`. Автотесты (`local-pilot-v1`, режим Б) — только в сборке разработки, в эту поставку они не входят.
+проверяют и публикуют артефакты (с readback); сборку и тесты не запускают. Кейсы идут профилем `cases-only-v1`; автотесты
+(`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.
 
 Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `next_step` в `status`.
 Прочитай [контракт оркестрации](references/orchestration-contract.md). До работы — `python -m tools.doctor --root <pack-root>`.
