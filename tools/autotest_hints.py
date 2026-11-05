@@ -40,7 +40,7 @@ _JAVA_GE_ZERO_CALL = re.compile(rf"\bisGreaterThanOrEqualTo\(\s*{_ZERO}\s*\)")
 _JAVA_ASSERT_OPEN = re.compile(r"\bassert\w*\s*\(")
 _JAVA_GE_ZERO_TAIL = re.compile(rf">=\s*{_ZERO}\s*\)")
 _JAVA_ASSERT_TRUE = re.compile(r"\bassertTrue\(\s*true\s*\)|\bassertFalse\(\s*false\s*\)|\bassertThat\(\s*true\s*\)\s*\.isTrue\(\)")
-# V5 (8.D6-6): the three patterns below read to the end of the text from every start when nothing closes them (a cut-off or looping model answer: 100 KB
+# the three patterns below read to the end of the text from every start when nothing closes them (a cut-off or looping model answer: 100 KB
 # of «@Test a(» did not finish).  The method header starts at the start of a run of type characters (what follows a start inside a run is the same
 # run to its end, so the same match), and the test header and the two tails are found from positions worked out once (``_java_test_braces``,
 # ``_ge_zero_assertions``, ``_path_calls``).
@@ -52,7 +52,7 @@ _JAVA_PATH_OPEN = re.compile(r"\b(?:contains\w*|startsWith|endsWith)\s*\(")
 _JAVA_PATH_LITERAL = re.compile(rf"\"({_PATH_PREFIX})\"\s*\)")
 _JAVA_PATH_AFTER_COMMA = re.compile(rf",\s*\"({_PATH_PREFIX})\"\s*\)")
 _JAVA_NOT_NULL = re.compile(r"^\s*(?:assertNotNull\s*\(|assertThat\s*\(.*\)\s*\.isNotNull\(\)\s*$)", re.DOTALL)
-# V5 (8.D6-6): how much of a test method that is never closed is read; its body is the rest of the file, and a cut-off file that opens 6 000 of them made that n squared
+# how much of a test method that is never closed is read; its body is the rest of the file, and a cut-off file that opens 6 000 of them made that n squared
 _UNCLOSED_BODY_LIMIT = 4096
 _NESTED_BODY_LIMIT = 256  # the same for a test method found inside the body of another one
 _KEYWORDS = {"if", "for", "while", "switch", "catch", "synchronized", "return", "new", "else", "try", "do"}
@@ -211,7 +211,7 @@ def _ge_zero_assertions(code: str) -> list[int]:
 
 def _path_calls(plain: str) -> list[int]:
     """Where ``contains…(``, ``startsWith(`` or ``endsWith(`` takes a path-prefix literal as its last argument (``"/x/"``, nothing but ``;``-free text
-    and a comma before it, or straight after the parenthesis), as ``finditer`` found them for ``_JAVA_PATH`` (V5: that pattern read to the end of the text
+    and a comma before it, or straight after the parenthesis), as ``finditer`` found them for ``_JAVA_PATH`` (that pattern read to the end of the text
     from every ``contains(`` when no ``;`` followed)."""
     semicolons = [match.start() for match in re.finditer(r";", plain)]
     after_comma = list(_JAVA_PATH_AFTER_COMMA.finditer(plain))
@@ -237,7 +237,7 @@ def _path_calls(plain: str) -> list[int]:
     return found
 
 
-# --- PQ4: an expected value computed by the call it checks; a rejected write whose state is not checked ----------------------------------------------
+# --- an expected value computed by the call it checks; a rejected write whose state is not checked ----------------------------------------------
 
 _ARGUMENT_WINDOW = 4000  # an assertion longer than this is not read: the scan of its arguments is bounded
 _JAVA_EQUALS_CALL = re.compile(r"\bassert(?:Equals|ArrayEquals|IterableEquals)\s*\(")  # not assertSame, isSameAs: an identity check is about repeated calls
@@ -248,7 +248,7 @@ _VARIABLE = re.compile(r"[A-Za-z_$][\w$]*")
 # a variable that says in its name that it is the expected value (the generator's habit); a variable called ``text`` or ``before`` that is read again after the call
 # is the idiom «the answer is stable», which people write on purpose (commons-lang, jsoup: 9 of 10 hits were that)
 _EXPECTED_NAME = re.compile(r"(?i)(?:expected|exp|want|wanted|should|reference|golden|baseline|oracle)[A-Z_0-9]?\w*|(?:expected|exp)$")
-# a call (a chain of calls), not a cast or a parenthesised value: a name, a dotted path, an opening bracket, and a closing one at the very end.  V5: read as a head
+# a call (a chain of calls), not a cast or a parenthesised value: a name, a dotted path, an opening bracket, and a closing one at the very end. Read as a head
 # match and an ``endswith``; the one-pattern form ``name(?:.name|(...))*(.*)`` backtracked over every ``(a)`` of ``f(a)(a)(a)…x`` and over every dot of ``a.a.a.…``
 _CALL_HEAD = re.compile(r"[A-Za-z_$][\w$]*+(?:\.[A-Za-z_$][\w$]*+)*+\(")
 # how a value is made twice to compare the two values, and the methods whose contract is to be compared with themselves
@@ -272,7 +272,7 @@ def _is_call(expression: str, head: re.Pattern[str] = _CALL_HEAD) -> bool:
 
 
 # «before and after»: how far back a variable is followed from its initialiser to the assertion.  A longer way is taken for «something happened in between» —
-# the careful answer, no finding — so the look back costs a bounded amount per assertion (V5: K statements and A assertions were K x A).
+# the careful answer, no finding — so the look back costs a bounded amount per assertion (K statements and A assertions were K x A).
 _BETWEEN_STATEMENTS = 200
 _BETWEEN_CHARS = 4000
 
@@ -439,7 +439,7 @@ def _java(text: str) -> Iterator[tuple[str, int, str]]:
     for match in _JAVA_BROAD_THROWS.finditer(code):
         yield "AT_ANY_EXCEPTION", match.start(), "broad-throws"
     for match in _JAVA_THROWN_BY.finditer(code):
-        # FaT-Q2 (2.12): assertThatThrownBy without a type or a message in its chain passes on any exception
+        # assertThatThrownBy without a type or a message in its chain passes on any exception
         if not _JAVA_THROWN_TYPED.search(code, match.end(), masked.statement_end(match.start())):
             yield "AT_ANY_EXCEPTION", match.start(), "thrown-by-untyped"
     for match in _JAVA_CATCH.finditer(code):
@@ -495,7 +495,7 @@ _PY_TYPE_LIST = re.compile(r"[\w.,\s]*")
 
 
 def _py_except(line: str) -> tuple[str, str, str] | None:
-    """``(indent, types, rest of the line)`` of ``except [(]types[)] [as name]:``, else None.  V5 (8.D6-6): the one pattern with a lazy ``[\\w.,\\s]*?`` between three
+    """``(indent, types, rest of the line)`` of ``except [(]types[)] [as name]:``, else None. The one pattern with a lazy ``[\\w.,\\s]*?`` between three
     ``\\s*`` was cubic on a blank run (10 KB of blanks did not finish); the line is cut at its first colon and the head read piece by piece."""
     opening = _PY_EXCEPT_HEAD.match(line)
     colon = line.find(":", opening.end()) if opening else -1
@@ -519,7 +519,7 @@ def _py_except(line: str) -> tuple[str, str, str] | None:
 
 _PY_GE_ZERO = re.compile(r"^\s*assert\s+[^#]*>=\s*0\s*(?:,.*)?$")
 _PY_ASSERT_TRUE = re.compile(r"^\s*assert\s+True\s*(?:,.*)?$")
-# ``^\s*assert\s+.+\s+is\s+not\s+None\s*(?:,.*)?$`` (a greedy ``.+`` before a blank run) backtracked over every blank of ``assert x   …   y``: V5 reads the line as the head
+# ``^\s*assert\s+.+\s+is\s+not\s+None\s*(?:,.*)?$`` (a greedy ``.+`` before a blank run) backtracked over every blank of ``assert x   …   y``: the pattern now reads the line as the head
 # ``assert`` and, after at least one character, a blank, ``is not None`` and the end of the line or a comma
 _PY_NOT_NULL_TAIL = re.compile(r"(?<=\s)is\s++not\s++None\s*+(?:,|$)")
 
@@ -601,7 +601,7 @@ _PY_ASSERT_EQUAL_HEAD = re.compile(r"\s*self\.assertEqual\(")
 
 def _top_level_split(text: str, separator: str, limit: int | None = None) -> list[str]:
     """``text`` cut at the ``separator`` (one character, or ``==``) that stands outside every bracket and every string; at most ``limit`` cuts.  One pass.
-    V5: ``assert (.+?) == (.+?)`` backtracked over every blank of ``assert x   …   y`` (8 000 blanks: 0.16 s, twice the blanks four times the time)."""
+    ``assert (.+?) == (.+?)`` backtracked over every blank of ``assert x   …   y`` (8 000 blanks: 0.16 s, twice the blanks four times the time)."""
     parts, depth, quote, start, position = [], 0, "", 0, 0
     while position < len(text):
         char = text[position]

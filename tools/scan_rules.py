@@ -1,4 +1,4 @@
-"""Which directories and file names a scan leaves out, and the summary of what it left out (FaT-2).
+"""Which directories and file names a scan leaves out, and the summary of what it left out.
 
 One source for the inventory (``project_inventory``) and the module search (``stack_catalog``,
 ``discover_project``, ``init_skillsrc``).  A directory is judged by its name *and* place: names of build output,
@@ -77,7 +77,7 @@ _PREPROCESSOR_STYLES = frozenset({".scss", ".sass", ".less"})
 
 
 def non_code_class(project_path: str, known: Container[str] = ()) -> tuple[str, str] | None:
-    """V7 (O-14a): ``(class, rule id)`` when the file is no code a model reads — it stays in the inventory and the baseline,
+    """``(class, rule id)`` when the file is no code a model reads — it stays in the inventory and the baseline,
     only the context of the model leaves it out: a licence text outside ``src/``, a translation of a resource bundle (not the Russian one, the language of the cases) whose main
     file is there (``known`` holds the project paths of the inventory), a style preprocessor source, an SVG image.  The classes were
     checked against the markup of 48 runs: none of them is cited by a requirement.  Not here: CI and container files (cited

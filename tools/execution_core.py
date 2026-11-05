@@ -1,4 +1,4 @@
-"""V1 (A3-4): the interface of the core that the execution files (``tools/exec_*.py``) stand on.
+"""The interface of the core that the execution files (``tools/exec_*.py``) stand on.
 
 ``exec_commands`` and ``exec_runner`` take the helpers of the core that have no public name of their
 own from here — and from nowhere else: a test (``tests/test_no_private_imports.py``) refuses a private name of another module in them.

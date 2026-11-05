@@ -1,4 +1,4 @@
-"""F6: the lexer of Java text shared by the map of existing tests (mode A) and the checks of generated tests (mode B)."""
+"""The lexer of Java text shared by the map of existing tests (mode A) and the checks of generated tests (mode B)."""
 
 from __future__ import annotations
 

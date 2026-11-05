@@ -191,7 +191,7 @@ def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: l
             if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
                 errors.append(f"implemented schema draft mismatch: {name}")
             version = schema.get("properties", {}).get("schema_version", {})
-            # FaT-PT: a schema that still reads its older version lists them in an enum, the target last
+            # a schema that still reads its older version lists them in an enum, the target last
             current = version.get("const", (version.get("enum") or [None])[-1])
             if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and current != row.get("target_version"):
                 errors.append(f"implemented schema version mismatch: {name}")
@@ -280,7 +280,7 @@ def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str
     _error_if_not_equal(errors, "exit priority", contract.get("exit_priority"), EXPECTED_EXIT_PRIORITY)
 
 
-# ---- V8 (A5-8): what the code publishes under a run is what ``published_artifacts`` lists — checked both ways ---------------------------------
+# ---- what the code publishes under a run is what ``published_artifacts`` lists — checked both ways ---------------------------------
 
 
 def _tools_source(root: Path, module: str) -> tuple[str, "ast.Module"] | None:

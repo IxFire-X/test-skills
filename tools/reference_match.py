@@ -1,4 +1,4 @@
-"""FaT-REF: new cases against the reference cases of a Zephyr CSV (``scan --reference``) — a hint, never a verdict.
+"""New cases against the reference cases of a Zephyr CSV (``scan --reference``) — a hint, never a verdict.
 
 ``reference_match(document, reference_cases)`` pairs new and reference cases one to one by the Jaccard similarity of
 the word tokens of title, objective and step actions, at least ``JACCARD_MIN``.  A reference case left without a pair is
@@ -13,7 +13,7 @@ import re
 from typing import Any, Iterable, Mapping, Sequence
 
 CODE = "CV_REFERENCE"
-# Chosen on the campaign (FaT-REF): the v5 CSV of one effective document as the reference for another.  The same cases
+# Chosen on the campaign: the v5 CSV of one effective document as the reference for another.  The same cases
 # (spring-petclinic 08a6e2fc → 97b27403, petclinic-rest, jsoup, jpetstore run pairs) score 1.0; the best match of a case
 # against another project of the same domain stays at most 0.30 (petclinic → microservices 0.30, → petclinic-rest
 # 0.26) and against an unrelated one 0.19 (commons-lang → jsoup).  0.35 sits above that noise with room for a reworded

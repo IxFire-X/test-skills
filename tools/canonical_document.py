@@ -91,7 +91,7 @@ _HTTP_RESULT = re.compile(r"^(.+?)\n[ \t]*\nHTTP ([1-5]\d\d) ([^\n]+)(?:\n|$)", 
 
 def service_expected(text: str) -> bool:
     """A service mark («успешно», «ok», «—», «проверено автотестом» …) as the whole expected result — not a system result.
-    One rule for the canonical validator and the import of ready cases (FaT-IMP2)."""
+    One rule for the canonical validator and the import of ready cases."""
     return _SERVICE_EXPECTED.fullmatch(text.strip()) is not None
 
 
@@ -385,7 +385,7 @@ def _requirement_coverage(index: _DocumentIndex, document: dict[str, Any], diagn
 
 
 def uncovered_requirements(requirements: Sequence[Mapping[str, Any]], cases: Sequence[Mapping[str, Any]]) -> list[int]:
-    """FaT-DG: the indexes of requirements no case references — the one coverage rule of assemble and of one batch fragment."""
+    """The indexes of requirements no case references — the one coverage rule of assemble and of one batch fragment."""
     covered = {requirement_id for case in cases for requirement_id in case.get("requirement_ids") or ()}
     return [index for index, requirement in enumerate(requirements) if requirement.get("requirement_id") not in covered]
 
@@ -403,7 +403,7 @@ def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, 
 
 
 def _group_shape(case: dict[str, Any]) -> dict[str, Any]:
-    """FaT-PT: the case without what its variants may differ in — literal values, human texts and document-global ids."""
+    """The case without what its variants may differ in — literal values, human texts and document-global ids."""
     positions = {step["step_id"]: index for index, step in enumerate(case["steps"])}
     steps = []
     for step in case["steps"]:
@@ -469,7 +469,7 @@ def _design_parameter(document: dict[str, Any], case: dict[str, Any], parameter_
 
 
 def _param_group_diagnostics(document: dict[str, Any], diagnostics: list[dict[str, str]]) -> None:
-    """FaT-PT: cases of one ``param_group`` are the variants of one design parameter and differ only in values.
+    """Cases of one ``param_group`` are the variants of one design parameter and differ only in values.
 
     The generator declares the group; the code guesses nothing — it compares each case with the first one of the group
     (all but literal values, human texts and ids) and checks through ``design_refs`` that exactly one declared design
@@ -497,7 +497,7 @@ def _param_group_diagnostics(document: dict[str, Any], diagnostics: list[dict[st
 
 
 def param_groups(document: dict[str, Any]) -> list[dict[str, Any]]:
-    """FaT-PT: the parameter groups of a valid document — id, the varying design parameter, the cases by display order."""
+    """The parameter groups of a valid document — id, the varying design parameter, the cases by display order."""
     groups = []
     for group_id, members in _group_members(document).items():
         cases = [case for _, case in members]
@@ -896,7 +896,7 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def blocked_cases(document: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """FaT-PA: the cases with automation blockers, in canonical order, each with its blocked steps and their codes.
+    """The cases with automation blockers, in canonical order, each with its blocked steps and their codes.
 
     The one reading of canonical blockers: ``blocker_count`` is its sum, and an automation leaves exactly these cases
     manual (``excluded_cases``)."""
@@ -922,7 +922,7 @@ _VALIDATED_LIMIT = 8
 
 
 def _remembered(kind: str, document: Any, compute):
-    """P2: the diagnostics of a document are a function of its bytes — one process audits the same candidate once, not once per
+    """The diagnostics of a document are a function of its bytes — one process audits the same candidate once, not once per
     function that wants to know (publish, session start, package, decision, receipts: 13 audits of one 73-case document on the
     work machine).  The key is the digest of the canonical bytes; a document that cannot be serialized (a non-finite number) is
     audited every time, as before.  A handful of documents are kept, no more."""
@@ -955,7 +955,7 @@ _PRECONDITION_CODES = frozenset({"CANONICAL_DOCUMENT_ID", "CANONICAL_DISPLAY_ORD
 
 
 def validate_canonical_document_all(document: dict[str, Any]) -> list[dict[str, str]]:
-    """P1: every diagnostic of *document* in one pass — the same rules as :func:`validate_canonical_document`, which stops at the
+    """Every diagnostic of *document* in one pass — the same rules as :func:`validate_canonical_document`, which stops at the
     first layer that has any.  A schema error or a precondition (ids, display_order) leaves the structure unreadable, so those
     are the whole answer; otherwise the canonical-order rows of the schema layer and the relational rows come together."""
 
@@ -1003,5 +1003,5 @@ def load_canonical_document(path: Path) -> dict[str, Any]:
     return document
 
 
-# Public name for batch_assembly (V1/V6): the same object under a name without an underscore; a rename of the private name is then a rename here.
+# Public name for batch_assembly: the same object under a name without an underscore; a rename of the private name is then a rename here.
 json_type = _json_type

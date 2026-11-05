@@ -1,11 +1,11 @@
-"""FaT-TD: code hints on the light test design the generator writes into its own answer — never a stop.
+"""Code hints on the light test design the generator writes into its own answer — never a stop.
 
 A requirement may carry ``design`` (input parameters, valid and invalid classes, numeric bounds); a case may carry
 ``technique`` and ``design_refs`` (which class or bound it checks; for DT/PAIRWISE one reference per parameter is
 the combination).  The hints say what the references do not cover.  They name only IDs, never case text, and stay
 silent on a document that uses none of the fields, so an old answer keeps its assembly receipt bytes.
 
-FaT-Q adds hints on vague expectations that work on any document: a refusal seen only as «failed», a refused write
+Further hints on vague expectations that work on any document: a refusal seen only as «failed», a refused write
 without a state check, a write confirmed only by «no error».  They read the machine part of the steps, rewrite nothing.
 """
 
@@ -20,7 +20,7 @@ from typing import Any, Iterable, Mapping
 
 HINT_LIMIT = 50
 HINT_BYTES = 4096
-# FaT-CV2 (2.6): the receipt caps the design hints and the expectation hints apart, so neither group pushes the other
+# the receipt caps the design hints and the expectation hints apart, so neither group pushes the other
 # out; two groups with their remainder entries stay within HINT_LIMIT and HINT_BYTES.
 GROUP_LIMIT = HINT_LIMIT // 2  # entries of a group, its remainder entry included
 GROUP_BYTES = HINT_BYTES // 2
@@ -31,13 +31,13 @@ PAIRS_PER_REQUIREMENT = 3
 _SEVERITY = {"TD_NEGATIVE_MISSING": 0, "TD_VAGUE_EXPECTATION": 1, "TD_NEGATIVE_NO_STATE_CHECK": 2, "TD_BOUNDARY_MISSING": 3,
              "TD_BOUNDARY_UNDECLARED": 4, "TD_WEAK_SUCCESS": 5, "TD_REF_UNKNOWN": 6, "TD_PAIR_UNCOVERED": 7}
 TECHNIQUES = ("EP", "BVA", "DT", "PAIRWISE", "OTHER")
-# FaT-TN: the Russian name of a technique in human projections; the machine field keeps the code
+# the Russian name of a technique in human projections; the machine field keeps the code
 TECHNIQUE_NAMES = {"EP": "Классы эквивалентности", "BVA": "Граничные значения", "DT": "Таблица решений",
                    "PAIRWISE": "Попарное тестирование", "OTHER": "Другая техника"}
 
 
 def technique_name(code: str) -> str:
-    """FaT-TN: the human name of a ``technique`` code (an unknown code as it is)."""
+    """The human name of a ``technique`` code (an unknown code as it is)."""
     return TECHNIQUE_NAMES.get(code, code)
 _COMBINING = {"DT", "PAIRWISE"}
 _BOUND_SIDES = {"min": ("min", "below_min"), "max": ("max", "above_max")}
@@ -155,7 +155,7 @@ def capped(hints: list[dict[str, Any]], more: str = "TD_MORE", *, limit: int = H
 
 
 def capped_code_hints(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """FaT-CV2 (2.6): the assembly receipt hints — design and expectation groups capped apart, the order kept."""
+    """The assembly receipt hints — design and expectation groups capped apart, the order kept."""
     if len(hints) <= HINT_LIMIT and len(json.dumps(hints, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= HINT_BYTES:
         return list(hints)
     groups = {"дизайн": [hint for hint in hints if hint["code"] not in _EXPECTATION_CODES],
@@ -172,7 +172,7 @@ def capped_code_hints(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [hint for hint in hints if id(hint) in kept] + remainders
 
 
-# --- FaT-Q: vague expectations on any document -------------------------------------------------------
+# --- vague expectations on any document -------------------------------------------------------
 
 _OUTCOME_FLAG = re.compile(r"^(?:is_?)?(failed|failure|error|errored|success|succeeded|ok)$", re.IGNORECASE)
 _FAILURE_FLAGS = {"failed", "failure", "error", "errored"}
@@ -284,7 +284,7 @@ def _case_hint(code: str, case: Mapping[str, Any], step: Mapping[str, Any], deta
 
 
 def expectation_hints(document: Mapping[str, Any]) -> list[dict[str, str]]:
-    """FaT-Q: a refusal without a concrete observation, a refused write without a state check, a write confirmed only by «no error».
+    """A refusal without a concrete observation, a refused write without a state check, a write confirmed only by «no error».
 
     Reads only the machine part of the steps and names IDs and result names, never case text; silent on manual steps.
     """
@@ -314,7 +314,7 @@ def expectation_hints(document: Mapping[str, Any]) -> list[dict[str, str]]:
 
 
 def code_hints(document: Mapping[str, Any]) -> list[dict[str, str]]:
-    """The FaT-TD and FaT-Q hints in one order of importance (a stable sort keeps requirement and case order)."""
+    """The hints in one order of importance (a stable sort keeps requirement and case order)."""
     return sorted(design_hints(document) + expectation_hints(document), key=lambda hint: _SEVERITY[hint["code"]])
 
 

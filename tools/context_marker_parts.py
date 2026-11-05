@@ -1,9 +1,9 @@
-"""The context marker in parts (FaT-5): the plan of the parts and the merge by code.
+"""The context marker in parts: the plan of the parts and the merge by code.
 
 ``python -m tools.context_marker_parts plan --run-root <project>/.pilot-runs/<run_id>`` lists the marker steps of the
 current attempt: with one context batch the single ``context-marker:baseline`` as before; with more,
 ``context-marker:requirements`` (documents only), one ``context-marker:batch-NNN`` per batch and the merge.  A part binds the
-inventory, its receipt and the requirements answer — the documents are read once, by the requirements step (FaT-P3).  Each step
+inventory, its receipt and the requirements answer — the documents are read once, by the requirements step.  Each step
 comes with its ``input_digests``, its bytes (batch / requirements / role instructions) against the step budget of
 ``tools.step_size`` and the next step to take.  ``merge`` publishes ``context-marker:baseline`` from the recorded answers:
 a merge of the parts by code, recorded with the model id ``controller:context-marker-merge`` — not a model call.
@@ -68,7 +68,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         return {"stage": stage, "input_digests": inputs, "bytes": {**sizes, "total": total}, "fits": total <= budget,
                 "hint": None if total <= budget else over_hint, "done": stage in responses}
 
-    imported = cases_path(root) is not None  # FaT-IMP: the requirements of an import are answered by code, always a part
+    imported = cases_path(root) is not None  # the requirements of an import are answered by code, always a part
     if len(receipts) <= 1 and not imported:
         parts = [step("context-marker:baseline", [*head, *(receipt["digest"] for receipt in receipts)],
                       {"batch": sum(int(receipt["byte_count"]) for receipt in receipts), "requirements": documents, "role": role},
@@ -80,14 +80,14 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                               if answer else documents)
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
-        if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (FaT-IMP3: with --docs the model)
+        if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (with --docs the model)
             parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}")
         for receipt in receipts:
-            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # FaT-P3: no documents digest in a part
+            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
                         "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                         + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else ""))
-            if answer is None:  # FaT-M: no digest list with a null in it before the requirements answer
+            if answer is None:  # no digest list with a null in it before the requirements answer
                 del part["input_digests"]
                 part["waits"] = "ждёт ответа context-marker:requirements"
             parts.append(part)
@@ -121,22 +121,22 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
     baseline = pilot_state.frozen_baseline(root, attempt)
     inputs = [baseline["requirements"]["digest"], baseline["inventory_digest"], *(receipt["digest"] for receipt in receipts),
               responses[stages[0]], *dict.fromkeys(responses[stage] for stage in stages[1:])]
-    try:  # FaT-O3: the merged marker is built and checked before its request is written — a refusal leaves no orphan request
+    try:  # the merged marker is built and checked before its request is written — a refusal leaves no orphan request
         from tools.cases_import import run_marker_requirements
 
-        derived = run_marker_requirements(root, attempt, answer)  # FaT-IMP3: an import with documents
+        derived = run_marker_requirements(root, attempt, answer)  # an import with documents
         merged = merge_marker_artifacts(answer, parts, derived)
         pilot_state.check_merged_marker(root, attempt_id, inputs, merged)
     except ValueError as error:
         raise ValueError(f"CONTEXT_MARKER_MERGE_INVALID: {str(error).split('; fix: ')[0]}; fix: слияние — код, его повтор даст то же: "
                          "исправить можно только ответы частей — начните разметку заново (scan --new-run); запрос слияния не записан") from None
     pilot_state.publish_code_step_request(root, attempt_id, "context-marker:baseline", model_id=MERGE_MODEL_ID,
-                                          invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)  # F2: a merge cut here goes on
+                                          invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)  # a merge cut here goes on
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged))
-    published["warning"] = None  # FaT-O: the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
+    published["warning"] = None  # the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
     from tools.scope_pause import write_draft
 
-    draft = write_draft(root, attempt_id)  # FaT-P3: the gaps of the marker as questions, for the human's decision on the scope
+    draft = write_draft(root, attempt_id)  # the gaps of the marker as questions, for the human's decision on the scope
     return {**published, **({"questions_draft": str(draft)} if draft else {})}
 
 

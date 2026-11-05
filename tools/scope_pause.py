@@ -1,4 +1,4 @@
-"""FaT-P3: the pause after the context marker — what the human decides before the batches are planned.
+"""The pause after the context marker — what the human decides before the batches are planned.
 
 The marker keeps its gaps as four-field warnings (``context-artifact-contract.md``).  Requirements without an observable
 channel get a case with a blocker — on the 02.11 run 17 of 40.  After the marker the human answers once: «исключи <SREQ>»
@@ -20,7 +20,7 @@ from typing import Any, Mapping, Sequence
 from tools.fixes import fix_for
 
 DECISION_NAME = "scope-decision.json"
-DECISION_BATCH = "scope-decision-v1"  # J1 (A1-9): the events of the decision carry it
+DECISION_BATCH = "scope-decision-v1"  # the events of the decision carry it
 REASON_LIMIT = 200  # the reason is the human's text and goes into the report: a line, not a document
 LISTED = 20  # the gaps `status` lists inline; the whole list is the draft questions-for-analyst.md
 _SEPARATOR = " — "
@@ -88,7 +88,7 @@ def draft_questions(marker: Mapping[str, Any]) -> str:
 
 
 def _bound(root: Path, attempt_id: str, raw: bytes, state: Mapping[str, Any] | None) -> bool:
-    """J1 (A1-9): the decision is a fact of the run only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``scope-decision-v1``)."""
+    """The decision is a fact of the run only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``scope-decision-v1``)."""
     from tools import pilot_state
 
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -111,7 +111,7 @@ def decision_file_unbound(root: Path, attempt_id: str, state: Mapping[str, Any] 
 
 def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None = None, *, bound_only: bool = True) -> dict[str, Any] | None:
     """The recorded answer of the human, read the way it was written (confined, strict JSON) and checked for its shape: a file
-    that is not what ``record_decision`` writes is ``SCOPE_DECISION_INVALID`` — never a decision, never silently «none».  J1 (A1-9): and
+    that is not what ``record_decision`` writes is ``SCOPE_DECISION_INVALID`` — never a decision, never silently «none». And
     a decision only from the journal — a file of the right shape without its events (planted, or left by a cut command) is none
     (``bound_only=False`` reads what such a file says, for the report to name it)."""
     from tools.confined_output import OutputConfinementError, read_confined_bytes
@@ -204,7 +204,7 @@ def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
 
 
 def prepare_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
-    """J1 (A2-6): every check of the human's answer, nothing written — the value ``commit_decision`` publishes.  The callers that
+    """Every check of the human's answer, nothing written — the value ``commit_decision`` publishes.  The callers that
     still have inputs to parse (``plan``, ``plan-batches``) prepare first and commit after those inputs passed, so a refused input
     leaves no decision behind (another decision after it would be SCOPE_DECISION_CONFLICT → a new run)."""
     from tools import pilot_state
@@ -321,7 +321,7 @@ def published_scope(run_root: Path, attempt_id: str, state: Mapping[str, Any] | 
         decision, invalid = read_decision(root, attempt_id, state, bound_only=False), False
     except ScopeRefused:
         decision, invalid = None, True
-    unbound = decision_file_unbound(root, attempt_id, state)  # J1 (A1-9): the file is no decision of the run without its events — named, never believed
+    unbound = decision_file_unbound(root, attempt_id, state)  # the file is no decision of the run without its events — named, never believed
     mismatch = invalid or unbound or _rows(out_of_scope(decision)) != _rows(in_plan)
     note = None
     if mismatch:

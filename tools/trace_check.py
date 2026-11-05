@@ -154,7 +154,7 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         if pair not in required: rows.append(_diag("/symbols", "TRACE_ORPHAN_SYMBOL"))
     for file_id in files:
         if not any(pair[0] == file_id for pair in required): rows.append(_diag("/files", "TRACE_ORPHAN_FILE"))
-    # FaT-PA: the cases with blockers left manual as a whole by the automation
+    # the cases with blockers left manual as a whole by the automation
     excluded = {row["case_id"] for row in trace.get("excluded_cases") or []}
     blocked_case_ids = {key[0] for key, step in steps.items() if step["blocker_ids"]}
     if any(row["case_id"] in excluded for row in trace["implementation_relations"]) or any(row["case_id"] in excluded for row in trace["manual_dispositions"]):
@@ -240,7 +240,7 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
 
 
 def _exclusion_rows(trace: Any, canonical: Mapping[str, Any] | None) -> list[dict[str, str]]:
-    """FaT-PA: a non-empty ``excluded_cases`` is never taken on the trace's word — it must be exactly the canon's
+    """A non-empty ``excluded_cases`` is never taken on the trace's word — it must be exactly the canon's
     ``blocked_cases`` in canonical order, and without the canon it is unverified."""
     if not isinstance(trace, Mapping) or not trace.get("excluded_cases"):
         return []
@@ -257,7 +257,7 @@ def _exclusion_rows(trace: Any, canonical: Mapping[str, Any] | None) -> list[dic
 def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, automation: Mapping[str, Any] | None = None, autotest_review: Mapping[str, Any] | None = None, run_result: Mapping[str, Any] | None = None, require_execution: bool = False, *, canonical: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Audit a trace alone or prove it exactly matches upstream pre-finalization artifacts.
 
-    FaT-PA: ``canonical`` — the effective document the exclusions are checked against when no full external set is
+    ``canonical`` — the effective document the exclusions are checked against when no full external set is
     supplied (the controller's own audit)."""
     supplied = (document is not None, automation is not None, autotest_review is not None, run_result is not None)
     # The audit always enforces the branch's exact obligation; this flag preserves the

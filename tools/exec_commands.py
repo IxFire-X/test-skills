@@ -1,5 +1,5 @@
-"""The commands of the generated tests (P4): ``materialize`` puts the accepted tests into the project and prints the command, a human runs
-it, ``ingest`` takes the reports; ``exec`` only answers that it was replaced (P4b).  The core reaches this module through ``tools.execution_gate``.
+"""The commands of the generated tests: ``materialize`` puts the accepted tests into the project and prints the command, a human runs
+it, ``ingest`` takes the reports; ``exec`` only answers that it was replaced.  The core reaches this module through ``tools.execution_gate``.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def _validated_execution_coordinates(project: Path, run_id: str) -> dict[str, An
 
 
 def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any) -> None:
-    """Reject any non-delta baseline drift before the execution-start gate; the stop names the changed paths (FaT-G)."""
+    """Reject any non-delta baseline drift before the execution-start gate; the stop names the changed paths."""
     from tools.project_inventory import InventoryError
 
     try:
@@ -103,7 +103,7 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
         result = _baseline_check(project, root, attempt, module_root, request)
     except (InventoryError, KeyError, TypeError, ValueError, OSError) as error:
         executable = Path(str(getattr(request, "executable", "") or ""))
-        if str(executable) not in {"", "."} and not executable.is_file():  # FaT-H2b 2.11: name the vanished runtime
+        if str(executable) not in {"", "."} and not executable.is_file():  # name the vanished runtime
             raise HostStop("BASELINE_INCOMPLETE", f"среда запуска модуля недоступна: {executable}; верните её или начните "
                            "новый прогон (команда — в status: drift)") from error
         raise HostStop("BASELINE_INCOMPLETE", "execution baseline is unreadable or incomplete") from error
@@ -202,7 +202,7 @@ _NOT_PREPARED_FIX = ("materialize кладёт в проект только пр
                      "(autotest-reviewer, вердикт ПРИНЯТО), затем снова materialize")
 
 
-# FaT-H2b 2.9: after a review that did not accept the automation — never push for another review past the limit
+# after a review that did not accept the automation — never push for another review past the limit
 _REFUSED_FIX = ("статическое ревью не приняло автоматизацию, ревизий больше нет: закройте попытку командой finish — "
                 "она напечатает next_run, команду следующего захода")
 
@@ -210,7 +210,7 @@ _REFUSED_FIX = ("статическое ревью не приняло авто�
 _REVISION_FIX = "ревью вернуло автоматизацию на правку: следующая ревизия tc-to-autotest:r2, её ревью autotest-reviewer:r2, затем materialize"
 
 
-# FaT-RL: the review accepted the automation, but materialize cannot write it into the project — no later step changes that
+# the review accepted the automation, but materialize cannot write it into the project — no later step changes that
 _UNMATERIALIZABLE_FIX = ("ревью приняло автоматизацию, но materialize не может записать её в проект (причина в message): закройте попытку "
                          "командой finish — она закроет её отрицательно (AUTOMATION_NOT_MATERIALIZABLE) и напечатает next_run")
 
@@ -230,7 +230,7 @@ def _not_prepared_fix(root: Path, attempt_id: str) -> str:
 
 
 def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
-    """FaT-E: before the first run, materialize the accepted reviewed automation of the attempt, if not done yet.
+    """Before the first run, materialize the accepted reviewed automation of the attempt, if not done yet.
 
     Inside the materialize step, not a driver: the same ``materialize_delta`` the agent would call, from the journal's own
     tc-to-autotest:rN and autotest-reviewer:rN answers.  Its checks stay as they are; a repeat is a no-op.
@@ -263,7 +263,7 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
     return ["execution-inputs", "generated-delta"]
 
 
-# FaT-AB D3: the accepted automation passed the precheck, then its preparation failed
+# the accepted automation passed the precheck, then its preparation failed
 _PREPARE_IO_FIX = ("подготовка принятой автоматизации прервалась на вводе-выводе (причина в message): снова вызови materialize — "
                    "ответы и журнал те же, повтор безопасен")
 
@@ -290,7 +290,7 @@ def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> s
                                        f'"{read_run(root)["manifest"]["project"]}" --run {root.name} --abandon'))
 
 
-# ---- P4: the build is run by a human ----------------------------------------------------------------------------------
+# ---- the build is run by a human ----------------------------------------------------------------------------------
 #
 # ``materialize`` puts the accepted tests into the project and prints the command; ``ingest`` takes the reports of that run.  The package
 # starts no process, opens no connection and passes no environment: what it holds against a report is the attempt it belongs to — the
@@ -407,7 +407,7 @@ def _durable_request(coordinates: Mapping[str, Any], carriers: Mapping[str, Any]
 
 
 def cmd_exec(args: Any) -> int:
-    """P4b: ``exec`` started the build itself; now a human runs it.  The answer names the way out and nothing is read, written or started."""
+    """``exec`` started the build itself; now a human runs it.  The answer names the way out and nothing is read, written or started."""
     _print({"status": "error", "stage": "exec", "reason": "EXEC_REPLACED",
             "message": "exec больше не запускает сборку: тесты кладёт materialize, команду запускает человек, отчёты принимает ingest",
             "fix": "python -m tools.run_pipeline materialize --project <project> --run <run_id> → человек запускает напечатанную команду → "
@@ -452,7 +452,7 @@ def _human_command(project: Path, module_root: Path, module_relative: str, reque
     return module_relative, [_relative_executable(request.executable, module_root), *argv[1:]]
 
 
-# V4b: the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
+# the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
 # or a backslash in double quotes (the same in all three); any other token is not printed.  What quotes cannot hold: ``"`` closes them, ``%``
 # and ``!`` are expanded by cmd.exe inside them, ``^`` escapes there, ``$`` and the back quote are expanded by sh and PowerShell inside them, and
 # ``& | < > ; ' * ?`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.
@@ -646,7 +646,7 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
 
 
 def cmd_materialize(args: Any) -> int:
-    """P4: the accepted tests into the project, then the command a human runs — nothing is started."""
+    """The accepted tests into the project, then the command a human runs — nothing is started."""
     from tools.execution_adapters import request_digest
 
     project = Path(args.project).resolve()
@@ -669,7 +669,7 @@ def cmd_materialize(args: Any) -> int:
                 "fix": "materialize без --restore", "attempt_id": attempt_id})
         return 2
     try:
-        command_text([sys.executable, str(project), str(attempt["module"])])  # V4b: what the printed lines will hold, before anything is written
+        command_text([sys.executable, str(project), str(attempt["module"])])  # what the printed lines will hold, before anything is written
         _prepare_execution(coordinates)
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), **({"fix": stop.fix} if stop.fix else {}),
@@ -692,7 +692,7 @@ def cmd_materialize(args: Any) -> int:
     module_relative = str(attempt["module"])
     working, command = _human_command(project, Path(coordinates["module_root"]), module_relative, request, challenge)
     try:
-        command_text([working, *command])  # V4b: a command that cannot be printed is not published as one
+        command_text([working, *command])  # a command that cannot be printed is not published as one
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
         return 2
@@ -891,7 +891,7 @@ def _printed_time(root: Path, attempt_id: str) -> str:
 
 
 def cmd_ingest(args: Any) -> int:
-    """P4: the reports of a run a human made of the printed command, held against the attempt — or the human's statement that there are none."""
+    """The reports of a run a human made of the printed command, held against the attempt — or the human's statement that there are none."""
     from tools.execution_adapters import request_digest
     from tools.exec_runner import ingest_reports, report_set_problems
     from tools.pilot_state import claim_execution_start, read_attempt_receipt

@@ -1,20 +1,20 @@
-"""FaT-CV: the compact view of a canonical candidate that the reviewer reads instead of the full JSON.
+"""The compact view of a canonical candidate that the reviewer reads instead of the full JSON.
 
 The view is a pure function of the candidate: the same candidate gives the same bytes.  It keeps what a person
 reviews — source and canonical requirements, case title, requirements, objective, preconditions, each step's action,
-test data, automation blockers, expected text and its assertions in one line — and (FaT-CV2) the machine part whose
+test data, automation blockers, expected text and its assertions in one line — and the machine part whose
 meaning only the reviewer judges: one line per step with its operation, inputs and outputs, and the list of
 capabilities with action, arguments, results and the first line of provenance (the test boundary).  The validator
 checks structure and references, not meaning.  A literal longer than ``LITERAL_LIMIT`` is cut with a mark; a sensitive
-input is ``***``.  FaT-PT: a parameter group is shown once at its first case — its lines with the IDs of the first
+input is ``***``. A parameter group is shown once at its first case — its lines with the IDs of the first
 case and ``<параметр>`` where the cases differ, then a table with a row per case ID.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
-step's action and data — a number of any length as a whole token or (FaT-NW) a Russian numeral of the same value
+step's action and data — a number of any length as a whole token or a Russian numeral of the same value
 («через три дня» names 3), other text from ``MIN_LITERAL`` characters.  The hint never changes the case text.
 
 ``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
 ``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
 
-FaT-AV: the profile ``autotest`` is the view of the effective document that the automation generator reads instead of
+The profile ``autotest`` is the view of the effective document that the automation generator reads instead of
 the full JSON (``--effective`` writes ``<run>/review-views/<document sha>.autotest.md``).  It keeps what a test is built
 from — the canonical requirements (ID and text: the testing-work constraints), the capabilities with their whole
 provenance (the test boundary), each case's requirement IDs, objective, preconditions, each step's action, operation,
@@ -123,7 +123,7 @@ def _soft_forms(word: str) -> tuple[str, ...]:
     return word, word[:-1] + "и", word[:-1] + "ью"
 
 
-# FaT-NW: Russian cardinal numerals as the equal of a digit token ("через три дня" names 3), every case form
+# Russian cardinal numerals as the equal of a digit token ("через три дня" names 3), every case form
 _NUMBER_WORDS: dict[str, int] = {
     **dict.fromkeys(("ноль", "нуль", "ноля", "нуля", "нолю", "нулю", "нолём", "нулём", "нолем", "нулем"), 0),
     **dict.fromkeys(("один", "одна", "одно", "одни", "одного", "одной", "одному", "одним", "одном", "одну", "одною", "одних", "одними"), 1),
@@ -149,7 +149,7 @@ _WORD = re.compile(r"[а-яё]+")
 
 
 def _numbers_in_words(text: str) -> set[int]:
-    """FaT-NW: the values the numerals of a text name — each word alone and a ten with its unit (двадцать пять = 25)."""
+    """The values the numerals of a text name — each word alone and a ten with its unit (двадцать пять = 25)."""
     values = [_NUMBER_WORDS.get(word) for word in _WORD.findall(text.lower())]
     named = {value for value in values if value is not None}
     named |= {tens + unit for tens, unit in zip(values, values[1:])
@@ -158,11 +158,11 @@ def _numbers_in_words(text: str) -> set[int]:
 
 
 def _named(leaf: str, text: str) -> bool:
-    """FaT-CV2 (2.10): a number of any length is named only as a whole token (17 is not in 170 or 1.17), FaT-NW: or as a
+    """A number of any length is named only as a whole token (17 is not in 170 or 1.17), or as a
     Russian numeral of the same integer value; other text from MIN_LITERAL."""
-    if not leaf.strip():  # P9: a blank value (three spaces) cannot be named literally — the text says «пробелы»
+    if not leaf.strip():  # a blank value (three spaces) cannot be named literally — the text says «пробелы»
         return True
-    if _PLACEHOLDER.search(leaf):  # P9: a route template — its fixed parts are named, the placeholder is a value of another input
+    if _PLACEHOLDER.search(leaf):  # a route template — its fixed parts are named, the placeholder is a value of another input
         return all(part in text for part in _PLACEHOLDER.split(leaf) if part.strip())
     if _NUMERIC.fullmatch(leaf):
         if re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None:
@@ -204,7 +204,7 @@ def data_mismatches(document: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def end_to_end_hint(document: Mapping[str, Any], groups: Mapping[str, str | None],
                     batches: Iterable[Iterable[str]] | None = None) -> dict[str, Any] | None:
-    """FaT-E2E: ``CV_NO_END_TO_END`` when the requirements form two or more process groups and no case links two of them.
+    """``CV_NO_END_TO_END`` when the requirements form two or more process groups and no case links two of them.
 
     *groups* — ``batch_assembly.requirement_groups`` (the rule plan-batches cuts by); a requirement without a group counts
     for none.  A group every case cites (the common constraints of the document) is not a step of a process and is left
@@ -222,7 +222,7 @@ def end_to_end_hint(document: Mapping[str, Any], groups: Mapping[str, str | None
 
 
 def linking_cases(document: Mapping[str, Any], groups: Mapping[str, str | None]) -> list[str]:
-    """FaT-E2E: the cases that link two or more process groups (the constraint groups every case cites left out)."""
+    """The cases that link two or more process groups (the constraint groups every case cites left out)."""
     return [case_id for case_id, linked in _case_groups(document, groups)[0] if len(linked) >= 2]
 
 
@@ -242,8 +242,8 @@ def _case_groups(document: Mapping[str, Any], groups: Mapping[str, str | None]) 
 
 
 def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, Any]) -> tuple[dict[str, str | None], list[list[str]] | None] | None:
-    """FaT-E2E: the requirement groups of a run's document (by the context receipt the plan was built from, else the last
-    context of the attempt) and the batches of its published plan (None before FaT-DG); None — nothing to group by."""
+    """The requirement groups of a run's document (by the context receipt the plan was built from, else the last
+    context of the attempt) and the batches of its published plan (None in a run of an earlier version); None — nothing to group by."""
     from tools.batch_assembly import requirement_groups
 
     found = _plan_context(Path(root), attempt_id)
@@ -255,7 +255,7 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
 
 
 def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-EC: the map of existing project tests for the context the generator's plan was built from (the one of
+    """The map of existing project tests for the context the generator's plan was built from (the one of
     ``step-inputs``); empty when the project has none."""
     from tools.existing_tests import for_context
     from tools.pilot_state import read_context_selection
@@ -266,13 +266,13 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
     plan, receipt = found
     if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
         return for_context(Path(root).parent.parent, receipt, Path(root))
-    # FaT-AU3: the one map of all the context receipts the generator read
+    # the one map of all the context receipts the generator read
     return for_context(Path(root).parent.parent, [dict(read_context_selection(Path(root), attempt_id, str(digest)))
                                                  for digest in plan["context_receipt_digests"]], Path(root))
 
 
 def run_context_note(root: Path, attempt_id: str) -> str | None:
-    """FaT-AU3: with more than one context batch, which of them the generator saw — the line of plan-batches; None with one
+    """With more than one context batch, which of them the generator saw — the line of plan-batches; None with one
     context batch (the view keeps its bytes) or before a plan."""
     from tools.batch_assembly import context_digests, context_note
     from tools.pilot_state import derive_state, read_context_selection
@@ -291,7 +291,7 @@ def run_context_note(root: Path, attempt_id: str) -> str | None:
 
 
 def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None, Mapping[str, Any]] | None:
-    """The published plan (None before FaT-DG) and the context receipt it was built from (else the last of the attempt)."""
+    """The published plan (None in a run of an earlier version) and the context receipt it was built from (else the last of the attempt)."""
     from tools.pilot_state import derive_state, read_attempt_receipt, read_context_selection
 
     try:
@@ -299,7 +299,7 @@ def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None
     except (KeyError, OSError, ValueError):
         plan = None
     if plan is not None:
-        # FaT-H4a2: a plan without the top-level field names its context in the batches (as _plan_contexts reads it)
+        # a plan without the top-level field names its context in the batches (as _plan_contexts reads it)
         context_digest = str(plan.get("context_receipt_digest") or plan["batches"][0]["context_receipt_digest"])
     else:
         selected = [event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
@@ -314,7 +314,7 @@ def _ids(values: list[str]) -> str:
 
 
 def _reference_lines(match: Mapping[str, Any] | None) -> list[str]:
-    """FaT-REF: ``CV_REFERENCE`` — counts and IDs only, no case text."""
+    """``CV_REFERENCE`` — counts and IDs only, no case text."""
     if match is None:
         return []
     line = (f"- {match['code']}: эталонов {match['reference']}, новых кейсов {match['cases']}, пар {len(match['pairs'])}; "
@@ -337,7 +337,7 @@ def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
 
 
 def _existing_lines(document: Mapping[str, Any], existing: Mapping[str, Any]) -> list[str]:
-    """FaT-EC: ``CV_EXISTING_TEST`` (count and case IDs) and the map lines, the same lines the generator reads."""
+    """``CV_EXISTING_TEST`` (count and case IDs) and the map lines, the same lines the generator reads."""
     from tools.existing_tests import hint_line, render_map, repeats
 
     body = render_map(existing).decode("utf-8")
@@ -355,7 +355,7 @@ def _hint_lines(hints: list[dict[str, Any]]) -> list[str]:
 
 
 def _exact(value: Mapping[str, Any]) -> str:
-    """FaT-AV: a source, actual or expected value whole: a literal as its exact JSON, else its kind and its fields."""
+    """A source, actual or expected value whole: a literal as its exact JSON, else its kind and its fields."""
     if value.get("kind") == "literal":
         return _json(value.get("value"))
     rest = {key: item for key, item in value.items() if key != "kind"}
@@ -420,7 +420,7 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
     from tools.canonical_document import blocked_cases
 
     blocked = blocked_cases(document)
-    if blocked:  # FaT-PA: these cases stay manual — the automation lists them in excluded_cases, the reviewer sees why
+    if blocked:  # these cases stay manual — the automation lists them in excluded_cases, the reviewer sees why
         lines += ["## Кейсы с блокерами — вручную, в excluded_cases", "",
                   f"- автоматизируется {len(document['test_cases']) - len(blocked)} из {len(document['test_cases'])} кейсов;"
                   " блокер, который выражается операторами проверок, — замечание WARNING: вопрос к следующему прогону,"
@@ -453,12 +453,12 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
            reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
            context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None,
            basis: Mapping[str, Any] | None = None) -> bytes:
-    """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
-    automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
-    without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
+    """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` for the
+    automation generator. With the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
+    without them the bytes are the same as before. With the map of *existing* project tests the hints add
     ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before.
-    FaT-REF: with the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same.
-    P7: *basis* is the real candidate when *document* is its copy with canaries (``tools.review_canaries.seed``): the header, the
+    With the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same.
+    *basis* is the real candidate when *document* is its copy with canaries (``tools.review_canaries.seed``): the header, the
     digest and every hint of the code are the real candidate's, only the cases show the control errors."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
@@ -483,12 +483,12 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         "- Код проверил структуру и ссылки (типы, ID, порядок, поток данных между шагами), не смысл. Смысл операций, входов"
         " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
         " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
-        *(["- " + IMPORT_NOTE] if imported else []),  # FaT-IMP: one line, the view of other runs keeps its bytes
-        *([f"- {context[:1].upper()}{context[1:]}."] if context else []),  # FaT-AU3: one line with more than one context batch
+        *(["- " + IMPORT_NOTE] if imported else []),  # one line, the view of other runs keeps its bytes
+        *([f"- {context[:1].upper()}{context[1:]}."] if context else []),  # one line with more than one context batch
         *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
            " сверка человеческих полей идёт с ними"] if imported and normalized else []),
         *([f"- Импорт с документами: требований без кейса в CSV — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
-           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"] if import_gaps else []),  # FaT-IMP3
+           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"] if import_gaps else []),  
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",
@@ -543,7 +543,7 @@ def _as_first(case: Mapping[str, Any], first: Mapping[str, Any], line: str) -> s
 
 
 def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[str]:
-    """FaT-PT: the lines of a group once — ``<параметр>`` where its cases differ — and a row per case ID."""
+    """The lines of a group once — ``<параметр>`` where its cases differ — and a row per case ID."""
     cases, parameter = group["cases"], group["parameter"]
     per_case = [[_as_first(case, cases[0], line) for line in _case_lines(case, actions)] for case in cases]
     values: list[list[str]] = [[] for _ in cases]
@@ -571,7 +571,7 @@ def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[s
 
 
 def _import_gaps(root: Path, state: Mapping[str, Any]) -> tuple[list[str], list[str]] | None:
-    """FaT-IMP3: (requirements without a case of the CSV, rows of the cases outside the documents) of an import with
+    """(requirements without a case of the CSV, rows of the cases outside the documents) of an import with
     documents; None for any other run or before the skeleton."""
     from tools.cases_import import outside_rows
     from tools.pilot_state import read_attempt_receipt
@@ -586,7 +586,7 @@ def _import_gaps(root: Path, state: Mapping[str, Any]) -> tuple[list[str], list[
 
 
 def _normalized(root: Path, state: Mapping[str, Any]) -> int:
-    """FaT-IMP2: how many cells code normalized in the skeleton of the import (0 when it is not published)."""
+    """How many cells code normalized in the skeleton of the import (0 when it is not published)."""
     from tools.pilot_state import read_attempt_receipt
 
     try:
@@ -606,15 +606,15 @@ def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any
     real = document if basis is None else basis
     review = profile == "review"
     attempt_id = str(state["attempts"][-1]["attempt_id"]) if state["attempts"] else None
-    try:  # FaT-E2E: the hint never stops the view — without groups the view is the one before FaT-E2E
+    try:  # the hint never stops the view — without groups the view is the plain one
         grouping = None if not review or attempt_id is None else run_requirement_groups(root, attempt_id, dict(real))
     except (OSError, ValueError, KeyError, TypeError):
         grouping = None
-    try:  # FaT-EC: the map is a hint too — none, and the view is the one before FaT-EC
+    try:  # the map is a hint too — none, and the view is the plain one
         existing = None if not review or attempt_id is None else run_existing_tests(root, attempt_id)
     except (OSError, ValueError, KeyError, TypeError):
         existing = None
-    try:  # FaT-AU3: which context batches the generator saw — a hint too, never a stop
+    try:  # which context batches the generator saw — a hint too, never a stop
         context = None if not review or attempt_id is None else run_context_note(root, attempt_id)
     except (OSError, ValueError, KeyError, TypeError):
         context = None
@@ -628,7 +628,7 @@ def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any
 
 
 def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any]) -> dict[str, Any]:
-    """P7: the reviewer's view of the assembled candidate with canaries, its map and the receipt that binds both to the journal.
+    """The reviewer's view of the assembled candidate with canaries, its map and the receipt that binds both to the journal.
 
     The view is rendered from a copy of the candidate with 0..3 control errors (``tools.review_canaries.seed``); the candidate, its
     bundles and its journal events stay as they are.  The map and the view are written next to each other in

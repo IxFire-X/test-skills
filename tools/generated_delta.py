@@ -278,7 +278,7 @@ def _plan_files(
     project: Path, module: Path, root: Path, test_root: str, frozen: Mapping[str, Any], generated: Sequence[Any],
     run_root: Path, attempt_id: str,
 ) -> tuple[list[tuple[str, str, bytes, Path]], Any]:
-    """Every check of the generated files before the first write; only reads (FaT-RL: shared with the precheck)."""
+    """Every check of the generated files before the first write; only reads (shared with the precheck)."""
     baseline_paths = _baseline_test_paths(frozen)
     planned: list[tuple[str, str, bytes, Path]] = []
     seen_paths: set[str] = set()
@@ -321,13 +321,13 @@ def _plan_files(
     return planned, ownership
 
 
-@_closure_cached  # FaT-RL
+@_closure_cached  
 def materialization_precheck(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any], run_root: Path, attempt_id: str,
     automation_history: Sequence[Mapping[str, Any]] = (), review_history: Sequence[Mapping[str, Any]] = (),
 ) -> None:
-    """FaT-RL: every check materialize_delta makes before its first write, in the same order, without writing.
+    """Every check materialize_delta makes before its first write, in the same order, without writing.
 
     A GeneratedDeltaError here is materialize's own answer for this accepted automation, and no later step changes it: the
     answers of the attempt are final once the review accepted them."""
@@ -343,7 +343,7 @@ def materialization_precheck(
 
 
 def journal_automation(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
-    """FaT-RL: the last reviewed automation of the attempt and its earlier revisions, from the journal answers of
+    """The last reviewed automation of the attempt and its earlier revisions, from the journal answers of
     tc-to-autotest:rN and autotest-reviewer:rN — what materialize writes; None while no review answers the last one."""
     from tools.pilot_state import derive_state, read_model_stage_artifact
 
@@ -366,7 +366,7 @@ def journal_automation(run_root: Path, attempt_id: str) -> dict[str, Any] | None
 
 
 def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
-    """FaT-RL: materialize's refusal to write the accepted automation of an open attempt, or None (only reads)."""
+    """Materialize's refusal to write the accepted automation of an open attempt, or None (only reads)."""
     from tools.pilot_state import derive_state, read_effective_canonical, read_run
     from tools.project_inventory import read_execution_baseline
 
@@ -388,7 +388,7 @@ def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
     return None
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def materialize_delta(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,
@@ -623,7 +623,7 @@ def _method_name(locator: Mapping[str, Any]) -> str:
 def plan_quarantine(
     files: Sequence[Mapping[str, Any]], symbols: Sequence[Mapping[str, Any]], payload: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]] | None:
-    """FaT-8: per generated path, the failed methods named by the authoritative execution evidence and the marked bytes.
+    """Per generated path, the failed methods named by the authoritative execution evidence and the marked bytes.
 
     ``None`` when a failure cannot be tied to exactly one generated method; the caller then cleans as before.
     """
@@ -634,7 +634,7 @@ def plan_quarantine(
     if payload.get("verdict") != "FAIL" or payload.get("evidence_authoritative") is not True or not isinstance(evidence, list):
         return None
     failed = {(row.get("file_id"), row.get("symbol_id")) for row in evidence if isinstance(row, Mapping) and row.get("status") in {"FAILED", "ERROR"}}
-    # FaT-PT: a group method is disabled whole — the mark names its failed rows, the receipt also the passed rows it took along
+    # a group method is disabled whole — the mark names its failed rows, the receipt also the passed rows it took along
     group_rows = {(row.get("file_id"), row.get("symbol_id")): row["rows"] for row in evidence
                   if isinstance(row, Mapping) and isinstance(row.get("rows"), list)}
     located = {(row.get("file_id"), row.get("symbol_id")): row.get("locator") for row in symbols if isinstance(row, Mapping)}
@@ -687,7 +687,7 @@ def resolve_disposition_policy(
 ) -> tuple[str, str, Mapping[str, frozenset[tuple[str, str | None]]]]:
     """Return the only permitted plan and its legal durable outcomes.
 
-    FaT-8: ``quarantine`` (the run's policy, read from its authorization receipt) turns a FAIL of a
+    ``quarantine`` (the run's policy, read from its authorization receipt) turns a FAIL of a
     materialized file into QUARANTINE_IF_EXACT; RETAINED after FAIL is legal only under it.
     """
     if type(retain_pass) is not bool or type(quarantine) is not bool or verification != "PASS" and retain_pass:
@@ -980,7 +980,7 @@ def apply_dispositions(
 def _attempt_quarantine(
     run_root: Path, attempt_id: str, delta: Mapping[str, Any], execution_payload: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]] | None:
-    """FaT-8: the quarantine plan of this attempt from its reviewed generated files and its own execution receipt."""
+    """The quarantine plan of this attempt from its reviewed generated files and its own execution receipt."""
     from tools.pilot_state import read_execution_inputs
 
     try:

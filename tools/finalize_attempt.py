@@ -18,7 +18,7 @@ from tools.pilot_state import closure_cached as _closure_cached
 
 
 class FinalizationError(ValueError):
-    """A closure input is incomplete, contradictory, or not safely readable; ``fix`` names the way out (FaT-RL)."""
+    """A closure input is incomplete, contradictory, or not safely readable; ``fix`` names the way out."""
 
     def __init__(self, message: str = "", fix: str | None = None):
         super().__init__(message)
@@ -82,7 +82,7 @@ def decide_dispositions(
     """
     if verification not in _VERIFICATIONS:
         raise FinalizationError("unknown verification")
-    delta_module = execution_gate.load_mode_b("generated_delta")  # F6: mode B, absent from a delivery of cases
+    delta_module = execution_gate.load_mode_b("generated_delta")  # mode B, absent from a delivery of cases
     inspection = delta_module.inspect_attempt_delta(project, delta, run_root=run_root, attempt_id=attempt_id)
     if not inspection.get("valid"):
         raise FinalizationError("generated delta digest does not verify")
@@ -167,7 +167,7 @@ def disposition_receipt(delta: Mapping[str, Any] | None, *, verification: str) -
 
 
 def effective_canonical_required(reviewer: Mapping[str, Any]) -> bool:
-    """A completed ACCEPTED review selects an effective canonical when it is isolated or self-accepted (FaT-4b)."""
+    """A completed ACCEPTED review selects an effective canonical when it is isolated or self-accepted."""
     return (
         reviewer.get("session_complete") is True
         and reviewer.get("authoritative_verdict") == "ACCEPTED"
@@ -687,7 +687,7 @@ def _durable_branch(
     return branch, unknown_evidence
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def finalize_attempt(
     branch: Mapping[str, Any], delta: Mapping[str, Any] | None, *, project: Path, verification: str,
     facts: Mapping[str, Any], publish: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None,
@@ -934,7 +934,7 @@ def finalize_durable_execution_attempt(
     attempt_id: str,
 ) -> Mapping[str, Any]:
     """Close the public local-execution branch from durable evidence only."""
-    with pilot_state.closure_cache():  # FaT-9: one closure reads and validates each unchanged artifact once
+    with pilot_state.closure_cache():  # one closure reads and validates each unchanged artifact once
         return _finalize_durable_execution_attempt(run_root, attempt_id)
 
 
@@ -1068,7 +1068,7 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
         else "BASELINE_INCOMPLETE" if "BASELINE_INCOMPLETE" in diagnostic_codes
         else operational_reason_code
     )
-    # FaT-PA: the cases with blockers stayed manual — a PASS of the rest is partial and never accepted as the whole
+    # the cases with blockers stayed manual — a PASS of the rest is partial and never accepted as the whole
     partial_automation = (verification == "PASS" and reason_code is None
                           and bool(automation_artifact.get("artifacts", {}).get("excluded_cases")))
     if partial_automation:
@@ -1131,11 +1131,11 @@ def _coverage_and_blockers(document: Mapping[str, Any]) -> tuple[str, int]:
 
 
 def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int) -> tuple[str, str | None]:
-    """FaT-4: the automation outcome of a local-pilot attempt, read from the r1/r2 model stages (only reads).
+    """The automation outcome of a local-pilot attempt, read from the r1/r2 model stages (only reads).
 
     ``("AUTOMATION_BLOCKED" | "AUTOMATION_REJECTED", None)`` — final, finish closes the attempt;
     ``("AUTOMATION_NOT_MATERIALIZABLE", "<materialize's refusal>")`` — final: the review accepted an automation materialize cannot write
-    (FaT-RL: the same checks materialize_delta makes before its first write);
+    (the same checks materialize_delta makes before its first write);
     ``("ACCEPTED", None)`` — ingest closes it; ``("PENDING", "<stage>:rN")`` — the next model stage of the chain.
     BLOCKED is final only with blockers in the canonical (every revision must then be BLOCKED); without them it is an
     invalid answer that the review may still send to a correction.
@@ -1157,7 +1157,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
             run_root, attempt_id, f"autotest-reviewer:r{revision}", str(reviewer["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
         verdict = reviewed["artifacts"]["autotest_review"]["verdict"]
         if verdict == "ПРИНЯТО":
-            # FaT-PA: GENERATED over canonical blockers is valid only with the blocked cases excluded (the validator
+            # GENERATED over canonical blockers is valid only with the blocked cases excluded (the validator
             # checked the list against the canon before the answer was written)
             partial = generated["artifacts"].get("excluded_cases") is not None
             if status_blocked or (canonical_blockers and not partial):
@@ -1170,7 +1170,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
     return "AUTOMATION_REJECTED", None
 
 
-# FaT-AB: the closed list of `finish --abandon` codes and the state each one closes
+# the closed list of `finish --abandon` codes and the state each one closes
 ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE")
 _PENDING_ABANDON = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID")
 
@@ -1180,7 +1180,7 @@ def _abandon_command(code: str) -> str:
 
 
 def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
-    """FaT-AB D3: materialize began to prepare the accepted automation (inputs published) and wrote nothing into the project."""
+    """Materialize began to prepare the accepted automation (inputs published) and wrote nothing into the project."""
     root = Path(run_root)
     return ((root / "execution-inputs" / f"{attempt_id}.json").exists()
             and not (root / "materialization-ownership" / f"{attempt_id}.json").exists()
@@ -1190,7 +1190,7 @@ def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
 def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int, abandon: str | None = None) -> str:
     """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
 
-    FaT-AB: ``abandon`` is the agent's decision that the chain cannot go on; the code closes with it only where no
+    ``abandon`` is the agent's decision that the chain cannot go on; the code closes with it only where no
     other command closes the attempt — an unfinished chain, or an accepted one materialize failed to prepare."""
     outcome, stage = automation_outcome(run_root, attempt_id, canonical_blockers)
     if outcome == "ACCEPTED":
@@ -1214,7 +1214,7 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
 
 
 def automation_split(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
-    """FaT-PA: the automated and the manual cases of a partial automation (only reads); None when nothing is excluded."""
+    """The automated and the manual cases of a partial automation (only reads); None when nothing is excluded."""
     if not execution_gate.mode_b_available():
         return None  # a delivery of cases has no automation to split
     inputs = execution_gate.load_mode_b("generated_delta").journal_automation(run_root, attempt_id)
@@ -1226,7 +1226,7 @@ def automation_split(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
 def split_cases(document: Mapping[str, Any], automation: Mapping[str, Any]) -> dict[str, Any]:
     """The automated cases are those the automation relates code to; every other case is manual (N + K = M), with its
     reason: the codes of its canonical blockers (``blocked_cases`` — the same reading as ``blocker_count`` and the
-    validator's check of ``excluded_cases``), or ``manual_only`` for a case of manual-only steps (FaT-PA2)."""
+    validator's check of ``excluded_cases``), or ``manual_only`` for a case of manual-only steps."""
     from tools.canonical_document import blocked_cases
 
     related = {str(row["case_id"]) for row in automation["artifacts"]["implementation_relations"]}
@@ -1242,14 +1242,14 @@ def split_cases(document: Mapping[str, Any], automation: Mapping[str, Any]) -> d
 
 
 def automation_next(run_root: Path, attempt_id: str) -> tuple[str, str | None]:
-    """FaT-H2b 2.8/2.9: the automation outcome of the attempt with the blockers of its effective canonical (only reads)."""
+    """The automation outcome of the attempt with the blockers of its effective canonical (only reads)."""
     effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
     blockers = _coverage_and_blockers(effective["document"])[1] if effective is not None else 0
     return automation_outcome(run_root, attempt_id, blockers)
 
 
 def finish_closes(run_root: Path, attempt_id: str) -> bool:
-    """FaT-H2b 2.2: would ``finish`` close this attempt now — the same reading as finish, without writing."""
+    """Would ``finish`` close this attempt now — the same reading as finish, without writing."""
     try:
         _durable_branch_facts(run_root, attempt_id)
     except (FinalizationError, KeyError, StopIteration, TypeError, ValueError, OSError):
@@ -1257,14 +1257,14 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
     return True
 
 
-# FaT-RL: the ways out of an attempt finish cannot close yet; FaT-AB D2: each names its exact abort code
+# the ways out of an attempt finish cannot close yet; each names its exact abort code
 _REVIEW_ABORT = ("python -m tools.api review-abort --run-root <run> --attempt <attempt_id> --reason {code} "
                  "--out <run>/tmp/session.json, затем select с этим --reviewer-session без --review")
 _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (next_step); "
                     "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
                     + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
                     "select отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")
-# FaT-R1: select checks the decision before it closes the ledger, so a closed session without an effective document is
+# select checks the decision before it closes the ledger, so a closed session without an effective document is
 # an interrupted select — the same session and answer again is safe
 _UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api review-select "
                    "--run-root <run> --attempt <attempt_id> --output-dir <dir> --reviewer-session <run>/tmp/session.json — "
@@ -1273,12 +1273,12 @@ _UNSELECTED_FIX = ("ревью кейсов приняло документ, н�
 
 
 def finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: str | None = None) -> Mapping[str, Any]:
-    """FaT-4: close an attempt that ran no tests, from durable evidence only — the facts the agent used to assemble.
+    """Close an attempt that ran no tests, from durable evidence only — the facts the agent used to assemble.
 
     Branches: an accepted cases-only canonical, and an early negative outcome of the canonical review (rework or a
     reviewer abort).  Any other state is not a closing point yet, and the error names the missing fact instead of a guess.
     """
-    with pilot_state.closure_cache():  # FaT-9
+    with pilot_state.closure_cache():  
         return _finalize_durable_branch_attempt(run_root, attempt_id, abandon)
 
 
@@ -1317,7 +1317,7 @@ def _reviewer_answer(run_root: Path, attempt_id: str) -> str | None:
 def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None = None) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any]]:
     """``(attempt, branch, facts)`` of a closing point without tests, or FinalizationError naming the missing fact; only reads.
 
-    FaT-AB: ``abandon`` (one of ABANDON_CODES) closes an automation chain that cannot go on — the same branch as a refused
+    ``abandon`` (one of ABANDON_CODES) closes an automation chain that cannot go on — the same branch as a refused
     automation; everywhere else it is refused with the command that closes or continues the attempt."""
     if abandon is not None and abandon not in ABANDON_CODES:
         raise FinalizationError(f"ABANDON_CODE_INVALID: one of {list(ABANDON_CODES)}")
@@ -1328,7 +1328,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
         effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
     except (KeyError, StopIteration, TypeError, ValueError) as error:
         answered = _reviewer_answer(run_root, attempt_id)
-        if answered is not None:  # FaT-ER: the reviewer answered, the selection is the missing step — say so, with its command
+        if answered is not None:  # the reviewer answered, the selection is the missing step — say so, with its command
             raise FinalizationError(f"FINISH_FACT_UNDETERMINED: ревью кейсов ответило, но select не выполнен ({error})",
                                     fix=_SELECT_FIX.format(review=answered)) from error
         raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})",
@@ -1363,7 +1363,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
     else:
         cause = "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason")
         if cause is None and verdict == "ACCEPTED" and not effective_canonical_required(reviewer):
-            # FaT-4b: selection refused an unisolated review and the run did not admit SELF.
+            # selection refused an unisolated review and the run did not admit SELF.
             cause = "INDEPENDENCE_UNVERIFIED"
         if cause is None:
             raise FinalizationError("FINISH_FACT_UNDETERMINED: the review neither selected an effective canonical nor ended in rework "
@@ -1377,6 +1377,6 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
     return attempt, branch, facts
 
 
-# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# Public names for execution_core: the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 accepted_unprepared = _accepted_unprepared

@@ -29,14 +29,14 @@ from tools.project_inventory import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
-_SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024  # default of .skillsrc limits.context_batch_bytes (FaT-5)
+_SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024  # default of .skillsrc limits.context_batch_bytes
 
 
 class HostStop(RuntimeError):
     def __init__(self, code: str, message: str = "", fix: str | None = None):
         super().__init__(message or code)
         self.code = code
-        self.fix = fix or fix_for(code)  # P1: the table has a way out for the codes without a fix at their raise site
+        self.fix = fix or fix_for(code)  # the table has a way out for the codes without a fix at their raise site
 
 
 _PRINTED: list[dict[str, Any]] = []
@@ -46,7 +46,7 @@ _ARGS: list[Any] = []  # the arguments of the running command: the refusal journ
 
 
 def _journal_refusal(payload: Mapping[str, Any]) -> None:
-    """P1: a refusal of a command that names its run goes to ``<run>/refusals.jsonl`` (code, command, stage — nothing else)."""
+    """A refusal of a command that names its run goes to ``<run>/refusals.jsonl`` (code, command, stage — nothing else)."""
     from tools.json_cli import record_refusal
 
     args = _ARGS[0] if _ARGS else None
@@ -65,7 +65,7 @@ def _print(payload: dict[str, Any]) -> None:
 
 
 def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-U5: the one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
+    """The one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
     next_step = payload.get("next_step")
     command = next_step.get("command") if isinstance(next_step, Mapping) else None
     reason = payload.get("reason") or payload.get("code") or "ERROR"
@@ -108,9 +108,9 @@ _FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
 _MATERIALIZE = _PIPELINE + "materialize --project <project> --run <run_id>"
 _INGEST = _PIPELINE + "ingest --project <project> --run <run_id> --reports <каталог с отчётами>"
 _NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
-# FaT-3, audit D5: the exact next_expected_artifact of _durable_status_facts -> (code, stage, action, section of
+# the exact next_expected_artifact of _durable_status_facts -> (code, stage, action, section of
 # skills/orchestrate/SKILL.md, command template).  The command only names the tool of the step: the agent picks the step
-# by the SKILL and runs it, status never does.  FaT-B: every value _durable_status_facts sets has a row
+# by the SKILL and runs it, status never does. Every value _durable_status_facts sets has a row
 # (tests/test_fat3.py walks them all); tests/test_next_step_commands.py checks each command against the real parsers.
 _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
     "module selection, inventory and profile baseline": (
@@ -153,7 +153,7 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
     "static automation review": (
         "AUTOMATION_REVIEW", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5",
         _API + "open-automation-boundary ..."),
-    # FaT-H2b 2.8: after autotest-reviewer the verdict decides — materialize, the next revision, or finish
+    # after autotest-reviewer the verdict decides — materialize, the next revision, or finish
     "automation revision": (
         "AUTOMATION_REVISION", "tc-to-autotest",
         "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5",
@@ -187,8 +187,8 @@ _NEW_SCAN_CODES = {"CONTEXT_SELECTION", "DRIFT"}
 
 
 def _next_step(status: Mapping[str, Any], project: Path | None = None, request: Any = None) -> dict[str, Any]:
-    """FaT-3: what to do next after /clear, from the same facts status shows (only reads).  Audit D5: the code of the state
-    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL.  FaT-D5b: the
+    """What to do next after /clear, from the same facts status shows (only reads).  Audit D5: the code of the state
+    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL. The
     new scan of a run with its *request* is the command of drift.command and next_run, with all the flags of the request."""
     expected = status.get("next_expected_artifact")
     if expected is None:
@@ -210,7 +210,7 @@ def _next_step(status: Mapping[str, Any], project: Path | None = None, request: 
 
 
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
-    """FaT-2: what the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
+    """What the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
     from tools.pilot_state import frozen_baseline
     from tools.project_inventory import read_inventory_receipt
     from tools.scan_rules import exclusion_summary
@@ -229,13 +229,13 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
 
     result = _durable_status_facts(project, run_root, stage=stage, status=status, **extra)
     if result.get("attempt_id") is not None:
-        try:  # FaT-D5b: the scan request of the run, for the full command of a new scan
+        try:  # the scan request of the run, for the full command of a new scan
             request = read_run(Path(run_root))["manifest"].get("scan_request")
         except (KeyError, OSError, TypeError, ValueError):
             request = None
         result["next_step"] = _scope_pause_step(Path(run_root), str(result["attempt_id"]), _next_step(result, project, request))
         cut = _scan_cut(Path(run_root), request if isinstance(request, Mapping) else None)
-        if cut is not None and _left_mark(Path(run_root)) is None:  # F3 (A2-3): nothing goes on from half a context
+        if cut is not None and _left_mark(Path(run_root)) is None:  # nothing goes on from half a context
             result["next_step"] = {"code": "SCAN_INCOMPLETE", "stage": "scan", "skill_section": "1",
                                    "why": f"scan оборван: записано {cut}",
                                    "action": f"scan не завершён: записано {cut}; повтори тот же scan — он достроит недостающее в этом прогоне",
@@ -243,7 +243,7 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
         if note:
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
-        if _left_mark(Path(run_root)):  # FaT-O12b: a left run goes nowhere; the plain scan of its request starts anew
+        if _left_mark(Path(run_root)):  # a left run goes nowhere; the plain scan of its request starts anew
             result["next_step"] = {"code": "RUN_LEFT", "stage": "scan", "why": "прогон оставлен до ревью кейсов",
                                    "action": "простой scan того же запроса начнёт новый прогон", "skill_section": "Resume и дрейф",
                                    "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
@@ -251,7 +251,7 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
 
 
 def _scope_mismatch(run_root: Path, attempt_id: str) -> str | None:
-    """FaT-P3: once the plan is published the scope is its ``out_of_scope``; a ``scope-decision.json`` that says another thing is named.  Only reads."""
+    """Once the plan is published the scope is its ``out_of_scope``; a ``scope-decision.json`` that says another thing is named.  Only reads."""
     from tools import scope_pause
 
     try:
@@ -262,7 +262,7 @@ def _scope_mismatch(run_root: Path, attempt_id: str) -> str | None:
 
 
 def _scope_pause_step(run_root: Path, attempt_id: str, step: dict[str, Any]) -> dict[str, Any]:
-    """FaT-P3: after the marker the plan of the batches waits for the human's answer on the gaps of the marker.  Only reads;
+    """After the marker the plan of the batches waits for the human's answer on the gaps of the marker.  Only reads;
     the step is the plan step itself until the marker has gaps, the human has not answered and the run keeps its pause."""
     if step.get("code") != "GENERATOR_PLAN":
         return step
@@ -289,7 +289,7 @@ def _scope_pause_step(run_root: Path, attempt_id: str, step: dict[str, Any]) -> 
 
 
 def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-8: what the FAIL closure did to the generated tests, read from the attempt's disposition receipt."""
+    """What the FAIL closure did to the generated tests, read from the attempt's disposition receipt."""
     from tools import pilot_state as pilot
 
     try:
@@ -298,7 +298,7 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
         return {}
     quarantine = [
         {"file": row["path"], "method": item["method"], "ref": item["ref"], "message": item["message"],
-         **{key: item[key] for key in ("failed_rows", "disabled_passed_rows") if key in item}}  # FaT-PT: a group method's rows
+         **{key: item[key] for key in ("failed_rows", "disabled_passed_rows") if key in item}}  # a group method's rows
         for row in rows if row.get("disposition") == "QUARANTINED" for item in row["quarantine"]
     ]
     unresolved = [row["path"] for row in rows if row.get("reason_code") == "QUARANTINE_UNRESOLVED"]
@@ -311,7 +311,7 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _review_notes_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-RN: how many notes the accepted case/autotest review left and where its answer is; nothing when there are none."""
+    """How many notes the accepted case/autotest review left and where its answer is; nothing when there are none."""
     from tools.run_report import review_notes
 
     summary: dict[str, Any] = {}
@@ -330,9 +330,9 @@ _KEPT_DISPOSITIONS = frozenset({"RETAINED", "QUARANTINED", "PRESERVED_EXECUTION_
 
 
 def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, str]:
-    """FaT-L: the project's style checks the selected-tests run skipped and how to format the files left in the project."""
+    """The project's style checks the selected-tests run skipped and how to format the files left in the project."""
     if not execution_gate.mode_b_available():
-        return {}  # F6: a delivery of cases has no build and no style checks to report
+        return {}  # a delivery of cases has no build and no style checks to report
     adapters = execution_gate.load_mode_b("execution_adapters")
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -356,12 +356,12 @@ def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, st
 
 
 def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
-    """FaT-DN: why an UNKNOWN run could not match its JUnit report, and the fix — never the report text.
+    """Why an UNKNOWN run could not match its JUnit report, and the fix — never the report text.
 
     A testcase whose method is selected but whose classname is none of that method's selected classes is what a class
     display name does (Surefire writes it as the classname); the hint names the selected classes only."""
     if not execution_gate.mode_b_available():
-        return {}  # F6: a delivery of cases has no test report to match
+        return {}  # a delivery of cases has no test report to match
     from tools import pilot_state as pilot
 
     parse_junit_bytes, selected_classes_renamed = execution_gate.from_mode_b("run_tests", "parse_junit_bytes", "selected_classes_renamed")
@@ -486,7 +486,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
                 "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization",
             }[stage_id.split(":", 1)[0]]
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
-                next_artifact = "context-marker parts merge"  # FaT-5: the remaining parts, then the merge by code
+                next_artifact = "context-marker parts merge"  # the remaining parts, then the merge by code
             if stage_id.startswith("autotest-reviewer:"):
                 from tools.finalize_attempt import automation_next
 
@@ -528,7 +528,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
         if not path.exists():
-            if kind == "effective-canonical":  # F1: gone where the journal recorded an accepting verdict is a named loss, not «nothing yet»
+            if kind == "effective-canonical":  # gone where the journal recorded an accepting verdict is a named loss, not «nothing yet»
                 try:
                     pilot.effective_canonical_or_reason(root, attempt_id)
                 except (OSError, KeyError, TypeError, ValueError):
@@ -543,7 +543,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             if kind == "execution-receipt":
                 facts["verification"] = value["payload"]["verdict"]
                 facts["execution_diagnostics"] = value["payload"].get("diagnostics", [])
-                if value["payload"].get("execution_source"):  # P4: a human ran the build — said wherever the result is shown
+                if value["payload"].get("execution_source"):  # a human ran the build — said wherever the result is shown
                     facts["execution_source"] = {**value["payload"]["execution_source"], "note": "результат запуска предоставлен человеком, пакет его не воспроизводил"}
             if kind == "resume-validation":
                 facts["stop_reason"] = value.get("reason_code")
@@ -552,7 +552,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             unreadable(str(path.relative_to(root)))
     lost = pilot.lost_attempt_receipts(root, state, attempt_id)
     if lost:
-        # F1: the journal read back a receipt of the attempt (its digest) and no file of the run carries that digest any more; the plan and the header
+        # the journal read back a receipt of the attempt (its digest) and no file of the run carries that digest any more; the plan and the header
         # are named by their own path, a receipt of another kind (the journal does not say which) by its digest
         for generator_input, receipt_kind in (("plan", "batch-plan"), ("header", "generator-header")):
             try:
@@ -600,7 +600,7 @@ def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
 
 def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outside_fix: str | None = None) -> list[tuple[str, bytes]]:
     """The files a scan flag names (``--docs``, ``--reference``, ``--cases``): inside the project, no reparse point, each
-    path once.  FaT-IMP: a path outside the project is the refusal ``SNAPSHOT_DOCS`` with *outside_fix*."""
+    path once. A path outside the project is the refusal ``SNAPSHOT_DOCS`` with *outside_fix*."""
     files: list[tuple[str, bytes]] = []
     seen: set[str] = set()
     for raw in paths or []:
@@ -621,7 +621,7 @@ def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outsi
 
 
 def _is_zephyr_csv(data: bytes) -> bool:
-    """FaT-REF: the file is a Zephyr Scale test-case CSV — the shared reader knows its columns (rows may still be wrong)."""
+    """The file is a Zephyr Scale test-case CSV — the shared reader knows its columns (rows may still be wrong)."""
     from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv
 
     try:
@@ -635,7 +635,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
     from tools.doc_sections import resolve_spec
 
     entries: list[dict[str, str]] = []
-    sections: dict[str, str | None] = {}  # FaT-P3: --docs path#Section — one section of the file, its heading by path
+    sections: dict[str, str | None] = {}  # --docs path#Section — one section of the file, its heading by path
     files: list[tuple[str, bytes]] = []
     for raw in docs or []:
         path, heading = resolve_spec(project, raw)
@@ -648,7 +648,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
             sections[rel] = heading
             files.append((rel, data))
     for rel, data in files:
-        if _is_zephyr_csv(data):  # FaT-REF: an export of cases is not a requirements document
+        if _is_zephyr_csv(data):  # an export of cases is not a requirements document
             raise HostStop("DOCS_ZEPHYR_CSV", f"{rel} — выгрузка тест-кейсов Zephyr, а не документ требований",
                            fix=f"подайте её через scan --reference {rel} (эталон для сравнения), а в --docs — документ требований")
         try:
@@ -665,7 +665,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
 
 
 def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
-    """FaT-P3: the entry of ``path#Section``: ``content`` is the section at its source line numbers (the rest of the lines
+    """The entry of ``path#Section``: ``content`` is the section at its source line numbers (the rest of the lines
     empty), ``view`` the same with the note the model reads.  The digest is that of ``content`` and the requirement digest also
     binds the heading (``_docs_projection``); a change of the file is drift of the inventory as before."""
     from tools.doc_sections import SectionMissing, find_section, view
@@ -680,7 +680,7 @@ def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
 
 
 def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, list[dict[str, Any]]] | None:
-    """FaT-REF: ``scan --reference <csv>`` read by the shared Zephyr reader; a reader refusal is the scan's refusal."""
+    """``scan --reference <csv>`` read by the shared Zephyr reader; a reader refusal is the scan's refusal."""
     if not reference:
         return None
     from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv
@@ -693,7 +693,7 @@ def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, 
     except ZephyrCsvError as error:
         raise HostStop(error.code, f"{rel}: {error}", fix="--reference — экспорт тест-кейсов Zephyr Scale в CSV") from error
     try:
-        require_human_csv(cases)  # FaT-REF: the v4 Test Data holds the machine model, not the human data of a case
+        require_human_csv(cases)  # the v4 Test Data holds the machine model, not the human data of a case
     except ZephyrCsvError as error:
         raise HostStop(error.code, f"{rel}: {error}", fix="выгрузите кейсы в профиле v5 (по умолчанию) или экспортом из Zephyr — "
                                                         "в Test Data должен быть текст человека") from error
@@ -719,17 +719,17 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
     if module is None:
         return None
     if (module.get("stack") or {}).get("language") == "documents":
-        # FaT-DOC: a project of documents only has nothing to build — local-pilot is refused, not lowered
+        # a project of documents only has nothing to build — local-pilot is refused, not lowered
         raise HostStop("NO_BUILD_MODULE", "в проекте только документы, сборки и тестов нет: local-pilot-v1 недоступен",
                        "повтори scan с --profile cases-only-v1 — кейсы по документам без автотестов")
     if (module.get("paths") or {}).get("context") and not module.get("service_url_env"):
-        # FaT-2R: the tests call an application the package does not start; without the stand's address — cases only
+        # the tests call an application the package does not start; without the stand's address — cases only
         return {"reason": "модуль только с тестами: приложение поднимает человек, адрес стенда не объявлен",
                 "fix": "укажите в .skillsrc у модуля service_url_env: <ИМЯ> — переменную окружения с адресом поднятого стенда"}
     facts = execution_facts(project, module)
     if not facts["ready"]:
         return {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
-    # FaT-S: the same baseline blockers the freeze would meet, known before the run is created.
+    # the same baseline blockers the freeze would meet, known before the run is created.
     blockers = _baseline_blockers(project, module)
     if not blockers:
         return None
@@ -749,14 +749,14 @@ def _baseline_blockers(project: Path, module: Mapping[str, Any]) -> list[dict[st
 
 
 def _scan_disposition_policy(project: Path, args: Any) -> str | None:
-    """FaT-8: ``cleanup`` when this scan asks for the old FAIL cleaning; the flag beats `.skillsrc`, read only here."""
+    """``cleanup`` when this scan asks for the old FAIL cleaning; the flag beats `.skillsrc`, read only here."""
     flag = getattr(args, "disposition_policy", None)
     if flag is not None:
         return "cleanup" if flag == "cleanup" else None
     from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
 
     try:
-        document = load_skillsrc(project / ".skillsrc")  # .skillsrc is a JSON object (P5)
+        document = load_skillsrc(project / ".skillsrc")  # .skillsrc is a JSON object
     except (OSError, SkillsrcError):
         return None
     return "cleanup" if document.get("disposition_policy") == "cleanup" else None
@@ -768,15 +768,15 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
     from tools.skillsrc_manifest import skillsrc_review_self as _skillsrc_review_self
 
     if (project / ".skillsrc").is_file():
-        _read_skillsrc_binding(project / ".skillsrc")  # J1 (A2-6): an input that is refused is refused before the run exists — no orphan run without MODULE_SELECTED
+        _read_skillsrc_binding(project / ".skillsrc")  # an input that is refused is refused before the run exists — no orphan run without MODULE_SELECTED
     profile = getattr(args, "profile", "local-pilot-v1")
     skipped = _execution_skipped(project, args) if profile == "local-pilot-v1" else None
     if skipped is not None:
-        # FaT-R: no build facts — the cases still run; the run says it is cases-only and what to fix for execution.
+        # no build facts — the cases still run; the run says it is cases-only and what to fix for execution.
         profile = "cases-only-v1"
         args.profile = profile
     authorization = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
-    if getattr(args, "accept_self_review", False) or _skillsrc_review_self(project):  # P2: the flag, or .skillsrc review.self: true
+    if getattr(args, "accept_self_review", False) or _skillsrc_review_self(project):  # the flag, or .skillsrc review.self: true
         authorization["accept_self_review"] = True
     if _scan_disposition_policy(project, args) == "cleanup":
         authorization["disposition_policy"] = "cleanup"
@@ -818,7 +818,7 @@ def _resolve_scan_module(project: Path, module_id: str | None, skillsrc_document
     except SkillsrcError as error:
         if error.code != "module_unknown":
             raise
-        # P6a: --module takes the id of .skillsrc, or the folder of that module (the id of a plain folder is its path)
+        # --module takes the id of .skillsrc, or the folder of that module (the id of a plain folder is its path)
         known = ", ".join(f"{row['id']} (root {row.get('root')})" for row in normalized["modules"])
         ids = [str(row["id"]) for row in normalized["modules"]]
         raise HostStop("MODULE_UNKNOWN", f"модуля {module_id} нет в .skillsrc: --module — id модуля или путь его папки; модули: {known}",
@@ -868,7 +868,7 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
 
 def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: Path, selected_ids: list[str],
                       task_ids: list[str], budget: int) -> tuple[list[str], list[dict[str, Any]]]:
-    """FaT-A: assets, user excludes and large non-sources stay out of the model context, always listed (scan and ready)."""
+    """Assets, user excludes and large non-sources stay out of the model context, always listed (scan and ready)."""
     return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids,
                           includes=skillsrc_include(project, module_root))
 
@@ -879,7 +879,7 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
-    sectioned = _sectioned_ids(inventory, project, docs)  # FaT-P3
+    sectioned = _sectioned_ids(inventory, project, docs)  
     selected = [opaque for opaque in selected if opaque not in sectioned]
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
@@ -888,14 +888,14 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
 
 
 def _sectioned_ids(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> set[str]:
-    """FaT-P3: the inventory ids of the documents given as ``path#Section``.  The model reads their section view, not the file:
+    """The inventory ids of the documents given as ``path#Section``.  The model reads their section view, not the file:
     they stay out of the context receipts (else the whole file would reach the model once more)."""
     paths = {row["path"] for row in _docs_entries(project, docs) if "section" in row}
     return {str(item["opaque_id"]) for item in inventory.get("files", []) if isinstance(item, Mapping) and str(item["project_path"]) in paths}
 
 
 def _write_section_views(project: Path, run_root: Path, docs: list[str] | None) -> list[dict[str, str]]:
-    """FaT-P3: ``<run>/doc-sections/<name>.md`` — the view of each ``path#Section`` (the lines of the section at their source
+    """``<run>/doc-sections/<name>.md`` — the view of each ``path#Section`` (the lines of the section at their source
     numbers); the rows tell the agent which file the model reads instead of the document."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
     from tools.doc_sections import view_name
@@ -913,7 +913,7 @@ def _write_section_views(project: Path, run_root: Path, docs: list[str] | None) 
 
 
 def _scan_context_budget(inventory: Mapping[str, Any], project: Path | None = None) -> int:
-    """The byte budget of one context batch: ``.skillsrc limits.context_batch_bytes``, else 256 KiB (FaT-5)."""
+    """The byte budget of one context batch: ``.skillsrc limits.context_batch_bytes``, else 256 KiB."""
     del inventory
     path = None if project is None else project / ".skillsrc"
     if path is not None and path.is_file():
@@ -951,7 +951,7 @@ def _scan_execution_baseline(
         raise InventoryError("execution baseline lacks .skillsrc")
     module_path = str(inventory.get("module"))
     prefix = "" if module_path == "." else module_path.rstrip("/") + "/"
-    # P6a: a task document outside the module is a proved dependency file of the baseline, not a parent build manifest
+    # a task document outside the module is a proved dependency file of the baseline, not a parent build manifest
     outside_docs = {row["path"] for row in _docs_entries(project, getattr(args, "docs", None))} if prefix else set()
     dependency_ids = [
         str(item["opaque_id"]) for item in files
@@ -999,7 +999,7 @@ def _scan_execution_baseline(
         "module_id": module.get("id"),
         "selected_target": getattr(args, "target", None),
         "docs": _docs_projection(_docs_entries(project, getattr(args, "docs", None))),
-        # FaT-IMP: the CSV of --cases is the requirement document of an import; its bytes bind the requirement digest
+        # the CSV of --cases is the requirement document of an import; its bytes bind the requirement digest
         **({"cases": [{"path": rel, "sha256": _digest_bytes(data)} for rel, data in _input_files(project, [args.cases], "--cases")]}
            if getattr(args, "cases", None) else {}),
     }
@@ -1022,22 +1022,22 @@ def _scan_execution_baseline(
 
 
 def _scan_request(args: Any) -> dict[str, Any]:
-    """FaT-G: the scan flags as given (the requested profile before any lowering) — kept in the run manifest."""
+    """The scan flags as given (the requested profile before any lowering) — kept in the run manifest."""
     cases = getattr(args, "cases", None)
     return {
         "module": getattr(args, "module", None), "docs": [str(doc) for doc in (getattr(args, "docs", None) or [])],
         "target": getattr(args, "target", None), "profile": getattr(args, "profile", "local-pilot-v1"),
         "accept_self_review": bool(getattr(args, "accept_self_review", False)),
         "disposition_policy": getattr(args, "disposition_policy", None),
-        **({"no_pause": True} if getattr(args, "no_pause", False) else {}),  # FaT-P3: a run without the pause after the marker
+        **({"no_pause": True} if getattr(args, "no_pause", False) else {}),  # a run without the pause after the marker
         **({"reference": str(args.reference)} if getattr(args, "reference", None) else {}),
-        **({"cases": str(cases)} if cases else {}),  # FaT-IMP
+        **({"cases": str(cases)} if cases else {}),  
     }
 
 
 def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
     """The same request: the module (resolved by .skillsrc when not given), the --docs paths, the requested profile, the
-    --reference and (FaT-CK) the --cases CSV; a request without --cases (and every journal before FaT-CK) has ``None``."""
+    --reference and the --cases CSV; a request without --cases (and every journal of an earlier version) has ``None``."""
     module = request.get("module")
     if module is None:
         try:
@@ -1060,11 +1060,11 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
 
 
 def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path] = ()) -> tuple[Path | None, list[str]]:
-    """FaT-G: an unfinished run of the same request — its scan selected the context (CONTEXT_SELECTED) and its last
+    """An unfinished run of the same request — its scan selected the context (CONTEXT_SELECTED) and its last
     attempt has no ATTEMPT_TERMINAL.  A run whose scan failed earlier never blocks; runs without ``scan_request``
-    (created before FaT-G) are never compared.
+    (created by an earlier version) are never compared.
 
-    FaT-H2b 2.2: ``(the live run that blocks, the abandoned ones)``.  An unfinished run whose baseline check finds
+    ``(the live run that blocks, the abandoned ones)``.  An unfinished run whose baseline check finds
     drift or fails is abandoned: it cannot go on, so it never blocks; the scan names it and leaves it as it is."""
     from tools import pilot_state as pilot
 
@@ -1074,7 +1074,7 @@ def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path]
         return None, abandoned
     key = _request_key(project, request)
     for root in sorted(path for path in runs.iterdir() if path.is_dir()):
-        if root in skip:  # F3: a cut run the scan could not finish - the caller named it
+        if root in skip:  # a cut run the scan could not finish - the caller named it
             continue
         try:
             stored = pilot.read_run(root)["manifest"].get("scan_request")
@@ -1086,7 +1086,7 @@ def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path]
             attempt = state["attempts"][-1]
             selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
                            for event in state["events"])
-            if not selected and attempt.get("state") != "TERMINAL":  # F3 (A2-3): a scan cut before its first context batch
+            if not selected and attempt.get("state") != "TERMINAL":  # a scan cut before its first context batch
                 abandoned.append(f"{root.name} (scan оборван до первой пачки контекста)")
             if selected and attempt.get("state") != "TERMINAL":
                 why = _left_mark(root) or _abandoned(project, root, attempt)
@@ -1124,7 +1124,7 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
         closes = finish_closes(root, str(derive_state(root)["attempts"][-1]["attempt_id"]))
     except (OSError, KeyError, IndexError, TypeError, ValueError):
         closes = False
-    # FaT-H2b 2.2: finish only where it closes the attempt (rework, a refused automation), never as a dead end
+    # finish only where it closes the attempt (rework, a refused automation), never as a dead end
     finish = f'закрыть его без продолжения: {python} finish --project "{project}" --run {root.name}; ' if closes else ""
     return {
         "status": "error", "stage": "scan", "reason": "SCAN_RUN_IN_PROGRESS", "run_id": root.name, "run_root": str(root),
@@ -1137,7 +1137,7 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
 
 
 def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
-    """FaT-G: the scan of the same request, its flags as given — printed for the human; the code never runs it."""
+    """The scan of the same request, its flags as given — printed for the human; the code never runs it."""
     parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"']
     if request.get("module"):
         parts.append(f'--module "{request["module"]}"')
@@ -1153,13 +1153,13 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
         parts.append(f"--disposition-policy {request['disposition_policy']}")
     if request.get("reference"):
         parts.append(f'--reference "{request["reference"]}"')
-    if request.get("cases"):  # FaT-CK: the import of the same CSV, never a run of cases from code
+    if request.get("cases"):  # the import of the same CSV, never a run of cases from code
         parts.append(f'--cases "{request["cases"]}"')
     return " ".join([*parts, *extra])
 
 
 def _drift_report(project: Path, manifest: Mapping[str, Any], changed: Sequence[str]) -> dict[str, Any]:
-    """FaT-G: the changed paths (never bytes) and the two real ways out."""
+    """The changed paths (never bytes) and the two real ways out."""
     request = manifest.get("scan_request")
     command = _scan_command(project, request, extra=("--new-run",)) if isinstance(request, Mapping) else None
     fix = ("верните эти файлы к состоянию на момент scan — тогда прогон продолжится; или начните новый прогон: "
@@ -1172,7 +1172,7 @@ _SECOND_PASS = {
     "AUTOMATION_REJECTED": "автоматизация отклонена ревью: следующий заход — новый scan того же запроса",
     "AUTOMATION_BLOCKED": "автоматизация заблокирована: следующий заход — новый scan того же запроса",
     "AUTOMATION_NOT_MATERIALIZABLE": "принятую автоматизацию нельзя записать в проект: следующий заход — новый scan того же запроса",
-    # FaT-AB: finish --abandon
+    # finish --abandon
     "STAGE_RETRY_EXHAUSTED": "стадия автоматизации исчерпала единственный повтор: следующий заход — новый scan того же запроса",
     "ASSEMBLY_INVALID": "сборка или публикация ревизии автоматизации не прошла: следующий заход — новый scan того же запроса",
     "REVIEW_UNUSABLE": "ревью кейсов не может закончиться вердиктом: следующий заход — новый scan того же запроса",
@@ -1180,7 +1180,7 @@ _SECOND_PASS = {
 
 
 def _automation_split(root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-PA: «автоматизировано N из M, вручную K» of a partial automation, for the human — not the whole set."""
+    """«автоматизировано N из M, вручную K» of a partial automation, for the human — not the whole set."""
     from tools.finalize_attempt import automation_split
 
     try:
@@ -1191,7 +1191,7 @@ def _automation_split(root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _next_run(project: Path, manifest: Mapping[str, Any], reason_code: Any) -> dict[str, Any]:
-    """FaT-G: after a closed negative outcome, the scan command of the same request — printed, never run here."""
+    """After a closed negative outcome, the scan command of the same request — printed, never run here."""
     request = manifest.get("scan_request")
     if reason_code not in _SECOND_PASS or not isinstance(request, Mapping):
         return {}
@@ -1199,7 +1199,7 @@ def _next_run(project: Path, manifest: Mapping[str, Any], reason_code: Any) -> d
 
 
 def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], module_root: Path, request: Any = None) -> Mapping[str, Any]:
-    """FaT-G: the one baseline check of materialize/ingest (with the request) and status (from the baseline alone); only reads."""
+    """The one baseline check of materialize/ingest (with the request) and status (from the baseline alone); only reads."""
     from tools.project_inventory import (
         baseline_external_input_paths,
         build_inventory,
@@ -1227,7 +1227,7 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     if request is not None:
-        # materialize/ingest: always against local-pilot-v1 with the runtime identity, as before FaT-G — never the baseline's own profile
+        # materialize/ingest: always against local-pilot-v1 with the runtime identity — never the baseline's own profile
         policy, adapter_id, build_profile, parameters = "local-pilot-v1", request.adapter_id, request.build_profile, dict(request.typed_parameters)
         executable = request.executable if request.adapter_id == "maven:selected-symbols-v1" else None
     else:
@@ -1242,7 +1242,7 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
     except (OSError, ValueError):
         if request is not None:
             raise
-        # FaT-H2b 2.11: status names the vanished runtime and still compares the files against the scan
+        # status names the vanished runtime and still compares the files against the scan
         vanished = (runtime if adapter_id == "maven:selected-symbols-v1" else module_prefix + runtime) + " (runtime недоступен)"
         identity_key = ("interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1"
                         else "executable_identity" if baseline.get("adapter_id") == "maven:selected-symbols-v1" else "wrapper_identity")
@@ -1257,14 +1257,14 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
 
 
 def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attempt: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-G: status of an open attempt names the files changed since the scan — the same check as materialize/ingest."""
+    """Status of an open attempt names the files changed since the scan — the same check as materialize/ingest."""
     module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
     try:
         result = _baseline_check(project, root, attempt, module_root)
-    except Exception as error:  # FaT-HARD (F2): not a drift — but said, with its code and fix; the hint never fails status
+    except Exception as error:  # not a drift — but said, with its code and fix; the hint never fails status
         from tools.json_cli import error_fields
 
-        fields = error_fields(error, table=False)  # P1: the fix of this place below is more exact than the table's
+        fields = error_fields(error, table=False)  # the fix of this place below is more exact than the table's
         return {"drift_check_error": {"code": fields["code"], "message": fields["message"][:500], "fix": fields.get("fix") or (
             "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, materialize и ingest остановятся "
             "на той же сверке: начни новый прогон тем же scan с --new-run (команда — next_step.command)")}}
@@ -1274,7 +1274,7 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
 
 
 def _scan_cases(project: Path, args: Any) -> int | None:
-    """FaT-IMP: ``--cases`` — the Zephyr CSV is checked before anything is written and becomes the document of the run."""
+    """``--cases`` — the Zephyr CSV is checked before anything is written and becomes the document of the run."""
     from tools.cases_import import CasesImportError, read_cases
 
     cases = getattr(args, "cases", None)
@@ -1287,12 +1287,12 @@ def _scan_cases(project: Path, args: Any) -> int | None:
         from tools.project_inventory import _secret_rule
 
         cases_read = read_cases(data)
-        passwords = password_cells(cases_read)  # FaT-PW: a plain password in a cell, by row and column, never the value
+        passwords = password_cells(cases_read)  # a plain password in a cell, by row and column, never the value
         if passwords:
             raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + "; ".join(passwords[:5]))
-        secret = _secret_rule(project / rel, data, rel)  # FaT-IMP2: the rule the inventory would leave the CSV out by
+        secret = _secret_rule(project / rel, data, rel)  # the rule the inventory would leave the CSV out by
         if secret is not None:
-            cell = secret_cell(cases_read, secret[0])  # FaT-H4c: and the cell it is in, as for a password
+            cell = secret_cell(cases_read, secret[0])  # and the cell it is in, as for a password
             raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + (f"{cell}: " if cell else "")
                                    + f"правило секретов {secret[0]} ({secret[1]}) — файл не войдёт в опись")
     except HostStop as stop:
@@ -1306,7 +1306,7 @@ def _scan_cases(project: Path, args: Any) -> int | None:
 
 
 def _scan_profile(args: Any) -> None:
-    """P8a-1: no ``--profile`` is what the package can do; ``local-pilot-v1`` asked of a package without its execution files
+    """No ``--profile`` is what the package can do; ``local-pilot-v1`` asked of a package without its execution files
     is refused before any run exists."""
     requested = getattr(args, "profile", None)
     if requested is None:
@@ -1316,7 +1316,7 @@ def _scan_profile(args: Any) -> None:
 
 
 def _module_warnings(module: Mapping[str, Any], given: str | None) -> list[str]:
-    """The warnings of the selected module: ``--module`` in the old hex form (P6a), a derived level of the autotests (P6b)."""
+    """The warnings of the selected module: ``--module`` in the old hex form, a derived level of the autotests."""
     from tools.module_ids import legacy_warning
     from tools.skillsrc_manifest import level_derived_note
 
@@ -1326,7 +1326,7 @@ def _module_warnings(module: Mapping[str, Any], given: str | None) -> list[str]:
 
 
 def _skillsrc_preflight(project: Path) -> None:
-    """F5 (8.11): ``.skillsrc`` is read before a run is created — a directory, a link, an unreadable or a foreign file is a refusal
+    """``.skillsrc`` is read before a run is created — a directory, a link, an unreadable or a foreign file is a refusal
     with its fix and no run behind it (the run_id line of a scan means a run exists)."""
     from tools.skillsrc_manifest import load_skillsrc, skillsrc_file_problem
 
@@ -1342,7 +1342,7 @@ _SCHEMA_CAUSE = re.compile(r"schema validation failed: [a-z0-9.-]+\.schema\.json
 
 
 def _inventory_invalid_detail(error: BaseException) -> str:
-    """F5: the cause of INVENTORY_INVALID — the kind of error and the schema or the module it names, never a text of the project."""
+    """The cause of INVENTORY_INVALID — the kind of error and the schema or the module it names, never a text of the project."""
     from tools.pilot_state import ModulePathError
 
     if isinstance(error, InventoryError):
@@ -1357,7 +1357,7 @@ def _inventory_invalid_detail(error: BaseException) -> str:
 
 
 def cmd_scan(args: Any) -> int:
-    """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
+    """Scan, then ``run_id: <id>`` as the last line of the output."""
     _PRINTED.clear()
     try:
         _scan_profile(args)
@@ -1367,7 +1367,7 @@ def cmd_scan(args: Any) -> int:
     refused = _scan_cases(Path(args.project).resolve(), args)
     if refused is not None:
         return refused
-    # FaT-R3: --docs and --reference are read before the run is created, as --cases: a refusal leaves no orphan run
+    # --docs and --reference are read before the run is created, as --cases: a refusal leaves no orphan run
     from tools.skillsrc_manifest import SkillsrcError
 
     try:
@@ -1377,7 +1377,7 @@ def cmd_scan(args: Any) -> int:
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
         return 2
-    except SkillsrcError as error:  # F5: a foreign .skillsrc — its code, message and fix, and no run
+    except SkillsrcError as error:  # a foreign .skillsrc — its code, message and fix, and no run
         _print({"status": "error", "stage": "scan", "reason": error.code, "code": error.code, "message": str(error), "fix": error.fix})
         return 2
     code = _scan(args)
@@ -1394,7 +1394,7 @@ def _scan(args: Any) -> int:
     if not getattr(args, "new_run", False):
         from tools.project_inventory import inventory_cache
 
-        # FaT-AU4: one inventory per module for every unfinished run the scan compares.  Only around the comparison: the
+        # one inventory per module for every unfinished run the scan compares.  Only around the comparison: the
         # scan then writes project files (.skillsrc, the cases document) and a rewrite of the same size within one
         # timestamp tick (Windows) keeps the stamp, so the inventory of the new run is never taken from this cache.
         skipped_runs: list[Path] = []
@@ -1408,7 +1408,7 @@ def _scan(args: Any) -> int:
             if _scan_cut(open_root, request) is None:
                 _print(_run_in_progress(project, open_root, request))
                 return 2
-            # F3 (A2-3): the scan of this run stopped before its last context batch — the same scan finishes it
+            # the scan of this run stopped before its last context batch — the same scan finishes it
             outcome = _resume_scan(project, args, request, open_root, [*abandoned, *cut_runs])
             if isinstance(outcome, int):
                 return outcome
@@ -1484,21 +1484,21 @@ def _scan(args: Any) -> int:
 
 def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventory: Mapping[str, Any], module_root: Path,
                        task_info: tuple[list[str], set[str], dict[str, Any]]) -> dict[str, Any]:
-    """The context batches of the scan from the frozen inventory and the request (F3: one function for a scan and for the repeat
+    """The context batches of the scan from the frozen inventory and the request (one function for a scan and for the repeat
     that finishes it); ``task_info`` is the result of ``_task_document_scope`` — its summary is filled in place.  Writes only the
     views of the document sections of the run."""
     task_ids, other_task_ids, context_summary = task_info
     selected_ids = _context_scope_ids(frozen_inventory, project, module_root, getattr(args, "target", None))
-    # FaT-3: the task document of --docs always goes to the model; the other tasks of to_do do not.
+    # the task document of --docs always goes to the model; the other tasks of to_do do not.
     selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
     selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
-    sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # FaT-P3: path#Section is no context file
+    sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # path#Section is no context file
     selected_ids = [opaque for opaque in selected_ids if opaque not in sectioned]
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
     by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
     reference = _reference_cases(project, getattr(args, "reference", None))
-    if reference is not None:  # FaT-REF: the reference CSV is never context of a model
+    if reference is not None:  # the reference CSV is never context of a model
         selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
@@ -1528,7 +1528,7 @@ def _publish_context(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -
         if str(batch["receipt"]["digest"]) not in have:
             pilot.publish_context_selection(run_root, attempt_id, batch["receipt"])
     reference = plan["reference"]
-    if reference is not None:  # FaT-REF: a receipt for the review hint; never context or generator input
+    if reference is not None:  # a receipt for the review hint; never context or generator input
         pilot.publish_reference_cases(run_root, attempt_id, *reference)
 
 
@@ -1536,7 +1536,7 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
                   frozen_inventory: Mapping[str, Any], exclusion_receipt: Mapping[str, Any], baseline_digest: str, attempt_id: str,
                   plan: Mapping[str, Any], context_summary: Mapping[str, Any], context_warnings: Sequence[str],
                   abandoned: Sequence[str], **extra: Any) -> dict[str, Any]:
-    """The answer of a scan that made (or, F3, finished) the run."""
+    """The answer of a scan that made (or finished) the run."""
     context_skipped = plan["context_skipped"]
     return _durable_status(
         project,
@@ -1563,7 +1563,7 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
 
 
 def _scan_cut(run_root: Path, request: Mapping[str, Any] | None = None) -> str | None:
-    """F3 (A2-3): why the scan of the run stopped before it was done - the context batches written against the count the
+    """Why the scan of the run stopped before it was done - the context batches written against the count the
     receipts carry, or the reference receipt of ``--reference`` - else None.  Only reads."""
     from tools import pilot_state as pilot
 
@@ -1583,7 +1583,7 @@ def _scan_cut(run_root: Path, request: Mapping[str, Any] | None = None) -> str |
 
 
 def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root: Path, abandoned: Sequence[str]) -> int | str:
-    """F3 (A2-3): the repeat of a scan finishes the run it cut.  The frozen inventory and baseline of the run are read from the
+    """The repeat of a scan finishes the run it cut.  The frozen inventory and baseline of the run are read from the
     journal, the batches are made again from the request, the ones the run has must be the same (by digest), the missing ones are
     written.  Returns the exit code of the scan, or why the run cannot be finished: it is then left as it is and a new one is made."""
     from tools import pilot_state as pilot
@@ -1596,7 +1596,7 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
     try:
         # the journal's readers only: the baseline is the attempt's (its self-digest is the attempt's baseline_digest), the
         # inventory is the one the journal has as INVENTORY_READY
-        try:  # F2 (A1-2): the one reader of the attempt's baseline — the file, its self-digest and the journal's EXECUTION_BASELINE_FROZEN
+        try:  # the one reader of the attempt's baseline — the file, its self-digest and the journal's EXECUTION_BASELINE_FROZEN
             baseline = pilot.frozen_baseline(run_root, attempt)
         except pilot.BaselineUnbound:
             return "baseline не совпал с записанным в попытке"
@@ -1626,7 +1626,7 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
 
 
 def _marker_reuse(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-CR: the scan suggests an earlier accepted run whose context marker has the very same inputs; the agent decides."""
+    """The scan suggests an earlier accepted run whose context marker has the very same inputs; the agent decides."""
     from tools.pilot_state import marker_reuse_suggestion
 
     try:
@@ -1636,7 +1636,7 @@ def _marker_reuse(run_root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _skillsrc_defaults(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-H2b P2b: a test framework the build files of the module do not show was taken by default — say so."""
+    """A test framework the build files of the module do not show was taken by default — say so."""
     from tools.discover_project import module_test_evidenced
 
     framework = (module.get("test") or {}).get("framework") if isinstance(module.get("test"), Mapping) else None
@@ -1656,7 +1656,7 @@ def _under_to_do(project_path: str) -> bool:
 
 
 def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None) -> list[Path]:
-    """P6a: the task documents of --docs that lie in the project outside the module (the root of a multi-module project):
+    """The task documents of --docs that lie in the project outside the module (the root of a multi-module project):
     they join the inventory as parent files, bound by its digest, and are read as documents only.  One the rules of the
     inventory leave out stops the scan with its rule."""
     from tools.project_inventory import outside_task_documents
@@ -1669,7 +1669,7 @@ def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None
 
 
 def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
-    """FaT-3: ``(ids of the task documents, ids of other tasks' files in to_do, summary, warnings)``.
+    """``(ids of the task documents, ids of other tasks' files in to_do, summary, warnings)``.
 
     A document of --docs must be a file of the module's inventory (its bytes are bound by the inventory digest);
     otherwise the scan stops with TASK_DOC_OUTSIDE_CONTEXT — cases without their requirements are no cases.
@@ -1708,7 +1708,7 @@ def _exclusion_note(inventory: Mapping[str, Any], path: str) -> str:
 
 
 def _moved_project_note(project: Path, root: Path) -> dict[str, Any] | None:
-    """P6a: ``None`` when the run was made at ``project``; else what to tell about the moved project (code, paths, fix)."""
+    """``None`` when the run was made at ``project``; else what to tell about the moved project (code, paths, fix)."""
     from tools.pilot_state import run_project_move
 
     move = run_project_move(project, root)
@@ -1745,7 +1745,7 @@ def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = Fals
         run = read_run(root)
         state = derive_state(root)
     except (OSError, ValueError, KeyError) as error:
-        note = _moved_project_note(project, root)  # P6a: the run is there, but the project is not where it was made
+        note = _moved_project_note(project, root)  # the run is there, but the project is not where it was made
         raise HostStop("EXECUTION_COORDINATES", "pilot run root is unreadable or outside this project",
                        note["fix"] if note else None) from error
     manifest = run.get("manifest")
@@ -1761,14 +1761,14 @@ def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = Fals
     return root, run, state
 
 
-# P4b: ingest closes a run whose claim of the start was made and whose receipt was not published; finish does not
+# ingest closes a run whose claim of the start was made and whose receipt was not published; finish does not
 _INTERRUPTED_FIX = ("приём отчётов начался, но квитанции исполнения нет (ingest прервался): снова вызови ingest с теми же отчётами или "
                     "`ingest --no-reports --reason RESULT_UNAVAILABLE` — он закроет попытку")
 
 
 def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-O12 O1: the mark «оставлен» of a run stopped before the canonical review — the attempt is not closed (that is FaT-AB2);
-    only the same-request check of scan skips the run.  J1 (A1-5): a decision of the run, so a file and its pair of events
+    """The mark «оставлен» of a run stopped before the canonical review — the attempt is not closed;
+    only the same-request check of scan skips the run. A decision of the run, so a file and its pair of events
     (``bind_bytes``, batch ``left-v1``): written once, a repeat only finishes the events; a file of other bytes is RECEIPT_FILE_UNBOUND."""
     from tools.pilot_state import LEFT_BATCH, LEFT_MARK, bind_bytes
 
@@ -1779,7 +1779,7 @@ def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _left_mark(root: Path) -> str | None:
-    """FaT-O12b: why the scan skips this run — only when the mark names the run's last attempt (read confined)."""
+    """Why the scan skips this run — only when the mark names the run's last attempt (read confined)."""
     from tools.pilot_state import left_attempt
 
     try:
@@ -1789,7 +1789,7 @@ def _left_mark(root: Path) -> str | None:
 
 
 def _before_canonical_review(root: Path, attempt_id: str) -> bool:
-    """FaT-AB tier C: the attempt has no reviewer session yet — no closing command exists before the canonical review."""
+    """The attempt has no reviewer session yet — no closing command exists before the canonical review."""
     from tools.pilot_state import read_reviewer_session_ledger
 
     try:
@@ -1800,7 +1800,7 @@ def _before_canonical_review(root: Path, attempt_id: str) -> bool:
 
 
 def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: str) -> dict[str, Any]:
-    """FaT-AB tier C (until FaT-AB2): the honest answer and the next run — this run stays as it is, --new-run starts another."""
+    """The honest answer and the next run — this run stays as it is, --new-run starts another."""
     request = manifest.get("scan_request")
     command = (_scan_command(project, request, extra=("--new-run",)) if isinstance(request, Mapping)
                else "scan с теми же --module, --docs и --profile, что у этого прогона, и --new-run")
@@ -1815,7 +1815,7 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
 
 
 def _exact_fix(fix: str, project: Path, root: Path, attempt_id: str) -> str:
-    """FaT-AB: the fix of finish with this run's own coordinates, a command to copy as it is."""
+    """The fix of finish with this run's own coordinates, a command to copy as it is."""
     return (fix.replace("python -m tools.", f'"{sys.executable}" -m tools.').replace("<project>", f'"{project}"')
             .replace("<run_id>", root.name).replace("<run>/tmp/session.json", f'"{root / "tmp" / "session.json"}"')
             .replace("<run>", f'"{root}"').replace("<attempt_id>", attempt_id))
@@ -1833,7 +1833,7 @@ def _execution_receipt_bound(root: Path, attempt_id: str) -> bool:
 
 
 def cmd_finish(args: Any) -> int:
-    """FaT-4: close the current attempt in one command — the same order and checks as the manual sequence."""
+    """Close the current attempt in one command — the same order and checks as the manual sequence."""
     from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
     from tools.pilot_state import derive_state
 
@@ -1843,7 +1843,7 @@ def cmd_finish(args: Any) -> int:
         raise HostStop("FINISH_FACT_UNDETERMINED", "the run has no attempt yet")
     attempt = state["attempts"][-1]
     attempt_id = str(attempt["attempt_id"])
-    # F3 (A1-4): the branch is the journal's - the start event, or an execution receipt the journal binds (a NOT_RUNNABLE
+    # the branch is the journal's - the start event, or an execution receipt the journal binds (a NOT_RUNNABLE
     # execution has a receipt and no start); a bare file execution-receipts/<attempt>.json decides nothing
     executed = (any(event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in derive_state(root)["events"])
                 or _execution_receipt_bound(root, attempt_id))
@@ -1860,14 +1860,14 @@ def cmd_finish(args: Any) -> int:
     if abandon is not None and (executed or attempt.get("state") == "TERMINAL"):
         from tools import execution_gate
 
-        # F3 (8.8): ingest only where the attempt is open after an execution start and the package has the execution; a closed
+        # ingest only where the attempt is open after an execution start and the package has the execution; a closed
         # attempt is read with report/status
         closes_by_ingest = executed and attempt.get("state") != "TERMINAL" and execution_gate.execution_available()
         raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает ingest или она уже закрыта: --abandon не нужен",
                        _exact_fix("python -m tools.run_pipeline ingest --project <project> --run <run_id> --reports <каталог с отчётами>" if closes_by_ingest else
                                   "попытка закрыта: итог — python -m tools.run_pipeline report --project <project> --run <run_id> "
                                   "(или status); следующий заход — next_run из ответа finish/status", project, root, attempt_id))
-    if abandon == "LEFT_BEFORE_REVIEW":  # FaT-O12 O1: the run stays as it is; a plain scan of the request starts a new one
+    if abandon == "LEFT_BEFORE_REVIEW":  # the run stays as it is; a plain scan of the request starts a new one
         if not _before_canonical_review(root, attempt_id):
             raise HostStop("ABANDON_NOT_NEEDED", "попытка уже дошла до ревью кейсов: LEFT_BEFORE_REVIEW только до него",
                            _exact_fix("python -m tools.run_pipeline finish --project <project> --run <run_id>", project, root, attempt_id))
@@ -1916,13 +1916,13 @@ def cmd_finish(args: Any) -> int:
 
 
 def cmd_report(args: Any) -> int:
-    """FaT-6: write the run report and the analyst questions; only reads the journal."""
+    """Write the run report and the analyst questions; only reads the journal."""
     from tools.run_report import GUARANTEE, write_report
 
     from tools.pilot_state import moved_project_allowed
 
     project = Path(args.project).resolve()
-    with moved_project_allowed():  # P6a: a moved project's run is read, never rewritten
+    with moved_project_allowed():  # a moved project's run is read, never rewritten
         root, run, _state = _read_run_coordinate(project, args.run, allow_moved=True)
         written = {Path(path).name: path for path in write_report(project, run["manifest"]["run_id"])}
     _print(_with_moved_note({"status": "ok", "stage": "report", "run_id": run["manifest"]["run_id"], "report_md": written["report.md"],
@@ -1936,9 +1936,9 @@ def cmd_status(args: Any) -> int:
     from tools.project_inventory import inventory_cache
 
     project = Path(args.project).resolve()
-    # FaT-ST: one block, so the run manifest is validated and the journal derived once; the answer is printed after
-    # the block's final full journal check.  FaT-AU4: and the module's inventory built once.
-    with moved_project_allowed(), closure_cache(), inventory_cache():  # P6a: status of a moved project works (the final check of closure_cache too)
+    # one block, so the run manifest is validated and the journal derived once; the answer is printed after
+    # the block's final full journal check. And the module's inventory built once.
+    with moved_project_allowed(), closure_cache(), inventory_cache():  # status of a moved project works (the final check of closure_cache too)
         result = _status_result(project, args.run)
     _print(result)
     return 0
@@ -1952,7 +1952,7 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
         result.update(_review_notes_summary(root, str(attempt["attempt_id"])))
         from tools.review_canaries import status_fields
 
-        result.update(status_fields(root, str(attempt["attempt_id"]), result))  # P7: the canaries of the review, REVIEW_UNRELIABLE
+        result.update(status_fields(root, str(attempt["attempt_id"]), result))  # the canaries of the review, REVIEW_UNRELIABLE
     if attempt is not None and attempt.get("state") == "TERMINAL":
         from tools.pilot_state import read_terminal_result
 
@@ -1961,7 +1961,7 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
         except (KeyError, OSError, TypeError, ValueError):
             pass
     elif attempt is not None and _moved_project_note(project, root) is None:
-        # P6a: in a moved project the baseline binds the folder name and path of the scan, so the comparison would report a
+        # in a moved project the baseline binds the folder name and path of the scan, so the comparison would report a
         # drift of no file at all; the PROJECT_MOVED note says that the check is not made here
         result.update(_status_drift(project, root, run["manifest"], attempt))
     return _with_moved_note(result, project, root)
@@ -1983,7 +1983,7 @@ def build_parser() -> JsonArgumentParser:
                              help="FaT-REF: a Zephyr Scale CSV of reference cases — compared with the new cases as a review hint")
     scan_parser.add_argument("--new-run", action="store_true",
                              help="FaT-G: start a new run although an unfinished run of the same request exists.")
-    if execution_gate.execution_available():  # V8 (A5-9): the policy of failed generated tests is a flag of mode B, not of a delivery of cases
+    if execution_gate.execution_available():  # the policy of failed generated tests is a flag of mode B, not of a delivery of cases
         scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
                                  help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
     status_parser = sub.add_parser("status", parents=[shared])
@@ -1993,7 +1993,7 @@ def build_parser() -> JsonArgumentParser:
                                                      "LEFT_BEFORE_REVIEW"),
                                help="FaT-AB: close an automation chain that cannot go on, only where no other command closes it.")
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
-    execution = execution_gate.load("exec_commands")  # P8a-1: exec (replaced), materialize and ingest exist only where their module does
+    execution = execution_gate.load("exec_commands")  # exec (replaced), materialize and ingest exist only where their module does
     if execution is not None:
         execution.add_parsers(sub, shared)
     report_parser = sub.add_parser("report", parents=[shared], help="FaT-6: report.md/report.json and questions-for-analyst.md of the run, without project content.")
@@ -2046,7 +2046,7 @@ def main(argv: list[str] | None = None) -> int:
             _print(payload)
             return 2
         if isinstance(error, (FileNotFoundError, ValueError)):
-            # FaT-O12b: the refusal's own code (CODE: prefix) and fix, like the branch below; INPUT_INVALID otherwise
+            # the refusal's own code (CODE: prefix) and fix, like the branch below; INPUT_INVALID otherwise
             from tools.json_cli import error_code_prefix, error_fields
 
             fields = error_fields(error)
@@ -2054,20 +2054,20 @@ def main(argv: list[str] | None = None) -> int:
             _print({"status": "error", "reason": code, **fields, "code": code})
             return 2
         if isinstance(error, (KeyError, TypeError, OSError)):
-            # FaT-F1: a JSON answer with the code instead of a traceback; an OSError names its file
+            # a JSON answer with the code instead of a traceback; an OSError names its file
             from tools.json_cli import error_fields
 
             fields = error_fields(error)
             _print({"status": "error", "reason": fields["code"], **fields})
             return 2
-        # FaT-R3: any other error is still a JSON answer, never a traceback the agent cannot read
+        # any other error is still a JSON answer, never a traceback the agent cannot read
         # the message is cut: an exception may carry a piece of a file, and the package prints no more than it needs
         _print({"status": "error", "reason": "INTERNAL", "message": f"{type(error).__name__}: {str(error)[:500]}",
                 "fix": "сообщите разработчикам пакета вывод этой команды"})
         return 2
 
 
-# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# Public names for execution_core: the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 print_payload = _print
 read_run_coordinate = _read_run_coordinate
@@ -2080,7 +2080,7 @@ automation_split_fields = _automation_split
 
 
 if __name__ == "__main__":
-    # P8a-1: the execution commands raise the HostStop of ``tools.run_pipeline``; run as ``__main__`` this file has a class of
+    # the execution commands raise the HostStop of ``tools.run_pipeline``; run as ``__main__`` this file has a class of
     # its own, so hand over to the imported module — one HostStop, one ``main``
     from tools.run_pipeline import main as _main
 

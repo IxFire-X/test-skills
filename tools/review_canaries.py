@@ -1,4 +1,4 @@
-"""P7: canaries in the reviewer's view, and the codeword of the generator.
+"""Canaries in the reviewer's view, and the codeword of the generator.
 
 A canary is a control error that code puts into the *reviewer's view* of a candidate (never into the canon, the bundles or
 the journal): a removed assertion, a shifted boundary, a changed status, a dropped state check.  The reviewer who reads the
@@ -238,7 +238,7 @@ def _bound_events(run_root: Path, attempt_id: str) -> list[dict[str, Any]]:
 
 def verify(run_root: Path, attempt_id: str) -> list[dict[str, Any]] | None:
     """The canaries of the attempt, read through the journal, or ``None`` when the journal has no event of a ``review-canaries``
-    receipt for the attempt (a run opened before P7: not measured).  Events that are there bind a receipt, and the receipt three
+    receipt for the attempt (a run opened by an earlier version: not measured).  Events that are there bind a receipt, and the receipt three
     digests; the receipt, the map and the view must all be there and give them — a file removed or changed is
     ``REVIEW_CANARY_MISMATCH``, whatever the reason it cannot be read."""
     events = _bound_events(run_root, attempt_id)

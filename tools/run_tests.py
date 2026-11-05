@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """V5 generated-test runner with exact ``(file_id, symbol_id)`` evidence.
 
-The package starts no process (P4b): a human runs the build, ``tools/exec_runner.py`` takes the reports (``ingest``).
+The package starts no process: a human runs the build, ``tools/exec_runner.py`` takes the reports (``ingest``).
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from tools.skillsrc_manifest import (
     select_module,
 )
 
-from tools.java_text import mask_java_noncode  # F6: the Java lexer is shared with the map of existing tests
+from tools.java_text import mask_java_noncode  # the Java lexer is shared with the map of existing tests
 
 _mask_java_noncode = mask_java_noncode
 _ROOT = Path(__file__).resolve().parents[1]
@@ -184,7 +184,7 @@ def _java_class(path: Path, text: str) -> tuple[str, str] | None:
         return None
     text = masked[declaration.end():end]
     nested = re.compile(r"\b(?:class|interface|enum|record)\s+[A-Za-z_$][\w$]*\b[^\{]*\{")
-    # V5 (8.D6-7): the body is searched where it is and the nested classes are blanked while it is copied out, once — joining the body into a new
+    # the body is searched where it is and the nested classes are blanked while it is copied out, once — joining the body into a new
     # string for every nested class found was n squared (7 500 empty nested classes: 4 s).  The pairs of braces are found in one pass.
     pairs = _brace_pairs(text)
     pieces: list[str] = []
@@ -212,7 +212,7 @@ def _brace_pairs(text: str) -> dict[int, int]:
     return pairs
 
 
-# FaT-DN: Surefire writes a class display name that differs from the simple class name as the report classname,
+# Surefire writes a class display name that differs from the simple class name as the report classname,
 # so the report can no longer match the class FQN; a method display name leaves the testcase name alone.
 _CLASS_DISPLAY_ANNOTATION = re.compile(r"@\s*(?:[\w$]+\s*\.\s*)*(?:DisplayName|DisplayNameGeneration|IndicativeSentencesGeneration)\b")
 _CLASS_DISPLAY_NAME_FIX = (
@@ -236,7 +236,7 @@ def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | Non
         return None
     method = locator["method_name"]
     body = parsed[1]
-    # FaT-RC: the declaration `<type> <name>(…) [throws …] {` found from each occurrence of the name, not by one pattern
+    # the declaration `<type> <name>(…) [throws …] {` found from each occurrence of the name, not by one pattern
     # tried at every token — `[\w<>\[\]., ?]+\s+name` backtracked quadratically on a long line of words (2 h on one file).
     count = sum(_declared_after_type(body, start) for start in _declaration_starts(body, method))
     return method if count == 1 else None
@@ -246,7 +246,7 @@ _TAIL_OF_A_HEADER = re.compile(r"\s*")
 
 
 def _declaration_starts(body: str, method: str) -> list[int]:
-    """Where ``\\bNAME\\s*\\([^;{}]*\\)\\s*(?:throws[^\\{]+)?\\{`` matches in *body*, as ``finditer`` finds them (V5, 8.D6-7: that pattern read to the end of the
+    """Where ``\\bNAME\\s*\\([^;{}]*\\)\\s*(?:throws[^\\{]+)?\\{`` matches in *body*, as ``finditer`` finds them (8.D6-7: that pattern read to the end of the
     body from every ``foo(`` when no ``;``, ``{`` or ``}`` followed — 100 KB took 4 s).  A match is a name and its opening parenthesis, a closing parenthesis
     before the first of ``;{}`` that the header ends on (the last such one that does: ``[^;{}]*`` is greedy), blanks, and either ``{`` or ``throws`` and the
     first ``{`` after it.  Which parenthesis ends a header does not depend on the name, so it is worked out once per parenthesis."""
@@ -302,7 +302,7 @@ def _declared_after_type(body: str, start: int) -> bool:
     return False
 
 
-# FaT-JL: a closed list of Java APIs newer than a module's level that a regular expression finds without a compiler —
+# a closed list of Java APIs newer than a module's level that a regular expression finds without a compiler —
 # (pattern on code without comments and literal contents, Java version, name, replacement, receiver class, argument count).
 # A rule names a JDK class as its receiver, so an explicit import of a same-named class from elsewhere (vavr ``List``,
 # Guava ``Files``/``Predicate``) turns it off; a method other libraries also have is narrowed by its argument count, and
@@ -340,7 +340,7 @@ _CALL_TOKENS = re.compile(r"[()\[\]{},;]")
 
 def _call_arguments(masked: str, start: int) -> int | None:
     """Top-level arguments of the call whose ``(`` ends at ``start``; None when the parenthesis never closes."""
-    # FaT-RC: only brackets, commas and semicolons matter, so the scan jumps between them — an unclosed call no longer walks
+    # only brackets, commas and semicolons matter, so the scan jumps between them — an unclosed call no longer walks
     # the rest of the file character by character from every match; a ``;`` outside brackets ends the statement.
     depth, commas = 0, 0
     for token in _CALL_TOKENS.finditer(masked, start):
@@ -359,11 +359,11 @@ def _call_arguments(masked: str, start: int) -> int | None:
 
 
 def _java_api_level_diagnostics(pointer: str, text: str, level: Mapping[str, Any]) -> list[dict[str, str]]:
-    """FaT-JL: RUNNER_API_LEVEL for each closed-list API newer than the module's Java level, with its replacement."""
+    """RUNNER_API_LEVEL for each closed-list API newer than the module's Java level, with its replacement."""
     target, masked = int(level["level"]), _mask_java_noncode(text, keep_quotes=True)
     found = []
     for pattern, since, name, fix, receiver, arguments in _JAVA_API_RULES:
-        # FaT-RC: [ \t]*, not \s* — from every line start \s* ran over a whole blank (masked) tail and back: quadratic
+        # [ \t]*, not \s* — from every line start \s* ran over a whole blank (masked) tail and back: quadratic
         if since <= target or receiver and re.search(rf"^[ \t]*import\s+(?!java\.)[\w.]+\.{receiver}\s*;", masked, re.MULTILINE):
             continue
         if any(arguments is None or _call_arguments(masked, match.end()) == arguments for match in re.finditer(pattern, masked)):
@@ -375,7 +375,7 @@ def _java_api_level_diagnostics(pointer: str, text: str, level: Mapping[str, Any
                   f"замени на {fix}; используй только API Java {target}") for since, name, fix in found]
 
 
-# FaT-PT: a param_group of the canonical is one @ParameterizedTest whose rows are literals in the same class — the first
+# a param_group of the canonical is one @ParameterizedTest whose rows are literals in the same class — the first
 # argument of a row is its case ID, the rows follow the display order of the group.  Surefire writes an invocation as
 # `method(Type, …)[N]` without the display name, so N is all the report gives on Maven; the literal rows prove N → case ID.
 _PARAM_ROWS_FIX = ("группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\") со строками-литералами в том же классе: "
@@ -470,7 +470,7 @@ def _annotation_region(masked: str, start: int) -> int:
 
 
 def _annotation_regions(masked: str, starts: Sequence[int]) -> dict[int, int]:
-    """FaT-R4: ``_annotation_region`` of every start in one pass.  A walk that reaches an earlier start at depth 0 goes
+    """``_annotation_region`` of every start in one pass.  A walk that reaches an earlier start at depth 0 goes
     on exactly as the walk from that start did, so it takes that start's answer: linear instead of a walk per member."""
     regions: dict[int, int] = {}
     for start in sorted(set(starts)):
@@ -493,7 +493,7 @@ def _annotation_regions(masked: str, starts: Sequence[int]) -> dict[int, int]:
 
 @lru_cache(maxsize=4)
 def _masked_java(text: str) -> tuple[str, tuple[int, ...]]:
-    """FaT-R4: the masked text once per file (not once per group) and where ``ParameterizedTest`` stands in it."""
+    """The masked text once per file (not once per group) and where ``ParameterizedTest`` stands in it."""
     masked = _mask_java_noncode(text)
     return masked, tuple(match.start() for match in re.finditer("ParameterizedTest", masked))
 
@@ -537,7 +537,7 @@ def _param_group_rows(text: str, method: str) -> list[str] | None:
     if source is None or re.search(r"@\s*(?:[\w$]+\s*\.\s*)*MethodSource\s*\(", raw_region) and source.group("provider") is None:
         return None  # a provider in another class, several providers or a computed name
     provider = source.group("provider") or method
-    # FaT-R4: a bounded run between ``static`` and the name — the unbounded lazy one re-read the text from every ``static``
+    # a bounded run between ``static`` and the name — the unbounded lazy one re-read the text from every ``static``
     found = _declaration(masked, r"\bstatic\b[^;{}()=]{0,200}?\b(?P<name>" + re.escape(provider) + r")\s*\(\s*\)\s*\{")
     if len(found) != 1:
         return None
@@ -553,7 +553,7 @@ def _param_group_rows(text: str, method: str) -> list[str] | None:
 
 def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: Mapping[str, Any], texts: Mapping[str, str],
                              params: bool) -> tuple[list[dict[str, str]], dict[tuple[str, str], tuple[str, ...]]]:
-    """FaT-PT: RUNNER_PARAM_ROWS / RUNNER_PARAMS_UNAVAILABLE per Java param_group, and each group's (file, symbol) → case IDs."""
+    """RUNNER_PARAM_ROWS / RUNNER_PARAMS_UNAVAILABLE per Java param_group, and each group's (file, symbol) → case IDs."""
     from tools.canonical_document import param_groups
 
     relations = automation_artifact["artifacts"]["implementation_relations"]
@@ -591,9 +591,9 @@ def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: M
     return diagnostics, rows_by_pair
 
 
-# FaT-AU4 (audit F6): the bytes of generated code one runner-compat call reads.  The campaign's largest automation had
+# the bytes of generated code one runner-compat call reads.  The campaign's largest automation had
 # 184 KB of code (spring-petclinic, one file of 62 methods); 1 MiB is ~5.7x that, and the checks stay linear up to it
-# (FaT-RC: the Java parsing; FaT-R4: the @ParameterizedTest rows — one mask per file, one pass over the members, a
+# (the Java parsing; the @ParameterizedTest rows — one mask per file, one pass over the members, a
 # bounded provider pattern: a degenerate 200 KB class in well under 5 s).
 RUNNER_INPUT_MAX_BYTES = 1024 * 1024
 
@@ -738,7 +738,7 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
                 "Process-stop proof must be a controller-confirmed timeout scope.",
             ))
         cause = row.get("exit_cause")
-        if cause == "NOT_OBSERVED":  # P4: a human ran the build; its exit code is not known to the package
+        if cause == "NOT_OBSERVED":  # a human ran the build; its exit code is not known to the package
             exit_valid = exit_code is None and kind in {"NO_TESTS_COLLECTED", "JUNIT_MISSING", "JUNIT_INVALID", "SOURCE_CHANGED", "BASELINE_DRIFT"}
         elif kind == "TIMEOUT":
             exit_valid = type(exit_code) is int and exit_code == 124 and cause == "TIMEOUT"
@@ -890,7 +890,7 @@ def _testcase_status(item: ET.Element) -> str:
 
 
 def _failure_message(item: ET.Element) -> str:
-    """FaT-8: the first line of a failure or error, kept for the quarantine note (500 characters at most)."""
+    """The first line of a failure or error, kept for the quarantine note (500 characters at most)."""
     found = item.find("failure")
     if found is None:
         found = item.find("error")
@@ -931,7 +931,7 @@ def parse_junit_bytes(data: bytes) -> JUnitParseResult:
 
 def junit_method_name(name: str) -> str:
     """The Java method of a JUnit testcase name — Surefire 3 writes an invocation `method(Type, …)[N]`, Surefire 2.22
-    `method{Type, …}[N]` (FaT-PT); the one reading of a name for the evidence and for the run_pipeline hint."""
+    `method{Type, …}[N]`; the one reading of a name for the evidence and for the run_pipeline hint."""
     return re.split(r"[\[({]", name, maxsplit=1)[0]
 
 
@@ -948,7 +948,7 @@ def _case_matches_pair(case: JUnitCase, binding: Mapping[str, Any], java: bool) 
     return same_file and case.classname == class_module and base_name == expected_name
 
 
-# FaT-PT: an invocation of a group method — Surefire `method(Type, …)[N]`, Gradle `[N] <case ID>` (the display name).
+# an invocation of a group method — Surefire `method(Type, …)[N]`, Gradle `[N] <case ID>` (the display name).
 _SUREFIRE_INVOCATION = re.compile(r"\[(\d+)\]$")
 _DISPLAY_INVOCATION = re.compile(r"\[(\d+)\] (\S+)$")
 
@@ -982,7 +982,7 @@ def classify_evidence(evidence: Sequence[Mapping[str, Any]], *, controller_timed
 
 
 def selected_classes_renamed(parsed: JUnitParseResult, selectors: Sequence[str]) -> set[str]:
-    """FaT-DN, audit U4: the selected Java classes whose selected methods the report writes under another classname (what a
+    """The selected Java classes whose selected methods the report writes under another classname (what a
     class display name does) — read with the same ``junit_method_name`` as ``match_junit_cases``."""
     selected: dict[str, set[str]] = {}
     for selector in selectors:
@@ -1034,7 +1034,7 @@ def match_junit_cases(
             unmatched.append(case)
     if ambiguous:
         errors.append("ambiguous JUnit testcase")
-    # FaT-PT: a group method answers each of its rows exactly once, row N being the N-th case ID of the literal rows
+    # a group method answers each of its rows exactly once, row N being the N-th case ID of the literal rows
     group_rows: dict[tuple[str, str], list[dict[str, str | int]]] = {}
     for pair, binding in compatibility.bindings.items():
         rows = binding.get("param_rows")
@@ -1246,7 +1246,7 @@ def _records_from_snapshots(snapshots: Mapping[Path, bytes], compatibility: Runn
 
 
 def _failed_methods(snapshots: Mapping[Path, bytes], compatibility: RunnerCompatibility, evidence: Sequence[Mapping[str, Any]], *, java: bool) -> list[dict[str, str]]:
-    """FaT-8: one row per failed generated method of the authoritative evidence, with its framework message."""
+    """One row per failed generated method of the authoritative evidence, with its framework message."""
     messages: dict[tuple[str, str], str] = {}
     for content in snapshots.values():
         try:
@@ -1352,7 +1352,7 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
     source = dict(source)
     source.setdefault("effective_bundle_receipt_digest", "sha256:" + "0" * 64)
     report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": [dict(row) for row in failed_methods] if failed_methods else None, "root_cause": None, "raw_output_excerpt": None, "ran_at": ran_at or datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))],
-              **({"execution_source": dict(execution_source)} if execution_source is not None else {})}  # P4: the run was a human's, not ours
+              **({"execution_source": dict(execution_source)} if execution_source is not None else {})}  # the run was a human's, not ours
     from tools.schema_validation import schema_diagnostics
     if schema_diagnostics(report, _ROOT / "schemas" / "run-tests-output.schema.json", _ROOT):
         raise RuntimeError("RUNNER_REPORT_SCHEMA")
@@ -1597,7 +1597,7 @@ def _request_report_path(request: Any) -> Path | None:
     return report if request.argv == expected and request.report_paths == reports and request.selectors else None
 
 
-# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# Public names for execution_core: the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 runner_report = _report
 runner_diag = _diag

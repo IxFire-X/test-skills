@@ -55,7 +55,7 @@ class _Answer:
 
 
 def _load_answer(path: str) -> _Answer:
-    """FaT-O2: a model answer file — its strict JSON and its raw size.  F4b (A5-5): read in ``main`` and refused with the code of the
+    """A model answer file — its strict JSON and its raw size. Read in ``main`` and refused with the code of the
     refusal and its fix (a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED), not by argparse as «check the flags»."""
     try:
         raw = Path(path).read_bytes()
@@ -72,7 +72,7 @@ def _load_answer(path: str) -> _Answer:
 
 
 def _yes_no(value: str) -> bool:
-    """FaT-10d: the host's own statement (`--fresh-context yes|no`), never derived by the code."""
+    """The host's own statement (`--fresh-context yes|no`), never derived by the code."""
     if value not in {"yes", "no"}:
         raise argparse.ArgumentTypeError(f"{value}: expected yes or no")
     return value == "yes"
@@ -140,25 +140,25 @@ def _plan_inputs(command: str, call):
 
 
 def _cmd_plan_batches(a):
-    imported = a.imported if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value; FaT-SK: its bytes
-    # FaT-AU3: one --context-receipt per context batch of the attempt; one is the receipt itself, as before
+    imported = a.imported if isinstance(a.imported, dict) else None  # the receipt or its value; its bytes
+    # one --context-receipt per context batch of the attempt; one is the receipt itself, as before
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     out_of_scope, commit = _scope_answer(a)
     plan = _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
                                                                                          imported, out_of_scope))
     if commit is not None:
-        commit()  # J1 (A2-6): the answer of the human is recorded after the plan's inputs passed — a refused input leaves no decision
+        commit()  # the answer of the human is recorded after the plan's inputs passed — a refused input leaves no decision
     return plan
 
 
 def _scope_answer(a):
-    """FaT-P3: the pause after the marker. With --run-root and --attempt the plan is bound to the human's answer: --exclude with
+    """The pause after the marker. With --run-root and --attempt the plan is bound to the human's answer: --exclude with
     --reason or --continue records it (scope-decision.json), a recorded one is used as it is, none (and gaps in the marker) is
     SCOPE_PENDING. Without them nothing is checked here; publish-generator-input checks the plan against the answer anyway.
-    J1 (A2-6): returns ``(out_of_scope, commit)`` — the answer is checked here and written by ``commit()`` once the inputs of the plan passed."""
+    Returns ``(out_of_scope, commit)`` — the answer is checked here and written by ``commit()`` once the inputs of the plan passed."""
     from tools import scope_pause
 
-    step_size.require_generator_context_all(a.project)  # FaT-P3: limits.generator_context: own is not implemented yet
+    step_size.require_generator_context_all(a.project)  # limits.generator_context: own is not implemented yet
     excluded, proceed = list(a.exclude), bool(getattr(a, "continue"))
     if a.run_root is None or a.attempt is None:
         if excluded or proceed or a.reason:
@@ -177,7 +177,7 @@ def _scope_answer(a):
 
 
 def _cmd_plan(a):
-    """P2: the header, the plan of the batches and their publication in one command (one package function, ``pilot_state.publish_plan``);
+    """The header, the plan of the batches and their publication in one command (one package function, ``pilot_state.publish_plan``);
     the pause after the marker answers first, before anything is published."""
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     imported = a.imported if isinstance(a.imported, dict) else None
@@ -187,7 +187,7 @@ def _cmd_plan(a):
 
 
 def _cmd_validate_fragment(a):
-    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value
+    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # the receipt or its value
     return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment, imported)
 
 
@@ -212,7 +212,7 @@ def _cmd_validate_canonical(a):
 
 
 def _review_files(a):
-    """FaT-U5: the reviewer-package files the agent passed — compared with the journal, never the source."""
+    """The reviewer-package files the agent passed — compared with the journal, never the source."""
     return {"candidate": getattr(a, "candidate", None), "candidate_receipt": getattr(a, "candidate_receipt", None), "assembly_receipt": getattr(a, "assembly_receipt", None),
             "inventory_receipt": getattr(a, "inventory_receipt", None), "context_receipts": getattr(a, "context_receipt", None),
             "context_marker_output": getattr(a, "context_marker_output", None), "generator_fragments": getattr(a, "generator_fragment", None)}
@@ -230,7 +230,7 @@ def _cmd_review_publish(a):
 
 
 def _refuse_legacy_flags(a, *names: str) -> None:
-    """F4b: a flag of the nine commands where their old CLI is not — a refusal with the way in, not a failure deep in the old path."""
+    """A flag of the nine commands where their old CLI is not — a refusal with the way in, not a failure deep in the old path."""
     if execution_gate.legacy_available():
         return
     given = [f"--{name.replace('_', '-')}" for name in names if getattr(a, name, None) is not None]
@@ -241,15 +241,15 @@ def _refuse_legacy_flags(a, *names: str) -> None:
 
 
 def _cmd_review_open(a):
-    """P2: without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
-    FaT-U5 command of the nine, as before — one package function either way."""
+    """Without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
+    command of the nine, as before — one package function either way."""
     return orchestrate_test_case_revision.review_open_step(
         a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE), model_id=a.model_id,
         invocation_id=a.invocation_id, fresh_context=a.fresh_context, session_start=getattr(a, "session_start", None))
 
 
 def _cmd_review_select(a):
-    """P2: ``--verdict`` records the answer and selects; ``--reviewer-session`` (the nine) is optional — the last revision of the
+    """``--verdict`` records the answer and selects; ``--reviewer-session`` (the nine) is optional — the last revision of the
     ledger when it is not given; ``--dry-run`` writes nothing."""
     verdict = a.verdict
     return orchestrate_test_case_revision.review_select_step(
@@ -291,7 +291,7 @@ def _cmd_automation_boundary_facts(a):
 
 
 def _cmd_read_receipt(a):
-    return pilot_state.attempt_receipt_or_reason(a.run_root, a.attempt, a.kind, a.event)  # F1: «not yet» is decided by the journal
+    return pilot_state.attempt_receipt_or_reason(a.run_root, a.attempt, a.kind, a.event)  # «not yet» is decided by the journal
 
 
 def _cmd_automation_digest(a):
@@ -316,7 +316,7 @@ def _cmd_step_inputs(a):
 
 
 RUN = ("--run-root", "--attempt")
-# FaT-U5: the reviewer-package files — optional, compared with the journal when given
+# the reviewer-package files — optional, compared with the journal when given
 REVIEW_FILES = (("--candidate", _json, None), ("--candidate-receipt", Path, None), ("--assembly-receipt", _json, None),
                 ("--inventory-receipt", _json, None), ("--context-receipt", _json, "append", "optional"),
                 ("--context-marker-output", _json, None), ("--generator-fragment", _json, "append", "optional"))
@@ -343,7 +343,7 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
                                          ("--run-root", Path, None), ("--attempt", str, None), ("--exclude", str, "append", "optional"),
                                          ("--reason", str, None), ("--continue", "flag")), None, ()),
-    # P2: header + plan-batches + publish of both in one command; --out-plan is the plan (the file validate-fragment and assemble read)
+    # header + plan-batches + publish of both in one command; --out-plan is the plan (the file validate-fragment and assemble read)
     "plan": (_cmd_plan, (("--header", _json), ("--requirements", _json), ("--grouping", _json), ("--project", Path),
                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
                          "--run-root", "--attempt", ("--exclude", str, "append", "optional"), ("--reason", str, None),
@@ -358,10 +358,10 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
     "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),
                                            ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None, ()),
-    # FaT-U5: the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
+    # the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
     "review-publish": (_cmd_review_publish, (*RUN, ("--candidate", _json, None), ("--output-dir", Path),
                                              ("--csv-profile", str, PROFILE)), None, ()),
-    # P2: review-open [--model-id --invocation-id --fresh-context] opens the whole review; review-select [--verdict] [--dry-run] closes it
+    # review-open [--model-id --invocation-id --fresh-context] opens the whole review; review-select [--verdict] [--dry-run] closes it
     "review-open": (_cmd_review_open, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
                                        ("--session-start", _json, None), ("--model-id", str, None), ("--invocation-id", str, None),
                                        ("--fresh-context", _yes_no, None)), None, ()),
@@ -391,13 +391,13 @@ _AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary",
 if not execution_gate.execution_available():
     for _name in _AUTOMATION_COMMANDS:
         COMMANDS.pop(_name, None)
-# F4b: the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is
+# the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is
 _LEGACY_REVIEW_COMMANDS = ("session-start", "review-requested", "complete-review")
 if not execution_gate.legacy_available():
     for _name in _LEGACY_REVIEW_COMMANDS:
         COMMANDS.pop(_name, None)
-    # V8 (A5-9): nor the flags of that way in on the commands that stay — package files the code takes from the journal, and the profile of the nine;
-    # `--session-start`, `--reviewer-session` and `--review` stay: a text of before names them, and F4b refuses them with the way in
+    # nor the flags of that way in on the commands that stay — package files the code takes from the journal, and the profile of the nine;
+    # `--session-start`, `--reviewer-session` and `--review` stay: a text of before names them, and they are refused with the way in
     _LEGACY_REVIEW_FLAGS = frozenset(("--candidate", "--candidate-receipt", "--assembly-receipt", "--inventory-receipt", "--context-receipt",
                                       "--context-marker-output", "--generator-fragment", "--csv-profile"))
     for _name in ("review-publish", "review-open", "review-select"):
@@ -476,13 +476,13 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     record_refusal(run_root, args.command, code, stage, batch)
 
 
-# P2: the review in two commands; the nine of before work one more release and say so
+# the review in two commands; the nine of before work one more release and say so
 _REVIEW_OPEN_NOW = "tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> --fresh-context yes|no"
 _REVIEW_SELECT_NOW = "tools.api review-select --verdict <файл ответа ревьюера> --run-root <run> --attempt <id> --output-dir <dir>"
 
 
 def _deprecated(args: argparse.Namespace) -> str | None:
-    """P2: ``deprecated: "tools.api review-open …"`` for a command of the nine of the canonical review, the one that replaces it."""
+    """``deprecated: "tools.api review-open …"`` for a command of the nine of the canonical review, the one that replaces it."""
     stage = getattr(args, "stage", None)
     reviewer = stage == orchestrate_test_case_revision.REVIEW_STAGE
     if args.command == "session-start" or (args.command == "review-open" and args.session_start is not None) or (
@@ -499,11 +499,11 @@ def main(argv: list[str] | None = None) -> int:
     handler, _options, invalid, parts = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))
     try:
-        if args.command == "review-open":  # F4b: before the guards below — the flag is refused for what it is
+        if args.command == "review-open":  # before the guards below — the flag is refused for what it is
             _refuse_legacy_flags(args, "session_start")
         elif args.command == "review-select":
             _refuse_legacy_flags(args, "reviewer_session", "review")
-        for _flag in ("artifact", "verdict"):  # F4b: the answer file is read here, so that its refusal has its code and fix and a line in refusals.jsonl
+        for _flag in ("artifact", "verdict"):  # the answer file is read here, so that its refusal has its code and fix and a line in refusals.jsonl
             if isinstance(getattr(args, _flag, None), str):
                 setattr(args, _flag, _load_answer(getattr(args, _flag)))
         run_root = getattr(args, "run_root", None)
@@ -513,12 +513,12 @@ def main(argv: list[str] | None = None) -> int:
             output_guard.run_output_directory(args.output_dir, run_root)
         result = handler(args)
     except Exception as error:
-        # FaT-U6: the refusal's own code and fix; FaT-U5: the one envelope {status, code, message, fix, next}
+        # the refusal's own code and fix; the one envelope {status, code, message, fix, next}
         envelope = {**error_envelope(error), "command": args.command,
                     **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})}
         _print(envelope)
         if not dry_run:  # a dry run leaves no file behind, a refusal line included
-            _record_refusal(args, envelope)  # P1: <run>/refusals.jsonl, when the command names its run
+            _record_refusal(args, envelope)  # <run>/refusals.jsonl, when the command names its run
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
@@ -527,7 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     deprecated = _deprecated(args)
     if deprecated is not None:
         payload["deprecated"] = deprecated
-    if getattr(result, "notes", None):  # FaT-BO: plan-batches says how and why it split
+    if getattr(result, "notes", None):  # plan-batches says how and why it split
         payload["notes"] = list(result.notes)
     if parts:
         payload["out"] = {part: _write(targets[part], plain(value)) for part, value in zip(parts, result, strict=True)}

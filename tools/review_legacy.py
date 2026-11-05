@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         candidate = core.load_json_strict(args.candidate)
         if args.command == "publish":
-            from tools.api import _out_target, _write  # FaT-AU2: the one --out policy and writer of the package
+            from tools.api import _out_target, _write  # the one --out policy and writer of the package
 
             out = _out_target(str(args.out), args.run_root) if args.out is not None else None  # refused before anything is published
             output_guard.run_output_directory(args.output_dir, args.run_root)
@@ -127,8 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({**core.error_envelope(error), "candidate_bundle_receipt": None, "diagnostics": [core._diag("", "ORCHESTRATION_IO")],
                           "successor_bundle_receipt": None, "reason_code": error.code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     except (core.StrictJsonError, OSError, ValueError) as error:
-        # FaT-10d: the inner refusal code and its fix; FaT-U5: the one envelope, the code is the refusal's own
-        envelope = core.error_envelope(error)  # FaT-U6: the same reading as tools.api
+        # the inner refusal code and its fix; the one envelope, the code is the refusal's own
+        envelope = core.error_envelope(error)  # the same reading as tools.api
         reason_code = core.error_code_prefix(envelope["message"])
         print(json.dumps({**envelope, "code": reason_code or "ORCHESTRATION_INPUT", "fix": core._FIXES.get(reason_code) or envelope["fix"],
                           "candidate_bundle_receipt": None, "diagnostics": [core._diag("", "ORCHESTRATION_IO")], "successor_bundle_receipt": None,

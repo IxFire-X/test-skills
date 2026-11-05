@@ -201,7 +201,7 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
             diagnostics.append(_diagnostic("AUTOMATION_PORTABLE_PATH", _pointer("artifacts", "generated_files", index, "path")))
         content_digest = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
         if row["content_digest"] != content_digest:
-            # FaT-CD: no command gives this digest, so the refusal names the exact value (as MODEL_INPUTS_MISMATCH does)
+            # no command gives this digest, so the refusal names the exact value (as MODEL_INPUTS_MISMATCH does)
             diagnostic = _diagnostic("AUTOMATION_CONTENT_DIGEST", _pointer("artifacts", "generated_files", index, "content_digest"))
             diagnostic["message"] += f": {path} — {content_digest} (SHA-256 UTF-8 байтов content); поставьте это значение в content_digest"
             diagnostics.append(diagnostic)
@@ -244,7 +244,7 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
                 diagnostics.append(_diagnostic("AUTOMATION_INVALID_JAVA_IDENTIFIER", base + "/locator/method_name"))
 
     cases, steps = _document_index(document)
-    # FaT-PA: a case with canonical blockers stays manual as a whole; the list is the canon's, the generator repeats it
+    # a case with canonical blockers stays manual as a whole; the list is the canon's, the generator repeats it
     blocked_ids = [str(row["case_id"]) for row in blocked_cases(document)]
     excluded_rows = artifacts.get("excluded_cases")
     excluded = {str(row["case_id"]) for row in excluded_rows or []}

@@ -42,7 +42,7 @@ _GENERATED_SUFFIXES = frozenset({".coverage", ".map", ".min.js"})
 _PRIVATE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".kdbx", ".key", ".p12", ".pfx", ".pem"})
 _PRIVATE_NAMES = frozenset({"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"})
 _SECRET_NAME = re.compile(r"(?:^|[._-])(credential|credentials|password|passwd|private|secret|token|api[_-]?key)(?:$|[._-])", re.I)
-# F9 (8.D6-10): the FaT-S1 form of «scheme://user:password@» for text (str), where the old ``[A-Za-z][A-Za-z0-9+.-]*://…`` was still written: one attempt per
+# the form of «scheme://user:password@» for text (str), where the old ``[A-Za-z][A-Za-z0-9+.-]*://…`` was still written: one attempt per
 # run of scheme characters instead of one per letter of it (100 KB of letters — 8 s).  ``URL_CREDENTIALS_TEXT`` finds the credentials,
 # ``URL_USERINFO_TEXT`` any user info (group 1 is everything before the user info, so a sub keeps it); the matches are the old ones.
 URL_CREDENTIALS_TEXT = re.compile(r"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")
@@ -54,26 +54,26 @@ _TOKEN_SIGNATURES = (
     ("service-token-v1", re.compile(rb"\b(?:glpat[-_]|sk_live_|rk_live_|xox[bpars]-|hf_|npm_|pypi-)[A-Za-z0-9_-]{8,}")),
     ("aws-key-v1", re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{20,}")),
-    # F9 (8.D6-9): ``\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`` tried every «-eyJ» of a long run of base64url characters as a start and ran each to the
+    # ``\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`` tried every «-eyJ» of a long run of base64url characters as a start and ran each to the
     # end of the run (100 KB of «-eyJ» — 2.4 s).  Every start of that kind ends at the same place, so one attempt per run says it all: from the start of a
     # run (nothing of the class before it), look ahead for an «eyJ» at a word boundary inside the run (at its start or after a dash) with a character after
     # it, then take the three dotted segments without backtracking.  The same matches, found once per run.
     ("jwt-v1", re.compile(rb"(?<![A-Za-z0-9_-])(?=(?:[A-Za-z0-9_]*+-)*?eyJ[A-Za-z0-9_-])[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++")),
-    # FaT-S1: the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
+    # the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
     # run: the old pattern re-read a long run of letters without «://» from each of its letters (140 KB — 28 s).
     ("url-credentials-v1", re.compile(rb"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")),
-    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  # FaT-B
+    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  
 )
-# FaT-H2a P5: token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
+# token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
 _SOURCE_TOKEN_LITERAL = re.compile(
     rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*(['\"])(?P<value>[^'\"\r\n]{8,})\1")
 _PROPERTY_NAME = re.compile(rb"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
-# FaT-B: a password set in YAML/properties of any length and alphabet; an empty value or a ${placeholder} is no secret.
-# FaT-H2a: the rule reads the value on the key's own line — YAML list items and quoted keys, any .json, XML elements, a
+# a password set in YAML/properties of any length and alphabet; an empty value or a ${placeholder} is no secret.
+# the rule reads the value on the key's own line — YAML list items and quoted keys, any .json, XML elements, a
 # ${X:default} with a default, a short secret.  Not a secret: an empty value, ${X} or ${X:}, a true/false/yes/no/on/off
 # flag.  Message bundles (messages*.properties, ValidationMessages*.properties) are texts, never passwords.
 _CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties"})
-# F9 (8.D6-9): the key is one atomic group.  What follows a key (a quote, a blank, «:», «=», «>») is not a word character, so the key must run to the end of its
+# the key is one atomic group.  What follows a key (a quote, a blank, «:», «=», «>») is not a word character, so the key must run to the end of its
 # word run whichever keyword it holds — and trying every keyword of a long run, each with a second ``[\w.-]*`` to the end of the run, was k x n (100 KB of
 # «pwd» did not finish).  The earliest keyword is enough.
 _PASSWORD_KEY = rb"(?>[\w.-]*?(?:password|passwd|pwd|secret)[\w.-]*)"
@@ -82,13 +82,13 @@ _PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?
 # A tag is read up to its «>» and never over a «<»: neither may stand inside a start tag of well-formed XML, and a look-ahead that runs to the end of the text
 # from every «<» of a file with no «>» was n squared (100 KB of «<a » — it did not finish).
 _PASSWORD_XML = re.compile(rb"(?is)<(?P<tag>" + _PASSWORD_KEY + rb")(?:\s[^<>]*+)?(?<!/)>(?P<value>[^<]*)</(?P=tag)\s*>")
-# FaT-RL: a Spring XML bean property or map entry — <property name="password" value="…"/>, <entry key="secret" value="…"/>
+# a Spring XML bean property or map entry — <property name="password" value="…"/>, <entry key="secret" value="…"/>
 _PASSWORD_XML_ATTR = re.compile(
     rb"(?is)<[\w:.-]+\s(?=[^<>]*\b(?:name|key)\s*=\s*([\"'])" + _PASSWORD_KEY + rb"\1)[^<>]*?\bvalue\s*=\s*([\"'])(?P<value>[^\"'>]*)\2")
 _PLACEHOLDER = re.compile(rb"\$\{\{[^}]*\}\}|\$\{[^}:]*(?::(?P<default>[^}]*))?\}")  # ${{ secrets.X }}: a CI reference
 _FLAG_VALUES = frozenset({b"true", b"false", b"yes", b"no", b"on", b"off"})
 _MESSAGE_BUNDLE = re.compile(r"(?i)^(?:validation)?messages[\w.-]*\.properties$")
-# FaT-B: non-source files in a secrets/credentials directory are left out also inside src/; FaT-H2a: any non-source file.
+# non-source files in a secrets/credentials directory are left out also inside src/; any non-source file.
 _CLOSED_MANIFESTS = frozenset({
     "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "pipfile", "pom.xml",
     "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties",
@@ -294,7 +294,7 @@ def _kind(project_path: str, path: Path) -> str:
 def token_signature_rule(contents: bytes, *, source: bool = False) -> str | None:
     """Return the existing scanner rule for a credential-like byte sequence."""
     if source:
-        # FaT-H2a P5: in source code only a string literal is a secret — `this.password = password;` or
+        # in source code only a string literal is a secret — `this.password = password;` or
         # `Token token = read();` assign a variable, and a dotted property name ("java.net.socks.password") is a name.
         literal = any(not _PROPERTY_NAME.fullmatch(match.group("value")) for match in _SOURCE_TOKEN_LITERAL.finditer(contents))
         return "token-assignment-v1" if literal else next(
@@ -314,7 +314,7 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
         return "filename-dotenv-v1", "dotenv"
     if path.suffix.casefold() in _PRIVATE_SUFFIXES or name in _PRIVATE_NAMES:
         return "private-extension-v1", "private-material"
-    # FaT-2: a secret-looking name is a rule for non-source files; a source file is judged by its content.
+    # a secret-looking name is a rule for non-source files; a source file is judged by its content.
     # Secret directories are left out by place (scan_rules.directory_reason); inside src/ only their non-source files (above).
     if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
@@ -327,7 +327,7 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
 
 
 def _secret_value(raw: bytes) -> bool:
-    """FaT-H2a: a value is a secret unless it is empty, a flag, or only placeholders without a default."""
+    """A value is a secret unless it is empty, a flag, or only placeholders without a default."""
     value = raw.strip()
     if len(value) >= 2 and value[:1] == value[-1:] and value[:1] in (b"'", b'"'):
         value = value[1:-1].strip()
@@ -367,12 +367,12 @@ def skillsrc_include(project_root: Path, module_root: Path) -> tuple[str, ...]:
 
 
 def skillsrc_exclude(project_root: Path, module_root: Path) -> tuple[str, ...]:
-    """FaT-A: ``paths.exclude`` of the module — globs kept out of the model context only."""
+    """``paths.exclude`` of the module — globs kept out of the model context only."""
     return _skillsrc_paths(project_root, module_root, "exclude")
 
 
 def context_root_problem(project_root: Path, module_root: Path, relative: str) -> str | None:
-    """FaT-2R: why ``relative`` (``paths.context``, from the project root) cannot be a context root, or None: it must be
+    """Why ``relative`` (``paths.context``, from the project root) cannot be a context root, or None: it must be
     an existing directory inside the project, outside the module (the module not inside it), with no link on the way."""
     raw = Path(relative)
     if not relative or raw.is_absolute() or "\\" in relative or any(part in {"", ".", ".."} for part in raw.parts):
@@ -391,7 +391,7 @@ def context_root_problem(project_root: Path, module_root: Path, relative: str) -
 
 
 def skillsrc_context(project_root: Path, module_root: Path) -> tuple[Path, ...]:
-    """FaT-2R: the context roots of the module (``paths.context``), checked; read only, for the model context."""
+    """The context roots of the module (``paths.context``), checked; read only, for the model context."""
     roots = []
     for relative in _skillsrc_paths(project_root, module_root, "context"):
         problem = context_root_problem(project_root, module_root, relative)
@@ -402,7 +402,7 @@ def skillsrc_context(project_root: Path, module_root: Path) -> tuple[Path, ...]:
 
 
 def task_document_problem(project_root: Path, project_path: str, *, skill_pack_root: Path | None = None) -> str | None:
-    """P6a: why a task document outside the module cannot join the inventory, or None.  The rules are those of the walk of the
+    """Why a task document outside the module cannot join the inventory, or None.  The rules are those of the walk of the
     module (excluded folders, binary and generated files, secrets) and of a proved dependency (no link, not the package)."""
     root = Path(project_root).absolute()
     parts = Path(project_path).parts
@@ -440,7 +440,7 @@ def task_document_problem(project_root: Path, project_path: str, *, skill_pack_r
 
 def outside_task_documents(project_root: Path, module_root: Path, project_paths: Iterable[str], *,
                            skill_pack_root: Path | None = None) -> tuple[list[Path], dict[str, str]]:
-    """P6a: ``(files, problems)`` — of the task documents (paths from the project root) those that lie in the project outside
+    """``(files, problems)`` — of the task documents (paths from the project root) those that lie in the project outside
     the module and its context roots: the files join the inventory as proved dependency files (read as documents, never as
     code of the module), the problems say, by path, why one cannot."""
     project, module = Path(project_root).resolve(), Path(module_root).resolve()
@@ -489,7 +489,7 @@ def _exclusion(project_path: str, reason_code: str, scanner_rule_id: str, safe_l
     }
 
 
-# FaT-AU4: within one command (scan, status) the inventory of the same module is built once — scan used to build it again
+# within one command (scan, status) the inventory of the same module is built once — scan used to build it again
 # for every unfinished run of the request.  The key is the call and the (path, mtime, size) of every project file outside
 # .git, the package and the run roots, so any change of a file between two calls builds afresh; no cache between commands.
 _INVENTORY_CACHE: contextvars.ContextVar[dict[Any, dict[str, Any]] | None] = contextvars.ContextVar("inventory_cache", default=None)
@@ -533,7 +533,7 @@ def build_inventory(
     proved_dependency_files: Iterable[Path] = (),
     include: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """Return a complete metadata-only inventory for one controller-selected module (once per command, FaT-AU4)."""
+    """Return a complete metadata-only inventory for one controller-selected module (once per command)."""
     generated_roots, proved_dependency_files = tuple(generated_roots), tuple(proved_dependency_files)
     cache = _INVENTORY_CACHE.get()
     if cache is None:
@@ -601,7 +601,7 @@ def _build_inventory(
     # Directories left out by name that a glob of `include` only leads through: (reason, rule) of the passage.
     passages: dict[Path, tuple[str, str]] = {}
     def walk(start: Path, origin: str | None) -> None:
-        """One walk of the module or (FaT-2R) of a context root: the same exclusions, secrets and binaries rules."""
+        """One walk of the module or of a context root: the same exclusions, secrets and binaries rules."""
         for current, dir_names, file_names in os.walk(start, topdown=True, followlinks=False, onerror=walk_error):
             current_path = Path(current)
             passage = passages.get(current_path)
@@ -683,7 +683,7 @@ def _build_inventory(
                     **({"origin": origin} if origin else {}),
                 })
     walk(module_root, None)
-    for context_root in skillsrc_context(project_root, module_root):  # FaT-2R: read only, for the model context
+    for context_root in skillsrc_context(project_root, module_root):  # read only, for the model context
         walk(context_root.resolve(), "context")
     for declared_dependency in proved_dependency_files:
         raw = Path(declared_dependency)
@@ -835,7 +835,7 @@ def _selected_test_root(project_root: Path, inventory: Mapping[str, Any], skills
 
 
 def _module_test_root(project_root: Path, inventory: Mapping[str, Any], module: Mapping[str, Any]) -> str:
-    """The one test root of a module; the same check for scan and ready (FaT-S)."""
+    """The one test root of a module; the same check for scan and ready."""
     paths = module.get("paths")
     roots = paths.get("tests") if isinstance(paths, Mapping) else None
     if not isinstance(roots, list) or len(roots) != 1 or not isinstance(roots[0], str):
@@ -881,7 +881,7 @@ _BLOCKER_TEXT = {
 
 
 def _secret_execution_inputs(project_root: Path, inventory: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """FaT-S: fingerprints of the secret-suspected execution inputs, and the ones that are not a plain project file.
+    """Fingerprints of the secret-suspected execution inputs, and the ones that are not a plain project file.
 
     The bytes are read once, hashed and dropped; only the path, the digest and the size are kept.
     """
@@ -909,7 +909,7 @@ def _secret_execution_inputs(project_root: Path, inventory: Mapping[str, Any]) -
 
 
 def baseline_blockers(project_root: Path, inventory: Mapping[str, Any], module: Mapping[str, Any], policy_profile: str) -> list[dict[str, str]]:
-    """FaT-S: why a local-pilot baseline cannot be frozen, known before a run — ``[{file, reason, fix}]`` (only reads)."""
+    """Why a local-pilot baseline cannot be frozen, known before a run — ``[{file, reason, fix}]`` (only reads)."""
     if policy_profile != "local-pilot-v1":
         return []
     blockers: list[dict[str, str]] = []
@@ -940,7 +940,7 @@ def build_execution_baseline(
         raise InventoryError("baseline policy profile is invalid")
     secret_inputs: list[dict[str, Any]] = []
     if policy_profile == "local-pilot-v1":
-        # FaT-S: a secret execution input is bound by its fingerprint; the build reads the real file.
+        # a secret execution input is bound by its fingerprint; the build reads the real file.
         secret_inputs, unreadable = _secret_execution_inputs(Path(project_root), inventory)
         if unreadable:
             raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: secret-suspected execution input is not a regular project file")
@@ -1292,7 +1292,7 @@ def validate_execution_baseline(
     if changed:
         return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True, "changed": changed}
     if baseline.get("secret_inputs"):
-        # FaT-S: the secret inputs are compared by fingerprint only; the result names neither bytes nor digests.
+        # the secret inputs are compared by fingerprint only; the result names neither bytes nor digests.
         if project_root is None:
             return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
         current_secrets, unreadable = _secret_execution_inputs(Path(project_root), inventory)
@@ -1305,7 +1305,7 @@ def validate_execution_baseline(
 
 
 def _changed_input_paths(baseline: Mapping[str, Any], index: Mapping[str, Mapping[str, Any]]) -> list[str]:
-    """FaT-G: the project paths added, removed or changed since the baseline — paths only, never bytes or digests."""
+    """The project paths added, removed or changed since the baseline — paths only, never bytes or digests."""
     frozen = {item.get("opaque_id"): item for item in baseline.get("inputs", [])}
     changed = {str(item.get("project_path")) for opaque, item in frozen.items()
                if opaque not in index or index[opaque].get("content_digest") != item.get("content_digest")}
@@ -1320,7 +1320,7 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
     if not isinstance(module, str) or not isinstance(inputs, list):
         raise InventoryError("execution baseline external inputs are invalid")
     prefix = "" if module == "." else module.rstrip("/") + "/"
-    # FaT-2R2: the paths.context files are read again by build_inventory itself (origin context), not as dependencies
+    # the paths.context files are read again by build_inventory itself (origin context), not as dependencies
     context = tuple(_relative(project_root, root) + "/" for root in skillsrc_context(project_root, Path(project_root) / module)) if prefix else ()
     result: list[Path] = []
     for item in inputs:
@@ -1342,7 +1342,7 @@ def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list
     }
     if skipped:
         receipt["skipped"] = [dict(row) for row in skipped]
-    if batch_count is not None:  # F3: a scan cut between the batches is told by the count every receipt carries
+    if batch_count is not None:  # a scan cut between the batches is told by the count every receipt carries
         receipt["batch_count"] = batch_count
     receipt["digest"] = _digest(receipt)
     _validate_receipt_schema(receipt, "context-selection-receipt.schema.json", ContextSelectionError)
@@ -1350,7 +1350,7 @@ def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list
 
 
 class ContextStop(ContextSelectionError):
-    """FaT-A: a context the filter cannot make useful — a code, the detail and a fix for the human."""
+    """A context the filter cannot make useful — a code, the detail and a fix for the human."""
 
     def __init__(self, code: str, detail: str, fix: str) -> None:
         super().__init__(f"{code}: {detail}")
@@ -1404,7 +1404,7 @@ def context_filter(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
     excludes: Iterable[str] = (), task_ids: Iterable[str] = (), includes: Iterable[str] = (),
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """FaT-A: what the model gets — ``(kept ids, skipped [{project_path, size, reason, rule}])``; only reads.
+    """What the model gets — ``(kept ids, skipped [{project_path, size, reason, rule}])``; only reads.
 
     Inventory and baseline do not change.  The task documents and closed manifests always stay; a source larger than
     a batch, an exclude of a task document, or nothing left of the code is a ContextStop with a fix.
@@ -1415,7 +1415,7 @@ def context_filter(
     index = _inventory_index(inventory)
     tasks = set(task_ids)
     patterns = [str(item) for item in excludes]
-    kept_by_user = [str(item) for item in includes]  # V7: a file the human put in paths.include stays in the context
+    kept_by_user = [str(item) for item in includes]  # a file the human put in paths.include stays in the context
     known = {str(item["project_path"]) for item in index.values()}
     kept: list[str] = []
     skipped: list[dict[str, Any]] = []
@@ -1430,7 +1430,7 @@ def context_filter(
                 raise ContextStop("CONTEXT_EXCLUDE_TASK_DOCUMENT", project_path,
                                   f"документ задачи нельзя исключить: уберите «{pattern}» из .skillsrc paths.exclude или сузьте шаблон")
             size = int(item.get("size", 0))
-            if size > byte_budget:  # FaT-B2: a task document is never cut, so it must fit one batch
+            if size > byte_budget:  # a task document is never cut, so it must fit one batch
                 raise ContextStop("CONTEXT_TASK_DOCUMENT_TOO_LARGE", f"{project_path}: {size} Б больше пачки {byte_budget} Б",
                                   "разбейте документ задачи на части (по функции на документ) или поднимите .skillsrc "
                                   "limits.context_batch_bytes выше размера документа: бюджет шага limits.step_input_bytes — "

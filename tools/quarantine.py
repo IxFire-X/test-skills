@@ -29,7 +29,7 @@ NOTE_LIMIT = 120
 
 
 def failure_note(message: str) -> tuple[str, str]:
-    """FaT-8: ``(ref, message)`` of a framework failure — the ``ASSERT-…`` label or ``FAIL``, and its first line made safe."""
+    """``(ref, message)`` of a framework failure — the ``ASSERT-…`` label or ``FAIL``, and its first line made safe."""
     first = (message or "").strip().splitlines()[0].strip() if (message or "").strip() else ""
     match = _ASSERT_REF.search(first)
     if match and match.start() == 0:

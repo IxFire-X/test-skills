@@ -1,4 +1,4 @@
-"""FaT-6: a run report without project code or case texts (what may leave — by the company's rules), and the analyst questions of the run (only reads the journal).
+"""A run report without project code or case texts (what may leave — by the company's rules), and the analyst questions of the run (only reads the journal).
 
 ``python -m tools.run_pipeline report --project <abs> --run <id>`` writes ``report.md``, ``report.json`` and
 ``questions-for-analyst.md`` into the run directory.  The report holds step names, times, sizes, counts and codes;
@@ -24,7 +24,7 @@ CLOCK_NOTE = "время по часам машины, не проверяетс
 HUMAN_RESULT_NOTE = "результат запуска предоставлен человеком, пакет его не воспроизводил"
 NO_QUESTIONS = "вопросов нет\n"
 SEPARATOR = " — "
-# FaT-RN: the review kind → its stage prefix, the report key inside the answer and the analyst-questions title
+# the review kind → its stage prefix, the report key inside the answer and the analyst-questions title
 _REVIEWS = {"cases": ("tc-reviewer:", "validation_report", "Замечания ревью", "Ревью приняло кейсы; это мелочи, кейсы код не менял."),
             "autotests": ("autotest-reviewer:", "autotest_review", "Замечания ревью автотестов",
                           "Ревью приняло автотесты; это мелочи, автотесты код не менял.")}
@@ -40,8 +40,8 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
                       autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None) -> str:
     """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
 
-    FaT-RN: ``notes``/``autotest_notes`` — the WARNING/INFO findings of the accepted case/autotest review, with text.
-    FaT-IMP3: ``imported`` — the import summary: the document requirements without a case of the CSV, the cases outside
+    ``notes``/``autotest_notes`` — the WARNING/INFO findings of the accepted case/autotest review, with text.
+    ``imported`` — the import summary: the document requirements without a case of the CSV, the cases outside
     the documents.
     """
     gap_rows = list((imported or {}).get("gaps") or [])
@@ -58,7 +58,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
-    if gap_rows:  # FaT-IMP3: a requirement of the documents no imported case checks — no case is made for it
+    if gap_rows:  # a requirement of the documents no imported case checks — no case is made for it
         lines += ["## Требования без кейса в CSV", "",
                   *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; нужен ли он?" for row in gap_rows), ""]
     if outside:
@@ -81,7 +81,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     return "\n".join(lines)
 
 
-# --- notes of the accepted review (FaT-RN) ------------------------------------------------------
+# --- notes of the accepted review ------------------------------------------------------
 
 def _document_ids(value: Any, found: set[str] | None = None) -> set[str]:
     """Every identifier of a canonical document: values of ``*id`` keys and items of ``*_ids`` lists."""
@@ -112,7 +112,7 @@ def _automation_ids(root: Path, attempt_id: str, stage: str, before: int) -> set
 
 
 def review_notes(run_root: Path, attempt_id: str, review: str = "cases") -> dict[str, Any]:
-    """FaT-RN: the WARNING/INFO findings of the accepted review (``cases`` or the newest ``autotests``); only reads the journal.
+    """The WARNING/INFO findings of the accepted review (``cases`` or the newest ``autotests``); only reads the journal.
 
     ``items`` may leave the workplace: a code only when it is an identifier, related IDs only those of the effective
     document, and for the autotest review also of the reviewed automation (the others are counted).  ``texts`` keep the model text for the analyst questions only.  ``path`` is the
@@ -162,7 +162,7 @@ def _time(value: Any) -> datetime | None:
 
 
 def test_level(project: Path, root: Path, attempt: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """P6b: the level of the autotests of the attempt's module (``in-process`` or ``stand``) and where it comes from — ``declared`` by
+    """The level of the autotests of the attempt's module (``in-process`` or ``stand``) and where it comes from — ``declared`` by
     ``test.level`` of ``.skillsrc``, ``derived`` by the old rule.  The source is the journal, not a file of the run folder: the module is
     ``attempt.module`` and the live ``.skillsrc`` counts only while its bytes are those of the attempt's journal-bound baseline
     (``pilot_state.frozen_skillsrc_matches``, the path ``step_size.run_limits`` takes); otherwise ``unconfirmed``, the value not said.
@@ -202,7 +202,7 @@ STEP_TIME_NOTE = ("время шага модели — от предыдуще�
 
 
 def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One row per ``MODEL_REQUESTED``: the step time (FaT-6b: from the previous journal event to the response) and attempts."""
+    """One row per ``MODEL_REQUESTED``: the step time (from the previous journal event to the response) and attempts."""
     rows = []
     ordered = sorted(events, key=lambda event: event["seq"])
     for request in (event for event in ordered if event.get("event_type") == "MODEL_REQUESTED"):
@@ -225,7 +225,7 @@ def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _answer_bytes(root: Path, call: Mapping[str, Any]) -> int | None:
-    """FaT-U7: the stored answer behind ``response_digest`` — its journal slot, not a search."""
+    """The stored answer behind ``response_digest`` — its journal slot, not a search."""
     digest = str(call.get("response_digest") or "")
     path = root / "model-stage-artifacts" / str(call.get("attempt_id")) / (digest.removeprefix("sha256:") + ".json")
     return path.stat().st_size if digest.startswith("sha256:") and path.is_file() else None
@@ -242,12 +242,12 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     try:
         request = pilot.read_model_request(root, str(call["attempt_id"]), str(call["stage"]), str(call["request_digest"]))
         inputs = list(request.get("input_digests") or [])
-        # FaT-6b: a controller step (the FaT-5 merge of the marker parts) is code, not a model call.
+        # a controller step (the merge of the marker parts) is code, not a model call.
         by_code = str(request.get("model_id") or "").startswith("controller:")
-        reuse = request.get("reuse")  # FaT-CR: the answer of an earlier run, reused — no model call either
+        reuse = request.get("reuse")  # the answer of an earlier run, reused — no model call either
     except (KeyError, OSError, TypeError, ValueError):
         pass
-    # FaT-U7: the same files and bytes as step-inputs — from the journal, the map of existing tests measured, not written
+    # the same files and bytes as step-inputs — from the journal, the map of existing tests measured, not written
     try:
         found = stage_inputs(root, str(call["stage"]), attempt_id=str(call["attempt_id"]), write_views=False, state=state, journals=journals)
         resolved, unresolved = input_size(found), len(found["unresolved"])
@@ -255,15 +255,15 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
         found, resolved, unresolved = None, 0, len(inputs)
     basis = None
     if str(call["stage"]).startswith(("tc-reviewer:", "tc-to-autotest:")) and inputs:
-        # FaT-CV2 (2.13) / FaT-AV: the view of the document when it is built, else the canonical JSON
+        # the view of the document when it is built, else the canonical JSON
         basis = "вид" if found and any(row.get("basis") == "вид" for row in found["files"]) else "канон"
     call["input_basis"] = basis
     call["composition"] = _composition(found, project, root) if found else None
-    # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
+    # the answer bytes are the journal-bound response artifact behind its digest
     answer = _answer_bytes(root, call)
-    # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
+    # the raw answer bytes when the command measured them, else the stored compact JSON
     raw = (raw_sizes or {}).get(str(call.get("response_digest") or ""))
-    # V9a: the raw size is the agent's measurement (a file nothing in the journal binds): printed as such, never the ground of a warning —
+    # the raw size is the agent's measurement (a file nothing in the journal binds): printed as such, never the ground of a warning —
     # STEP_OUTPUT_LARGE is judged by the stored answer, whose bytes the journal seals
     call["output_raw_bytes"] = raw
     call["output_basis"] = None if answer is None else "compact"
@@ -277,7 +277,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     budget = step_budget(project, limits)
     call.update(input_bytes=resolved, role_bytes=role_bytes, unresolved_inputs=unresolved, size_complete=unresolved == 0,
                 by="code" if by_code else "reuse" if isinstance(reuse, Mapping) else "model")
-    if isinstance(reuse, Mapping):  # FaT-CR: nothing was sent to a model; the input it would have read is the saving
+    if isinstance(reuse, Mapping):  # nothing was sent to a model; the input it would have read is the saving
         call.update(reused_from=reuse.get("run_id"), saved_bytes=resolved + role_bytes, output_large=None)
     if by_code or isinstance(reuse, Mapping):  # code reads no prompt: no token estimate and no comparison with the step budget of a model
         call.update(role_bytes=0, tokens_est=None, budget_bytes=None, fits=None)
@@ -289,7 +289,7 @@ _STEP_KEYS = ("step", "bytes", "input_bytes", "role_bytes", "role", "files", "to
 
 
 def step_sizes(root: Path) -> list[dict[str, Any]]:
-    """FaT-RV: the ``tools.step_size --run`` measurements in order; an unreadable line is skipped, not fatal."""
+    """The ``tools.step_size --run`` measurements in order; an unreadable line is skipped, not fatal."""
     from tools.step_size import RECORD
 
     try:
@@ -312,7 +312,7 @@ _RUN_PLAN_SLOTS = ("generator-headers", "batch-plans")
 
 
 def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[str, int]:
-    """P9: the bytes ``stage_inputs`` found, by kind — requirement documents, project code, the answers of the marker, plan and
+    """The bytes ``stage_inputs`` found, by kind — requirement documents, project code, the answers of the marker, plan and
     header, the map of existing tests, the rest (each file is counted once, as ``input_size`` does)."""
     from tools.step_size import _requirement_files
 
@@ -353,7 +353,7 @@ def _stage_of(path: Path) -> Any:
 
 
 def input_composition(calls: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """P9 («Состав входа по видам»): one row per model call, the role bytes next to the kinds of the input."""
+    """«Состав входа по видам»: one row per model call, the role bytes next to the kinds of the input."""
     return [{"stage": call["stage"], **call["composition"], "role": call.get("role_bytes") or 0}
             for call in calls if call.get("by") == "model" and call.get("composition")]
 
@@ -365,7 +365,7 @@ def _find(events: Sequence[Mapping[str, Any]], kind: str, prefix: str | None = N
 
 
 def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """P9 («Фазы по времени»): the boundaries are journal events, as the report template names them; a phase whose
+    """«Фазы по времени»: the boundaries are journal events, as the report template names them; a phase whose
     boundary is not in the journal yet has ``sec: None`` — never guessed."""
     ordered = sorted(events, key=lambda event: event["seq"])
     marker_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "context-marker:baseline", last=True)
@@ -403,11 +403,11 @@ def _identifier(value: Any) -> str | None:
     return value if isinstance(value, str) and _IDENTIFIER.match(value) else None
 
 
-REFUSALS_BASIS = "по журналу (событие COMMAND_REFUSED); подробности строки — из refusals.jsonl, сверенной с журналом по digest"  # J1: the journal counts, the file only gives the detail
+REFUSALS_BASIS = "по журналу (событие COMMAND_REFUSED); подробности строки — из refusals.jsonl, сверенной с журналом по digest"  # the journal counts, the file only gives the detail
 
 
 def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
-    """P9 («Отказы»), J1: the refusals are COUNTED BY THE JOURNAL — one ``COMMAND_REFUSED`` event per refusal, its digest the sha256 of the
+    """«Отказы»: the refusals are COUNTED BY THE JOURNAL — one ``COMMAND_REFUSED`` event per refusal, its digest the sha256 of the
     line ``<run>/refusals.jsonl`` got (``{at, command, code, stage, batch}``, written by ``tools.api``).  The line gives the detail
     (command, code, stage, batch) of the event it is bound to; an event whose line is gone or changed is counted all the same and
     its detail is ``details_lost``; a line no event confirms is not counted and is named in ``mismatch`` (the agent can edit the file,
@@ -464,14 +464,14 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
         pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")
         pairs[pair] = pairs.get(pair, 0) + 1
     summary["by_command_code"] = [{"command": command, "code": code, "count": count} for (command, code), count in sorted(pairs.items())]
-    # J1 (A2-5): a second model-request of a generator batch is refused (MODEL_REQUEST_DUPLICATE) and the word of the first one is not shown again
+    # a second model-request of a generator batch is refused (MODEL_REQUEST_DUPLICATE) and the word of the first one is not shown again
     summary["codeword_lost"] = sorted({stage for row in rows if row.get("code") == "MODEL_REQUEST_DUPLICATE"
                                        for stage in [_identifier(row.get("stage"))] if stage and stage.startswith("tc-generator:")})
     return summary
 
 
 def canon_numbers(document: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """P9 («Канон в числах»): the size of the canonical document (compact JSON) per case, and steps, assertions and
+    """«Канон в числах»: the size of the canonical document (compact JSON) per case, and steps, assertions and
     automation blockers per case."""
     if not isinstance(document, Mapping) or not isinstance(document.get("test_cases"), list) or not document["test_cases"]:
         return None
@@ -496,7 +496,7 @@ def remove_commands(relative: str, system: str) -> tuple[str, str | None]:
 
 
 def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
-    """P9: the size of ``<run>/tmp/`` (the agent's working files) and the command that removes it — the report removes nothing."""
+    """The size of ``<run>/tmp/`` (the agent's working files) and the command that removes it — the report removes nothing."""
     tmp = Path(root) / "tmp"
     if not tmp.is_dir():
         return None
@@ -510,7 +510,7 @@ def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
 
 
 def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]] = ()) -> list[str]:
-    """FaT-RV / V9a: ``STEP_OVER_BUDGET`` when a model call of the journal is over the step budget; the rows of ``step-sizes.jsonl`` (``sizes``) are
+    """``STEP_OVER_BUDGET`` when a model call of the journal is over the step budget; the rows of ``step-sizes.jsonl`` (``sizes``) are
     the agent's measurement — they are printed, they warn of nothing."""
     from tools.step_size import OVER_BUDGET
 
@@ -536,7 +536,7 @@ _WARNING_TEXT = {"CODEWORD_LOST": "model-request генератора повто
 
 
 def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
-    """FaT-EC: how many cases repeat a test of the project (the map of the generator's context) — counts and IDs only;
+    """How many cases repeat a test of the project (the map of the generator's context) — counts and IDs only;
     None when the project has no map."""
     from tools.existing_tests import repeats
     from tools.review_view import run_existing_tests
@@ -551,7 +551,7 @@ def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[
 
 
 def reference(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
-    """FaT-REF: ``CV_REFERENCE`` of the run's case document against its reference cases — IDs and counts only."""
+    """``CV_REFERENCE`` of the run's case document against its reference cases — IDs and counts only."""
     from tools.pilot_state import read_reference_cases
     from tools.review_view import _reference_counts
     from tools.reference_match import reference_match
@@ -566,7 +566,7 @@ def reference(root: Path, attempt_id: str | None, document: Any) -> dict[str, An
 
 
 def end_to_end(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
-    """FaT-E2E: ``CV_NO_END_TO_END`` of the run's case document — counts only, no case text."""
+    """``CV_NO_END_TO_END`` of the run's case document — counts only, no case text."""
     from tools.review_view import end_to_end_hint, run_requirement_groups
 
     if not attempt_id or not isinstance(document, Mapping):
@@ -579,7 +579,7 @@ def end_to_end(root: Path, attempt_id: str | None, document: Any) -> dict[str, A
 
 
 def data_mismatch(document: Any) -> list[dict[str, Any]]:
-    """FaT-CV: the steps with ``CV_DATA_MISMATCH`` by ID and count only — the values are case data and stay out."""
+    """The steps with ``CV_DATA_MISMATCH`` by ID and count only — the values are case data and stay out."""
     from tools.review_view import data_mismatches
 
     try:
@@ -594,7 +594,7 @@ EFFECTIVE_UNREADABLE = "EFFECTIVE_CANON_UNREADABLE: эффективный ка�
 
 
 def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str, Any] | None, bool]:
-    """F1: ``(document, unreadable)`` — the effective canonical of the attempt, read the strict way (against its events); a file that is
+    """``(document, unreadable)`` — the effective canonical of the attempt, read the strict way (against its events); a file that is
     there and cannot be read is ``unreadable``, not a reason to look anywhere else."""
     from tools import pilot_state as pilot
 
@@ -612,7 +612,7 @@ def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str
 
 
 def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
-    """FaT-6b / F1: the selected case document — the effective canonical of the attempt and nothing else (no file the agent can
+    """The selected case document — the effective canonical of the attempt and nothing else (no file the agent can
     put into the run); before a verdict the report takes the candidate from the journal (``journal_assembly``)."""
     return _effective_document(root, attempt_id)[0]
 
@@ -621,7 +621,7 @@ UNUSED_TEST_DESIGN = "генератор не заполнил технику и
 
 
 def test_design_summary(document: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-TD: technique counts and code hints by ID only — never case text; ``used`` false says the fields were empty."""
+    """Technique counts and code hints by ID only — never case text; ``used`` false says the fields were empty."""
     from tools.test_design_hints import capped, design_hints, technique_counts, uses_test_design
 
     hints = design_hints(document)
@@ -642,7 +642,7 @@ def render_test_design(summary: Mapping[str, Any]) -> str:
 
 
 def expectation_summary(document: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-Q: hints on vague expectations of the cases by ID only, on any document."""
+    """Hints on vague expectations of the cases by ID only, on any document."""
     from tools.test_design_hints import capped, expectation_hints
 
     hints = expectation_hints(document)
@@ -666,14 +666,14 @@ def automation_artifact(root: Path, events: Sequence[Mapping[str, Any]]) -> Any:
         return None
     from tools import pilot_state as pilot
 
-    try:  # F1: by the journal (the stage, the digest, the bytes checked), not the first file of that name in the run
+    try:  # by the journal (the stage, the digest, the bytes checked), not the first file of that name in the run
         return pilot.read_model_stage_artifact(root, str(response["attempt_id"]), str(response["stage_instance_id"]), str(response["artifact_digest"]))["artifact"]
     except (KeyError, OSError, TypeError, ValueError):
         return None
 
 
 def autotest_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-Q: weak assertions of the generated tests — file ID, line, rule and ASSERT ID, never the code."""
+    """Weak assertions of the generated tests — file ID, line, rule and ASSERT ID, never the code."""
     autotest_hints, capped_autotest_hints, counts = execution_gate.from_mode_b("autotest_hints", "autotest_hints", "capped_autotest_hints", "counts")
 
     hints = autotest_hints(artifact)
@@ -691,7 +691,7 @@ ZEPHYR_BASIS = "по файлу zephyr-import.json, журналом не под
 
 
 def _zephyr_import(root: Path) -> Any:
-    """FaT-7: only the template path and digest of the import CSV, never its values.  V9a (A1-10): the file has no event in the journal (the export runs after
+    """Only the template path and digest of the import CSV, never its values. The file has no event in the journal (the export runs after
     ``finish``, the attempt is closed): it is printed only for the template it names — the digest of the file at ``template_path`` in the project — and
     labelled as the file's."""
     try:
@@ -707,7 +707,7 @@ def _zephyr_import(root: Path) -> Any:
 
 
 def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-    """FaT-IMP2: the CSV of an import run, its cases and how many cells code normalized; None for other runs."""
+    """The CSV of an import run, its cases and how many cells code normalized; None for other runs."""
     from tools import pilot_state
     from tools.cases_import import cases_path
 
@@ -722,11 +722,11 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     from tools.cases_import import outside_rows
 
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}  # FaT-IMP3
+            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}  
 
 
 def _left(root: Path) -> str | None:
-    """FaT-O12b: «оставлен до ревью кейсов» of a run left by finish --abandon LEFT_BEFORE_REVIEW."""
+    """«оставлен до ревью кейсов» of a run left by finish --abandon LEFT_BEFORE_REVIEW."""
     from tools.pilot_state import left_attempt
 
     try:
@@ -736,7 +736,7 @@ def _left(root: Path) -> str | None:
 
 
 def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
-    """FaT-PA: automated N of M cases, manual K with their blocker codes — the same split ingest and finish print."""
+    """Automated N of M cases, manual K with their blocker codes — the same split ingest and finish print."""
     if not attempt_id:
         return None
     from tools.finalize_attempt import automation_split
@@ -756,7 +756,7 @@ def _plan_lost_with_receipts(root: Path, state: Mapping[str, Any], attempt_id: s
 
 
 def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict[str, Any] | None:
-    """FaT-P3: what the human decided on the gaps of the marker — the requirements left out of the batches, each with the
+    """What the human decided on the gaps of the marker — the requirements left out of the batches, each with the
     reason the human gave; None for a run whose marker has no gaps and whose human excluded nothing (nothing was asked, nothing left out)."""
     if not attempt_id:
         return None
@@ -769,7 +769,7 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
     except (KeyError, OSError, TypeError, ValueError):
         published = None
     if published is None and _plan_lost_with_receipts(root, state, attempt_id):
-        # F1: the journal binds a plan (the generator was asked with it) that cannot be read now: the decision file has no event — it is not the scope
+        # the journal binds a plan (the generator was asked with it) that cannot be read now: the decision file has no event — it is not the scope
         return {"refused": {"code": "SCOPE_PLAN_UNREADABLE", "fix": fix_for("SCOPE_PLAN_UNREADABLE")}}
     try:
         scope = scope_state(root, attempt_id, state)
@@ -809,14 +809,14 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     from tools.step_size import output_sizes
 
     calls = model_calls(events)
-    journals: dict[str, Any] = {}  # FaT-U7: the journal of an attempt is read once for all its calls
+    journals: dict[str, Any] = {}  # the journal of an attempt is read once for all its calls
 
     raw_sizes = output_sizes(root)
     limits, limits_note = ({}, None)
     if attempt_id:
         from tools.step_size import run_limits
 
-        limits, limits_note = run_limits(project, root, state, attempt_id)  # V9a: the limits of the .skillsrc the run froze
+        limits, limits_note = run_limits(project, root, state, attempt_id)  # the limits of the .skillsrc the run froze
     for call in calls:
         _size(project, root, call, raw_sizes, state=state, journals=journals, limits=limits)
     measured = step_sizes(root)
@@ -873,7 +873,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     answer = None
     canaries = None
     codeword = None
-    if attempt_id:  # P7: what the canaries and the control word say of the review — derived from the journal, nothing stored
+    if attempt_id:  # what the canaries and the control word say of the review — derived from the journal, nothing stored
         try:
             answer = review_canaries.recorded_answer(root, attempt_id)
         except (OSError, KeyError, TypeError, ValueError):
@@ -917,10 +917,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
-        "automation_split": _split(root, attempt_id),  # FaT-PA
-        "scope": scope,  # FaT-P3: the answer on the gaps and the excluded requirements with reasons
+        "automation_split": _split(root, attempt_id),  
+        "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
-                  "left": _left(root),  # FaT-O12b
+                  "left": _left(root),  
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
             "requirements": requirements,
@@ -932,15 +932,15 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "execution": execution.get("verdict") or terminal.get("verification"),
             "execution_duration_sec": (execution.get("stats") or {}).get("duration_sec"),
             "completion": terminal.get("completion"), "coverage": terminal.get("coverage"),
-            "accepted": False if unreliable else terminal.get("accepted"),  # P7: REVIEW_UNRELIABLE — not accepted (the sealed result is the terminal's)
-            # FaT-CR: calls a model made, and answers reused from an earlier run with the input bytes not sent
+            "accepted": False if unreliable else terminal.get("accepted"),  # REVIEW_UNRELIABLE — not accepted (the sealed result is the terminal's)
+            # calls a model made, and answers reused from an earlier run with the input bytes not sent
             "model_calls": sum(1 for call in calls if call.get("by") == "model"),
             "code_steps": sum(1 for call in calls if call.get("by") == "code"),
             "reused_calls": sum(1 for call in calls if call.get("by") == "reuse"),
             "reused_input_bytes": sum(int(call.get("saved_bytes") or 0) for call in calls if call.get("by") == "reuse"),
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
-        # P4: the run of the tests was a human's — the package did not reproduce it
+        # the run of the tests was a human's — the package did not reproduce it
         "execution_source": ({**execution["execution_source"], "note": HUMAN_RESULT_NOTE} if execution.get("execution_source") else None),
         "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
         "review_notes": {"count": notes["count"], "items": notes["items"]},
@@ -968,7 +968,7 @@ def _size_cell(call: Mapping[str, Any]) -> str:
 
 
 def _tokens_cell(call: Mapping[str, Any]) -> str:
-    if call.get("by") == "reuse":  # FaT-CR
+    if call.get("by") == "reuse":  
         return f"повтор {str(call.get('reused_from') or '')[:8]}"
     return "код" if call.get("by") == "code" else _dash(call.get("tokens_est"))
 
@@ -1051,7 +1051,7 @@ def _tmp_lines(report: Mapping[str, Any]) -> list[str]:
 
 
 def _canary_lines(report: Mapping[str, Any]) -> list[str]:
-    """P7: the canaries of the reviewer's view and the control word — numbers and the honest note, never the map itself."""
+    """The canaries of the reviewer's view and the control word — numbers and the honest note, never the map itself."""
     canaries, codeword = report.get("review_canaries"), report.get("review_codeword")
     if not canaries and not codeword:
         return []
@@ -1138,7 +1138,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
 
 def write_report(project: Path, run_id: str) -> list[str]:
-    """Build and write the report inside one closure_cache (FaT-6b): each journal and receipt is checked once, not per read."""
+    """Build and write the report inside one closure_cache: each journal and receipt is checked once, not per read."""
     from tools.pilot_state import closure_cache
 
     with closure_cache():

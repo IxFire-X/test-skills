@@ -1,4 +1,4 @@
-"""Deterministic merge of the context-marker parts into one ``context-marker:baseline`` artifact (FaT-5, from main P1).
+"""Deterministic merge of the context-marker parts into one ``context-marker:baseline`` artifact.
 
 The marker of a large module is made in parts: ``context-marker:requirements`` normalises the requirements from the
 documents alone, each ``context-marker:batch-NNN`` adds the code observations of one context batch with the same
@@ -54,7 +54,7 @@ def merge_marker_artifacts(requirements: Mapping[str, Any], parts: Sequence[Mapp
                            derived: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """One marker artifact from the requirements answer and the part answers, in part order.
 
-    FaT-IMP3: ``derived`` — the requirements code derives for an import with documents (the linked ones and those of the
+    ``derived`` — the requirements code derives for an import with documents (the linked ones and those of the
     cases outside the documents) in place of the answer's own."""
     if not parts:
         raise ValueError("context-marker merge needs at least one part answer")

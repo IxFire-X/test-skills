@@ -66,7 +66,7 @@ def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None =
     """Partition authorized requirement prose without dropping unlabelled content.
 
     Semantic classification belongs to context-marker/reviewer, not heading heuristics.  With ``id_pattern``
-    (``.skillsrc`` ``requirements.id_pattern``, FaT-3) a line starting with the project's ID opens a requirement
+    (``.skillsrc`` ``requirements.id_pattern``) a line starting with the project's ID opens a requirement
     section like a built-in ``REQ-`` ID does; without it the split is the built-in one.
     """
     text = analytics or ""

@@ -36,7 +36,7 @@ def _report_error(message: str) -> tuple[int, dict[str, Any]]:
 
 
 def _truncated(path: Path) -> tuple[int, dict[str, Any]] | None:
-    """FaT-O2: an answer cut in the middle (open string or bracket at the end) — its bytes, a hint and a retry prompt."""
+    """An answer cut in the middle (open string or bracket at the end) — its bytes, a hint and a retry prompt."""
     from tools.step_size import OUTPUT_TRUNCATED, TRUNCATED_HINT, looks_truncated, truncated_message
 
     try:
@@ -126,7 +126,7 @@ def _at(artifact: Any, pointer: str) -> str:
 
 
 def retry_prompt(artifact: Any, errors: list[dict[str, str]]) -> str:
-    """FaT-6: the text for the one retry of a model stage — each error's path, what is expected and what came."""
+    """The text for the one retry of a model stage — each error's path, what is expected and what came."""
     lines = ["Ответ не прошёл проверку схемы:"]
     # The retry input grows by at most RETRY_BYTES: the first RETRY_ERRORS errors that fit, then a count of the rest.
     budget = RETRY_BYTES - len(lines[0].encode("utf-8")) - len(RETRY_TAIL.encode("utf-8")) - 64

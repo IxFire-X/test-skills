@@ -1,4 +1,4 @@
-"""FaT-7: a Zephyr import CSV filled from the project's own Zephyr export template, beside the published bundle.
+"""A Zephyr import CSV filled from the project's own Zephyr export template, beside the published bundle.
 
 ``python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`` reads
 ``.skillsrc`` ``projection.zephyr.template`` and writes ``<doc>.r<N>.zephyr-import.csv`` next to the bundle.  The
@@ -84,7 +84,7 @@ def read_template(project: Path, relative: str) -> Template:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ZephyrTemplateError("ZEPHYR_TEMPLATE_ENCODING") from None
-    try:  # FaT-Z5: the one delimiter rule of the Zephyr CSV reader
+    try:  # the one delimiter rule of the Zephyr CSV reader
         delimiter = detect_delimiter(text)
     except ValueError as error:
         raise ZephyrTemplateError("ZEPHYR_TEMPLATE_NOT_CSV" if str(error) == "ZEPHYR_CSV_NOT_CSV" else "ZEPHYR_TEMPLATE_DELIMITER") from None
@@ -152,7 +152,7 @@ def _automation_facts(run_root: Path) -> tuple[bool, set[str]]:
     attempt_id = state["attempts"][-1]["attempt_id"]
     result = pilot.read_terminal_result(run_root, attempt_id)
     if result.get("accepted") is not True:
-        # FaT-PA: a partial automation that passed — «да» only for the cases its retained code covers
+        # a partial automation that passed — «да» only for the cases its retained code covers
         evidence = result.get("evidence") or {}
         if (result.get("reason_code") == "AUTOMATION_PARTIAL" and result.get("verification") == "PASS"
                 and evidence.get("generated_retained_count") == evidence.get("generated_required_count")):
@@ -229,14 +229,14 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     bundle_csv = Path(bundle_csv).resolve()
     base = bundle_csv.name.removesuffix(".zephyr-scale.csv")
     try:
-        bundle_csv.relative_to(Path(project).resolve())  # FaT-B: the import file is written only inside the project
+        bundle_csv.relative_to(Path(project).resolve())  # the import file is written only inside the project
         if base == bundle_csv.name:
             raise ValueError
         document = json.loads(bundle_csv.with_name(base + ".json").read_text(encoding="utf-8"))
         cases_bytes = bundle_csv.read_bytes()
     except (OSError, ValueError):
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
-    # FaT-7: case IDs repeat between runs, so the set must be one this run published.
+    # case IDs repeat between runs, so the set must be one this run published.
     if document_sha256(document) not in _published_digests(root, state):
         raise ZephyrTemplateError("ZEPHYR_EXPORT_RUN_MISMATCH", str(bundle_csv))
     closed, automated = _automation_facts(root)
@@ -244,7 +244,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
         raise ZephyrTemplateError("ZEPHYR_EXPORT_NOT_CLOSED")
     from tools.publish_test_case_bundle import build_bundle
 
-    try:  # V9a (A1-10): the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has
+    try:  # the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has
         expected = build_bundle(document).csv_bytes
     except Exception:  # noqa: BLE001 - a document that cannot build its bundle is not a document to export
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     except ZephyrTemplateError as error:
         print(json.dumps({"status": "error", "code": error.code, "hint": error.hint}, ensure_ascii=False))
         return 2
-    except Exception as error:  # noqa: BLE001 - FaT-B: HostStop of the run coordinate and any other failure: one JSON, code 2
+    except Exception as error:  # noqa: BLE001 - HostStop of the run coordinate and any other failure: one JSON, code 2
         code = getattr(error, "code", None)
         print(json.dumps({"status": "error", "code": code if isinstance(code, str) and code else "ZEPHYR_EXPORT_FAILED",
                           "hint": str(error) or type(error).__name__}, ensure_ascii=False))

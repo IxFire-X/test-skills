@@ -1,4 +1,4 @@
-"""FaT-EC: the map of what the project's own tests already exercise — a hint to the case generator and its reviewer.
+"""The map of what the project's own tests already exercise — a hint to the case generator and its reviewer.
 
 Code reads only the test files of the frozen scan inventory (by their content digest) and never runs them.  A key is an
 HTTP endpoint the tests call (``МЕТОД /путь``, numbers and ``{x}`` as ``{}``) or a production class (Java) or module
@@ -33,7 +33,7 @@ _STATUS = re.compile(r"status\(\)\s*\.\s*(is\w+)\s*\(\s*(\d{3})?\s*\)|HttpStatus
                      r"|status_code\s*==\s*(\d{3})")
 _VIEW = re.compile(r"view\(\)\s*\.\s*name\s*\(\s*\"([^\"]+)\"\s*\)")
 # the model attribute (first quoted name) is left out, the field names after it are kept
-# F9 (8.D6-11): the names are one unambiguous list — a blank between two names belongs to the second one's ``\s*``, or to the comma's ``\s*,`` when a comma follows —
+# the names are one unambiguous list — a blank between two names belongs to the second one's ``\s*``, or to the comma's ``\s*,`` when a comma follows —
 # so a call that is never closed is tried once, not 2^k ways (16 names in quotes without commas — 3.3 s).
 _FIELD_ERRORS = re.compile(r"attributeHasFieldErrors\s*\(\s*\"\w+\"\s*,((?:\s*\"\w+\"(?:\s*,)?)+)(?:(?<=,)|(?<!,)\s*)\)"
                            r"|attributeHasFieldErrorsCode\s*\(\s*\"\w+\"\s*,(\s*\"\w+\")")
@@ -138,7 +138,7 @@ def _python_names(text: str) -> set[str]:
 def _excluded(project: Path) -> set[str]:
     """Files the package wrote into the project (materialization ownership of any run): not the project's own tests.
 
-    V9a (A1-8): every run's receipt is read through the journal of THAT run (``read_attempt_receipt`` for each of its attempts); a file the journal
+    Every run's receipt is read through the journal of THAT run (``read_attempt_receipt`` for each of its attempts); a file the journal
     of its run does not bind, or cannot read, excludes nothing.  A run planted whole — journal and receipt — is not told apart this way; what it
     changes is a hint of the map, not a verdict."""
     from tools import pilot_state
@@ -297,10 +297,10 @@ def hint_line(case_ids: list[str]) -> str | None:
 
 
 def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]], root: Path | None = None) -> dict[str, Any]:
-    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files.  V9a: with ``root`` the inventory
+    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files. With ``root`` the inventory
     is that run's; without it (plan-batches knows only the project) the first run whose own journal froze that digest.
 
-    FaT-AU3: for the context receipts of one plan (one inventory) the one map of all their files — the HTTP keys of the
+    For the context receipts of one plan (one inventory) the one map of all their files — the HTTP keys of the
     tests do not depend on the context, so a map per receipt would repeat them."""
     project = Path(project).resolve()
     receipts = list(context_receipt) if isinstance(context_receipt, list) else [context_receipt]
@@ -312,7 +312,7 @@ def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping
 
     runs = [Path(root)] if root is not None else sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "inventories").is_dir())
     for run_root in runs:
-        try:  # V9a (A1-8): the inventory the journal of that run froze under this digest — never the first file of that name
+        try:  # the inventory the journal of that run froze under this digest — never the first file of that name
             inventory = pilot_state.frozen_inventory(project, Path(run_root).resolve(), digest)
             break
         except (OSError, KeyError, TypeError, ValueError):
@@ -324,8 +324,8 @@ def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping
 
 def context_view(run_root: Path, context_digests: str | list[str], attempt_id: str | None = None) -> bytes:
     """The map bytes of the context of one generator batch, built from the frozen inputs; the digests that are no context
-    selection of the attempt are skipped, empty when none is or the project has no hits.  FaT-RE: the one source of these
-    bytes for step-inputs and the run report; FaT-AU3: one map for all the context receipts the batch reads."""
+    selection of the attempt are skipped, empty when none is or the project has no hits. The one source of these
+    bytes for step-inputs and the run report; one map for all the context receipts the batch reads."""
     from tools.pilot_state import _context_selection_target, derive_state, read_context_selection
 
     root = Path(run_root).resolve()

@@ -294,7 +294,7 @@ def _cached_schema_errors(schema_name: str, snapshot: tuple[tuple[str, bytes], .
     return found
 
 
-# V3 precedence of the categories of a case: the order the canon keeps them in (the code puts it, P1)
+# V3 precedence of the categories of a case: the order the canon keeps them in (the code puts it)
 CATEGORY_PRECEDENCE = ("positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional")
 
 

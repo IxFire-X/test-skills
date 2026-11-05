@@ -27,7 +27,7 @@ _PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROF
 # machine-model step columns as an explicit compatibility opt-in.  Their HTML/Markdown are identical.
 _PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
-# The company's Zephyr accepts only High/Normal/Low (FaT-3): CRITICAL goes out as High.
+# The company's Zephyr accepts only High/Normal/Low: CRITICAL goes out as High.
 _PRIORITIES = {"CRITICAL": "High", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
 _HEADERS = (
     "Key", "Name", "Status", "Precondition", "Objective", "Folder", "Priority",
@@ -59,7 +59,7 @@ def _escape_plain(value: str) -> str:
 def escape_inline(value: str) -> str:
     """Escape one user-originated value for its Markdown inline position.
 
-    FaT-MD: a paired backtick span (`Range.of`) is code in the human text and stays a code span — only its ``|`` is
+    A paired backtick span (`Range.of`) is code in the human text and stays a code span — only its ``|`` is
     escaped for a table cell; an unpaired backtick and the text around the spans are escaped as before."""
     value = value.replace("\r\n", "\n").replace("\r", "\n")
     parts: list[str] = []
@@ -140,7 +140,7 @@ def _trailing_json(value: str) -> tuple[str, str | None]:
     return joined.strip(), None
 
 
-# FaT-PT: a parameter group is shown once — the texts of its first case with a slot where the variants differ, and a
+# a parameter group is shown once — the texts of its first case with a slot where the variants differ, and a
 # table with a row per case; the slot becomes ``<имя параметра>``. The canonical keeps one case per variant.
 SLOT = "\ue000"
 
@@ -316,7 +316,7 @@ def _html_action(step: dict[str, Any], display_orders: dict[str, int] | None = N
 
 
 def _html_test_data(step: dict[str, Any]) -> str:
-    if SLOT in step["test_data"]:  # FaT-PT: a slotted request is no JSON any more; shown as it is
+    if SLOT in step["test_data"]:  # a slotted request is no JSON any more; shown as it is
         data = step["test_data"]
         return f"<pre>{html.escape(data, quote=True)}</pre>" if "{" in data or "[" in data else f"<p>{_html_text(data)}</p>"
     marker = step["test_data"].strip()
@@ -430,7 +430,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
         start = len(lines)
         lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
-        if "technique" in case:  # FaT-TD
+        if "technique" in case:  
             lines.extend([f"Техника: {technique_name(case['technique'])}", ""])
         lines.append("**Предусловия:**")
         if case["preconditions"]:

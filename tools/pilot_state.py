@@ -107,7 +107,7 @@ def _validate_schema(name: str, value: Mapping[str, Any]) -> None:
 
     schema_text = (_SCHEMA_ROOT / name).read_text(encoding="utf-8")
     serialized = _json_validation_key(value)
-    # FaT-6b: inside one closure a successful check of the same bytes is remembered by digest; the global lru cache
+    # inside one closure a successful check of the same bytes is remembered by digest; the global lru cache
     # (64 entries) drops large artifacts such as an inventory, whose uniqueItems check is quadratic.
     cache = _CLOSURE_CACHE.get()
     key = None
@@ -135,7 +135,7 @@ def _is_reparse(path: Path) -> bool:
 
 
 def run_root_is_unsafe(project: Path) -> bool:
-    """V9b (8.12): ``.pilot-runs`` of the project is a link (a junction, a symlink): no run is written through it."""
+    """``.pilot-runs`` of the project is a link (a junction, a symlink): no run is written through it."""
     runs = Path(project) / ".pilot-runs"
     return runs.exists() and _is_reparse(runs)
 
@@ -311,7 +311,7 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
     return dict(authorization)
 
 
-# P6a: status and report read a run of a project that was moved or renamed.  The manifest keeps the absolute path of the folder
+# status and report read a run of a project that was moved or renamed.  The manifest keeps the absolute path of the folder
 # where the run was made; inside this block a different path is accepted when the files of the frozen inventories are all there.
 _MOVED_PROJECT: contextvars.ContextVar[dict[Any, Any] | None] = contextvars.ContextVar("pilot_moved_project", default=None)
 
@@ -326,7 +326,7 @@ def moved_project_allowed():
 
 
 def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
-    """P6a: ``None`` when the run was made at ``project``; else ``{"recorded", "current", "same_structure", "missing"}``.
+    """``None`` when the run was made at ``project``; else ``{"recorded", "current", "same_structure", "missing"}``.
 
     The structure is the same when the run has frozen inventories, they read back whole (their own digest), and every file
     they list is in ``project`` at the same relative path.  Contents are not compared here: a changed file is a drift,
@@ -334,7 +334,7 @@ def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
     from tools.project_inventory import InventoryError, read_execution_baseline, read_inventory_receipt
 
     project, root = Path(project).resolve(), Path(run_root)
-    try:  # V9a: the sealed manifest (the boundary itself asks here, so not read_run)
+    try:  # the sealed manifest (the boundary itself asks here, so not read_run)
         recorded = _read_artifact(project, root, root / "run-manifest.json", "run manifest").get("project")
     except (OSError, ValueError, AttributeError, KeyError, TypeError):
         return None
@@ -387,7 +387,7 @@ def _moved_recorded(project: Path) -> str | None:
 
 
 def _moved_refusal(project: Path, root: Path) -> ValueError | None:
-    """V9b: the refusal of a command that reads a run made in another folder — ``PROJECT_MOVED`` with where the run was made and what to do — or None
+    """The refusal of a command that reads a run made in another folder — ``PROJECT_MOVED`` with where the run was made and what to do — or None
     when the run is not a moved project's (``status`` and ``report`` say the same in their ``project_moved`` note)."""
     move = run_project_move(project, root)
     if move is None:
@@ -428,13 +428,13 @@ def _disposition_policy_at(project: Path, root: Path) -> str:
 
 
 def disposition_policy(run_root: Path) -> str:
-    """FaT-8: what a FAIL does to generated files — ``quarantine`` (default) or ``cleanup`` (`scan --disposition-policy cleanup`)."""
+    """What a FAIL does to generated files — ``quarantine`` (default) or ``cleanup`` (`scan --disposition-policy cleanup`)."""
     project, root = _run_root(run_root)
     return _disposition_policy_at(project, root)
 
 
 def self_review_accepted(run_root: Path) -> bool:
-    """FaT-4b: the run admits a review without a fresh context (`scan --accept-self-review`)."""
+    """The run admits a review without a fresh context (`scan --accept-self-review`)."""
     project, root = _run_root(run_root)
     return _self_review_accepted_at(project, root)
 
@@ -530,7 +530,7 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                 if event_type == "MODEL_REQUESTED":
                     if key in model_requests:
                         raise ValueError("duplicate model request")
-                    # FaT-5: the marker in parts — requirements, then the batches, then the merge by code.
+                    # the marker in parts — requirements, then the batches, then the merge by code.
                     if stage.startswith("context-marker:") and stage != "context-marker:baseline" and (attempt_id, "context-marker:baseline") in model_requests:
                         raise ValueError("context-marker part request after the merged request")
                     if stage.startswith("context-marker:batch-") and (attempt_id, "context-marker:requirements") not in model_responses:
@@ -675,7 +675,7 @@ def _validate_process_stopped_bindings(
 
 
 def _events(project: Path, root: Path) -> list[dict[str, Any]]:
-    """The checked event journal; inside closure_cache() only the lines after the checked prefix are checked (FaT-9b)."""
+    """The checked event journal; inside closure_cache() only the lines after the checked prefix are checked."""
     cache = _CLOSURE_CACHE.get()
     pending = root / "pending-events"
     if cache is None or pending.is_dir() and any(pending.glob("*.json")):
@@ -715,7 +715,7 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
 
 
 def _checked_event_line(project: Path, root: Path, manifest: Mapping[str, Any], seq: int, line: bytes, previous: str | None) -> dict[str, Any]:
-    """One journal line against its copy in events/, its schema, seal, seq, run and chain link (FaT-9b, as in _events_full)."""
+    """One journal line against its copy in events/, its schema, seal, seq, run and chain link (as in _events_full)."""
     event_bytes = read_confined_bytes(project, root, root / "events" / f"{seq:010d}.json")
     if event_bytes != line:
         raise ValueError("invalid event journal")
@@ -855,13 +855,13 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
 
 def create_scan_run(project: Path, policy_profile: str, authorization: Mapping[str, Any], scan_request: Mapping[str, Any],
                     skipped: Mapping[str, str] | None = None) -> Mapping[str, Any]:
-    """FaT-G: the run of a scan — its flags as given go to the manifest (``scan_request``); lowered when ``skipped``."""
+    """The run of a scan — its flags as given go to the manifest (``scan_request``); lowered when ``skipped``."""
     downgrade = None if skipped is None else {"requested_policy_profile": "local-pilot-v1", **skipped}
     return _create_run(project, "cases-only-v1" if skipped is not None else policy_profile, authorization, downgrade, scan_request)
 
 
 def create_lowered_run(project: Path, authorization: Mapping[str, Any], skipped: Mapping[str, str]) -> Mapping[str, Any]:
-    """FaT-R: a local-pilot request whose build is not ready runs as cases-only-v1; the manifest keeps both profiles."""
+    """A local-pilot request whose build is not ready runs as cases-only-v1; the manifest keeps both profiles."""
     return _create_run(project, "cases-only-v1", authorization, {"requested_policy_profile": "local-pilot-v1", **skipped})
 
 
@@ -888,10 +888,10 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
         if safe_auth.get("accept_self_review") is True:
-            # FaT-4b: the human's choice before any review, under the same digest; absent means the prior rules.
+            # the human's choice before any review, under the same digest; absent means the prior rules.
             receipt_data["accept_self_review"] = True
         if safe_auth.get("disposition_policy") == "cleanup":
-            # FaT-8: decided once at scan; absent means quarantine and the receipt keeps its prior bytes.
+            # decided once at scan; absent means quarantine and the receipt keeps its prior bytes.
             receipt_data["disposition_policy"] = "cleanup"
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest_data = {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}
@@ -899,7 +899,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
             manifest_data["requested_policy_profile"] = str(downgrade["requested_policy_profile"])
             manifest_data["execution_skipped"] = {"reason": str(downgrade["reason"]), "fix": str(downgrade["fix"])}
         if scan_request is not None:
-            # FaT-G: the scan's own flags as given — to compare a repeated scan and to print the next scan; absent before FaT-G.
+            # the scan's own flags as given — to compare a repeated scan and to print the next scan; absent in a run of an earlier version.
             manifest_data["scan_request"] = dict(scan_request)
         manifest = _publish(root_project, root, root / "run-manifest.json", manifest_data, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
@@ -1005,7 +1005,7 @@ def _recover_single_uncommitted_attempt(project: Path, root: Path, events: list[
         raise ValueError("uncommitted attempt is invalid")
 
 
-# FaT-9: inside one closure the same bytes are derived and validated once.  Keys are content digests — the
+# inside one closure the same bytes are derived and validated once.  Keys are content digests — the
 # journal for the state, the receipt bytes and the journal's last digest for a validation — so every write of
 # the closure itself changes the key.  Every file is still read through read_confined_bytes each time; only the
 # successful validation is remembered, never an error.  Outside closure_cache() nothing is cached.
@@ -1018,7 +1018,7 @@ _UNCACHED_RECEIPT_KINDS = frozenset({"phase1-artifact", "execution-receipt", "re
 
 @contextmanager
 def closure_cache():
-    """Remember derived state and successful receipt validations for one closure (FaT-9)."""
+    """Remember derived state and successful receipt validations for one closure."""
     if _CLOSURE_CACHE.get() is not None:
         yield
         return
@@ -1026,7 +1026,7 @@ def closure_cache():
     token = _CLOSURE_CACHE.set(cache)
     try:
         yield
-        # FaT-9b: one full check of every journal the block read, so a copy changed inside the block is still caught.
+        # one full check of every journal the block read, so a copy changed inside the block is still caught.
         for project, root in list(cache.get("journal_roots", {}).values()):
             if (root / "events.jsonl").exists():
                 _events_full(project, root)
@@ -1035,7 +1035,7 @@ def closure_cache():
 
 
 def closure_cached(function):
-    """Run a public entry point inside one closure_cache() (FaT-9b); nested entry points reuse the outer one."""
+    """Run a public entry point inside one closure_cache(); nested entry points reuse the outer one."""
 
     @functools.wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -1209,7 +1209,7 @@ def _validate_automation_model_lifecycle(
 
 
 def model_transport_attempts_allowed(stage_instance_id: str, transport_attempts: Any) -> bool:
-    """FaT-6: every model stage may repeat its call once after a schema or validation error of the answer."""
+    """Every model stage may repeat its call once after a schema or validation error of the answer."""
     return type(transport_attempts) is int and transport_attempts in {1, 2} and _MODEL_STAGE_INSTANCE.fullmatch(str(stage_instance_id)) is not None
 
 
@@ -1371,7 +1371,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
     return event
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str | None = None, batch_id: str | None = None, artifact_digest: str | None = None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> Mapping[str, Any]:
     if event_type == "MODEL_REQUESTED":
         raise ValueError("MODEL_REQUESTED requires publish_model_request")
@@ -1392,9 +1392,9 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
 _REVIEW_STAGE = re.compile(r"^(?:tc-reviewer:canonical|autotest-reviewer:r[12])$")
 
 
-@closure_cached  # FaT-10b
+@closure_cached  
 def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, candidate_digest: str) -> Mapping[str, Any]:
-    """FaT-10b: the one REVIEW_REQUESTED of a reviewer stage, on the exact candidate it reviews.
+    """The one REVIEW_REQUESTED of a reviewer stage, on the exact candidate it reviews.
 
     tc-reviewer:canonical reviews the assembled candidate; autotest-reviewer:rN reviews the candidate of
     tc-to-autotest:rN. The same digest again returns the recorded event; another digest is refused.
@@ -1483,14 +1483,14 @@ def record_execution_unknown(run_root: Path, attempt_id: str, execution_receipt_
 
 
 class ModulePathError(ValueError):
-    """F5: ``module`` of an attempt is not a folder of the project; ``str`` is a reason that carries nothing of the project's text."""
+    """``module`` of an attempt is not a folder of the project; ``str`` is a reason that carries nothing of the project's text."""
 
 
 _MODULE_PATH_CHARS = frozenset(":") | {chr(code) for code in range(32)}
 
 
 def module_path_problem(project: Path, value: Any) -> str | None:
-    """F5: why *value* cannot be ``module`` of an attempt — the one check of ``create_attempt``, ``ready`` and the schema's
+    """Why *value* cannot be ``module`` of an attempt — the one check of ``create_attempt``, ``ready`` and the schema's
     complement.  The schema takes any path of parts without ``:`` and control characters (a Cyrillic or spaced folder is a
     folder); a part ``.`` or ``..``, an empty part, a folder that is missing or a link out of the project are refused here."""
     if not isinstance(value, str):
@@ -1535,7 +1535,7 @@ def _module_selection_is_bound(project: Path, events: list[dict[str, Any]], modu
         return False
     if selected[0].get("artifact_digest") == module_selection_digest(project, module):
         return True
-    recorded = _moved_recorded(project)  # P6a: the digest binds the path where the run was made
+    recorded = _moved_recorded(project)  # the digest binds the path where the run was made
     return recorded is not None and selected[0].get("artifact_digest") == _digest(
         {"schema_version": "1.0.0", "project": recorded, "module": _module(_project_root(project), module)})
 
@@ -1731,13 +1731,13 @@ def _frozen_inventory(project: Path, root: Path, inventory_digest: str) -> dict[
 
 
 class BaselineUnbound(ValueError):
-    """F2 (A1-2): the baseline file under the attempt's name is not the baseline the attempt froze."""
+    """The baseline file under the attempt's name is not the baseline the attempt froze."""
 
     code = "BASELINE_UNBOUND"
 
 
 def frozen_baseline(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
-    """F2 (A1-2): the execution baseline of *attempt* — the file named by ``attempt.baseline_digest``, whose own self-digest is that digest
+    """The execution baseline of *attempt* — the file named by ``attempt.baseline_digest``, whose own self-digest is that digest
     and which the journal froze (``EXECUTION_BASELINE_FROZEN`` on that digest).  Like ``_frozen_inventory``: a file that is only
     called by the right name, a consistent forged pair of baseline and inventory among them, is BASELINE_UNBOUND, not a baseline."""
     from tools.project_inventory import read_execution_baseline
@@ -1758,7 +1758,7 @@ def frozen_baseline(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
 
 
 def frozen_skillsrc_matches(project: Path, run_root: Path, attempt: Mapping[str, Any]) -> bool | None:
-    """V3 (after V9a): do the bytes of the project's ``.skillsrc`` equal what the attempt's baseline froze (``skillsrc_authority``)?  The one path
+    """Do the bytes of the project's ``.skillsrc`` equal what the attempt's baseline froze (``skillsrc_authority``)?  The one path
     for every reader of the file after the scan.  None when the journal-bound baseline or the file cannot say (no file, no baseline, unbound)."""
     try:
         frozen = frozen_baseline(run_root, attempt)["skillsrc_authority"]["skillsrc_digest"]
@@ -1795,7 +1795,7 @@ def _model_request_target(root: Path, attempt_id: str, request_digest: str) -> P
 
 
 def _context_marker_parts(state: Mapping[str, Any], attempt_id: str) -> tuple[tuple[str, str | None] | None, list[tuple[str, str, str | None]]]:
-    """FaT-5: ``(requirements (request, response) or None, [(batch stage, request, response)…] in batch order)``."""
+    """``(requirements (request, response) or None, [(batch stage, request, response)…] in batch order)``."""
     requests: dict[str, str] = {}
     responses: dict[str, str] = {}
     for event in state["events"]:
@@ -1814,7 +1814,7 @@ def _context_marker_parts(state: Mapping[str, Any], attempt_id: str) -> tuple[tu
 def _published_context_receipts(state: Mapping[str, Any], attempt_id: str, stage_instance_id: str) -> list[str]:
     """Every context receipt the attempt published, once each, in publication order: batch-NNN is the N-th of them.
 
-    FaT-10c: a recorded request binds the receipts published before it; reviewer evidence published later is not its input."""
+    A recorded request binds the receipts published before it; reviewer evidence published later is not its input."""
     cutoff = next((event["seq"] for event in state["events"] if event.get("attempt_id") == attempt_id
                    and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage_instance_id), None)
     return list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
@@ -1825,7 +1825,7 @@ def _published_context_receipts(state: Mapping[str, Any], attempt_id: str, stage
 def _context_marker_receipt_digests(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str, inputs: Sequence[str],
 ) -> list[str]:
-    """The context receipts a marker request binds after requirements and inventory (FaT-5, after main P1).
+    """The context receipts a marker request binds after requirements and inventory.
 
     The requirements step binds none (documents only).  A part binds exactly one receipt and then the requirements
     answer.  The merged ``context-marker:baseline`` of a marker in parts binds every part's receipt in part order, the
@@ -1839,7 +1839,7 @@ def _context_marker_receipt_digests(
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")
         return []
     if stage_instance_id.startswith("context-marker:batch-"):
-        # FaT-P3: [inventory, receipt, requirements answer]; the runs before P3 also bound the documents digest first
+        # [inventory, receipt, requirements answer]; the runs of an earlier version also bound the documents digest first
         if len(inputs) not in (3, 4) or requirements is None or requirements[1] is None or inputs[-1] != requirements[1]:
             raise ValueError("context-marker part must bind one context receipt and the requirements answer")
         number = int(stage_instance_id.rsplit("-", 1)[1])
@@ -1873,7 +1873,7 @@ def _context_marker_snapshots(
     minimum = 2 if stage_instance_id == "context-marker:requirements" else 3
     head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
     if stage_instance_id.startswith("context-marker:batch-") and len(inputs) == 3:
-        head = head[1:]  # FaT-P3: a part binds the inventory, not the documents again (the answer of the requirements step does)
+        head = head[1:]  # a part binds the inventory, not the documents again (the answer of the requirements step does)
     if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:len(head)]) != head or len(inputs) < minimum:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
     snapshots: dict[str, dict[str, str]] = {}
@@ -1887,7 +1887,7 @@ def _context_marker_snapshots(
             path = item["project_path"].replace("\\", "/")
             if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/"):
                 continue
-            raw = read_confined_bytes(project, project / "openspec", project / path)  # FaT-AU5: the project itself is no confined root
+            raw = read_confined_bytes(project, project / "openspec", project / path)  # the project itself is no confined root
             if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != item["content_digest"]:
                 raise ValueError("context-marker OpenSpec source bytes drifted")
             try:
@@ -1922,13 +1922,13 @@ def _validate_context_marker_sources(
                  for stage, _request, response in batches]
         from tools.cases_import import run_marker_requirements
 
-        derived = run_marker_requirements(root, attempt, answer)  # FaT-IMP3: an import with documents
+        derived = run_marker_requirements(root, attempt, answer)  # an import with documents
         if dict(value) != merge_marker_artifacts(answer, parts, derived):
             raise ValueError("merged context-marker artifact differs from the merge of its parts")
         from tools.cases_import import is_code_requirements
 
         if is_code_requirements(root, attempt, answer):
-            return  # FaT-R2: the requirements of an import without documents are its cases, not an OpenSpec reading
+            return  # the requirements of an import without documents are its cases, not an OpenSpec reading
         tolerated = _gap_marks(answer, derived)
     else:
         tolerated = set()
@@ -1942,7 +1942,7 @@ _OPENSPEC_MISSING_TAIL = " — missing from normalized requirement/scenario set"
 
 
 def _gap_marks(answer: Mapping[str, Any], derived: Sequence[Mapping[str, Any]] | None) -> set[str]:
-    """FaT-IMP3: the provenance marks of the requirements of the answer the merged marker of an import leaves out — the gaps
+    """The provenance marks of the requirements of the answer the merged marker of an import leaves out — the gaps
     (a document requirement no case of the CSV links), named in the report; nothing for any other marker."""
     if derived is None:
         return set()
@@ -1952,7 +1952,7 @@ def _gap_marks(answer: Mapping[str, Any], derived: Sequence[Mapping[str, Any]] |
 
 
 def _openspec_refusals(diagnostics: Sequence[Mapping[str, str]], tolerated: set[str]) -> list[Mapping[str, str]]:
-    """FaT-IMP3: the OpenSpec diagnostics that refuse the marker — every one but OPENSPEC_MISSING of a gap mark."""
+    """The OpenSpec diagnostics that refuse the marker — every one but OPENSPEC_MISSING of a gap mark."""
     return [item for item in diagnostics if not (item["code"] == "OPENSPEC_MISSING" and item["message"].endswith(_OPENSPEC_MISSING_TAIL)
                                                  and item["message"][:-len(_OPENSPEC_MISSING_TAIL)] in tolerated)]
 
@@ -1960,7 +1960,7 @@ def _openspec_refusals(diagnostics: Sequence[Mapping[str, str]], tolerated: set[
 def _reconcile_requirements_openspec(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> None:
-    """FaT-AU5 (audit D4): the merged marker keeps the requirements of this answer and adds the part warnings, so its OpenSpec
+    """The merged marker keeps the requirements of this answer and adds the part warnings, so its OpenSpec
     reconciliation is decided here, against every receipt of the attempt — before the write, while the stage keeps its retry.
     Write time only: a journal written before reads as before; the merge keeps its own check."""
     from tools.build_context import openspec_diagnostics
@@ -1968,13 +1968,13 @@ def _reconcile_requirements_openspec(
     from tools.cases_import import is_code_requirements
 
     stage_instance_id = str(request["stage_instance_id"])
-    if is_code_requirements(root, attempt, value):  # FaT-R2: the requirements of an import are its cases, by the CSV bytes
+    if is_code_requirements(root, attempt, value):  # the requirements of an import are its cases, by the CSV bytes
         return
     receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
     snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
     diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
     if diagnostics:
-        raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # FaT-R2: a code
+        raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # a code
                          + json.dumps(diagnostics, ensure_ascii=False)
                          + "; fix: требования ответа — по OpenSpec из квитанций контекста; отдай исправленный ответ единственным "
                          "повтором стадии (--transport-attempts 2), ничего не записано")
@@ -1996,8 +1996,8 @@ def _validate_model_request_predecessors(
         from tools.project_inventory import read_execution_baseline
 
         markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-        # FaT-BO: from batch 2 a fifth input — the capabilities of the earlier batches (prior-capabilities)
-        # the exact list (FaT-DG, FaT-AU3: M context receipts) is checked at publish time by _expected_model_inputs
+        # from batch 2 a fifth input — the capabilities of the earlier batches (prior-capabilities)
+        # the exact list (M context receipts) is checked at publish time by _expected_model_inputs
         if len(inputs) < 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
         _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
@@ -2008,7 +2008,7 @@ def _validate_model_request_predecessors(
             raise ValueError("tc-generator context must bind its prior attempt inventory selection")
     else:
         boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
-        # F2: only the package binding is wanted (the same in every revision), so a latest revision still waiting for its READ_BACK will do
+        # only the package binding is wanted (the same in every revision), so a latest revision still waiting for its READ_BACK will do
         ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, unconfirmed_ok=True)
         package = ledger["package_binding"]
         reviews = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
@@ -2040,7 +2040,7 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
         return
     inputs = request["input_digests"]
     context = read_context_selection(root, attempt_id, inputs[1])
-    # FaT-AU3: plan and header follow the context receipts of the plan — one, or its list
+    # plan and header follow the context receipts of the plan — one, or its list
     after = inputs.index(value.get("plan_digest"), 2) if value.get("plan_digest") in inputs[2:] else 2
     if (
         [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != [inputs[1], *inputs[after:after + 2]]
@@ -2050,13 +2050,13 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
         raise ValueError("generator fragment must match its request and stored context receipt")
 
 
-LEFT_MARK = "left-before-review.json"  # FaT-O12: finish --abandon LEFT_BEFORE_REVIEW
-LEFT_BATCH = "left-v1"  # J1 (A1-5): the events of the mark carry it
+LEFT_MARK = "left-before-review.json"  # finish --abandon LEFT_BEFORE_REVIEW
+LEFT_BATCH = "left-v1"  # the events of the mark carry it
 
 
 def left_attempt(run_root: Path) -> str | None:
-    """FaT-O12b: the attempt the run was left at before the canonical review — only while it is still the run's last
-    attempt (a later attempt is never hidden by an old mark); the mark is read confined.  J1 (A1-5): the mark is a decision of the
+    """The attempt the run was left at before the canonical review — only while it is still the run's last
+    attempt (a later attempt is never hidden by an old mark); the mark is read confined. The mark is a decision of the
     run, so it counts only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``left-v1``) — a file an agent put there
     leaves the run as it was."""
     project, root = _run_root(run_root)
@@ -2080,14 +2080,14 @@ def left_attempt(run_root: Path) -> str | None:
 
 
 def _refuse_left(root: Path, attempt_id: str) -> None:
-    """FaT-O12b: no model step on a left attempt — the plain scan of the request starts a new run."""
+    """No model step on a left attempt — the plain scan of the request starts a new run."""
     if left_attempt(root) == attempt_id:
         raise ValueError("RUN_LEFT: прогон оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW); "
                          "fix: простой scan того же запроса начнёт новый")
 
 
 def _codeword_lost_note(root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str) -> str:
-    """J1 (A2-5): a generator request carries the sha256 of its control word and shows the word once, in the output of the command that
+    """A generator request carries the sha256 of its control word and shows the word once, in the output of the command that
     wrote it.  A repeat cannot show it again: when the request already holds a word, the refusal says so (CODEWORD_LOST) — the generator
     that did not get the word works without it, and the report calls such a stage's word lost."""
     if not stage_instance_id.startswith("tc-generator:"):
@@ -2102,7 +2102,7 @@ def _codeword_lost_note(root: Path, state: Mapping[str, Any], attempt_id: str, s
             "only its sha256 — if that output was lost the generator works without the word (the report says so);") if held else ""
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def publish_model_request(
     run_root: Path,
     attempt_id: str,
@@ -2115,7 +2115,7 @@ def publish_model_request(
 ) -> Mapping[str, Any]:
     """Persist and read back the complete model invocation envelope before its event.
 
-    FaT-CR: a context-marker request records the skill_pack_digest of the package; ``reuse_from`` names an earlier run of the
+    A context-marker request records the skill_pack_digest of the package; ``reuse_from`` names an earlier run of the
     project whose answer for the same stage and the very same inputs is reused — checked here, recorded as ``reuse``.
     """
     project, root = _run_root(run_root)
@@ -2130,7 +2130,7 @@ def publish_model_request(
     journal_inputs = (not inputs and attempt is not None and attempt["state"] != "TERMINAL" and declaration is not None
                       and _MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is not None)
     if journal_inputs:
-        # audit U2: without --input-digest the inputs the journal fixes (FaT-DG); its refusals about an unpublished
+        # audit U2: without --input-digest the inputs the journal fixes; its refusals about an unpublished
         # predecessor stay as they are
         known = _expected_model_inputs(project, root, state, attempt, stage_instance_id)
         if known is None and stage in {"tc-to-autotest", "autotest-reviewer"}:
@@ -2157,7 +2157,7 @@ def publish_model_request(
         (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>",
          "digest целиком, как его отдала команда публикации входа (sha256:<64 hex>, поле digest или content_digest её result)"),
     ) if failed), None)
-    if broken is not None:  # FaT-AU1: the condition, not only «invalid model request»; FaT-H4b: and the way out
+    if broken is not None:  # the condition, not only «invalid model request»; and the way out
         fix = broken[1]() if callable(broken[1]) else broken[1]
         raise ModelRequestInvalid(f"invalid model request: {broken[0]}; fix: {fix}")
     if any(event["event_type"] == "MODEL_REQUESTED" and event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id
@@ -2170,29 +2170,29 @@ def publish_model_request(
         raise ValueError("MODEL_REUSE_REFUSED: only a context-marker answer is reused")
     if stage == "context-marker":
         _context_marker_snapshots(project, root, state, attempt, stage_instance_id, inputs)
-    # FaT-DG: the inputs the journal fixes, each wrong position named with its right digest and source; publish time only,
+    # the inputs the journal fixes, each wrong position named with its right digest and source; publish time only,
     # so a journal written before the generator inputs were published still replays
     expected = _expected_model_inputs(project, root, state, attempt, stage_instance_id)
     if expected is not None and inputs != [digest for digest, _source in expected]:
         raise _inputs_mismatch(stage_instance_id, inputs, expected)
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
-        _require_next_automation_stage(run_root, attempt_id, stage_instance_id)  # FaT-RQ: publish time only
-        if expected is None:  # FaT-AU5 (U1): FaT-DG named a wrong input above; a predecessor it could not read is refused by that read
+        _require_next_automation_stage(run_root, attempt_id, stage_instance_id)  # publish time only
+        if expected is None:  # the inputs mismatch above is named when the expected inputs are known; a predecessor it could not read is refused by that read
             pairs = _automation_inputs(project, root, state, attempt_id, stage_instance_id)
             if inputs != [digest for digest, _source in pairs]:
                 raise _inputs_mismatch(stage_instance_id, inputs, pairs)
     run_id = read_run(root)["manifest"]["run_id"]
     role, role_policy = declaration
     extra: dict[str, Any] = {}
-    if stage == "context-marker":  # FaT-CR: the package the answer is made with, so a reuse can require the same package
+    if stage == "context-marker":  # the package the answer is made with, so a reuse can require the same package
         pack = skill_pack_digest()
         if pack is not None:
             extra["skill_pack_digest"] = pack
         if reuse_from is not None:
             extra["reuse"] = _reuse_source(project, root, attempt, stage_instance_id, inputs, role_policy, pack, reuse_from)
     nonce = None
-    if stage == "tc-generator":  # P7: the control word of the generator's task — the run keeps its sha256 only
+    if stage == "tc-generator":  # the control word of the generator's task — the run keeps its sha256 only
         from tools.review_canaries import nonce_digest
 
         nonce = secrets.token_hex(6)
@@ -2234,7 +2234,7 @@ def publish_model_request(
                                    "слово не копируй — прогон хранит только его sha256; вывод этой команды слово показывает один раз")
     if not str(model_id or "").startswith("controller:"):  # the merge by the code is no model step
         warning, measure_error = _record_step_size(project, root, run_id, stage_instance_id)
-        if warning is not None:  # P1: a warning, never a refusal
+        if warning is not None:  # a warning, never a refusal
             published["step_warning"] = warning
         if measure_error is not None:  # nor is a measurement that failed silent
             published["step_measure_error"] = measure_error
@@ -2243,7 +2243,7 @@ def publish_model_request(
 
 def publish_code_step_request(run_root: Path, attempt_id: str, stage_instance_id: str, *, model_id: str, invocation_id: str,
                               input_digests: Sequence[str]) -> Mapping[str, Any]:
-    """F2 (A2-2): the request of a step the code answers itself (the merge of the marker parts, the import of cases).  A command cut
+    """The request of a step the code answers itself (the merge of the marker parts, the import of cases).  A command cut
     between this request and the answer is run again and goes on from the request it wrote — the same model, invocation and inputs,
     no answer yet; any other request of the stage (or an answered stage) is what ``publish_model_request`` makes of it,
     MODEL_REQUEST_DUPLICATE."""
@@ -2260,7 +2260,7 @@ def publish_code_step_request(run_root: Path, attempt_id: str, stage_instance_id
 
 
 def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id: str) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
-    """P1: the measurement of the step the request has just fixed, appended to ``step-sizes.jsonl`` (the report's section) —
+    """The measurement of the step the request has just fixed, appended to ``step-sizes.jsonl`` (the report's section) —
     the same measure ``tools.step_size --run --stage`` makes, by the code at the one place every request passes, for every
     stage whose inputs the journal resolves.  Returns ``(warning, error)``: STEP_OVER_BUDGET is a warning and a measurement
     that cannot be taken or written is named (class of the error), neither stops the request."""
@@ -2270,7 +2270,7 @@ def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id:
     try:
         found = step_size.request_files(root, stage_instance_id) if stage in step_size._REQUEST_STAGES else step_size.stage_inputs(root, stage_instance_id)
         state = derive_state(root)
-        limits, _note = step_size.run_limits(project, root, state, str(state["attempts"][-1]["attempt_id"]))  # V9a: the limits the run froze
+        limits, _note = step_size.run_limits(project, root, state, str(state["attempts"][-1]["attempt_id"]))  # the limits the run froze
         report = step_size.measure(project, [Path(row["path"]) for row in found["files"]], stage, budget=step_size.step_budget(project, limits),
                                    extra_bytes=sum(row["bytes"] for row in found["bindings"]))
         step_size.record(project, run_id, stage_instance_id, report)
@@ -2348,7 +2348,7 @@ def read_model_request(
 
 
 def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence[str], value: Mapping[str, Any]) -> None:
-    """FaT-O3: every check the write of the merged ``context-marker:baseline`` makes that needs no write — the schema and
+    """Every check the write of the merged ``context-marker:baseline`` makes that needs no write — the schema and
     order, the inputs, the merge of the parts and OpenSpec — run by ``merge`` before it writes the request."""
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -2359,7 +2359,7 @@ def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence
 
 
 def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
-    """FaT-R2: the checks of an answer that need no journal — the requirement order and the schema of the stage — for code
+    """The checks of an answer that need no journal — the requirement order and the schema of the stage — for code
     that builds an answer itself (cases-import), before it writes the request."""
     misplaced = _requirement_order_rows(stage_instance_id, value)
     if misplaced:
@@ -2404,7 +2404,7 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
     else:
         raise ValueError("unsupported model stage artifact")
     diagnostics = schema_diagnostics(dict(value), _SCHEMA_ROOT / schema_name, _PACK_ROOT)
-    if diagnostics:  # FaT-AU1: the same retry_prompt validate_artifact gives, so the one retry needs no second command
+    if diagnostics:  # the same retry_prompt validate_artifact gives, so the one retry needs no second command
         from tools.validate_artifact import retry_prompt
 
         raise ModelStageArtifactInvalid(
@@ -2432,9 +2432,9 @@ _RETRY_EXHAUSTED_FIX = ("fix: python -m tools.run_pipeline finish --project <pro
 
 
 def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: str, value: Mapping[str, Any]) -> None:
-    """FaT-R1: the reviewer's decision against the requested candidate before the answer is written — select would refuse
+    """The reviewer's decision against the requested candidate before the answer is written — select would refuse
     it after the ledger is closed, with no way out; here the stage keeps its one retry.  A run whose candidate the journal
-    cannot assemble (before FaT-DG) is left to select as before."""
+    cannot assemble (in a run of an earlier version) is left to select as before."""
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import OrchestrationError, _run_imported, journal_assembly, review_decision
 
@@ -2448,7 +2448,7 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
         return
     from tools import review_canaries
 
-    canaries = review_canaries.verify(root, attempt_id)  # P7: a map that does not match is a refusal, before anything is written
+    canaries = review_canaries.verify(root, attempt_id)  # a map that does not match is a refusal, before anything is written
     if review_canaries.codeword_state(root, attempt_id, value) == "named" and not _self_review_accepted_at(_run_root(root)[0], root):
         raise ValueError("REVIEW_CODEWORD_NAMED: ревьюер назвал контрольное слово генератора — он видел задачу генератора, это ревью в той же "
                          "сессии; fix: проведи ревью в новой сессии (/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её "
@@ -2464,7 +2464,7 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
 _RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def publish_model_stage_artifact(
     run_root: Path,
     attempt_id: str,
@@ -2477,10 +2477,10 @@ def publish_model_stage_artifact(
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
 
-    Audit 2 (FaT-AB): a refused answer given as the one retry (--transport-attempts 2) never advises that retry again — its
+    Audit 2: a refused answer given as the one retry (--transport-attempts 2) never advises that retry again — its
     fix is the way out of the stage.  The code does not count refused answers yet (AB2, after the release).
 
-    P2: ``dry_run`` runs every check that precedes the write and returns ``{"dry_run": True, "artifact": <the answer as it would
+    ``dry_run`` runs every check that precedes the write and returns ``{"dry_run": True, "artifact": <the answer as it would
     be stored>, "content_digest", "filled", "normalized"}`` — nothing is written, no event is appended."""
     try:
         return _publish_model_stage_artifact(run_root, attempt_id, stage_instance_id, artifact,
@@ -2494,7 +2494,7 @@ def publish_model_stage_artifact(
 
 
 def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: str, artifact: Mapping[str, Any]) -> str:
-    """P2: ``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``model-response``
+    """``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``model-response``
     would store it, the digest fields it puts filled in), ``"other"`` when another answer is recorded.  Reads only."""
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -2504,7 +2504,7 @@ def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: st
     if not responses:
         return "none"
     value = dict(artifact)
-    if stage_instance_id == "tc-reviewer:canonical":  # P7: as the answer is stored
+    if stage_instance_id == "tc-reviewer:canonical":  # as the answer is stored
         from tools.review_canaries import hash_codeword
 
         value = hash_codeword(value)
@@ -2535,13 +2535,13 @@ def _publish_model_stage_artifact(
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
 
-    FaT-O2: ``raw_bytes`` — the size of the answer as the model gave it (the ``--artifact`` file); the stored artifact is
+    ``raw_bytes`` — the size of the answer as the model gave it (the ``--artifact`` file); the stored artifact is
     compact JSON, so without it the measurement falls back to the stored bytes.
     """
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
     project, root = _run_root(run_root)
-    _refuse_left(root, attempt_id)  # FaT-O12b
+    _refuse_left(root, attempt_id)  
     state = derive_state(root)
     attempt = next(
         (item for item in state["attempts"] if item["attempt_id"] == attempt_id), None,
@@ -2549,8 +2549,8 @@ def _publish_model_stage_artifact(
     value = dict(artifact)
     if attempt is None or attempt["state"] == "TERMINAL":
         raise ValueError("unknown model stage artifact attempt")
-    # FaT-AB C5: one answer per stage, at most the one retry — --transport-attempts above 2 is refused before anything is
-    # written (and so is replacing a recorded answer); refused answers are not counted yet (FaT-AB2), the agent keeps the limit
+    # one answer per stage, at most the one retry — --transport-attempts above 2 is refused before anything is
+    # written (and so is replacing a recorded answer); refused answers are not counted yet, the agent keeps the limit
     if type(transport_attempts) is int and transport_attempts > 2:
         raise ValueError(f"MODEL_STAGE_RETRY_EXHAUSTED: {stage_instance_id}: у стадии один ответ и единственный повтор "
                          f"(--transport-attempts 1 или 2): --transport-attempts больше 2 отказан; ничего не записано; " + _RETRY_EXHAUSTED_FIX)
@@ -2563,21 +2563,21 @@ def _publish_model_stage_artifact(
     filled: list[str] = []
     normalized: list[str] = []
     mechanics: list[str] = []
-    if stage_instance_id.startswith("tc-generator:"):  # P1: the order of requirement_ids and categories is the code's work, as in validate-fragment
+    if stage_instance_id.startswith("tc-generator:"):  # the order of requirement_ids and categories is the code's work, as in validate-fragment
         from tools.batch_assembly import fill_fragment_mechanics, normalize_fragment
 
         value, normalized = normalize_fragment(value)
-        value, mechanics = fill_fragment_mechanics(value)  # V6 / O-12: ids, display_order, defaults, the types the code can take
-    if stage_instance_id == "tc-reviewer:canonical":  # P7: the control word the reviewer names is kept as its sha256 only
+        value, mechanics = fill_fragment_mechanics(value)  # ids, display_order, defaults, the types the code can take
+    if stage_instance_id == "tc-reviewer:canonical":  # the control word the reviewer names is kept as its sha256 only
         from tools.review_canaries import hash_codeword
 
         value = hash_codeword(value)
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
-        if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
+        if not isinstance(prior.get("reuse"), Mapping):  # a reused answer is passed as it is
             if (stage_instance_id.startswith("tc-generator:") and isinstance(value, dict) and value.get("status") == "COMPLETE"
                     and value.get("context_receipt") in (None, "")):
-                # V6: the context receipt of the batch — by the digest the published plan binds to this batch (never the digest the answer
+                # the context receipt of the batch — by the digest the published plan binds to this batch (never the digest the answer
                 # names: a different one is the refusal of the digest binding)
                 try:
                     batch = next(row for row in _generator_input(project, root, state, attempt_id, "plan")["batches"]
@@ -2606,8 +2606,8 @@ def _publish_model_stage_artifact(
         if len(requests) == 1 and len(responses) == 1:
             raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
-        if not requests:  # FaT-AU1
-            if stage_instance_id == "tc-reviewer:canonical":  # P2-fix: the request of the reviewer is the work of review-open
+        if not requests:  
+            if stage_instance_id == "tc-reviewer:canonical":  # the request of the reviewer is the work of review-open
                 from tools.fixes import REVIEW_CHAIN
 
                 raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
@@ -2620,12 +2620,12 @@ def _publish_model_stage_artifact(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
     reuse = request.get("reuse")
-    if isinstance(reuse, Mapping) and content_digest != reuse["response_digest"]:  # FaT-CR: a reused answer is not changed
+    if isinstance(reuse, Mapping) and content_digest != reuse["response_digest"]:  # a reused answer is not changed
         source = _model_stage_artifact_target(_run_root(Path(root).parent / str(reuse["run_id"]))[1], str(reuse["attempt_id"]), str(reuse["response_digest"]))
         raise ModelReuseMismatch(
             f"MODEL_REUSE_MISMATCH: {stage_instance_id}: ответ {content_digest}, а запрос переиспользует ответ {reuse['response_digest']} "
             f"прогона {reuse['run_id']}; fix: передай файл ответа источника как есть — --artifact {source}, ничего не записано")
-    # FaT-DG: digest fields of the answer against the journal before anything is written; the stage keeps its one retry
+    # digest fields of the answer against the journal before anything is written; the stage keeps its one retry
     mismatches = _response_digest_rows(project, root, state, attempt_id, stage_instance_id, request, value)
     if mismatches:
         raise ModelResponseDigestMismatch(
@@ -2634,7 +2634,7 @@ def _publish_model_stage_artifact(
             + "; fix: " + delete_field_fix(", ".join(pointer for pointer, *_rest in mismatches))
             + "; это ошибка ответа — отдай его единственным повтором стадии (--transport-attempts 2), ничего не записано"
         )
-    # FaT-SN: source requirements follow their documents; only a new answer is checked, journals already written read as before
+    # source requirements follow their documents; only a new answer is checked, journals already written read as before
     misplaced = _requirement_order_rows(stage_instance_id, value)
     if misplaced:
         raise ValueError(
@@ -2648,16 +2648,16 @@ def _publish_model_stage_artifact(
         try:
             published = _published_generator_inputs(project, root, state, attempt_id)
             if published is None:
-                # reachable only for a request published before FaT-DG: a new model-request without the published plan and
-                # header is refused by _expected_model_inputs (FaT-HARD, audit 1, 5g); such a run keeps the coverage rule
+                # reachable only for a request published by an earlier version: a new model-request without the published plan and
+                # header is refused by _expected_model_inputs (audit 1, 5g); such a run keeps the coverage rule
                 require_batch_coverage(value)
-            else:  # FaT-DG: the whole fragment check (coverage inside) against the journal, before the write
+            else:  # the whole fragment check (coverage inside) against the journal, before the write
                 validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))),
                                   _accepted_earlier_fragments(project, root, state, attempt_id, published[0], stage_instance_id.split(":", 1)[1]),
                                   imported=_imported_for_answer(project, root, state, attempt_id, stage_instance_id.split(":", 1)[1], request))
         except BatchAssemblyError as error:
             retry = "отдай исправленный фрагмент единственным повтором стадии (--transport-attempts 2), ничего не записано"
-            rows = getattr(error, "diagnostics", ())  # P1: the whole list, each row with its fix
+            rows = getattr(error, "diagnostics", ())  # the whole list, each row with its fix
             raise BatchAssemblyError(error.code, error.detail + "; fix: исправь фрагмент и " + retry, rows,
                                      (getattr(error, "fix", None) + "; " if getattr(error, "fix", None) else "исправь фрагмент и ") + retry) from error
     if stage_instance_id.startswith("context-marker:"):
@@ -2666,11 +2666,11 @@ def _publish_model_stage_artifact(
         _reconcile_requirements_openspec(project, root, state, attempt, request, value)
         from tools.cases_import import check_requirements_answer
 
-        check_requirements_answer(root, attempt, value)  # FaT-IMP3: the links of an import with documents (by the run, not a label)
+        check_requirements_answer(root, attempt, value)  # the links of an import with documents (by the run, not a label)
     if stage_instance_id == "tc-reviewer:canonical":
         _validate_review_decision(root, state, attempt_id, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
-    if dry_run:  # P2: every check above ran; nothing below is written
+    if dry_run:  # every check above ran; nothing below is written
         return {"dry_run": True, "artifact": value, "content_digest": content_digest, "filled": [*mechanics, *filled], "normalized": normalized}
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
@@ -2695,18 +2695,18 @@ def _publish_model_stage_artifact(
             artifact_digest=content_digest,
         )
     published = dict(read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest))
-    # FaT-O: the answer size of every call, and a warning (never a stop) when it is large
+    # the answer size of every call, and a warning (never a stop) when it is large
     from tools.step_size import output_warning, record_output, run_limits
 
-    limits, _limits_note = run_limits(project, root, state, attempt_id)  # V9a: the output limit of the .skillsrc the run froze
+    limits, _limits_note = run_limits(project, root, state, attempt_id)  # the output limit of the .skillsrc the run froze
     measured = int(raw_bytes) if raw_bytes is not None else published["byte_count"]
     if raw_bytes is not None:
         record_output(project, root, stage_instance_id, content_digest, measured)
     published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
                      warning=output_warning(project, measured, limits))
-    if mechanics or filled:  # audit U2 / V6: what the code put into the answer — the mechanics by name and count, then the digest fields
+    if mechanics or filled:  # what the code put into the answer — the mechanics by name and count, then the digest fields
         published["filled"] = [*mechanics, *filled]
-    if normalized:  # P1: what the code put in order
+    if normalized:  # what the code put in order
         published["normalized"] = normalized
     return published
 
@@ -2719,7 +2719,7 @@ def _read_model_stage_artifact_with_state(
     stage_instance_id: str,
     content_digest: str,
 ) -> Mapping[str, Any]:
-    """P2: inside one closure a stage answer is read and checked once — its bytes are content-addressed and its request and
+    """Inside one closure a stage answer is read and checked once — its bytes are content-addressed and its request and
     predecessors are earlier events of an append-only journal, so a second read of the same digest checks the same things."""
     kept = _CLOSURE_CACHE.get()
     key = ("stage-artifact", str(root), attempt_id, stage_instance_id, content_digest)
@@ -2813,7 +2813,7 @@ def read_model_stage_artifact(
     )
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back one inventory-owned exact C-lite byte-set receipt."""
     from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
@@ -2844,9 +2844,9 @@ def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[
 
 
 def context_progress(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """F3: the context batches the scan has written for the attempt against the count its receipts carry (``batch_count``,
+    """The context batches the scan has written for the attempt against the count its receipts carry (``batch_count``,
     bound by the journal through the receipt digest): ``{"have", "total"}``.  ``total`` is None before the first batch and for a
-    run from before F3 (no count) — the set is then taken as whole.  Only reads the receipt files and the journal."""
+    run of an earlier version (no count) — the set is then taken as whole.  Only reads the receipt files and the journal."""
     from tools.project_inventory import _digest
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
@@ -2868,7 +2868,7 @@ def context_progress(run_root: Path, attempt_id: str, state: Mapping[str, Any] |
 
 
 def context_incomplete(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> tuple[int, int] | None:
-    """F3: ``(have, total)`` when the scan of the attempt stopped before its last context batch, else None."""
+    """``(have, total)`` when the scan of the attempt stopped before its last context batch, else None."""
     progress = context_progress(run_root, attempt_id, state)
     return (progress["have"], progress["total"]) if progress["total"] is not None and progress["have"] < progress["total"] else None
 
@@ -2879,7 +2879,7 @@ def scan_incomplete_message(have: int, total: int) -> str:
 
 
 def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
-    """Read a C-lite receipt only when immutable bytes and attempt event both bind it.  P2: once per closure — the receipt is
+    """Read a C-lite receipt only when immutable bytes and attempt event both bind it. Once per closure — the receipt is
     content-addressed and its event is in the journal for good."""
     kept = _CLOSURE_CACHE.get()
     key = ("context-selection", str(run_root), attempt_id, receipt_digest)
@@ -2914,7 +2914,7 @@ def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_dig
 
 
 class ReviewLedgerUnbound(ValueError):
-    """F2 (A2-1): a reviewer ledger file lies without its events and is not the revision being published."""
+    """A reviewer ledger file lies without its events and is not the revision being published."""
 
     code = "REVIEW_LEDGER_UNBOUND"
 
@@ -2927,7 +2927,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
     state = derive_state(root)
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
     value = dict(session)
-    if attempt is not None and attempt["state"] == "TERMINAL":  # P1: not a bare ValueError — the attempt is closed
+    if attempt is not None and attempt["state"] == "TERMINAL":  # not a bare ValueError — the attempt is closed
         raise ValueError(f"ATTEMPT_TERMINAL: the attempt {attempt_id} is closed; a reviewer session ledger needs an open attempt")
     if attempt is None or schema_diagnostics(value, _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT):
         raise ValueError("invalid reviewer session ledger")
@@ -2944,7 +2944,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
     recorded_read_back = [event for event in events if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1"]
     recorded_publish_digests = [event.get("artifact_digest") for event in recorded_published]
     recorded_readback_digests = [event.get("artifact_digest") for event in recorded_read_back]
-    pending: set[str] = set()  # F2: the revision this call publishes, found on disk with its events cut short — finished below
+    pending: set[str] = set()  # the revision this call publishes, found on disk with its events cut short — finished below
     if len(recorded_publish_digests) != len(set(recorded_publish_digests)) or len(recorded_readback_digests) != len(set(recorded_readback_digests)):
         raise ValueError("invalid reviewer session ledger history")
     if ledger_root.exists():
@@ -2970,7 +2970,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
             published = [event for event in recorded_published if event.get("artifact_digest") == prior["digest"]]
             read_back = [event for event in recorded_read_back if event.get("artifact_digest") == prior["digest"]]
             if len(published) <= 1 and not read_back and prior["digest"] != digest:
-                raise ReviewLedgerUnbound(  # F2 (A2-1): a file of another revision without its events — not ours to finish
+                raise ReviewLedgerUnbound(  # a file of another revision without its events — not ours to finish
                     f"REVIEW_LEDGER_UNBOUND: файл леджера {path.name} лежит без событий журнала и это не та ревизия, что публикуется сейчас; "
                     "ничего не записано; fix: повтори ту же команду с теми же входами (ответом ревьюера, --path) — она допишет события файла; "
                     "иные входы — новое ревью: новый прогон (scan --new-run)")
@@ -3004,7 +3004,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
         ):
             raise ValueError("reviewer session ledger must prefix-extend its latest revision")
     data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    try:  # J1: the file and its pair of events — the one contract of bind_bytes (the file is only compared with the bytes computed here)
+    try:  # the file and its pair of events — the one contract of bind_bytes (the file is only compared with the bytes computed here)
         bound = bind_bytes(run_root, attempt_id, target, data, digest=digest, batch_id="reviewer-ledger-v1", label="reviewer session ledger")
     except ReceiptFileUnbound as error:
         raise ReviewLedgerUnbound(
@@ -3046,7 +3046,7 @@ def _read_reviewer_session_ledger_with_state(
     if attempt is None or not isinstance(selected, str) or not _DIGEST.fullmatch(selected):
         raise ValueError("reviewer session ledger is unavailable")
     confirmed = len([event for event in readbacks if event.get("artifact_digest") == selected])
-    # F2 (A2-1): the latest revision is the last one PUBLISHED; the commands that finish a cut publication (``unconfirmed_ok``) read it
+    # the latest revision is the last one PUBLISHED; the commands that finish a cut publication (``unconfirmed_ok``) read it
     # while its READ_BACK is still to come — the file is content-addressed and checked against that digest below, and an older
     # revision is never read in its place.  Evidence consumers keep the strict reading (both events).
     if (len([event for event in published if event.get("artifact_digest") == selected]) != 1
@@ -3220,15 +3220,15 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
     directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries"}
-    if kind.startswith(_SKELETON_KIND):  # FaT-SKB: the skeleton of one batch, next to the whole one
+    if kind.startswith(_SKELETON_KIND):  # the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
         return root / "imported-cases" / f"{attempt_id}.{kind[len(_SKELETON_KIND):]}.json"
-    if kind == "imported-cases":  # FaT-IMP: the skeleton of an import, one per attempt
+    if kind == "imported-cases":  # the skeleton of an import, one per attempt
         if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
         return root / "imported-cases" / f"{attempt_id}.json"
-    if kind.startswith(_PRIOR_KIND):  # FaT-BO: one receipt per batch, in its own folder
+    if kind.startswith(_PRIOR_KIND):  # one receipt per batch, in its own folder
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_PRIOR_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
         return root / "prior-capabilities" / f"{attempt_id}.{kind[len(_PRIOR_KIND):]}.json"
@@ -3555,7 +3555,7 @@ def _validate_factual_receipt(
             raise ValueError("invalid factual receipt")
         if set(receipt) != common | {"module_selection_digest", "baseline_digest"} or not isinstance(receipt.get("module_selection_digest"), str) or not isinstance(receipt.get("baseline_digest"), str) or receipt["module_selection_digest"] != module_selection_digest(project, attempt["module"]) or receipt["baseline_digest"] != attempt["baseline_digest"]:
             raise ValueError("invalid phase1 artifact")
-    elif kind == "reference-cases":  # FaT-REF: the parsed reference CSV of scan --reference, a hint source only
+    elif kind == "reference-cases":  # the parsed reference CSV of scan --reference, a hint source only
         reference = receipt.get("reference")
         if (
             set(receipt) != common | {"reference"}
@@ -3567,7 +3567,7 @@ def _validate_factual_receipt(
             or not isinstance(reference.get("cases"), list)
         ):
             raise ValueError("invalid reference-cases receipt")
-    elif kind == "review-canaries":  # P7: the digests of the canary map and of the reviewer's view, bound to the assembled candidate
+    elif kind == "review-canaries":  # the digests of the canary map and of the reviewer's view, bound to the assembled candidate
         digests = ("candidate_digest", "view_digest", "canary_map_digest")
         if (
             set(receipt) != common | {*digests, "canary_count"}
@@ -3580,7 +3580,7 @@ def _validate_factual_receipt(
                        for event in state["events"])
         ):
             raise ValueError("invalid review-canaries receipt")
-    elif kind in _GENERATOR_INPUT_KINDS.values():  # FaT-DG: the plan or the header with its one self-digest
+    elif kind in _GENERATOR_INPUT_KINDS.values():  # the plan or the header with its one self-digest
         field = next(name for name, value in _GENERATOR_INPUT_KINDS.items() if value == kind)
         value = receipt.get(field)
         if (
@@ -3591,20 +3591,20 @@ def _validate_factual_receipt(
             or field == "plan" and not _plan_batches_listed(value)
         ):
             raise ValueError(f"invalid {kind} receipt")
-    elif kind == "imported-cases":  # FaT-IMP: the skeleton is the one the CSV bound by the inventory gives (FaT-IMP3: and the links)
+    elif kind == "imported-cases":  # the skeleton is the one the CSV bound by the inventory gives (and the links)
         from tools.cases_import import run_skeleton
 
         found = run_skeleton(root, attempt)
         if set(receipt) != common | {"imported"} or not identity_matches or found is None or receipt.get("imported") != found:
             raise ValueError("invalid imported-cases receipt")
-    elif kind.startswith(_SKELETON_KIND):  # FaT-SKB: the slice the whole skeleton and the published plan give, nothing else
+    elif kind.startswith(_SKELETON_KIND):  # the slice the whole skeleton and the published plan give, nothing else
         if (
             set(receipt) != common | {"imported"}
             or not identity_matches
             or receipt.get("imported") != _batch_skeleton_value(project, root, state, str(attempt["attempt_id"]), kind[len(_SKELETON_KIND):])
         ):
             raise ValueError(f"invalid {kind} receipt")
-    elif kind.startswith(_PRIOR_KIND):  # FaT-BO: the value is the one the journal gives, nothing else
+    elif kind.startswith(_PRIOR_KIND):  # the value is the one the journal gives, nothing else
         if (
             set(receipt) != common | {"prior_capabilities"}
             or not identity_matches
@@ -3686,8 +3686,8 @@ def _validate_factual_receipt(
             successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
             edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
             if edits is not None:
-                # FaT-CV: the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
-                # P7: the edits of a canary text were dropped before the successor was made — they are dropped here too.
+                # the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
+                # the edits of a canary text were dropped before the successor was made — they are dropped here too.
                 from tools.review_canaries import filter_edits, verify as verify_canaries
                 from tools.review_edits import edits_rebuild
 
@@ -3935,7 +3935,7 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid execution receipt")
         request = _execution_request_from_payload(payload)
-        if isinstance(payload.get("execution_source"), Mapping):  # P4: the command the human was given is the one the receipt names
+        if isinstance(payload.get("execution_source"), Mapping):  # the command the human was given is the one the receipt names
             try:
                 printed = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "materialization-command", "ARTIFACT_READ_BACK")["record"]
             except (KeyError, TypeError, ValueError) as error:
@@ -3962,7 +3962,7 @@ def _validate_factual_receipt(
             if len(starts) != 1 or starts[0].get("artifact_digest") != request_digest(request):
                 raise ValueError("invalid execution receipt")
     elif kind == "materialization-command":
-        # P4: the command printed to the human who runs the build — and the facts a report is later held against
+        # the command printed to the human who runs the build — and the facts a report is later held against
         _validate_schema("materialization-command-receipt.schema.json", receipt)
         try:
             delta = _phase5_generated_delta(project, root, state, attempt)
@@ -4211,7 +4211,7 @@ def _validate_factual_receipt(
                     if (
                         any(actual.get(key) != relation.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
                         or actual.get("pre_effect_state") not in ({"NOT_APPLICABLE"} if operation == "NO_FILE" else {"EXACT", "MISSING", "DRIFT", "UNSAFE"})
-                        # FaT-8: a quarantine row is either unresolved or names its methods and their marked digest.
+                        # a quarantine row is either unresolved or names its methods and their marked digest.
                         or operation != "QUARANTINE_IF_EXACT" and quarantine_keys
                         or operation == "QUARANTINE_IF_EXACT" and quarantine_keys not in ({"quarantine_unresolved"}, {"quarantine", "quarantined_digest"})
                         or operation == "QUARANTINE_IF_EXACT" and "quarantine" in actual and (actual["quarantine"] == []) != (actual["quarantined_digest"] is None)
@@ -4360,7 +4360,7 @@ _RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-
 
 
 def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> list[str]:
-    """F1: the digests the journal read back as receipts of the attempt (``ARTIFACT_READ_BACK`` without a batch) that no receipt file of the
+    """The digests the journal read back as receipts of the attempt (``ARTIFACT_READ_BACK`` without a batch) that no receipt file of the
     run carries any more — deleted or replaced.  Reads files, writes nothing."""
     wanted = [str(event["artifact_digest"]) for event in state["events"]
               if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") is None
@@ -4379,7 +4379,7 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
 
 
 def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_type: str) -> Mapping[str, Any]:
-    """F1: the answer of ``read-receipt`` — the receipt as ``read_attempt_receipt`` gives it, or ``{"receipt": None, "reason": …}`` while the
+    """The answer of ``read-receipt`` — the receipt as ``read_attempt_receipt`` gives it, or ``{"receipt": None, "reason": …}`` while the
     journal says there is none yet.  A file that is there is read the strict way.  The journal binds a receipt by its digest alone (the
     events of a fixed receipt carry no kind), so «not yet» is decided only where the journal fixes it: the boundary of the reviewer
     session exists from ``review-open`` on, and ``review-open`` opens the ledger (events ``reviewer-ledger-v1``) — no such event, no boundary
@@ -4400,7 +4400,7 @@ def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_
 
 
 class ReceiptFileUnbound(ValueError):
-    """The file of a receipt lies without its events and its bytes are not the ones being published (J1: one code for every family)."""
+    """The file of a receipt lies without its events and its bytes are not the ones being published (one code for every family)."""
 
     code = "RECEIPT_FILE_UNBOUND"
 
@@ -4443,7 +4443,7 @@ def _file_is_bound(root: Path, attempt_id: str, target: Path) -> bool:
 
 
 def publish_bound(run_root: Path, attempt_id: str, kind: str, facts: Mapping[str, Any], *, batch_id: str | None = None) -> Mapping[str, Any]:
-    """J1: publish one fixed receipt of the attempt and bind it to the journal — the single way, for every family, that a command may
+    """Publish one fixed receipt of the attempt and bind it to the journal — the single way, for every family, that a command may
     leave half done and run again.
 
     Contract: the bytes are the ones this call computes from ``facts`` (validated as ``publish_attempt_receipt`` does); the file at the
@@ -4474,7 +4474,7 @@ def publish_bound(run_root: Path, attempt_id: str, kind: str, facts: Mapping[str
 
 def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, digest: str, batch_id: str | None = None,
                label: str) -> Mapping[str, Any]:
-    """J1: the same contract for a content-addressed file that is no fixed receipt (a ledger revision, a run artifact of the attempt).
+    """The same contract for a content-addressed file that is no fixed receipt (a ledger revision, a run artifact of the attempt).
 
     ``data`` is what the caller computed; ``digest`` the identity the events carry (the record's own digest).  The file at ``target`` is compared with ``data`` and is never the
     source of the bytes (what is found on a disk is not a fact of the run).  No file → written; the same bytes → only the missing events
@@ -4502,7 +4502,7 @@ def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, di
     return {"created": created, "installed_identity": identity, "path": str(target.relative_to(root)).replace("\\", "/"), "digest": digest}
 
 
-# the names the code and the tests used before J1
+# the earlier names the code and the tests used
 _publish_bound_attempt_receipt = publish_bound
 
 
@@ -4784,7 +4784,7 @@ def _read_effective_canonical_with_state(
     return readback["record"]
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def read_effective_canonical(
     run_root: Path,
     attempt_id: str,
@@ -4829,7 +4829,7 @@ def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[st
     if not recorded:
         return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (review-select --verdict)"}
     not_yet = {"effective": None, "reason": "ещё нет: ответ ревьюера записан, ревизия не выбрана — повтори review-select (тот же --verdict или без него)"}
-    # F2: the order of the writes of review-select decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
+    # the order of the writes of review-select decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
     # canonical (orchestrate_revision: validate_reviewer_session, then publish_effective_canonical).  So a latest revision still waiting for its
     # READ_BACK, a ledger still WAITING (no verdict), and a closed accepting ledger with no attempt-level receipt read back after it all mean the
     # effective canonical was not published yet — a repeat of review-select does it.  Only a published selection whose file is gone is a refusal.
@@ -4882,7 +4882,7 @@ def recover_phase5_receipt_events(run_root: Path, attempt_id: str, kind: str) ->
     return _recover_attempt_receipt_events(run_root, attempt_id, kind)
 
 
-@closure_cached  # FaT-9b
+@closure_cached  
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back the controller-owned isolation boundary for one V5 revision."""
     revision = facts.get("automation_revision")
@@ -4910,13 +4910,13 @@ def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapp
 
 
 class IndependenceUnverified(ValueError):
-    """FaT-10d: the host states no fresh context in a run without ``scan --accept-self-review``."""
+    """The host states no fresh context in a run without ``scan --accept-self-review``."""
 
     code = "INDEPENDENCE_UNVERIFIED"
 
 
 def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None:
-    """FaT-10d: ``fresh_context`` is the host's statement; ``no`` needs SELF admitted at scan, ``yes`` is left to the protocol."""
+    """``fresh_context`` is the host's statement; ``no`` needs SELF admitted at scan, ``yes`` is left to the protocol."""
     if type(fresh_context) is not bool:
         raise ValueError("fresh_context must be the host's yes or no")
     if not fresh_context and not self_review_accepted(run_root):
@@ -4927,7 +4927,7 @@ def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None
         )
 
 
-@closure_cached  # FaT-10d
+@closure_cached  
 def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *, fresh_context: bool, reviewer_invocation_id: str) -> dict[str, Any]:
     """The ``--facts`` of ``open-automation-boundary`` for revision N from the journal; writes nothing.
 
@@ -4958,34 +4958,34 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
     }
 
 
-_GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  # FaT-DG
+_GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  
 
 
 def publish_reference_cases(run_root: Path, attempt_id: str, path: str, data: bytes, cases: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
-    """FaT-REF: the reference cases of ``scan --reference`` (parsed by ``zephyr_csv``) as a receipt of the attempt; they
+    """The reference cases of ``scan --reference`` (parsed by ``zephyr_csv``) as a receipt of the attempt; they
     never enter the context, the generator input or the canon."""
     facts = {"reference": {"path": path, "sha256": "sha256:" + hashlib.sha256(bytes(data)).hexdigest(), "cases": [dict(case) for case in cases]}}
     return publish_bound(run_root, attempt_id, "reference-cases", facts)
 
 
 def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
-    """FaT-REF: the reference of the attempt, None when the scan had no ``--reference``."""
+    """The reference of the attempt, None when the scan had no ``--reference``."""
     try:
         return read_attempt_receipt(run_root, attempt_id, "reference-cases", "ARTIFACT_READ_BACK")["record"]["reference"]
     except (ValueError, OSError, KeyError):
         return None
-_PRIOR_KIND = "prior-capabilities-"  # FaT-BO: + batch_id — the fifth tc-generator input from batch 2
-_SKELETON_KIND = "imported-cases-"  # FaT-SKB: + batch_id — the skeleton of the batch, its last tc-generator input
+_PRIOR_KIND = "prior-capabilities-"  # + batch_id — the fifth tc-generator input from batch 2
+_SKELETON_KIND = "imported-cases-"  # + batch_id — the skeleton of the batch, its last tc-generator input
 
 
 def _batch_ordinal(batch: Mapping[str, Any]) -> int:
-    """FaT-BO: the ordinal of a published plan batch; a fixture plan without one is a first batch (four inputs)."""
+    """The ordinal of a published plan batch; a fixture plan without one is a first batch (four inputs)."""
     return batch["ordinal"] if type(batch.get("ordinal")) is int else 1
 
 
 def _accepted_earlier_fragments(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, plan: Mapping[str, Any],
                                 batch_id: str) -> list[dict[str, Any]]:
-    """FaT-BO: the accepted fragments (model-response) of the batches before *batch_id*; one missing is refused by name."""
+    """The accepted fragments (model-response) of the batches before *batch_id*; one missing is refused by name."""
     rows = [row for row in plan.get("batches") or [] if isinstance(row, Mapping)]
     current = next((row for row in rows if row.get("batch_id") == batch_id), None)
     if current is None:
@@ -5007,7 +5007,7 @@ def _accepted_earlier_fragments(project: Path, root: Path, state: Mapping[str, A
 
 
 def _prior_capabilities_value(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str) -> Mapping[str, Any]:
-    """FaT-BO: the capabilities of the accepted batches before *batch_id*, built by code from the published plan and the journal."""
+    """The capabilities of the accepted batches before *batch_id*, built by code from the published plan and the journal."""
     from tools.batch_assembly import BatchAssemblyError, prior_capabilities
 
     plan = _generator_input(project, root, state, attempt_id, "plan")
@@ -5024,7 +5024,7 @@ def _prior_capabilities_value(project: Path, root: Path, state: Mapping[str, Any
 
 
 def _imported_cases(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> Mapping[str, Any] | None:
-    """FaT-IMP: the published skeleton of an import run; None for a run without --cases; refused when not yet published."""
+    """The published skeleton of an import run; None for a run without --cases; refused when not yet published."""
     from tools.cases_import import cases_path
 
     if cases_path(root) is None:
@@ -5037,7 +5037,7 @@ def _imported_cases(project: Path, root: Path, state: Mapping[str, Any], attempt
 
 
 def _batch_skeleton_value(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str) -> Mapping[str, Any]:
-    """FaT-SKB: the skeleton of *batch_id* as the whole skeleton and the published plan give it."""
+    """The skeleton of *batch_id* as the whole skeleton and the published plan give it."""
     from tools.cases_import import slice_value
 
     whole = _imported_cases(project, root, state, attempt_id)
@@ -5047,7 +5047,7 @@ def _batch_skeleton_value(project: Path, root: Path, state: Mapping[str, Any], a
 
 
 def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
-    """FaT-SKB: publish the skeleton of every batch of the published plan — bookkeeping inside the plan publication the
+    """Publish the skeleton of every batch of the published plan — bookkeeping inside the plan publication the
     agent called; the same plan again changes nothing.  ``{batch_id: digest}``; empty for a run without --cases."""
     from tools.cases_import import cases_path
 
@@ -5062,7 +5062,7 @@ def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
         value = _batch_skeleton_value(project, root, state, attempt_id, row["batch_id"])
         prior = None
         if _receipt_target(root, attempt_id, kind).exists():
-            try:  # F2 (A2-4): a file without its events is finished below, not a dead end
+            try:  # a file without its events is finished below, not a dead end
                 prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["imported"]
             except (ValueError, OSError, KeyError):
                 prior = None
@@ -5076,15 +5076,15 @@ def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
 
 def _imported_for_answer(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str,
                          request: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """FaT-SKB: what model-response checks the human fields against — the skeleton the request took as its last input:
-    the batch's own one, or the whole one for a request published before FaT-SKB.  None for a run without --cases."""
+    """What model-response checks the human fields against — the skeleton the request took as its last input:
+    the batch's own one, or the whole one for a request published by an earlier version.  None for a run without --cases."""
     whole = _imported_cases(project, root, state, attempt_id)
     if whole is None or (request.get("input_digests") or [None])[-1] == whole["digest"]:
         return whole
     return _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + batch_id, "ARTIFACT_READ_BACK")["record"]["imported"]
 
 
-@closure_cached  # FaT-IMP
+@closure_cached  
 def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     """Publish the skeleton of an import run from its CSV; the same value again changes nothing."""
     from tools.cases_import import run_skeleton
@@ -5099,7 +5099,7 @@ def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     return {"digest": value["digest"], "cases": len(value["cases"]), "path": target.relative_to(root).as_posix()}
 
 
-@closure_cached  # FaT-BO
+@closure_cached  
 def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -> dict[str, Any]:
     """Publish the fifth tc-generator input of batch k>=2 — built from the journal, one receipt per batch; the same value
     again changes nothing, another one is refused."""
@@ -5112,7 +5112,7 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
         try:
             prior = _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["prior_capabilities"]
         except (ValueError, OSError, KeyError):
-            prior = None  # F2 (A2-4): the file is there, its events are not — below it is finished (same bytes) or refused (other bytes)
+            prior = None  # the file is there, its events are not — below it is finished (same bytes) or refused (other bytes)
         if prior is not None and prior != value:
             raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {batch_id} already has other prior capabilities; another one needs "
                              "a new run (scan --new-run)")
@@ -5128,7 +5128,7 @@ _STAGE_EXAMPLES = "context-marker:baseline, tc-generator:BATCH-<id>, tc-reviewer
 
 
 def _new_run_fix(root: Path) -> str:
-    """FaT-H4b: the scan of this run's request with --new-run, as other refusals of a closed attempt give it."""
+    """The scan of this run's request with --new-run, as other refusals of a closed attempt give it."""
     try:
         from tools.run_pipeline import _scan_command
 
@@ -5141,31 +5141,31 @@ def _new_run_fix(root: Path) -> str:
 
 
 class ModelRequestInvalid(ValueError):
-    """FaT-AU1: a model request that breaks one of its basic conditions, named in the message."""
+    """A model request that breaks one of its basic conditions, named in the message."""
 
     code = "MODEL_REQUEST_INVALID"
 
 
 class ModelRequestDuplicate(ValueError):
-    """FaT-AU1: a second request of one stage of the attempt."""
+    """A second request of one stage of the attempt."""
 
     code = "MODEL_REQUEST_DUPLICATE"
 
 
 class ModelStageArtifactInvalid(ValueError):
-    """FaT-AU1: a model answer that does not pass its schema; the message carries the retry_prompt."""
+    """A model answer that does not pass its schema; the message carries the retry_prompt."""
 
     code = "MODEL_STAGE_ARTIFACT_INVALID"
 
 
 class ModelInputsMismatch(ValueError):
-    """FaT-DG: a model request whose input digests are not the ones the journal fixes."""
+    """A model request whose input digests are not the ones the journal fixes."""
 
     code = "MODEL_INPUTS_MISMATCH"
 
 
 class ModelRequestOutOfOrder(ValueError):
-    """FaT-RQ: a request of the automation chain that is not its next stage (an orphan r2 before r1)."""
+    """A request of the automation chain that is not its next stage (an orphan r2 before r1)."""
 
     code = "MODEL_REQUEST_OUT_OF_ORDER"
 
@@ -5184,24 +5184,24 @@ def _require_next_automation_stage(run_root: Path, attempt_id: str, stage_instan
 
 
 class ModelReuseRefused(ValueError):
-    """FaT-CR: the named run is no reuse source for this context-marker request (the reason says why)."""
+    """The named run is no reuse source for this context-marker request (the reason says why)."""
 
     code = "MODEL_REUSE_REFUSED"
 
 
 class ModelReuseMismatch(ValueError):
-    """FaT-CR: the answer to a reuse request is not the source answer byte for byte."""
+    """The answer to a reuse request is not the source answer byte for byte."""
 
     code = "MODEL_REUSE_MISMATCH"
 
 
-# FaT-CR: a marker is reused only from a run whose review accepted the cases; AUTO_FIX_APPLIED fixes human fields only, not the marker
+# a marker is reused only from a run whose review accepted the cases; AUTO_FIX_APPLIED fixes human fields only, not the marker
 ACCEPTED_REVIEW = frozenset({"ПРИНЯТО", "AUTO_FIX_APPLIED"})
 _REUSE_FREE = "нет прошлого прогона с разметкой"
 
 
 def skill_pack_digest() -> str | None:
-    """FaT-CR: the skill_pack_digest of this package's release/manifest.json — the one fingerprint of the package (audit U9)."""
+    """The skill_pack_digest of this package's release/manifest.json — the one fingerprint of the package (audit U9)."""
     try:
         value = json.loads((Path(__file__).resolve().parents[1] / "release" / "manifest.json").read_text(encoding="utf-8")).get("skill_pack_digest")
     except (OSError, ValueError, AttributeError):
@@ -5263,7 +5263,7 @@ def _source_refusal(source: Mapping[str, Any], module: str) -> str | None:
 def _reuse_source(
     project: Path, root: Path, attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str], role_policy: str, pack: str | None, run_id: str,
 ) -> dict[str, str]:
-    """FaT-CR: the reuse record of a context-marker request — only when every condition on the source holds."""
+    """The reuse record of a context-marker request — only when every condition on the source holds."""
     if run_id == root.name:
         raise ModelReuseRefused("MODEL_REUSE_REFUSED: тот же прогон — переиспользуется только прошлый прогон")
     source = _marker_source(project, run_id)
@@ -5287,7 +5287,7 @@ def _reuse_source(
 
 
 def _marker_stage_order(stage: str) -> tuple[int, int]:
-    """FaT-CR2: the order the journal accepts — requirements, the parts by number, then the baseline."""
+    """The order the journal accepts — requirements, the parts by number, then the baseline."""
     if stage == "context-marker:requirements":
         return 0, 0
     if stage.startswith("context-marker:batch-"):
@@ -5305,7 +5305,7 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
 
 
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-CR: an earlier run of the project whose context marker this attempt may reuse, with the commands — or why not.
+    """An earlier run of the project whose context marker this attempt may reuse, with the commands — or why not.
 
     A suggestion only: the agent decides; every reused answer still goes through model-request --reuse-from and
     model-response, the same checks as a fresh one."""
@@ -5346,7 +5346,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
         source_attempt = str(source["attempt"]["attempt_id"])
         rows = []
         made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
-        if made_by.get("context-marker:requirements") == "controller:cases-import":  # FaT-CR2: an import makes it by code
+        if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
             rows.append({"stage": "context-marker:requirements", "by": "cases-import",
                          "commands": [f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}"]})
         for stage in model_stages:
@@ -5365,7 +5365,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 class ModelResponseDigestMismatch(ValueError):
-    """FaT-DG: a digest field of a model answer that does not match the journal; nothing is written."""
+    """A digest field of a model answer that does not match the journal; nothing is written."""
 
     code = "MODEL_RESPONSE_DIGEST_MISMATCH"
 
@@ -5377,7 +5377,7 @@ def _generator_input_digest(value: Mapping[str, Any]) -> str:
 
 
 def _plan_contexts(plan: Mapping[str, Any]) -> list[str]:
-    """FaT-AU3: the context receipts every generator batch of the plan reads, in order (one before the list)."""
+    """The context receipts every generator batch of the plan reads, in order (one before the list)."""
     from tools.batch_assembly import context_digests
 
     if isinstance(plan.get("context_receipt_digests"), list) or "context_receipt_digest" in plan:
@@ -5396,9 +5396,9 @@ def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
     )
 
 
-@closure_cached  # FaT-DG
+@closure_cached  
 def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], header_digest: str, state: Mapping[str, Any]) -> None:
-    """P2-fix: the checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
+    """The checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
     attempt, the receipts are a prefix in batch_index order.  They write nothing, so ``tools.api plan`` can run them before it
     publishes the header and a refusal leaves the journal as it was."""
     unfinished = context_incomplete(root, attempt_id, state)
@@ -5408,20 +5408,20 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], he
         if row["header_digest"] != header_digest:
             raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
                              f"header is {header_digest}; fix: put {header_digest} as header_digest in the grouping and rerun plan-batches")
-        for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # FaT-AU3: and the list
+        for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # and the list
             try:
                 read_context_selection(root, attempt_id, context)
             except ValueError as error:
                 selected = sorted({str(event["artifact_digest"]) for event in state["events"]
                                    if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
-                if context in selected:  # F3 (hunt 8.6): the receipt is the attempt's, its bytes no longer match the project
+                if context in selected:  # the receipt is the attempt's, its bytes no longer match the project
                     raise ValueError(f"CONTEXT_DRIFTED: the context receipt {context} of batch {row['batch_id']} is the attempt's, but the "
                                      "files of the context changed after the scan; fix: `run_pipeline status` shows drift.changed — "
                                      "restore those files, or start the run again with `scan --new-run`") from error
                 raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
                                  f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
                                  "(tools.api read-context --digest <d>)") from error
-    # FaT-H4a (hunt 4.1): the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
+    # the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
     # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
     ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(
         str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")),
@@ -5454,11 +5454,11 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
         raise ValueError("GENERATOR_INPUT_INVALID: the plan lists no batches; build it with tools.api plan-batches")
     receipt_kind = _GENERATOR_INPUT_KINDS[kind]
     project, root = _run_root(run_root)
-    if kind == "plan":  # FaT-DG: a plan the generator request would refuse is refused now, while another plan is still possible
+    if kind == "plan":  # a plan the generator request would refuse is refused now, while another plan is still possible
         state = derive_state(root)
         from tools.scope_pause import check_plan
 
-        check_plan(root, attempt_id, item, state)  # FaT-P3: the pause after the marker — the plan carries the human's answer
+        check_plan(root, attempt_id, item, state)  # the pause after the marker — the plan carries the human's answer
         try:
             header = _generator_input(project, root, state, attempt_id, "header")
         except ModelInputsMismatch as error:
@@ -5474,11 +5474,11 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
         raise ValueError(f"GENERATOR_INPUT_CONFLICT: this attempt already has the {kind} {prior.get('digest')}; "
                          "another one needs a new run (scan --new-run)")
     publish_bound(run_root, attempt_id, receipt_kind, {kind: item})
-    skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # FaT-SKB: the last input of each batch
-    if kind == "plan":  # FaT-H4a (hunt 4.1): which context batches of the attempt the generator sees — the line of the reviewer view
+    skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # the last input of each batch
+    if kind == "plan":  # which context batches of the attempt the generator sees — the line of the reviewer view
         from tools.review_view import run_context_note
 
-        try:  # FaT-H4a2: a hint, never a stop — as in the reviewer view
+        try:  # a hint, never a stop — as in the reviewer view
             context = run_context_note(root, attempt_id)
         except (KeyError, OSError, ValueError, TypeError):
             context = None
@@ -5498,10 +5498,10 @@ class PlanPublished(tuple):
 def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], requirements: list[dict[str, Any]], grouping: Mapping[str, Any],
                  project: Path, input_files: list[Path], context_receipt: Any, imported: Mapping[str, Any] | None,
                  out_of_scope: Any = None, before_check: Any = None) -> PlanPublished:
-    """P2 (item 9): ``tools.api plan`` — what ``publish-generator-input --kind header``, ``plan-batches`` and ``publish-generator-input
+    """``tools.api plan`` — what ``publish-generator-input --kind header``, ``plan-batches`` and ``publish-generator-input
     --kind plan`` do, in that order, with their events and files, in one call.  The grouping needs no ``header_digest``: it is the
     self-digest of the header; a grouping that names another is GENERATOR_INPUT_HEADER.  The plan is built before anything is published,
-    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was.  J1 (A2-6): ``before_check`` (the record
+    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was. ``before_check`` (the record
     of the human's scope answer) runs once the inputs have been parsed into a plan and before the plan is checked against the answer."""
     from tools.batch_assembly import plan_batches_for_project
 
@@ -5534,7 +5534,7 @@ def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], req
 
 
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
-    """FaT-DG: the published (plan, header) of the attempt, or None when the run published neither (before FaT-DG)."""
+    """The published (plan, header) of the attempt, or None when the run published neither (in a run of an earlier version)."""
     try:
         return _generator_input(project, root, state, attempt_id, "plan"), _generator_input(project, root, state, attempt_id, "header")
     except ModelInputsMismatch:
@@ -5554,7 +5554,7 @@ def _generator_input(project: Path, root: Path, state: Mapping[str, Any], attemp
 def _expected_model_inputs(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str,
 ) -> list[tuple[str, str]] | None:
-    """FaT-DG: the ordered input digests the journal fixes for a model request, each with where it comes from.
+    """The ordered input digests the journal fixes for a model request, each with where it comes from.
 
     None — the journal does not fix them here (context-marker, or a predecessor is missing: the existing checks name it)."""
     stage, _, instance = stage_instance_id.partition(":")
@@ -5574,12 +5574,12 @@ def _expected_model_inputs(
         expected = [
             (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
             (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
-            # FaT-AU3: the further context receipts of the plan, in its order
+            # the further context receipts of the plan, in its order
             *((context, f"context_receipt_digests[{index}] опубликованного плана") for index, context in enumerate(_plan_contexts(plan)) if index),
             (str(plan["digest"]), "result.digest команды publish-generator-input --kind plan"),
             (str(header["digest"]), "result.digest команды publish-generator-input --kind header"),
         ]
-        if _batch_ordinal(batch) > 1:  # FaT-BO: from batch 2 the capabilities of the accepted earlier batches
+        if _batch_ordinal(batch) > 1:  # from batch 2 the capabilities of the accepted earlier batches
             prior = _prior_capabilities_value(project, root, state, attempt_id, instance)
             try:
                 _read_attempt_receipt_with_state(project, root, state, attempt_id, _PRIOR_KIND + instance, "ARTIFACT_READ_BACK")
@@ -5589,7 +5589,7 @@ def _expected_model_inputs(
                     f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — вход сразу после header"
                 ) from error
             expected.append((str(prior["digest"]), f"result.digest команды tools.api prior-capabilities --batch-id {instance}"))
-        if _imported_cases(project, root, state, attempt_id) is not None:  # FaT-SKB: the skeleton of this batch is its last input
+        if _imported_cases(project, root, state, attempt_id) is not None:  # the skeleton of this batch is its last input
             try:
                 skeleton = _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + instance, "ARTIFACT_READ_BACK")["record"]["imported"]
             except (ValueError, OSError, KeyError) as error:
@@ -5629,7 +5629,7 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
     if len(inputs) > len(expected):
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
     order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
-    if stage_instance_id.startswith("tc-reviewer:"):  # P2: the reviewer's request is the work of review-open, one fix for the whole chain
+    if stage_instance_id.startswith("tc-reviewer:"):  # the reviewer's request is the work of review-open, one fix for the whole chain
         from tools.fixes import REVIEW_CHAIN
 
         return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет review-open "
@@ -5641,7 +5641,7 @@ _PROVENANCE_LINE = re.compile(r"^(?P<path>[^\s:]+):(?P<line>\d+)(?!\d)")
 
 
 def _requirement_order_rows(stage_instance_id: str, value: Mapping[str, Any]) -> str | None:
-    """FaT-SN: the first source requirement out of document order, or None.  In display_order the requirements of one
+    """The first source requirement out of document order, or None.  In display_order the requirements of one
     document come together (the documents in the answer's own order — of --docs or the task first, never forced by path)
     and its lines grow as numbers (`…md:4` before `…md:12`), by the first provenance `path:line` of each; the SREQ numbers
     follow display_order.  A row whose first reference names no line leaves the whole order to the model."""
@@ -5683,7 +5683,7 @@ def _response_bindings(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
     request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> list[tuple[str, str | None, str]]:
-    """FaT-DG, audit U2: the digest fields of a model answer the journal fixes — (pointer, expected, source).  The one list
+    """The digest fields of a model answer the journal fixes — (pointer, expected, source).  The one list
     both for the check (``_response_digest_rows``) and for the fill (``_fill_response_bindings``); the expected value of the
     fragment self-digest is None — it is the digest of the answer itself, taken last.
 
@@ -5706,7 +5706,7 @@ def _response_bindings(
     try:
         if stage == "tc-generator":
             inputs = request["input_digests"]
-            try:  # FaT-AU3: further context receipts of the published plan shift plan and header
+            try:  # further context receipts of the published plan shift plan and header
                 more = len(_plan_contexts(_generator_input(project, root, state, attempt_id, "plan"))) - 1
             except ModelInputsMismatch:
                 more = 0
@@ -5777,7 +5777,7 @@ def _response_digest_rows(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
     request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> list[tuple[str, Any, str, str]]:
-    """FaT-DG: the digest fields of a model answer against the journal — (pointer, given, expected, source) per mismatch."""
+    """The digest fields of a model answer against the journal — (pointer, given, expected, source) per mismatch."""
     rows = []
     for pointer, expected, source in _response_bindings(project, root, state, attempt_id, stage_instance_id, request, value):
         expected = _self_digest(value) if expected is None else expected
@@ -5832,7 +5832,7 @@ def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str,
 
 
 def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
-    """P7: bind the digests of the canary map and of the reviewer's view to the attempt: the receipt and its event pair, marked with
+    """Bind the digests of the canary map and of the reviewer's view to the attempt: the receipt and its event pair, marked with
     ``batch_id`` ``review-canaries-v1`` — whether canaries were seeded is read from these events, not from a file.  The same facts
     again change nothing."""
     from tools.review_canaries import BATCH_ID
@@ -5946,7 +5946,7 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
         raise ValueError("rework requires one rejected reviewer verdict")
     if reason == "EXECUTION_UNKNOWN" and (facts["completion"] != "PARTIAL" or facts["verification"] != "UNKNOWN"):
         raise ValueError("invalid result reason tuple")
-    # FaT-PA: the automated subset passed, the cases with blockers stayed manual
+    # the automated subset passed, the cases with blockers stayed manual
     if reason == "AUTOMATION_PARTIAL" and (policy_profile != "local-pilot-v1" or facts["completion"] != "PARTIAL"
                                            or facts["verification"] != "PASS" or e["blocker_count"] == 0):
         raise ValueError("invalid result reason tuple")
@@ -5998,7 +5998,7 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
             raise ValueError("invalid pre-verdict abort reason")
     if facts["verification"] == "UNKNOWN" and not closure_invalid and reason != "EXECUTION_UNKNOWN":
         raise ValueError("invalid unknown result tuple")
-    # FaT-4b: SELF marks a review admitted by `scan --accept-self-review`; it never stands next to a verified isolation.
+    # SELF marks a review admitted by `scan --accept-self-review`; it never stands next to a verified isolation.
     self_review = "review_independence" in facts
     if self_review and (facts["review_independence"] != "SELF" or e["reviewer_isolation_state"] == "verified"):
         raise ValueError("invalid review independence")
@@ -6692,7 +6692,7 @@ def _project_state_for(policy_profile: str, project: Path) -> dict[str, Any] | N
 
     A project without ``.git`` is sealed as ``GIT_DIRECTORY`` (the precondition of the scenario ``fresh-non-git``); a project with it, and
     every ``cases-only-v1`` run, has ``project_state: null`` — "not taken", which no reader takes for "clean".  That the run did not touch
-    the user's files is proved at its end by the inventory (``_project_tree_state``), not by ``git status`` (V4a: a clean filter or a hook
+    the user's files is proved at its end by the inventory (``_project_tree_state``), not by ``git status`` (a clean filter or a hook
     of the project's own configuration runs there)."""
     if policy_profile == "cases-only-v1" or (Path(project) / ".git").exists():
         return None
@@ -6700,7 +6700,7 @@ def _project_state_for(policy_profile: str, project: Path) -> dict[str, Any] | N
 
 
 def _project_tree_state(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """V4a: the user's tree as the inventory sees it — the number of files and the digest of their ``(path, content digest)`` pairs."""
+    """The user's tree as the inventory sees it — the number of files and the digest of their ``(path, content digest)`` pairs."""
     pairs = sorted((str(row["project_path"]), str(row["content_digest"])) for row in rows)
     return _sealed({"kind": "PROJECT_TREE", "files": len(pairs),
                     "tree_digest": "sha256:" + hashlib.sha256(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()})
@@ -6717,7 +6717,7 @@ def _owned_project_paths(root: Path, attempt: Mapping[str, Any]) -> set[str]:
 
 
 def _project_tree_states(project: Path, root: Path, attempt: Mapping[str, Any], inventory: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """V4a: ``(before, after)`` — the frozen inventory of the attempt, and the inventory rebuilt now, both without the files the pipeline
+    """``(before, after)`` — the frozen inventory of the attempt, and the inventory rebuilt now, both without the files the pipeline
     owns.  The same rebuild as ``run_pipeline._baseline_check`` (the same arguments), so what ``status`` calls a drift is what is compared."""
     from tools.project_inventory import baseline_external_input_paths, build_inventory
 
@@ -6897,7 +6897,7 @@ def _validate_scenario_observation(
                 and after == _terminal_retry_snapshot(root, str(attempt["attempt_id"]))
             )
         else:
-            # V4a: no state in the manifest — the "before" is the frozen inventory of the attempt (without the files the pipeline owns)
+            # no state in the manifest — the "before" is the frozen inventory of the attempt (without the files the pipeline owns)
             owned = _owned_project_paths(root, attempt)
             valid = (
                 initial is None
@@ -7081,7 +7081,7 @@ def publish_project_state_observation(
         return None
     manifest = read_run(root)["manifest"]
     before = manifest.get("project_state")
-    if before is None:  # V4a: no state — the tree of a local-pilot run is compared by the inventory (below); a cases-only run takes none
+    if before is None:  # no state — the tree of a local-pilot run is compared by the inventory (below); a cases-only run takes none
         if attempt.get("policy_profile") != "local-pilot-v1":
             return None
     elif not isinstance(before, Mapping) or before.get("kind") != "GIT_DIRECTORY":
@@ -7214,7 +7214,7 @@ def exit_code(result: Mapping[str, Any] | None, controller_error: bool = False) 
     return 1
 
 
-# Public names for execution_core / finalize_attempt (V1): the same objects under names without an underscore; a rename of the private name is then
+# Public names for execution_core / finalize_attempt: the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 append_journal_event = _append_event
 check_sealed_value = _check_sealed
@@ -7223,7 +7223,7 @@ publish_artifact_value = _publish
 scenario_observation_target = _scenario_observation_target
 run_root_of = _run_root
 terminal_retry_snapshot = _terminal_retry_snapshot
-generator_input = _generator_input  # V7: the published plan or header of the attempt (step_size, for the projection of the plan)
+generator_input = _generator_input  # the published plan or header of the attempt (step_size, for the projection of the plan)
 validate_execution_event_branch = _validate_execution_event_branch
-publish_fixed_receipt_resuming = publish_bound  # J1: the name P4a made public (execution_core, exec_commands) is the one contract; drop it when they call publish_bound
+publish_fixed_receipt_resuming = publish_bound  # the public name (execution_core, exec_commands) is the one contract; drop it when they call publish_bound
 canonical_digest = _digest

@@ -1,4 +1,4 @@
-"""FaT-P3: ``--docs путь#Раздел`` — one section of a Markdown analytics file instead of the whole file.
+"""``--docs путь#Раздел`` — one section of a Markdown analytics file instead of the whole file.
 
 A section is an ATX heading (``# …`` to ``###### …``, outside code fences) and everything up to the next heading of the same or
 a higher level.  The model reads a *view* of it: the file with every line outside the section left empty, so the lines of the
@@ -46,7 +46,7 @@ def headings(text: str) -> list[tuple[int, int, str]]:
     """``(line, level, title)`` of every ATX heading outside code fences, in file order."""
     found: list[tuple[int, int, str]] = []
     fence: str | None = None
-    # F5: Notepad saves with a BOM; a heading on the first line is still a heading (the digests stay those of the bytes)
+    # Notepad saves with a BOM; a heading on the first line is still a heading (the digests stay those of the bytes)
     for number, line in enumerate(text.removeprefix("﻿").splitlines(), start=1):
         opening = _FENCE.match(line)
         if opening:

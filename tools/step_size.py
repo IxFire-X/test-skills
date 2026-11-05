@@ -1,18 +1,18 @@
-"""The size of one model step's input before the call, against the step budget (FaT-3).
+"""The size of one model step's input before the call, against the step budget.
 
 ``python -m tools.step_size --project <abs> --files <path>… [--role <role>]`` sums the files a step reads;
 ``--run <id> --stage context-marker [--batch N]`` takes them from the journal: the selected context files of the
 batch (all batches without ``--batch``) and the requirement documents of the run.  ``--role`` (by default the role of
 ``--stage``) adds ``skills/<role>/SKILL.md`` and its references.  The budget is ``.skillsrc`` ``limits.step_input_bytes``,
 else 500 000 bytes: the window is shared with the session history.  Prints
-``{bytes, tokens_est, budget_bytes, fits, warning, hint, recorded, …}``.  FaT-RV: a step over the budget is the warning
+``{bytes, tokens_est, budget_bytes, fits, warning, hint, recorded, …}``. A step over the budget is the warning
 ``STEP_OVER_BUDGET`` with the hint, not a stop (exit 0).  With ``--run`` the measurement — the step (``--step``, else
 the stage or the role), sizes and the code, no file paths — is appended to ``<run>/step-sizes.jsonl`` for the report.
-FaT-O: ``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_output_warn_bytes`` (default
+``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_output_warn_bytes`` (default
 ``DEFAULT_OUTPUT_WARN``) is the warning ``STEP_OUTPUT_LARGE``; only a measurement, nothing is split or rewritten.
-FaT-Q2: ``--stage context-marker:requirements`` is the requirements step of the marker in parts (the documents only);
+``--stage context-marker:requirements`` is the requirements step of the marker in parts (the documents only);
 ``--stage tc-generator:<batch>|tc-reviewer:canonical|tc-to-autotest:rN|autotest-reviewer:rN`` takes the files behind the
-``input_digests`` of the published model request of that stage (``stage_inputs``, FaT-U7: by the journal of the attempt, the
+``input_digests`` of the published model request of that stage (``stage_inputs``, by the journal of the attempt, the
 same answer as ``step-inputs`` and the run report): an input the journal does not bind is ``unresolved``
 (``STEP_INPUT_UNRESOLVED``, not a stop), nothing is guessed.
 """
@@ -30,7 +30,7 @@ from tools.json_cli import JsonArgumentParser, cli_error
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
-DEFAULT_WINDOW = 1_000_000  # FaT-BO: DeepSeek 239k tokens / 0.239 tok/B
+DEFAULT_WINDOW = 1_000_000  # DeepSeek 239k tokens / 0.239 tok/B
 OVER_BUDGET = "STEP_OVER_BUDGET"
 RECORD = "step-sizes.jsonl"
 OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
@@ -73,7 +73,7 @@ def _live_limits(project: Path) -> Mapping[str, Any]:
 
 
 def run_limits(project: Path, root: Path, state: Any, attempt_id: str) -> tuple[Mapping[str, Any], str | None]:
-    """V9a (A1-6): the ``limits`` of the ``.skillsrc`` the run froze — ``(limits, note)``.  The baseline keeps the digest of the file's bytes, not its
+    """The ``limits`` of the ``.skillsrc`` the run froze — ``(limits, note)``.  The baseline keeps the digest of the file's bytes, not its
     values: the live file counts only while its bytes are those of the baseline; edited since the scan it gives ``({}, LIMITS_DRIFT_NOTE)`` — the defaults,
     named.  Warnings and measurements only: the limits that shape a plan are read at plan time, before it is published."""
     from tools.pilot_state import frozen_skillsrc_matches
@@ -103,7 +103,7 @@ def step_budget(project: Path, limits: Mapping[str, Any] | None = None) -> int:
 
 
 def step_window(project: Path) -> int:
-    """FaT-BO: the model window in bytes (``.skillsrc`` ``limits.step_window_bytes``); 0 turns the tc-generator split off."""
+    """The model window in bytes (``.skillsrc`` ``limits.step_window_bytes``); 0 turns the tc-generator split off."""
     return _limit(project, "step_window_bytes", DEFAULT_WINDOW, zero=True)
 
 
@@ -112,9 +112,9 @@ class GeneratorContextNotImplemented(ValueError):
 
 
 def generator_context(project: Path) -> str:
-    """FaT-P3: ``.skillsrc`` ``limits.generator_context`` — ``all`` (default: every generator batch reads the context receipts
-    of its plan) or ``own``.  ``own`` (the receipts of the batch's own group plus an index of the others) waits for the
-    measurement on the PQ1 line and a definition of «own group»; ``plan-batches`` refuses it with a code."""
+    """``.skillsrc`` ``limits.generator_context`` — ``all`` (default: every generator batch reads the context receipts
+    of its plan) or ``own``.  ``own`` (the receipts of the batch's own group plus an index of the others) waits for a
+    measurement on a project with known defects and a definition of «own group»; ``plan-batches`` refuses it with a code."""
     path = Path(project) / ".skillsrc"
     if not path.is_file():
         return "all"
@@ -132,7 +132,7 @@ def require_generator_context_all(project: Path) -> None:
 
 
 def looks_truncated(text: str) -> bool:
-    """FaT-O2: the JSON ends inside a string or with an open bracket — cut in the middle, not merely malformed."""
+    """The JSON ends inside a string or with an open bracket — cut in the middle, not merely malformed."""
     depth, in_string, escape = 0, False, False
     for char in text:
         if in_string:
@@ -156,7 +156,7 @@ def truncated_message(byte_count: int) -> str:
 
 
 def record_output(project: Path, root: Path, step: str, response_digest: str, raw_bytes: int) -> None:
-    """FaT-O2: the raw answer size by its journal digest, for the report (only sizes; never fails the step)."""
+    """The raw answer size by its journal digest, for the report (only sizes; never fails the step)."""
     from datetime import datetime, timezone
 
     from tools.confined_output import atomic_write_confined_bytes_at_root
@@ -172,7 +172,7 @@ def record_output(project: Path, root: Path, step: str, response_digest: str, ra
 
 
 def output_sizes(root: Path) -> dict[str, int]:
-    """FaT-O2: raw answer bytes by response digest (the last record of a digest wins)."""
+    """Raw answer bytes by response digest (the last record of a digest wins)."""
     sizes: dict[str, int] = {}
     try:
         lines = (Path(root) / OUTPUT_SIZES).read_text(encoding="utf-8").splitlines()
@@ -188,7 +188,7 @@ def output_sizes(root: Path) -> dict[str, int]:
 
 
 def output_warning(project: Path, byte_count: int, limits: Mapping[str, Any] | None = None) -> str | None:
-    """FaT-O: ``STEP_OUTPUT_LARGE`` when one model answer is over the output warning threshold, else ``None``.  V9a: a run passes its frozen ``limits``
+    """``STEP_OUTPUT_LARGE`` when one model answer is over the output warning threshold, else ``None``. A run passes its frozen ``limits``
     (``run_limits``); without them the live ``.skillsrc`` is read."""
     limit = DEFAULT_OUTPUT_WARN
     try:  # called after the answer is published: an unreadable .skillsrc must not fail the step, the default applies
@@ -203,14 +203,14 @@ def role_files(role: str) -> list[Path]:
     base = PACK / "skills" / role
     if not (base / "SKILL.md").is_file():
         raise ValueError(f"unknown role: {role}")
-    # FaT-B: tc-to-autotest also reads assets/ (the Java/Python conventions)
+    # tc-to-autotest also reads assets/ (the Java/Python conventions)
     return [base / "SKILL.md", *sorted(path for folder in ("references", "assets") for path in (base / folder).rglob("*") if path.is_file())]
 
 
 def _requirement_files(project: Path, root: Path) -> list[Path]:
     """The documents a requirements digest stands for: ``--docs`` of the run's scan request (the baseline keeps only the
     digest of their projection, ``run_pipeline`` requirement) and, in an import with documents, the CSV whose cases the
-    requirements step links (FaT-IMP3; without documents that step is answered by code from the CSV)."""
+    requirements step links (without documents that step is answered by code from the CSV)."""
     from tools.cases_import import cases_path, docs_run
     from tools.pilot_state import read_run
 
@@ -219,7 +219,7 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
 
     files: list[Path] = []
     for raw in request.get("docs") or []:
-        path, heading = resolve_spec(project, raw)  # FaT-P3: the model reads the view of path#Section, not the file
+        path, heading = resolve_spec(project, raw)  # the model reads the view of path#Section, not the file
         if heading is None:
             files.append(Path(path) if Path(path).is_absolute() else project / path)
         else:
@@ -247,7 +247,7 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
     files: list[Path] = []
     selected = [str(event["artifact_digest"]) for event in derive_state(root)["events"]
                 if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "CONTEXT_SELECTED"]
-    for digest in sorted(dict.fromkeys(selected)):  # V9a: the receipts the journal selected, read the strict way — never a glob of the folder
+    for digest in sorted(dict.fromkeys(selected)):  # the receipts the journal selected, read the strict way — never a glob of the folder
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if batch is None or receipt.get("batch_index") == batch:
             files.extend(project / item["project_path"] for item in receipt["files"])
@@ -255,10 +255,10 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
                    if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
     if stage == "context-marker:requirements":
-        # FaT-Q2 (2.3): the requirements step of the marker in parts reads the requirement documents only
+        # the requirements step of the marker in parts reads the requirement documents only
         return _requirement_files(project, root)
     if batch is not None and answer is not None:
-        # FaT-5: a part of the marker reads the requirements answer, not the documents again.
+        # a part of the marker reads the requirements answer, not the documents again.
         files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))
     else:
         files.extend(_requirement_files(project, root))
@@ -271,12 +271,12 @@ def _compact(value: Any) -> bytes:
 
 _RECEIPT_SLOTS = ("batch-plans/{a}.json", "generator-headers/{a}.json", "prior-capabilities/{a}.*.json", "imported-cases/{a}.*.json",
                   "imported-cases/{a}.json", "reviewer-session-boundaries/{a}.json", "automation-review-boundaries/{a}.*.json",
-                  "artifacts/{a}/*")  # FaT-10d: run artifacts of the attempt (publish_run_artifact_bytes), also without a suffix
+                  "artifacts/{a}/*")  # run artifacts of the attempt (publish_run_artifact_bytes), also without a suffix
 _BUNDLES = ("cases", "candidate-bundle")  # where publish_test_case_bundle writes the document of the run
 
 
 class _Journal:
-    """FaT-U7: what the journal of one attempt binds, by digest — files that are an input as a whole (more than one is
+    """What the journal of one attempt binds, by digest — files that are an input as a whole (more than one is
     ``ambiguous``), objects kept inside a carrier ``(carrier, key, bytes)``, inputs that stand for project files (the
     requirement documents; the files of a context receipt, ``context``) and the canonical documents the run keeps only by
     digest (the assembled candidate; the effective document, with its carrier).  Only the attempt's own slots are read —
@@ -305,7 +305,7 @@ class _Journal:
             if event["event_type"] == "CONTEXT_SELECTED":
                 from tools.pilot_state import read_context_selection
 
-                receipt = read_context_selection(root, attempt_id, digest)  # V9a: the strict reader, not the bytes of a file at that name
+                receipt = read_context_selection(root, attempt_id, digest)  # the strict reader, not the bytes of a file at that name
                 self.expands[digest] = ([project / item["project_path"] for item in receipt["files"]], True)
             elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
                 self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
@@ -341,7 +341,7 @@ class _Journal:
             self.carried[str(package["package_digest"])] = (ledger, "package_binding", len(_compact(package)))
 
     def plan(self, state: Any) -> Mapping[str, Any]:
-        """The batch plan of the attempt as the journal binds it (V7); ``{}`` before it is published."""
+        """The batch plan of the attempt as the journal binds it; ``{}`` before it is published."""
         from tools.pilot_state import ModelInputsMismatch, generator_input
 
         if getattr(self, "_plan", None):
@@ -386,7 +386,7 @@ class _Journal:
 
 
 def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str, list[str]]:
-    """The digest and the input digests of the last published request of ``stage``, from its journal slot.  V9a: the bytes are the ones the journal
+    """The digest and the input digests of the last published request of ``stage``, from its journal slot. The bytes are the ones the journal
     sealed (the body hashes to the digest field and to the digest of the event); the predecessor check of ``read_model_request`` is not repeated
     — the request was checked when it was published."""
     from tools.pilot_state import _model_request_target, check_sealed_value
@@ -405,13 +405,13 @@ def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str
 
 def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, write_views: bool = True,
                  state: Any = None, journals: dict[str, Any] | None = None) -> dict[str, Any]:
-    """FaT-U7 (audit U7, F5): the files and bytes behind the ``input_digests`` of the published model request of ``stage``,
+    """The files and bytes behind the ``input_digests`` of the published model request of ``stage``,
     from the journal — the one answer of ``step-inputs``, ``tools.step_size --run --stage`` and the run report.
 
     A context receipt or a requirements digest opens into the project files it stands for; an object kept inside a carrier
     is a ``binding`` with its own bytes, or 0 when the step reads the carrier anyway.  The view of the document replaces it
     (``basis: вид``: the reviewer's candidate, the autotest view of ``tc-to-autotest``); a generator batch also reads the map
-    of existing project tests (``basis: карта``, FaT-EC).  ``tc-to-autotest:r2`` also reads the answers of r1 and of its
+    of existing project tests (``basis: карта``).  ``tc-to-autotest:r2`` also reads the answers of r1 and of its
     review (``basis: r1``/``ревью r1``) — they bind the correction, not the request.  An input the journal does not bind is
     ``unresolved`` (``not-in-journal``), never guessed.  ``write_views=False`` (the report) measures the map without
     writing it; the report also passes its ``state`` and one ``journals`` cache for all its calls."""
@@ -430,7 +430,7 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     if digests and stage.startswith("tc-to-autotest:") and autotest_view(root, digests[0]).is_file():
         views[0] = autotest_view(root, digests[0])
     elif digests and stage.startswith("tc-reviewer:") and (root / "review-views" / (digests[0].removeprefix("sha256:") + ".md")).is_file():
-        views[0] = root / "review-views" / (digests[0].removeprefix("sha256:") + ".md")  # FaT-CV2: the reviewer reads the view
+        views[0] = root / "review-views" / (digests[0].removeprefix("sha256:") + ".md")  # the reviewer reads the view
     files: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
@@ -438,12 +438,12 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     for position, digest in enumerate(digests):
         if position in views:
             files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
-        elif digest == journal.inventory_digest:  # V7 (O-15): the model reads the projection of the inventory, not the receipt
+        elif digest == journal.inventory_digest:  # the model reads the projection of the inventory, not the receipt
             data = inventory_view_bytes(project, root, digest)
             target = inventory_view_path(root, digest)
             _write_view(project, root, target, data, write_views)
             files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": INVENTORY_VIEW})
-        elif stage.startswith("tc-generator:") and digest == journal.plan_digest(state):  # V7 (O-16): the plan without the texts
+        elif stage.startswith("tc-generator:") and digest == journal.plan_digest(state):  # the plan without the texts
             data = plan_view_bytes(journal.plan(state))
             target = plan_view_path(root, digest)
             _write_view(project, root, target, data, write_views)
@@ -477,8 +477,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             else:
                 unresolved.append({"digest": answer, "source": source, "reason": "not-in-journal"})  # e.g. an r2 requested before r1
     if contexts:
-        # FaT-EC: the map of existing project tests for the context — built (again, when its bytes differ) from the
-        # frozen inventory and the receipts; no input digest of its own, like the autotest view.  FaT-AU3: one map for
+        # the map of existing project tests for the context — built (again, when its bytes differ) from the
+        # frozen inventory and the receipts; no input digest of its own, like the autotest view. One map for
         # all the context receipts of the batch, named by the first
         from tools.existing_tests import context_view, ensure_view, map_path
 
@@ -510,7 +510,7 @@ def plan_view_path(root: Path, plan_digest: str) -> Path:
 
 
 def inventory_view_bytes(project: Path, root: Path, inventory_digest: str) -> bytes:
-    """V7 (O-15): what the model reads of the inventory - the path, the kind and the size of each file.  A pure function of the
+    """What the model reads of the inventory - the path, the kind and the size of each file.  A pure function of the
     inventory receipt the journal binds (INVENTORY_READY); the digests and opaque ids stay in the receipt and in ``input_digests``."""
     from tools.pilot_state import frozen_inventory
 
@@ -522,7 +522,7 @@ def inventory_view_bytes(project: Path, root: Path, inventory_digest: str) -> by
 
 
 def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
-    """V7 (O-16): the batch plan without the texts of the source requirements - the generator reads them in the markup (the plan
+    """The batch plan without the texts of the source requirements - the generator reads them in the markup (the plan
     rows are those of the marker, byte for byte).  The plan the journal keeps is not changed."""
     rows = [{key: value for key, value in row.items() if key != "text"} for row in plan.get("source_requirements") or []]
     return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
@@ -583,12 +583,12 @@ def input_size(found: Mapping[str, Any]) -> int:
 
 
 def autotest_view(root: Path, document_digest: str) -> Path:
-    """FaT-AV: where ``python -m tools.review_view --effective`` writes the view of the effective document."""
+    """Where ``python -m tools.review_view --effective`` writes the view of the effective document."""
     return root / "review-views" / (str(document_digest).removeprefix("sha256:") + ".autotest.md")
 
 
 def request_files(run_root: Path, stage: str) -> dict[str, Any]:
-    """FaT-Q2 (2.2): ``step-inputs`` — :func:`stage_inputs` of the published model request of ``stage``, plus for the
+    """``step-inputs`` — :func:`stage_inputs` of the published model request of ``stage``, plus for the
     automation stages the Java level of the module's build and whether it has junit-jupiter-params."""
     from tools.pilot_state import derive_state
 
@@ -596,7 +596,7 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
     project = root.parent.parent
     result = stage_inputs(root, stage)
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
-        # FaT-JL: the Java level of the module's build, so that the generator and its reviewer keep to its API
+        # the Java level of the module's build, so that the generator and its reviewer keep to its API
         from tools.discover_project import java_api_level, junit_params_available
 
         attempt = next(item for item in derive_state(root)["attempts"] if item["attempt_id"] == result["attempt_id"])
@@ -606,7 +606,7 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         if level is not None:
             result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее отклонит runner-compat (RUNNER_API_LEVEL)"}
         if (module_root / "pom.xml").is_file() or (module_root / "build.gradle").is_file() or (module_root / "build.gradle.kts").is_file():
-            # FaT-PT: a param_group becomes one @ParameterizedTest only where the tests have junit-jupiter-params
+            # a param_group becomes one @ParameterizedTest only where the tests have junit-jupiter-params
             params = junit_params_available(module_root, project)
             result["junit_params"] = {"available": params, "rule": (
                 "группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\"), строки литералами по display_order"
@@ -616,8 +616,8 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
             budget: int | None = None, extra_bytes: int = 0) -> dict[str, Any]:
-    """``extra_bytes``: what a step reads beyond the listed files — bindings inside a carrier (FaT-AV), the map of existing
-    project tests before its file is written (FaT-EC)."""
+    """``extra_bytes``: what a step reads beyond the listed files — bindings inside a carrier, the map of existing
+    project tests before its file is written."""
     paths = [Path(path) for path in files]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
@@ -636,7 +636,7 @@ def measure(project: Path, files: Iterable[Path], role: str | None = None, *, to
 
 
 def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str:
-    """FaT-RV: append one measurement to ``<run>/step-sizes.jsonl`` (only the step, sizes and the code)."""
+    """Append one measurement to ``<run>/step-sizes.jsonl`` (only the step, sizes and the code)."""
     from datetime import datetime, timezone
 
     from tools.confined_output import atomic_write_confined_bytes_at_root
@@ -686,7 +686,7 @@ def main(argv: list[str] | None = None) -> int:
                 files += journal_files(project, args.run, args.stage, args.batch)
         role = args.role or stage_role
         budget = args.budget_bytes
-        if budget is None and args.run:  # V9a: the budget of the .skillsrc the run froze
+        if budget is None and args.run:  # the budget of the .skillsrc the run froze
             from tools.pilot_state import derive_state
 
             run_root = project / ".pilot-runs" / args.run

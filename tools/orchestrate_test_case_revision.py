@@ -62,7 +62,7 @@ def _plain(value: Any) -> Any:
         return {key: _plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(item) for item in value]
-    if value is None or isinstance(value, (str, int, float, bool)):  # F4b (O-9): a scalar cannot be changed in place — no copy
+    if value is None or isinstance(value, (str, int, float, bool)):  # a scalar cannot be changed in place — no copy
         return value
     return copy.deepcopy(value)
 
@@ -85,7 +85,7 @@ class OrchestrationResult:
     diagnostics: tuple[Mapping[str, str], ...]
 
 
-# FaT-9b fix: contextlib (closure_cache) sets __traceback__ on the way out; the error's own fields stay immutable.
+# contextlib (closure_cache) sets __traceback__ on the way out; the error's own fields stay immutable.
 _EXCEPTION_SLOTS = frozenset({"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"})
 
 
@@ -126,7 +126,7 @@ def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | o
         if field in {"preview_sha256", "csv_sha256"} and (not isinstance(value, str) or not _DIGEST.fullmatch(value)):
             return [_diag(f"/receipt/{field}", "ORCHESTRATION_RECEIPT")]
     if expected_paths is not None and (receipt.json_path, receipt.preview_path, receipt.csv_path) != expected_paths:
-        # FaT-ER: select got another --output-dir than publish — name both directories; same directory, other files: as before
+        # select got another --output-dir than publish — name both directories; same directory, other files: as before
         published = Path(str(receipt.json_path)).parent
         if Path(output_dir).resolve() == published:
             return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
@@ -175,7 +175,7 @@ def _exact_receipt(value: Mapping[str, Any], label: str) -> dict[str, Any]:
 
 
 def _marker_requirements(rows: Any, run_root: Path, attempt_id: str) -> Any:
-    """FaT-P3: the requirements the candidate document holds — those of the marker without the ones the human excluded."""
+    """The requirements the candidate document holds — those of the marker without the ones the human excluded."""
     from tools.scope_pause import marker_requirements_in_scope
 
     return marker_requirements_in_scope(rows, Path(run_root), attempt_id)
@@ -282,7 +282,7 @@ def reviewer_package_binding(
     return binding
 
 
-@_closure_cached  # FaT-10d
+@_closure_cached  
 def reviewer_session_start(
     run_root: Path,
     attempt_id: str,
@@ -331,7 +331,7 @@ def reviewer_session_start(
     }
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
     """Reserve the only canonical reviewer session for an active attempt before invocation."""
     package = _plain(package_binding)
@@ -346,7 +346,7 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
     ):
         raise ValueError("REVIEWER_PROTOCOL: invalid reviewer session start")
     budget = start["context_budget_bytes"]
-    if type(budget) is not int or budget < package["base_package_byte_count"]:  # FaT-10d: refuse now, not after the review
+    if type(budget) is not int or budget < package["base_package_byte_count"]:  # refuse now, not after the review
         raise ValueError(
             f"REVIEW_CONTEXT_LIMIT: context_budget_bytes {budget} is smaller than the review package "
             f"({package['base_package_byte_count']} bytes); build the session start with tools.api session-start"
@@ -358,7 +358,7 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
     }
     from tools.pilot_state import publish_bound
 
-    # F2: the one way a fixed receipt is published and bound — an opening cut short is opened again, no event is written twice
+    # the one way a fixed receipt is published and bound — an opening cut short is opened again, no event is written twice
     bound = publish_bound(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
     boundary = dict(bound["record"])
     created = {
@@ -403,13 +403,13 @@ def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[st
 _VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}
 
 
-@_closure_cached  # FaT-10c
+@_closure_cached  
 def complete_reviewer_session(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """FaT-10c: the completed reviewer session for `select`, built from the published ledger and the recorded review.
+    """The completed reviewer session for `select`, built from the published ledger and the recorded review.
 
     The session keeps the ledger events, then adds the one AUTHORITATIVE_VERDICT bound to the recorded
     tc-reviewer:canonical answer and REVIEW_SESSION_COMPLETED. Nothing is written: `select` validates and publishes it.
-    P2: ``review`` is the answer of a dry run, not recorded yet — the session is built from it.
+    ``review`` is the answer of a dry run, not recorded yet — the session is built from it.
     """
     from tools.pilot_state import derive_state, read_model_stage_artifact, read_reviewer_session_ledger, reviewer_lifecycle_projection
 
@@ -458,12 +458,12 @@ def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]
     return session
 
 
-@_closure_cached  # FaT-10c
+@_closure_cached  
 def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str]) -> dict[str, Any]:
-    """FaT-10c: one C-lite evidence pair for the open reviewer session.
+    """One C-lite evidence pair for the open reviewer session.
 
-    The named project files of the attempt inventory become one context receipt (the one way to publish evidence since
-    FaT-U5 removed publish-evidence);
+    The named project files of the attempt inventory become one context receipt (the one way to publish evidence now that
+    publish-evidence is removed);
     the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
     with the cumulative package digest, and the WAITING ledger is published again.
     """
@@ -474,7 +474,7 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     package = session["package_binding"]
     events = list(session["events"])
     provided = [event for event in events if event.get("event_type") == "EVIDENCE_PROVIDED"]
-    try:  # F2 (A2-1): the latest revision published but not read back — the evidence of a call cut short, finished by the same call
+    try:  # the latest revision published but not read back — the evidence of a call cut short, finished by the same call
         read_reviewer_session_ledger(Path(run_root), attempt_id)
         pending = None
     except ValueError:
@@ -524,14 +524,14 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
 
 
-# the pre-verdict aborts: the context ceiling, and FaT-AB D2 — a reviewer answer that twice failed its check or a select
+# the pre-verdict aborts: the context ceiling, and a reviewer answer that twice failed its check or a select
 # refusal, so the session cannot end in a verdict
 _ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE")
 
 
-@_closure_cached  # FaT-10c
+@_closure_cached  
 def abort_reviewer_session(run_root: Path, attempt_id: str, reason_code: str) -> dict[str, Any]:
-    """FaT-10c: the aborted reviewer session for `select` (no verdict). Nothing is written: `select` validates and publishes it."""
+    """The aborted reviewer session for `select` (no verdict). Nothing is written: `select` validates and publishes it."""
     from tools.pilot_state import reviewer_lifecycle_projection
 
     if reason_code not in _ABORT_REASONS:
@@ -621,7 +621,7 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     if isolation["distinct_invocations"] != invocation_distinct or isolation.get("evidence_digest") != _host_isolation_digest(isolation):
         raise ValueError("REVIEWER_PROTOCOL: contradictory invocation isolation evidence")
     verified = bool(isolation["fresh_context"] and isolation["distinct_invocations"] and isolation["role_policy"] == "canonical-reviewer-v1")
-    if verified and review_artifact is not None:  # P7: a reviewer who names the generator's control word saw its task — SELF, whatever was declared
+    if verified and review_artifact is not None:  # a reviewer who names the generator's control word saw its task — SELF, whatever was declared
         from tools.review_canaries import codeword_state
 
         verified = codeword_state(run_root, attempt_id, _plain(review_artifact)) != "named"
@@ -631,7 +631,7 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
         reason = lifecycle["abort_reason"]
         if evidence_bytes > value["context_budget_bytes"] and reason != "REVIEW_CONTEXT_LIMIT":
             raise ValueError("REVIEWER_PROTOCOL: base package exceeds the context ceiling")
-        ledger_digest = str(value["digest"]) if dry_run else _publish_reviewer_ledger(Path(run_root), attempt_id, value)  # P2: a dry run publishes nothing
+        ledger_digest = str(value["digest"]) if dry_run else _publish_reviewer_ledger(Path(run_root), attempt_id, value)  # a dry run publishes nothing
         return {"attempt_state": "TERMINAL", "coverage": None, "independence": "independence_unverified", "acceptance_eligible": False, "verdict_count": 0, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "accepted": False, "reason_code": reason, "reviewer_session_digest": ledger_digest}
     if evidence_bytes > value["context_budget_bytes"]:
         raise ValueError("REVIEW_CONTEXT_LIMIT")
@@ -647,12 +647,12 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     verdict_count = lifecycle["authoritative_verdict_count"]
     from tools.pilot_state import self_review_accepted
 
-    # FaT-4b: an unisolated review is eligible only in a run started with `scan --accept-self-review`.
+    # an unisolated review is eligible only in a run started with `scan --accept-self-review`.
     admitted = verified or self_review_accepted(Path(run_root))
     return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": admitted and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def publish_unreviewed_candidate(
     candidate: Mapping[str, Any],
     output_dir: str | os.PathLike[str],
@@ -666,7 +666,7 @@ def publish_unreviewed_candidate(
     value = _plain(candidate); require_valid_canonical_document(value)
     from tools.pilot_state import append_event, derive_state
 
-    # FaT-AU2: the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is
+    # the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is
     # refused as before — now before any bundle file is written
     digest = document_sha256(value)
     recorded = [str(event.get("artifact_digest")) for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
@@ -687,9 +687,9 @@ def publish_unreviewed_candidate(
 
 def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
                     candidate_receipt: Receipt | None = None, canaries: Sequence[Mapping[str, Any]] | None = None) -> tuple[Any, Any]:
-    """FaT-R1: ``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
+    """``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
     decision, writing nothing: the review shape, the successor edits, the decision against the candidate, the successor
-    document and (FaT-IMP) the human fields of an import.  select runs it before it publishes the ledger, model-response
+    document and the human fields of an import.  select runs it before it publishes the ledger, model-response
     of tc-reviewer before it writes the answer, so a wrong answer keeps the stage's one retry."""
     candidate_value, review_value = _plain(candidate), _plain(review_value)
     rows = _review_rows(review_value)
@@ -697,13 +697,13 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
         raise OrchestrationError("ORCHESTRATION_INPUT", rows, candidate_receipt) from None
     report = review_value["artifacts"]["validation_report"]
     artifacts = review_value["artifacts"]
-    if canaries:  # P7: an edit of a canary text has the mutated text as ``old`` — the canon holds the original, so it never applies
+    if canaries:  # an edit of a canary text has the mutated text as ``old`` — the canon holds the original, so it never applies
         from tools import review_canaries
 
         artifacts, dropped = review_canaries.filter_edits(canaries, artifacts)
         review_canaries.refuse_if_only_canaries(canaries, review_value, dropped)
     try:
-        successor = reviewer_successor(candidate_value, artifacts)  # FaT-CV: a document or exact edits
+        successor = reviewer_successor(candidate_value, artifacts)  # a document or exact edits
     except SelectionError as error:
         raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
     decision_rows = validate_review_decision(candidate_value, report, successor)
@@ -734,7 +734,7 @@ _IMPORTED_CASE_FIELDS = ("title", "objective", "preconditions", "priority")
 
 
 def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any]) -> list[str]:
-    """FaT-R1: in an import the reviewer's fix may not touch the human fields the import fixed (the fields
+    """In an import the reviewer's fix may not touch the human fields the import fixed (the fields
     batch_assembly.require_imported_human_fields keeps): case title/objective/preconditions/priority, step action,
     test data and expectation texts — the machine part only."""
     before = {case["case_id"]: case for case in candidate.get("test_cases", [])}
@@ -759,7 +759,7 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
 
 
 def _run_imported(run_root: Path, attempt_id: str) -> bool:
-    """Whether the attempt is an import of cases (FaT-IMP): its published cases are the human part."""
+    """Whether the attempt is an import of cases: its published cases are the human part."""
     from tools.pilot_state import _imported_cases, _run_root, derive_state
 
     try:
@@ -769,11 +769,11 @@ def _run_imported(run_root: Path, attempt_id: str) -> bool:
         return False
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receipt, package_binding: Mapping[str, Any], reviewer_session: Mapping[str, Any], review_artifact: Mapping[str, Any] | None, output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, *, run_root: Path, attempt_id: str, reviewer_evidence_receipts: Sequence[Mapping[str, Any]] = (), publisher=publish_bundle, verifier=verify_bundle, dry_run: bool = False) -> OrchestrationResult:
     """Select the published r1 and publish reviewer-produced r2 only when needed.
 
-    P2: ``dry_run`` runs every check of the decision and of the session and publishes nothing — no ledger, no r2 bundle, no
+    ``dry_run`` runs every check of the decision and of the session and publishes nothing — no ledger, no r2 bundle, no
     effective canonical; the result is the selection the real call would make (receipts of what is not published are None)."""
     _validate_profile(csv_profile)
     candidate_value, review_value = _plain(candidate), None if review_artifact is None else _plain(review_artifact)
@@ -792,7 +792,7 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
         if facts.get("completion") == "PARTIAL":
             return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, str(facts.get("reason_code", "REWORK")), _freeze(facts), ())
         raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/review_artifact", "REVIEWER_PROTOCOL")], candidate_receipt)
-    # FaT-R1: every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
+    # every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
     from tools.review_canaries import verify as _verify_canaries
 
     successor, effective = review_decision(candidate_value, review_value, imported=_run_imported(run_root, attempt_id),
@@ -879,7 +879,7 @@ def publish_command(candidate: Mapping[str, Any], output_dir: Path, csv_profile:
     again = any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt_id
                 and event.get("stage_instance_id") == "assembly" for event in derive_state(run_root)["events"])
     receipt = publish_unreviewed_candidate(candidate, output_dir, csv_profile, run_root=run_root, attempt_id=attempt_id)
-    # FaT-6: the analyst questions beside the case set; a failed write only warns, the set is published.
+    # the analyst questions beside the case set; a failed write only warns, the set is published.
     questions, code = write_questions_next_to(output_dir, run_root)
     return {"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
             "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [], "idempotent": again}
@@ -894,7 +894,7 @@ def review_package(run_root: Path, attempt_id: str, inputs: Mapping[str, Any]) -
 
 
 def journal_review_artifact(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """FaT-U5: the tc-reviewer answer of a completed session, from the journal; None for an aborted or waiting one."""
+    """The tc-reviewer answer of a completed session, from the journal; None for an aborted or waiting one."""
     from tools.pilot_state import derive_state, read_model_stage_artifact
 
     if _plain(session).get("status") != "COMPLETED":
@@ -906,7 +906,7 @@ def journal_review_artifact(run_root: Path, attempt_id: str, session: Mapping[st
 
 
 def journal_evidence_receipts(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """FaT-U5: the C-lite evidence receipts the session's ledger records as provided, in order."""
+    """The C-lite evidence receipts the session's ledger records as provided, in order."""
     from tools.pilot_state import read_context_selection
 
     return [read_context_selection(Path(run_root), attempt_id, str(event["provided_digest"]))
@@ -924,7 +924,7 @@ REVIEW_STAGE = "tc-reviewer:canonical"
 
 
 def _require_open_attempt(run_root: Path, attempt_id: str) -> None:
-    """P2: a review command on a closed attempt answers ATTEMPT_TERMINAL at once (the P1 envelope), before it assembles anything."""
+    """A review command on a closed attempt answers ATTEMPT_TERMINAL at once (the refusal envelope), before it assembles anything."""
     from tools.pilot_state import derive_state
 
     attempt = next((row for row in derive_state(Path(run_root))["attempts"] if row["attempt_id"] == attempt_id), None)
@@ -934,10 +934,10 @@ def _require_open_attempt(run_root: Path, attempt_id: str) -> None:
 
 def review_step(step: str, run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path | None = None,
                 csv_profile: str = _PROFILE, **values: Any) -> Any:
-    """FaT-U5: one tools.api command of the review layer — ``publish``, ``session-start``, ``open`` or ``select`` — over the
+    """One tools.api command of the review layer — ``publish``, ``session-start``, ``open`` or ``select`` — over the
     journal inputs; ``files`` are the reviewer-package files the agent passed (compared, never the source).
 
-    P2: the whole command runs in one ``closure_cache()`` and ``inventory_cache()`` — the journal, the receipts and the canon
+    The whole command runs in one ``closure_cache()`` and ``inventory_cache()`` — the journal, the receipts and the canon
     are read and checked once per process, not once per function; ``dry_run=True`` (select) publishes nothing."""
     from tools.pilot_state import closure_cache
     from tools.project_inventory import inventory_cache
@@ -973,7 +973,7 @@ def review_step(step: str, run_root: Path, attempt_id: str, *, files: Mapping[st
 
 
 class ReviewRefused(ValueError):
-    """P2: a refusal of the two-command review with its own code; the fix is the tail of the message, the table has the same."""
+    """A refusal of the two-command review with its own code; the fix is the tail of the message, the table has the same."""
 
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
@@ -981,7 +981,7 @@ class ReviewRefused(ValueError):
 
 
 def _resolve_fresh_context(run_root: Path, fresh_context: bool | None) -> bool:
-    """P2 (item 7): ``fresh_context`` is the host's statement.  A run that admitted SELF at scan (``--accept-self-review``,
+    """``fresh_context`` is the host's statement.  A run that admitted SELF at scan (``--accept-self-review``,
     ``.skillsrc`` ``review.self``) needs none — the code says ``no`` itself; any other run must state it."""
     from tools.pilot_state import require_fresh_context_statement, self_review_accepted
 
@@ -998,7 +998,7 @@ def _resolve_fresh_context(run_root: Path, fresh_context: bool | None) -> bool:
 def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path, csv_profile: str = _PROFILE,
                      model_id: str | None = None, invocation_id: str | None = None, fresh_context: bool | None = None,
                      session_start: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """P2: ``tools.api review-open --model-id --invocation-id [--fresh-context]`` — everything before the reviewer's call, in the
+    """``tools.api review-open --model-id --invocation-id [--fresh-context]`` — everything before the reviewer's call, in the
     events of the nine commands and their order: the candidate published (assemble → validate-canonical → review-publish, when it
     is not yet), the session start, the package and the boundary, REVIEW_REQUESTED, MODEL_REQUESTED.  It records and computes; the
     model is called by the agent afterwards.  The same call again changes nothing; another reviewer is REVIEW_ALREADY_OPEN."""
@@ -1006,7 +1006,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
                                    read_reviewer_session_ledger, request_review)
     from tools.project_inventory import inventory_cache
 
-    if session_start is not None:  # the open-session of the nine (FaT-U5): the session start is the agent's file
+    if session_start is not None:  # the open-session of the nine: the session start is the agent's file
         return review_step("open", run_root, attempt_id, files=files, output_dir=output_dir, csv_profile=csv_profile, session_start=session_start)
     missing = [flag for flag, value in (("--model-id", model_id), ("--invocation-id", invocation_id)) if value is None]
     if missing:
@@ -1022,7 +1022,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
         from tools.pilot_state import _run_root as _pilot_run_root
         from tools.review_view import ensure_reviewer_view
 
-        view = ensure_reviewer_view(*_pilot_run_root(Path(run_root)), journal_assembly(run_root, attempt_id)[0])  # P7: the reviewer's view with canaries
+        view = ensure_reviewer_view(*_pilot_run_root(Path(run_root)), journal_assembly(run_root, attempt_id)[0])  # the reviewer's view with canaries
         receipt = files.get("candidate_receipt")
         given = {**files, "candidate_receipt": _load_receipt(Path(receipt)) if receipt else None}
         try:
@@ -1074,7 +1074,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
 
 
 def human_instruction(run_root: Path, view: Path | str, select_command: str) -> str:
-    """PQ3: what a person does to have the review made in a fresh session.  Printed text only — the model is not started here."""
+    """What a person does to have the review made in a fresh session.  Printed text only — the model is not started here."""
     run_id = Path(run_root).name
     answer = Path(run_root) / "tmp" / "reviewer-answer.json"
     return ("Ревью кейсов в свежей сессии (руками):\n"
@@ -1086,7 +1086,7 @@ def human_instruction(run_root: Path, view: Path | str, select_command: str) -> 
 
 
 def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str, Any] | None) -> dict[str, Any]:
-    """P2: the session ``select`` works on when the agent names none — the last revision of the attempt's ledger: an aborted or
+    """The session ``select`` works on when the agent names none — the last revision of the attempt's ledger: an aborted or
     completed one as it is, a waiting one completed with the recorded answer (or the answer of a dry run)."""
     from tools.pilot_state import read_reviewer_session_ledger
 
@@ -1114,7 +1114,7 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
                        verdict: Mapping[str, Any] | None = None, verdict_bytes: int | None = None, transport_attempts: int = 1,
                        reviewer_session: Mapping[str, Any] | None = None, review: Mapping[str, Any] | None = None,
                        dry_run: bool = False) -> dict[str, Any]:
-    """P2: ``tools.api review-select [--verdict <file>] [--dry-run]`` — MODEL_RESPONSE_RECEIVED (the stage keeps its one retry,
+    """``tools.api review-select [--verdict <file>] [--dry-run]`` — MODEL_RESPONSE_RECEIVED (the stage keeps its one retry,
     ``--transport-attempts 2``), the completed session, the selection.  Without ``--reviewer-session`` the session is the last
     revision of the ledger.  ``dry_run`` runs all of it but writes: it says what would be published, or why not."""
     from tools.pilot_state import closure_cache, publish_model_stage_artifact, recorded_model_answer
@@ -1147,7 +1147,7 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
         session = reviewer_session if reviewer_session is not None else _last_reviewer_session(run_root, attempt_id, pending)
         selected = review_step("select", run_root, attempt_id, files=files, output_dir=output_dir, csv_profile=csv_profile,
                                reviewer_session=session, review=review if review is not None else pending, dry_run=dry_run)
-        selected = {**selected, **_canary_report(run_root, attempt_id, pending)}  # P7: the canaries and the codeword of the answer
+        selected = {**selected, **_canary_report(run_root, attempt_id, pending)}  # the canaries and the codeword of the answer
         if not dry_run:
             return selected
         would: dict[str, Any] = {"model_response": answer, "reviewer_ledger": {"status": _plain(session).get("status"), "digest": _plain(session).get("digest")}}
@@ -1159,7 +1159,7 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
 
 
 def _canary_report(run_root: Path, attempt_id: str, pending: Mapping[str, Any] | None) -> dict[str, Any]:
-    """P7: what ``review-select`` says of the canaries (the outcome of the answer) and of the control word."""
+    """What ``review-select`` says of the canaries (the outcome of the answer) and of the control word."""
     from tools import review_canaries
 
     summary = review_canaries.summary(run_root, attempt_id, pending)
@@ -1175,14 +1175,14 @@ REVIEW_INPUT_FIELDS = ("candidate", "candidate_receipt", "assembly_receipt", "in
 
 def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = None, csv_profile: str = _PROFILE,
                   given: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """FaT-U5: the seven reviewer-package inputs of the attempt, read from the journal (only reads).
+    """The seven reviewer-package inputs of the attempt, read from the journal (only reads).
 
     candidate and assembly receipt — ``assemble_candidate`` over the published plan, header and the tc-generator answers
     (the bytes ``tools.api assemble`` gave); candidate receipt — ``verify_bundle`` of that candidate in ``output_dir``;
     inventory — the attempt baseline's; context receipts — the package's when a session is open, else every receipt the
     attempt published; marker — the context-marker:baseline answer.  A value in ``given`` (a file the agent passed) is
     compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
-    cannot give (a run before FaT-DG) comes from ``given`` as before, else REVIEW_INPUTS_UNAVAILABLE."""
+    cannot give (a run of an earlier version) comes from ``given`` as before, else REVIEW_INPUTS_UNAVAILABLE."""
     from tools.batch_assembly import BatchAssemblyError
     from tools.pilot_state import derive_state, frozen_baseline, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
@@ -1249,7 +1249,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
 
 
 def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
-    """FaT-U5: ``(candidate, assembly receipt, fragments)`` — ``assemble_candidate`` over the published plan and header
+    """``(candidate, assembly receipt, fragments)`` — ``assemble_candidate`` over the published plan and header
     and the tc-generator answers of the journal in plan order: the bytes ``tools.api assemble`` gives (only reads)."""
     from tools.batch_assembly import assemble_candidate
     from tools.pilot_state import _generator_input, _run_root, derive_state, read_model_stage_artifact
@@ -1263,7 +1263,7 @@ def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], d
     absent = [stage for stage in stages if stage not in answers]
     if absent:
         raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: candidate: нет ответа {absent[0]}; fix: сначала model-response этой пачки")
-    # P2: the canon is assembled once per process — the plan, the header and the answers are append-only facts of the journal, so
+    # the canon is assembled once per process — the plan, the header and the answers are append-only facts of the journal, so
     # one command (publish, package, the decision of the verdict) asks for the same candidate several times and gets one assembly
     from tools.pilot_state import _CLOSURE_CACHE
 
@@ -1315,11 +1315,11 @@ def _read_existing_context_receipts(paths: Sequence[Path], run_root: Path, attem
     return result
 
 
-_FIXES = {code: FIXES[code] for code in ("REVIEW_CONTEXT_LIMIT", "ORCHESTRATION_RECEIPT_SHAPE", "REVIEWER_PROTOCOL")}  # FaT-10d; P1: the texts live in tools.fixes
+_FIXES = {code: FIXES[code] for code in ("REVIEW_CONTEXT_LIMIT", "ORCHESTRATION_RECEIPT_SHAPE", "REVIEWER_PROTOCOL")}  # the texts live in tools.fixes
 
 
 def main(argv: list[str] | None = None) -> int:
-    """F4b: the old CLI of the review (``publish|open-session|select``) is ``tools/review_legacy.py`` — a file of the development
+    """The old CLI of the review (``publish|open-session|select``) is ``tools/review_legacy.py`` — a file of the development
     build.  A delivery of cases does not carry it: its one way into the review is ``tools.api review-open`` → ``review-select``."""
     from tools import execution_gate
 

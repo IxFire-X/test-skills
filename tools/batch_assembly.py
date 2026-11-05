@@ -28,7 +28,7 @@ _CONTEXT_SCHEMA = _ROOT / "schemas" / "context-selection-receipt.schema.json"
 class BatchAssemblyError(ValueError):
     """A stable controller-contract failure which must not invoke review.
 
-    P1: ``diagnostics`` — all the rows of one validate-fragment pass, ``{path, code, message, fix}`` each; ``code`` is the
+    ``diagnostics`` — all the rows of one validate-fragment pass, ``{path, code, message, fix}`` each; ``code`` is the
     controller code of the first one, ``fix`` the way out of the whole list."""
 
     def __init__(self, code: str, message: str, diagnostics: Sequence[Mapping[str, Any]] = (), fix: str | None = None) -> None:
@@ -104,16 +104,16 @@ def _evidence_digests(grouping_evidence: dict[str, Any]) -> tuple[str, str]:
 
 
 def context_digests(value: Mapping[str, Any]) -> list[str]:
-    """FaT-AU3: the context receipts every batch of a plan (or a grouping) reads, in batch_index order — the list
+    """The context receipts every batch of a plan (or a grouping) reads, in batch_index order — the list
     ``context_receipt_digests`` or, before it and for one context batch, the one ``context_receipt_digest``."""
     listed = value.get("context_receipt_digests")
     return [str(item) for item in listed] if isinstance(listed, list) and listed else [str(value.get("context_receipt_digest"))]
 
 
-ANSWER_PER_TEXT_BYTE = 42  # FaT-BO: the largest "fragment bytes / source requirement text bytes" of the 28.10 campaign (23–41)
-IMPORT_ANSWER_PER_HUMAN_BYTE = 5  # FaT-IMP: a full case of the campaign is 3.9–4.5 times its human fields
-NO_ROOM = "не оставляет места ответу"  # FaT-AU3: the note of a step input that leaves the answer no room; the ceiling of the context reads it
-WINDOW_SHARE = 0.85  # FaT-BO: input + expected answer of one batch stay under this share of the model window
+ANSWER_PER_TEXT_BYTE = 42  # the largest "fragment bytes / source requirement text bytes" of the 28.10 campaign (23–41)
+IMPORT_ANSWER_PER_HUMAN_BYTE = 5  # a full case of the campaign is 3.9–4.5 times its human fields
+NO_ROOM = "не оставляет места ответу"  # the note of a step input that leaves the answer no room; the ceiling of the context reads it
+WINDOW_SHARE = 0.85  # input + expected answer of one batch stay under this share of the model window
 _LETTER_ID = re.compile(r"(?:#{1,6}[^\n]*\n\s*)?(?:[-*]\s+)?([^\W\d_]{1,4})[-_.]?\d")
 _HEADING = re.compile(r"#{1,2}\s+(\S.*)")
 
@@ -228,7 +228,7 @@ def _human_bytes(case: Mapping[str, Any]) -> int:
 
 
 def _imported_groups(source: list[dict[str, Any]], imported: Mapping[str, Any]) -> dict[str, str | None]:
-    """FaT-IMP: a case is its own group; FaT-IMP3: the cases that share a source requirement and their requirements are one
+    """A case is its own group; the cases that share a source requirement and their requirements are one
     group (connected components), so a case and every requirement it traces to stay in one batch."""
     from tools.cases_import import case_sources
 
@@ -249,15 +249,15 @@ def _imported_groups(source: list[dict[str, Any]], imported: Mapping[str, Any]) 
 
 def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: int, id_pattern: re.Pattern[str] | None,
                 documents: dict[str, str], imported: Mapping[str, Any] | None = None) -> tuple[list[list[str]] | None, list[str]]:
-    """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
+    """Batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
 
-    FaT-IMP: in an import the answer is the human fields of a case with its machine part (× 5), a case is its own group.
-    FaT-SKB: the skeleton of a batch holds its own cases only, so the skeleton bytes of a case join its share as well."""
+    In an import the answer is the human fields of a case with its machine part (× 5), a case is its own group.
+    The skeleton of a batch holds its own cases only, so the skeleton bytes of a case join its share as well."""
     if imported is not None:
         from tools.cases_import import case_sources
 
         share: dict[str, int] = {}
-        for case in imported["cases"]:  # FaT-IMP3: a case counts once, on its first source requirement
+        for case in imported["cases"]:  # a case counts once, on its first source requirement
             first = case_sources(case)[0]
             share[first] = share.get(first, 0) + _human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case))
         expected = {item["source_requirement_id"]: share.get(item["source_requirement_id"], 0) for item in source}
@@ -299,7 +299,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
             notes.append(f"BATCH_GROUP_OVER_BUDGET: требование {members[0]} — оценка ответа {size} Б больше порога пачки {cap} Б; "
                          "оно не делится и идёт отдельной пачкой")
             continue
-        # FaT-BO: a group over the batch budget is cut in display order, one requirement per unit — else a document of
+        # a group over the batch budget is cut in display order, one requirement per unit — else a document of
         # FR-1…FR-40 is one prefix group and the split gives nothing
         parts: list[list[str]] = []
         units: list[tuple[list[str], int]] = []
@@ -331,7 +331,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
 
 
 def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> list[str]:
-    """FaT-E2E: a case cites only requirements of its batch, so a path through groups that sit in different batches
+    """A case cites only requirements of its batch, so a path through groups that sit in different batches
     cannot be one case — the plan says so instead of a hint."""
     grouped = [{keys[source] for source in members if keys.get(source)} for members in batches]
     if len(set().union(*grouped)) < 2 or any(len(groups) >= 2 for groups in grouped):
@@ -341,7 +341,7 @@ def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> 
 
 
 def _without_out_of_scope(source: list[dict[str, Any]], out_of_scope: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """FaT-P3: the source requirements the human excluded leave the plan (and so the candidate document): no batch owns them,
+    """The source requirements the human excluded leave the plan (and so the candidate document): no batch owns them,
     the rest keep their IDs and are numbered 1..N again (the canonical document wants a contiguous display_order)."""
     ids = [str(row.get("source_requirement_id")) for row in out_of_scope]
     known = {item["source_requirement_id"] for item in source}
@@ -355,7 +355,7 @@ def _without_out_of_scope(source: list[dict[str, Any]], out_of_scope: Sequence[M
 
 
 def in_scope_requirements(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """FaT-P3: the marker's requirements as the candidate document of that plan holds them: the excluded ones left out
+    """The marker's requirements as the candidate document of that plan holds them: the excluded ones left out
     and the rest renumbered. For the checks that compare the document with the marker. Without ``out_of_scope`` the
     rows themselves."""
     excluded = {str(row.get("source_requirement_id")) for row in (plan or {}).get("out_of_scope") or [] if isinstance(row, Mapping)}
@@ -369,11 +369,11 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
                  documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None,
                  out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
-    """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO).
+    """Create one complete partition: one batch unless the expected answer does not fit the window.
 
-    FaT-AU3: a grouping with more than one context receipt (``context_receipt_digests``, the first one is
+    A grouping with more than one context receipt (``context_receipt_digests``, the first one is
     ``context_receipt_digest``) gives a plan with the same list: every batch reads all of them.
-    FaT-P3: ``out_of_scope`` is ``[{source_requirement_id, reason}]`` the human excluded after the marker: no batch owns
+    ``out_of_scope`` is ``[{source_requirement_id, reason}]`` the human excluded after the marker: no batch owns
     them, the plan names them with the reason."""
     source = _source_requirements(source_requirements)
     order = {item["source_requirement_id"]: item["display_order"] for item in source}
@@ -399,9 +399,9 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
             "completeness": "COMPLETE",
         })
     body: dict[str, Any] = {"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}
-    if len(contexts) > 1:  # one context batch: the plan bytes as before FaT-AU3
+    if len(contexts) > 1:  # one context batch: the plan bytes stay those of a single-context plan
         body["context_receipt_digests"] = contexts
-    if out_of_scope:  # without an exclusion the plan bytes are as before FaT-P3
+    if out_of_scope:  # without an exclusion the plan bytes stay those of a plan with no out_of_scope
         body["out_of_scope"] = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": " ".join(str(row["reason"]).split())}
                                 for row in sorted(out_of_scope, key=lambda row: order[row["source_requirement_id"]])]
     plan = BatchPlan(_with_digest(body))
@@ -418,13 +418,13 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
                              imported: Mapping[str, Any] | None = None,
                              out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
-    it (the given files, the context files of the receipts, the map of existing project tests — FaT-EC — the skeleton of an
-    import — FaT-SK — and the tc-generator role), the documents of the receipts.
+    it (the given files, the context files of the receipts, the map of existing project tests, the skeleton of an
+    import and the tc-generator role), the documents of the receipts.
 
-    ``imported`` is the imported-cases receipt (or its value).  FaT-SKB: a batch reads the skeleton of its own cases only, so
+    ``imported`` is the imported-cases receipt (or its value). A batch reads the skeleton of its own cases only, so
     the skeleton is no part of the common step input — the bytes of each case join the share of its batch (``_size_split``).
 
-    FaT-AU3: ``context_receipt`` may be every context receipt of the attempt (the grouping lists them in
+    ``context_receipt`` may be every context receipt of the attempt (the grouping lists them in
     ``context_receipt_digests``).  Every batch reads the receipts of the plan, so the plan takes them in ``batch_index``
     order while they add no batch (no model call more) to the plan with the first one alone; the first is always taken
     (as before), the rest the plan names in a note."""
@@ -436,7 +436,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     given = context_digests(grouping_evidence)
     for receipt in receipts:
         if not isinstance(receipt, dict) or receipt.get("digest") not in given:
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding; fix: add "  # FaT-H4a
+            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding; fix: add "  
                                      "context_receipt_digests to the grouping with every digest, the lowest batch_index first")
         _validate_context_receipt(receipt, str(receipt["digest"]))
     if sorted(str(receipt["digest"]) for receipt in receipts) != sorted(given) or len(receipts) != len(given):
@@ -457,7 +457,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
             context_files, texts = _context_documents(project, receipt)
             files.extend(context_files)
             documents.update(texts)
-        maps = len(view_bytes(for_context(project, taken)))  # FaT-AU3: one map of all the receipts the batch reads
+        maps = len(view_bytes(for_context(project, taken)))  # one map of all the receipts the batch reads
         step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps)["bytes"]
         evidence = {key: item for key, item in grouping_evidence.items() if key != "context_receipt_digests"}
         if len(taken) > 1:
@@ -476,8 +476,8 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
         plan.notes.append(context_note(receipts, taken))
     if value is not None:
         plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
-    # P9: the volume of the run, so that the person sees at once how long it will take
-    counted = len(plan["source_requirements"])  # FaT-P3: the excluded requirements get no cases
+    # the volume of the run, so that the person sees at once how long it will take
+    counted = len(plan["source_requirements"])  # the excluded requirements get no cases
     plan.notes.append(f"пачек {len(plan['batches'])}, требований {counted}"
                       + (f" (вне охвата {len(plan['out_of_scope'])})" if plan.get("out_of_scope") else "")
                       + f", ориентировочно кейсов {counted}×2–3 ({counted * 2}–{counted * 3})")
@@ -485,7 +485,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
 
 
 def context_note(receipts: list[Mapping[str, Any]], taken: int) -> str:
-    """FaT-AU3: which context batches every generator batch sees — for the plan-batches output and the reviewer view."""
+    """Which context batches every generator batch sees — for the plan-batches output and the reviewer view."""
     seen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken])
     total = sum(int(receipt["byte_count"]) for receipt in receipts)
     line = f"контекст: генератор видит {taken} из {len(receipts)} батчей контекста ({seen} из {total} Б)"
@@ -517,7 +517,7 @@ def _context_documents(project: Path, context_receipt: dict[str, Any]) -> tuple[
 
 
 def requirement_groups(source_requirements: list[dict[str, Any]], project: Path, context_receipt: dict[str, Any]) -> dict[str, str | None]:
-    """FaT-E2E: the group of every source requirement exactly as plan-batches cuts batches (one rule for both): the
+    """The group of every source requirement exactly as plan-batches cuts batches (one rule for both): the
     ``.skillsrc`` ID pattern group, else the letter prefix, else the document section; None — no group."""
     project = Path(project).resolve()
     return _group_keys(_source_requirements(source_requirements), _grouping_pattern(project), _context_documents(project, context_receipt)[1])[0]
@@ -538,7 +538,7 @@ def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     expected = [item.get("source_requirement_id") for item in plan.get("source_requirements", [])]
     if sorted(owned) != sorted(expected) or len(set(owned)) != len(owned):
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "plan ownership is not an exact partition")
-    excluded = [row.get("source_requirement_id") for row in plan.get("out_of_scope", [])]  # FaT-P3: owned by no batch, in no document
+    excluded = [row.get("source_requirement_id") for row in plan.get("out_of_scope", [])]  # owned by no batch, in no document
     if len(set(excluded)) != len(excluded) or set(excluded) & set(expected):
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "out_of_scope requirements must be unique and outside source_requirements")
     return by_id
@@ -567,7 +567,7 @@ def _validate_context_receipt(receipt: dict[str, Any], expected_digest: str) -> 
 
 def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]], batch: dict[str, Any],
                        fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """FaT-BO: exactly the fragments of the batches before *batch* in plan order (batches go one after another)."""
+    """Exactly the fragments of the batches before *batch* in plan order (batches go one after another)."""
     earlier = sorted((item for item in batches.values() if item["ordinal"] < batch["ordinal"]), key=lambda item: item["ordinal"])
     by_batch = {item.get("batch_id"): item for item in fragments if isinstance(item, dict) and item.get("plan_digest") == plan["digest"]}
     missing = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch]
@@ -597,7 +597,7 @@ def _capabilities_of(fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prior_capabilities(plan: dict[str, Any], batch_id: str, fragments: list[dict[str, Any]]) -> dict[str, Any]:
-    """FaT-BO: the fifth tc-generator input of batch k>=2 — the operation capabilities of the accepted batches 1..k-1."""
+    """The fifth tc-generator input of batch k>=2 — the operation capabilities of the accepted batches 1..k-1."""
     batches = _plan_batches(plan)
     batch = batches.get(batch_id)
     if batch is None:
@@ -613,7 +613,7 @@ def prior_capabilities(plan: dict[str, Any], batch_id: str, fragments: list[dict
 
 
 def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str, Any]]) -> None:
-    """FaT-BO: the same capability ID has the same bytes, the same adapter/action the same ID as in the earlier batches."""
+    """The same capability ID has the same bytes, the same adapter/action the same ID as in the earlier batches."""
     known = {item["capability_id"]: item for item in _capabilities_of(earlier)}
     actions = {(item.get("adapter"), item.get("action")): key for key, item in known.items()}
     for capability in fragment["operation_capabilities"]:
@@ -627,7 +627,7 @@ def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str
 
 
 def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any], imported: Mapping[str, Any]) -> None:
-    """FaT-IMP: the cases of the batch keep the human fields of the import byte for byte — one case per imported case of
+    """The cases of the batch keep the human fields of the import byte for byte — one case per imported case of
     the batch, in its order; the model completes only the machine part.  A difference names its path."""
     from tools.cases_import import canonical_management, case_sources
 
@@ -643,7 +643,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
         for field in ("title", "objective", "preconditions", "priority"):
             if case.get(field) != source[field]:
                 differences.append(f"/test_cases/{index}/{field}")
-        if case.get("management") != canonical_management(source):  # FaT-IMP3 (hunt 3.10): Key, folder, labels, custom fields
+        if case.get("management") != canonical_management(source):  # Key, folder, labels, custom fields
             differences.append(f"/test_cases/{index}/management")
         steps = case.get("steps") or []
         if len(steps) != len(source["steps"]):
@@ -657,7 +657,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
     if differences:
         raise BatchAssemblyError("IMPORT_HUMAN_FIELD_CHANGED", "человеческие поля импорта изменены: " + ", ".join(differences[:12])
                                  + " — верни их байт в байт из входа imported, достраивай только машинную часть")
-    # FaT-IMP: the case of an imported row traces to that row's source requirement only — never to another case's one
+    # the case of an imported row traces to that row's source requirement only — never to another case's one
     sources: dict[str, set[str]] = {}
     for mapping in fragment.get("source_to_canonical_mappings") or []:
         for requirement_id in mapping.get("canonical_requirement_ids") or []:
@@ -671,7 +671,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
 
 
 def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """P1: the order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
+    """The order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
     display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for validate-fragment and
     model-response; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
     left where it is for the refusal; nothing else is touched."""
@@ -705,7 +705,7 @@ def _missing(item: Mapping[str, Any], key: str) -> bool:
 
 
 def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """V6 / O-12: what the model need not write — the mechanics of a fragment that the code lays out by rule.
+    """What the model need not write — the mechanics of a fragment that the code lays out by rule.
 
     ``display_order`` (the position, from 1) of requirements, cases, steps, inputs, outputs, expectations and assertions; the ids
     ``STEP-<tail of case_id>-<NN>``, ``INPUT-…-<NN>-<k>``, ``EXP-…-<NN>-<k>``, ``ASSERT-…-<NN>-<k>-<j>``; ``output_id`` = the source name;
@@ -813,7 +813,7 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
     """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
     plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given
-    with another value stays for the refusal (P1: its fix is «удали поле — код поставит его сам»)."""
+    with another value stays for the refusal (its fix is «удали поле — код поставит его сам»)."""
     batch = next((row for row in plan.get("batches") or [] if isinstance(row, Mapping) and row.get("batch_id") == fragment.get("batch_id")), None)
     if batch is None:
         return fragment
@@ -842,7 +842,7 @@ _REQUIRED_FIXES = {
 
 
 def _required_fix(row: Mapping[str, str], fragment: Mapping[str, Any]) -> str | None:
-    """V6: the fix of a missing field the code could not put by rule — what the model writes there.  An input whose type is missing because its
+    """The fix of a missing field the code could not put by rule — what the model writes there.  An input whose type is missing because its
     step_output reference points nowhere gets the fix of that reference."""
     if row["code"] != "SCHEMA_REQUIRED":
         return None
@@ -896,7 +896,7 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
                       prior_fragments: list[dict[str, Any]] | None = None, imported: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches).
 
-    P1: the bindings (batch_id, namespace, ownership, the header and the context receipt) are refused alone and first; every
+    The bindings (batch_id, namespace, ownership, the header and the context receipt) are refused alone and first; every
     other violation comes in one ``BatchAssemblyError.diagnostics`` list, each row with its fix.  The order of ``requirement_ids``
     and ``categories`` is laid out by the code first — what it changed is returned as ``{"normalized": [...]}``."""
     batches = _plan_batches(plan)
@@ -904,9 +904,9 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "", "fragment must be an object",
                        "ответ генератора — один JSON-объект фрагмента, без конверта artifacts и без обёртки")
     fragment, normalized = normalize_fragment(fragment)
-    fragment, filled = fill_fragment_mechanics(fragment)  # V6: ids, display_order, defaults, the types the code can take
+    fragment, filled = fill_fragment_mechanics(fragment)  # ids, display_order, defaults, the types the code can take
     if fragment.get("context_receipt") in (None, "") and isinstance(context_receipt, dict) and fragment.get("status") == "COMPLETE":
-        fragment = {**fragment, "context_receipt": deepcopy(context_receipt)}  # V6: the receipt of the batch given to the check (it is verified below), put by the code
+        fragment = {**fragment, "context_receipt": deepcopy(context_receipt)}  # the receipt of the batch given to the check (it is verified below), put by the code
         filled = [*filled, "/context_receipt"]
     fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
     batch = batches.get(fragment.get("batch_id"))
@@ -1027,7 +1027,7 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     return result or None
 
 
-# FaT-VF: the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
+# the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
 # decided by one batch and runs on the fragment before the answer is written
 DOCUMENT_WIDE_CODES = frozenset({
     "SEMANTIC_PARAM_GROUP_SINGLE", "SEMANTIC_PARAM_GROUP_MISMATCH", "SEMANTIC_PARAM_GROUP_PARAMETER",  # a group may span batches
@@ -1036,10 +1036,10 @@ DOCUMENT_WIDE_CODES = frozenset({
 
 
 def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """FaT-VF: the canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
+    """The canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
     header, the batch's own source requirements, the capabilities of the earlier batches and this one, and this fragment,
     with the same display_order — so an order or format error is refused by validate-fragment, not first by assemble.
-    P1: all its rows (``validate_canonical_document_all``), not the first."""
+    All its rows (``validate_canonical_document_all``), not the first."""
     owned = set(fragment["owned_source_requirement_ids"])
     probe = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
     probe.update({
@@ -1058,7 +1058,7 @@ def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str
 
 
 def require_batch_coverage(fragment: dict[str, Any]) -> None:
-    """FaT-DG: every canonical requirement of this batch is referenced by a case — the rule assemble applies as
+    """Every canonical requirement of this batch is referenced by a case — the rule assemble applies as
     SEMANTIC_UNCOVERED_REQUIREMENT (canonical_document.uncovered_requirements), checked on the batch alone."""
     from tools.canonical_document import uncovered_requirements
 
@@ -1102,7 +1102,7 @@ def _case_fingerprint(case: dict[str, Any]) -> str:
     return _digest(without_identity(case))
 
 
-@_closure_cached  # FaT-9b
+@_closure_cached  
 def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Assemble complete ordered fragments without semantic mutation."""
     batches = _plan_batches(plan)
@@ -1110,7 +1110,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "there must be exactly one fragment per batch")
     by_batch: dict[str, dict[str, Any]] = {}
     ordinals = {key: item["ordinal"] for key, item in batches.items()}
-    # P1-fix2: the document is built from the canon validate-fragment and model-response lay out — the order of the ids and
+    # the document is built from the canon validate-fragment and model-response lay out — the order of the ids and
     # categories and the bindings the code puts itself — so the agent's file and the recorded answer give the same bytes
     fragments = [fill_fragment_bindings(fill_fragment_mechanics(normalize_fragment(item)[0])[0], plan) if isinstance(item, dict) else item for item in fragments]
     for fragment in sorted(fragments, key=lambda item: ordinals.get(item.get("batch_id"), 0) if isinstance(item, dict) else 0):
@@ -1158,7 +1158,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     for case in document["test_cases"]:
         fingerprints[_case_fingerprint(case)].append(case["case_id"])
     warnings = [{"code": "POSSIBLE_DUPLICATE", "fingerprint": fingerprint, "case_ids": sorted(case_ids)} for fingerprint, case_ids in sorted(fingerprints.items()) if len(case_ids) > 1]
-    # FaT-TD/FaT-Q: code hints for the reviewer; none on a document without the new fields and vague expectations, so its bytes stay.
+    # code hints for the reviewer; none on a document without the new fields and vague expectations, so its bytes stay.
     warnings += capped_code_hints(code_hints(document))
     receipt = _with_digest({
         "schema_version": "1.0.0", "plan_digest": plan["digest"], "header_digest": plan["header_digest"],

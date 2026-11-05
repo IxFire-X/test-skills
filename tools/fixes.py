@@ -1,4 +1,4 @@
-"""P1: the one table ``code -> fix`` of the refusals an agent meets.
+"""The one table ``code -> fix`` of the refusals an agent meets.
 
 A refusal that carries its own fix (``error.fix``, a ``; fix: …`` tail, a row of ``diagnostics``) keeps it; the table is
 what ``tools.json_cli.error_fields`` and ``HostStop`` fall back to, so every code has a way out in the envelope.  The
@@ -21,13 +21,13 @@ _BLOCKER_RULE = (
 _STAGES = "context-marker, tc-generator, tc-reviewer, tc-to-autotest, autotest-reviewer"
 _DELETE_FIELD = "удали поле {name} из ответа — код поставит его сам"
 
-# P2: the whole review in one sentence — the fix of the refusals of its stage and the way out of `status` (item 5)
+# the whole review in one sentence — the fix of the refusals of its stage and the way out of `status` (item 5)
 REVIEW_CHAIN = ("ревью — две команды: `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> "
                 "--invocation-id <id вызова ревьюера> --fresh-context yes|no` → вызов ревьюера по пакету → `tools.api review-select "
                 "--run-root <run> --attempt <id> --output-dir <dir> --verdict <файл ответа ревьюера>`")
 
 FIXES: dict[str, str] = {
-    # --- the review layer (moved from orchestrate_test_case_revision._FIXES, FaT-10d) ---
+    # --- the review layer (moved from orchestrate_test_case_revision._FIXES) ---
     "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
                             "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови select без --review; вердикт уже записан — "
                             "начни новый прогон (scan --new-run) и строй session-start командой `tools.api session-start`",
@@ -45,7 +45,7 @@ FIXES: dict[str, str] = {
     "INDEPENDENCE_UNVERIFIED": "ревью требует свежего контекста: передай --fresh-context yes, если ревьюер запущен новым "
                                "сеансом; нового сеанса нет — прогон должен начинаться с scan --accept-self-review",
     "ATTEMPT_TERMINAL": "попытка закрыта, итог — report.md прогона; новая работа — новый прогон (scan --new-run)",
-    # --- the review in two commands (P2) ---
+    # --- the review in two commands ---
     "FRESH_CONTEXT_REQUIRED": "--fresh-context yes — ревьюер отдельный субагент или вызов без истории генерации; ревью в той же сессии — "
                               "прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)",
     "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори review-open с теми же --model-id, --invocation-id и --fresh-context или иди "
@@ -246,12 +246,12 @@ FIXES: dict[str, str] = {
                      "нет: такое наблюдение — утверждение ожидания или его блокер",
     "SCHEMA_REQUIRED": "не хватает обязательного поля (его имя — в path): утверждение assertion требует assertion_id, display_order, "
                        "actual, operator и expected (кроме exists и not_exists)",
-    # --- P8a-1: a delivery without the execution files ---
+    # --- a delivery without the execution files ---
     "PROFILE_NOT_IN_PACKAGE": "в этой поставке нет исполнения тестов — повтори команду без --profile или с --profile cases-only-v1: "
                               "кейсы и отчёт доступны, автотесты запускает тот, у кого есть полная поставка",
     "MODE_B_NOT_IN_PACKAGE": "эта поставка — для кейсов, режима автотестов в ней нет: не вызывай эту команду; кейсы и отчёт доступны "
                              "(scan без --profile, status, report, finish)",
-    # --- P4: the build is run by a human (materialize prints the command, ingest takes the reports) ---
+    # --- the build is run by a human (materialize prints the command, ingest takes the reports) ---
     "EXEC_REPLACED": "exec заменён: `materialize --project <project> --run <run_id>` кладёт тесты в проект и печатает команду, человек её запускает, "
                      "`ingest --project <project> --run <run_id> --reports <каталог с отчётами>` принимает отчёты",
     "COMMAND_NOT_PRINTABLE": "переименуйте или переместите проект (или интерпретатор/модуль) в каталог без символов, которые назвал ответ, и начните прогон заново "
@@ -274,7 +274,7 @@ FIXES: dict[str, str] = {
     "INGEST_REASON_AFTER_RESULT": "результат попытки уже записан: ingest без --no-reports печатает его снова",
     "MATERIALIZE_RESTORE_NOTHING": "тесты ещё не положены в проект: `materialize` без --restore",
     "MATERIALIZATION_COMMAND_UNBOUND": "файл команды materialize лежит без событий журнала: повторите `materialize` с теми же аргументами",
-    # --- V8 (A5-10): the refusals of the cases-only path that had no fix ---
+    # --- the refusals of the cases-only path that had no fix ---
     "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и --attempt (`status` называет попытку) и входные файлы команды; "
                      "повтори с исправленными аргументами",
     "GENERATOR_INPUT_INVALID": "`publish-generator-input` берёт `--kind plan|header` и `--value` — JSON-объект; план без пачек не публикуется: "

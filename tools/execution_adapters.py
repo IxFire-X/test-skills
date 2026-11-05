@@ -22,9 +22,9 @@ SYSTEM_MAVEN = "maven:selected-symbols-v1"
 GRADLE = "gradle-wrapper:selected-symbols-v1"
 ADAPTER_IDS = frozenset({PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE})
 SAFE_ENVIRONMENT_LABELS = frozenset({"PROJECT_NATIVE_ENV"})
-# V4b: ``% ^ " ( ) !`` are what cmd.exe expands, escapes, quotes, groups and delay-expands in the command a human pastes
+# ``% ^ " ( ) !`` are what cmd.exe expands, escapes, quotes, groups and delay-expands in the command a human pastes
 _UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r%^\"()!")
-# FaT-L: the project's style, license-header and static-analysis checks never change how a selected test behaves, so the
+# the project's style, license-header and static-analysis checks never change how a selected test behaves, so the
 # selected-tests run skips this closed list (absent plugins ignore the property).  maven-enforcer is NOT here: it checks
 # the environment.  Each property is the plugin's own user property:
 MAVEN_STYLE_SKIPS = (
@@ -175,14 +175,14 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
     elif adapter_id in {MAVEN, SYSTEM_MAVEN}:
         return ("target/surefire-reports",), (executable, "-B", f"-P{profile}", *MAVEN_STYLE_SKIPS, f"-Dtest={','.join(selectors)}", "test")
     elif adapter_id == GRADLE:
-        # cleanTest reruns only the test task; --rerun-tasks rebuilt everything (FaT-L: 10 s against 34 s on Petclinic).
-        # FaT-H2a: --no-build-cache — with org.gradle.caching the test task would come FROM-CACHE with old reports.
+        # cleanTest reruns only the test task; --rerun-tasks rebuilt everything (10 s against 34 s on Petclinic).
+        # --no-build-cache — with org.gradle.caching the test task would come FROM-CACHE with old reports.
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)
         return ("build/test-results/test",), (executable, "cleanTest", "test", "--no-build-cache", f"-Pprofile={profile}", *(part for selector in gradle_selectors for part in ("--tests", selector)))
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
 
-# FaT-L: the project's own style checks, read statically from its build files — for hints only, never for the command.
+# the project's own style checks, read statically from its build files — for hints only, never for the command.
 # name -> (Maven markers, Gradle markers, Maven format goal, Gradle format task, scans the whole project directory)
 _STYLE_CHECKS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str | None, str | None, bool], ...] = (
     ("spring-javaformat", (r"<artifactId>\s*spring-javaformat-maven-plugin\s*</artifactId>",), (r"io\.spring\.javaformat",),
@@ -281,7 +281,7 @@ def whole_project_checks(checks: Sequence[str]) -> tuple[str, ...]:
 
 
 def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_files: Sequence[str]) -> dict[str, str]:
-    """FaT-L: what the selected-tests run skipped and how to format the generated files left in the project."""
+    """What the selected-tests run skipped and how to format the generated files left in the project."""
     notes: dict[str, str] = {}
     if adapter_id in {MAVEN, SYSTEM_MAVEN}:
         found = ", ".join(checks) if checks else (
@@ -291,7 +291,7 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
     if adapter_id not in {MAVEN, SYSTEM_MAVEN, GRADLE} or not checks or not kept_files:
         return notes
     rows = [row for row in _STYLE_CHECKS if row[0] in checks]
-    # FaT-H2a: only spotless (Maven) takes a file filter; every other command formats the whole module.
+    # only spotless (Maven) takes a file filter; every other command formats the whole module.
     spotless_files = ",".join(".*" + r"[\\/]".join(re.escape(part) for part in path.split("/")) for path in kept_files)
     if adapter_id == GRADLE:
         commands = [f'"{executable}" {row[4]}' for row in rows if row[4]]
@@ -306,7 +306,7 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
         return notes
     scope = ("команда форматирует весь модуль, не только эти файлы — проверьте дифф чужих файлов перед коммитом"
              if whole else "команда форматирует только эти файлы")
-    # FaT-RL: a license goal rewrites the header of every file of the module, say it in so many words
+    # a license goal rewrites the header of every file of the module, say it in so many words
     goals = [row[3] for row in rows if row[0] in {"license-mycila", "license-codehaus"} and row[3] and adapter_id != GRADLE]
     if goals:
         scope += f"; {', '.join(goals)} переписывает заголовки лицензий во всех файлах модуля, а не только в этих"

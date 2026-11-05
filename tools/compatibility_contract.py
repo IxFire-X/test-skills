@@ -45,7 +45,7 @@ def _label(value: Any) -> bool:
 
 
 def _marker_requirements(rows: Any, root: Any, attempt_id: str) -> Any:
-    """FaT-P3: the requirements the effective document holds: the marker's without those the human excluded (plan out_of_scope)."""
+    """The requirements the effective document holds: the marker's without those the human excluded (plan out_of_scope)."""
     from tools.scope_pause import marker_requirements_in_scope
 
     return marker_requirements_in_scope(rows, Path(root), attempt_id)
@@ -158,7 +158,7 @@ def _model_event_errors(
     ]
     instances = {str(row.get("stage_instance_id")) for row in executed}
     lifecycle = durable["model_lifecycle"].get("stages", {})
-    # The marker parts (FaT-5) are bound through the input digests of the merged context-marker:baseline request.
+    # The marker parts are bound through the input digests of the merged context-marker:baseline request.
     parts = ("context-marker:requirements", "context-marker:batch-")
     if not isinstance(lifecycle, Mapping) or any(stage not in instances | {"assembly"} and not str(stage).startswith(parts) for stage in lifecycle):
         _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
@@ -586,7 +586,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
 
 
 def reviewer_independence(reviewer: Mapping[str, Any]) -> str:
-    """FaT-4b: a review admitted by `scan --accept-self-review` is named, never promoted to verified."""
+    """A review admitted by `scan --accept-self-review` is named, never promoted to verified."""
     if reviewer.get("isolation") == "verified":
         return "verified"
     return "self_accepted" if reviewer.get("self_accepted") is True else "independence_unverified"

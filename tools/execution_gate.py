@@ -1,4 +1,4 @@
-"""P8a-1: the one seam between the core and the code that builds, runs tests and contacts the stand.
+"""The one seam between the core and the code that builds, runs tests and contacts the stand.
 
 Everything that starts a build or a test process, or opens a connection to the stand, lives in the four ``tools/exec_*.py``
 files; the core never imports them.  The profile of a delivery is the presence of those files — a file cannot be "enabled"
@@ -19,7 +19,7 @@ from types import ModuleType
 from typing import Any
 
 EXEC_MODULES = ("exec_commands", "exec_runner")
-# F4b: the way into the review of before (the CLI of the nine commands) is a file of the development build only
+# the way into the review of before (the CLI of the nine commands) is a file of the development build only
 LEGACY_MODULES = ("review_legacy",)
 MODE_B_MODULES = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
                   "build_trace_document", "quarantine", "code_slices")

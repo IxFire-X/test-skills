@@ -23,28 +23,28 @@ def error_code_prefix(message: str) -> str | None:
 
 
 def error_fields(error: BaseException, table: bool = True) -> dict[str, str]:
-    """FaT-U6: ``{code, message[, fix]}`` of a refusal — the error's own code, else the ``CODE:`` its message starts with,
+    """``{code, message[, fix]}`` of a refusal — the error's own code, else the ``CODE:`` its message starts with,
     else its type; the fix is the error's own, else the ``; fix: …`` tail of the message.  The message stays whole: its
     readers look for the fix text in it, the separate field is for the code.  An OSError names its file — the agent's own
-    input, not a secret (FaT-F1).  P1: with no fix of its own the code's fix is the one of ``tools.fixes`` — unless ``table`` is
+    input, not a secret. With no fix of its own the code's fix is the one of ``tools.fixes`` — unless ``table`` is
     False, for a call site that has a more exact fix of its own to fall back to; the error's own fix is above both."""
     message = str(error)
     if isinstance(error, OSError):
         message = f"{type(error).__name__}: {error.strerror or 'input/output error'}" + (f": {error.filename}" if error.filename else "")
-    # V8 (A5-10): a bare ValueError names no refusal — INPUT_INVALID, as run_pipeline.main says it, with the fix of the table
+    # a bare ValueError names no refusal — INPUT_INVALID, as run_pipeline.main says it, with the fix of the table
     code = getattr(error, "code", None) or error_code_prefix(message) or ("INPUT_INVALID" if type(error) is ValueError else type(error).__name__)
     fix = getattr(error, "fix", None) or (message.split(_FIX_TAIL, 1)[1] if _FIX_TAIL in message else None) or (fix_for(str(code)) if table else None)
     return {"code": str(code), "message": message, **({"fix": str(fix)} if fix else {})}
 
 
 def error_envelope(error: BaseException, next_step: str | None = None) -> dict[str, object]:
-    """FaT-U5: the one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null)."""
+    """The one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null)."""
     fields = error_fields(error)
     return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step}
 
 
 def cli_error(error: BaseException, *, fix: str, code: str = "INVALID_INPUT") -> dict[str, object]:
-    """F4b (A5-9): the envelope ``{status, code, message, fix, next}`` of a CLI that had printed ``{status, message}`` — the refusal's own
+    """The envelope ``{status, code, message, fix, next}`` of a CLI that had printed ``{status, message}`` — the refusal's own
     code and fix when it has them (``CODE: …; fix: …``), else *code* (``FILE_UNREADABLE`` for a file that cannot be read) and the *fix* of
     the CLI.  ``status`` and ``message`` stay as they were."""
     envelope = error_envelope(error)
@@ -64,10 +64,10 @@ _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")  # a stage or a batc
 
 
 def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None) -> None:
-    """P1: one line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
+    """One line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
     invalid) of a command that names its run; the run report counts the file.  No content, no paths, no messages — the code
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
-    never changes the refusal the agent gets.  J1: the line is followed by a ``COMMAND_REFUSED`` event of the journal whose digest is
+    never changes the refusal the agent gets. The line is followed by a ``COMMAND_REFUSED`` event of the journal whose digest is
     the sha256 of the line's bytes — the report counts the events, the line only carries the detail."""
     import datetime
     from pathlib import Path
@@ -90,7 +90,7 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
         atomic_write_confined_bytes_at_root(root.parent.parent, root, path, before + line + b"\n")
     except (OSError, ValueError, KeyError, TypeError):
         return
-    try:  # J1 (A1-1): the fact of the refusal is an event of the journal, bound to its line by the digest; a journal that does not pass its checks takes none
+    try:  # the fact of the refusal is an event of the journal, bound to its line by the digest; a journal that does not pass its checks takes none
         from tools import pilot_state
 
         pilot_state.append_event(root, "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
@@ -113,7 +113,7 @@ def emit_error(message: str, prog: str | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     payload: dict[str, object] = {"status": "error", "errors": [{"path": "", "message": message}]}
-    if message.startswith("argument error: "):  # P1: the one envelope of every refusal, the old field stays
+    if message.startswith("argument error: "):  # the one envelope of every refusal, the old field stays
         flags = [flag for flag in _MODEL_REQUEST_FLAGS if flag in message]
         fix = ("флаги " + ", ".join(flags) + " — у model-request; model-response получает только --run-root, --attempt, --stage, "
                "--artifact, --transport-attempts") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"

@@ -52,7 +52,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         missing_integrity.append("root")
     dependencies = {"schema_engine": {"required": True, "available": _engine_importable()}}
     missing_modules = [name for name, item in dependencies.items() if not item["available"]]
-    # FaT-R: without it the manifest cannot be checked — say what is missing, not "invalid manifest".
+    # without it the manifest cannot be checked — say what is missing, not "invalid manifest".
     messages.extend(
         f"не импортируется собственный валидатор схем ({name}, tools/schema_engine.py); сверка с манифестом пропущена. "
         "Сверьте папку пакета с поставкой: стороннее ПО пакету не нужно"
@@ -71,7 +71,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
             missing_integrity.append("invalid:release/manifest.json")
             messages.append(f"release/manifest.json: {type(error).__name__}: {error}")
             crlf = registry.crlf_converted(root) if "does not match runtime bytes" in str(error) else []
-            if crlf:  # P6a: said in words; the byte-for-byte check is unchanged
+            if crlf:  # said in words; the byte-for-byte check is unchanged
                 crlf_report = {"count": len(crlf), "examples": crlf[:5], "fix": CRLF_FIX}
                 messages.append(f"переносы строк изменены (CRLF) в {len(crlf)} файл(ах) пакета, например {', '.join(crlf[:3])}: "
                                 f"содержимое то же, но git при checkout заменил LF на CRLF. {CRLF_FIX}")

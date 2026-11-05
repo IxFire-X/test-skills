@@ -1,4 +1,4 @@
-"""P4b: what the runner takes from a human's run of the build — ``ingest_reports`` builds the report of the closed request from the reports'
+"""What the runner takes from a human's run of the build — ``ingest_reports`` builds the report of the closed request from the reports'
 bytes alone.  The package starts no process; the evidence, the receipts and the checks stay in ``run_tests``.
 """
 
@@ -66,7 +66,7 @@ def _has_one_new_durable_execution_start(run_root: Path | None, attempt_id: str 
 
 
 def report_set_problems(snapshots: Mapping[Any, bytes], compatibility: Any, source: Mapping[str, Any], language: str) -> list[str]:
-    """P4: what is wrong with a set of reports a human brought, against the tests of the attempt — extra, missing, duplicate,
+    """What is wrong with a set of reports a human brought, against the tests of the attempt — extra, missing, duplicate,
     malformed; empty when the set is exactly the reviewed tests (or a report that proves zero collected tests)."""
     from tools.execution_adapters import is_zero_test_report
 
@@ -80,7 +80,7 @@ def report_set_problems(snapshots: Mapping[Any, bytes], compatibility: Any, sour
 
 
 def ingest_reports(request: Any, authorization_receipt: Mapping[str, Any], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], *, host_isolation_receipt: Mapping[str, Any] | None, generated_delta_receipt: Mapping[str, Any] | None, run_root: Path, attempt_id: str, snapshots: Mapping[Path, bytes], execution_source: Mapping[str, Any], run_id: str, ran_at: str, duration_sec: float, on_execution_start: Callable[[Any], None], post_execution_check: Callable[[], str | None] | None = None) -> dict[str, Any]:
-    """P4: the result of a run of the closed request that a human made — the report ``run_tests_v5`` would build from the run, built from the
+    """The result of a run of the closed request that a human made — the report ``run_tests_v5`` would build from the run, built from the
     reports' bytes alone: no process, no clock, no environment.  The same checks of the attempt first; the execution-start claim is made here once
     (a claim found for this very request, left by a cut ingest, is the same one)."""
     from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review

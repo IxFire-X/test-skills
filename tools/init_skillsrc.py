@@ -100,7 +100,7 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], p
         if isinstance(module, dict):
             module.pop("readiness", None)
             missing = _close_discovered_test(module, project_dir)
-            if missing is not None and notes is not None:  # FaT-NB: init says why the test block is not written
+            if missing is not None and notes is not None:  # init says why the test block is not written
                 notes.append(f"{missing[0]}; fix: {missing[1]}")
     return {"schema_version": "5.0.0", "version": "3.0", "project": {"name": discovery.get("project_name", "project")}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": modules}
 
@@ -109,7 +109,7 @@ BUILD_TOOL_NOT_FOUND = "BUILD_TOOL_NOT_FOUND"
 
 
 def build_tool_missing(module: Mapping[str, Any], project_dir: Path) -> tuple[str, str] | None:
-    """FaT-NB: ``(reason, fix)`` when the package cannot find the build tool of a Java module — no Maven wrapper and no
+    """``(reason, fix)`` when the package cannot find the build tool of a Java module — no Maven wrapper and no
     ``mvn`` on PATH, or no Gradle wrapper (a system gradle is not supported); None otherwise.  One check for init and ready."""
     stack = module.get("stack") if isinstance(module.get("stack"), Mapping) else {}
     build_tool = stack.get("build_tool")
@@ -132,7 +132,7 @@ def build_tool_missing(module: Mapping[str, Any], project_dir: Path) -> tuple[st
 
 
 def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[str, str] | None:
-    """Emit only the frozen closed execution tuple, or omit execution config; FaT-NB: a missing build tool is named."""
+    """Emit only the frozen closed execution tuple, or omit execution config; a missing build tool is named."""
     test = module.get("test")
     stack = module.get("stack")
     if not isinstance(test, Mapping) or not isinstance(stack, Mapping):
@@ -175,7 +175,7 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[s
             system_maven_path("mvn")
         except (InventoryError, OSError):
             pass
-        else:  # P6b: the name, found on PATH where the tests run — the absolute path of this machine does not travel
+        else:  # the name, found on PATH where the tests run — the absolute path of this machine does not travel
             module["test"] = {
                 "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
                 "executable": "mvn", "build_profile": "default", "adapter_parameters": {},
@@ -186,7 +186,7 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[s
 
 
 def _keep_declared_test_keys(module: Any, declared: Mapping[str, Any], *, new_file: bool) -> None:
-    """P6b: ``test.level`` and the form of ``test.executable`` are the person's.  A repeated init keeps what the file says (an older
+    """``test.level`` and the form of ``test.executable`` are the person's.  A repeated init keeps what the file says (an older
     absolute path of ``mvn`` still works and is no reason for a replacement); only a new file gets the level — ``in-process`` for a
     module that has no ``paths.context`` — and a module with a context is left to the derivation and its warning."""
     test = module.get("test") if isinstance(module, dict) else None
@@ -651,7 +651,7 @@ CONTEXT_IMPACT = ("Модуль только с тестами: исходник
 
 def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
                         declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
-    """FaT-2R: the ``paths.source`` question of a tests-only module becomes ``paths.context``; an answer (option IDs or
+    """The ``paths.source`` question of a tests-only module becomes ``paths.context``; an answer (option IDs or
     paths from the project root, comma-separated) closes both.  Returns (discovery, the other answers, {module: roots})."""
     from tools.project_inventory import context_root_problem
 
@@ -687,13 +687,13 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
 
 
 def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | None) -> tuple[dict[str, str], list[str]]:
-    """FaT-H2b P2b: ``(answers, notes)`` for questions of modules the human did not select whose only option is the
+    """``(answers, notes)`` for questions of modules the human did not select whose only option is the
     host's supported runner — no decision is left there.  A question with several options stays a question."""
     if selected_module is None:
         return {}, []
     from tools.module_ids import current_id
 
-    selected_module = current_id(discovery.get("modules", []), selected_module)  # P6a: --module may be the old hex id
+    selected_module = current_id(discovery.get("modules", []), selected_module)  # --module may be the old hex id
     answers: dict[str, str] = {}
     notes: list[str] = []
     for question in discovery.get("questions", []):
@@ -762,7 +762,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         str(module.get("id"))
         for module in existing_modules
         if list((module.get("paths") or {}).get("source") or [])
-        or list((module.get("paths") or {}).get("context") or [])  # FaT-2R: a tests-only module reads its sources there
+        or list((module.get("paths") or {}).get("context") or [])  # a tests-only module reads its sources there
         or list((module.get("feature_sources") or {}).get("source") or [])
     }
     try:
@@ -794,10 +794,10 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     effective_answers = _existing_discovery_answers(existing, working_discovery, {**defaults, **answers})
     try:
         proposed = compile_skillsrc(working_discovery, effective_answers, root, notes)
-        for module in proposed.get("modules") or []:  # FaT-2R: the answered context roots of a tests-only module
+        for module in proposed.get("modules") or []:  # the answered context roots of a tests-only module
             if isinstance(module, dict) and module.get("id") in context_paths:
                 module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])
-            # FaT-2R2: discovery cannot see what the person declared; a repeated init keeps it instead of proposing its removal
+            # discovery cannot see what the person declared; a repeated init keeps it instead of proposing its removal
             declared = next((row for row in existing_modules if isinstance(module, dict) and row.get("id") == module.get("id")), {})
             if (declared.get("paths") or {}).get("context") and module.get("id") not in context_paths:
                 module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
@@ -827,7 +827,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
                 original,
                 before_replace=lambda: _preserve_immutable_evidence(root, immutable_evidence_dir, original),
             )
-        except (OSError, ValueError) as error:  # FaT-DEAD2 F3: OS errors and the package's refusals (InitError, OutputConfinementError)
+        except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
             return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
         return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back)
     try:
@@ -846,7 +846,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
     try:
         read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
-    except (OSError, ValueError) as error:  # FaT-DEAD2 F3: OS errors and the package's refusals (InitError, OutputConfinementError)
+    except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
         return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
     return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
 

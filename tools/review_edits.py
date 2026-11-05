@@ -1,4 +1,4 @@
-"""FaT-CV: the reviewer's AUTO_FIX as a list of exact edits to human fields; code applies them, never rewrites them.
+"""The reviewer's AUTO_FIX as a list of exact edits to human fields; code applies them, never rewrites them.
 
 A ``successor_edits`` item is ``{correction_id, case_id, field, step_id?, expectation_id?, index?, old, new}``.  ``field``
 is one of ``EDITABLE``: ``title``/``objective`` of a case, ``precondition`` (``index``), ``action``/``test_data`` of a step

@@ -43,7 +43,7 @@ else:
 
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
-# FaT-H2b P2a: JUnit 4 in the same build — spring-boot-starter-test alone is then no proof of JUnit 5.
+# JUnit 4 in the same build — spring-boot-starter-test alone is then no proof of JUnit 5.
 _JUNIT4_MARKERS = re.compile(r"junit-vintage-engine|<artifactid>\s*junit\s*</artifactid>|['\"]junit:junit[:'\"]")
 SOURCE_SUFFIXES = {"python": frozenset({".py"}), "java": frozenset({".java"}), "typescript": frozenset({".ts", ".tsx", ".js", ".jsx"}), "go": frozenset({".go"})}
 def _parts(root: Path, path: Path) -> tuple[str, ...]:
@@ -95,7 +95,7 @@ def _validate_maven(data: ET.Element) -> None:
             if _xml_name(module)!="module" or list(module) or not _safe_module_ref(module.text): raise ValueError
             if module.tail and not module.tail.isspace(): raise ValueError
 def _own_pack_root(root: Path) -> Path | None:
-    """F5: the folder of this skill pack when it lies inside the project (HOW-TO-USE allows it beside the project's files) —
+    """The folder of this skill pack when it lies inside the project (HOW-TO-USE allows it beside the project's files) —
     the inventory leaves it out by skill-pack-root-v1, and so does discovery: it is no module of the project."""
     pack = Path(__file__).resolve().parents[1]
     return pack if pack != root and root in pack.parents else None
@@ -128,7 +128,7 @@ def _safe_parse(root: Path, manifests: Sequence[Path]) -> tuple[dict[Path,Any],l
 def _id(rel: str) -> str:
     return module_id_for(rel)
 def _declared_legacy_ids(root: Path) -> dict[str,str]:
-    """P6a: the old hex ids an existing .skillsrc already uses stay the ids of those folders — the file is not rewritten and its
+    """The old hex ids an existing .skillsrc already uses stay the ids of those folders — the file is not rewritten and its
     modules are not taken for removed ones."""
     try:
         if __package__: from .skillsrc_manifest import load_skillsrc
@@ -147,7 +147,7 @@ def _test_values(lang: str, texts: Mapping[str, str]) -> dict[str, list[str]]:
         values.pop("junit5")
     return values
 def module_test_evidenced(project_dir: Path, module: Mapping[str, Any]) -> bool:
-    """FaT-H2b P2b: is the module's test.framework seen in its own build files (not taken by default)?"""
+    """Is the module's test.framework seen in its own build files (not taken by default)?"""
     lang = (module.get("stack") or {}).get("language")
     framework = (module.get("test") or {}).get("framework")
     if lang not in MARKERS or lang == "go" or framework is None:
@@ -209,17 +209,17 @@ def _pom_levels(pom: Path, inherited: Mapping[str, str], external: str | None = 
     return levels, properties
 _PROJECT_MARKERS = (".skillsrc", ".pilot-runs", ".git")
 def project_root_of(module_root: Path) -> Path | None:
-    """V4b: the project a module lies in — the nearest directory (the module itself included) that holds a marker of the package or of git; None without one."""
+    """The project a module lies in — the nearest directory (the module itself included) that holds a marker of the package or of git; None without one."""
     start = Path(module_root).resolve()
     return next((folder for folder in (start, *start.parents) if any((folder / marker).exists() for marker in _PROJECT_MARKERS)), None)
 def _in_project(path: Path, project: Path) -> bool:
     return path == project or project in path.parents
 def _plain_relative_path(value: str) -> bool:
-    """V4b: a ``relativePath`` that names a place under the pom's own tree by a relative path: not empty-with-NUL, not rooted, no drive, no UNC (resolving one would reach the network)."""
+    """A ``relativePath`` that names a place under the pom's own tree by a relative path: not empty-with-NUL, not rooted, no drive, no UNC (resolving one would reach the network)."""
     return "\x00" not in value and not value.startswith(("/", "\\")) and not re.match(r"^[A-Za-z]:", value) and not Path(value).is_absolute()
 def _reactor_chain(root: Path, project_root: Path | None = None) -> tuple[list[Path], str | None]:
     """The module pom and its reactor parents (each lists its child), and the artifactId of the external parent at the top.
-    V4b: a parent pom is opened only if ``relativePath`` leaves no trace outside the project (``project_root``, else the one the markers show); with no project, no parent is followed."""
+    A parent pom is opened only if ``relativePath`` leaves no trace outside the project (``project_root``, else the one the markers show); with no project, no parent is followed."""
     project = Path(project_root).resolve() if project_root is not None else project_root_of(root)
     chain, pom, external = [], root / "pom.xml", None
     while pom.is_file() and len(chain) < 6:
@@ -241,7 +241,7 @@ def _reactor_chain(root: Path, project_root: Path | None = None) -> tuple[list[P
 _JUNIT_PARAMS_ARTIFACTS = frozenset({"junit-jupiter", "junit-jupiter-params", "spring-boot-starter-test"})
 _BOOT_TEST_STARTER = re.compile(r"spring-boot-starter-[\w.-]+-test")  # Spring Boot 4 module test starters pull spring-boot-starter-test
 def junit_params_available(module_root: Path, project_root: Path | None = None) -> bool:
-    """FaT-PT: does the module's build give its tests junit-jupiter-params — a dependency (not a managed version) on
+    """Does the module's build give its tests junit-jupiter-params — a dependency (not a managed version) on
     junit-jupiter, junit-jupiter-params, spring-boot-starter-test or a Boot 4 `spring-boot-starter-*-test` in the module pom, its reactor parents or build.gradle.
     Read only; an external parent pom is not read, so what only it adds counts as absent."""
     root = Path(module_root).resolve()
@@ -261,7 +261,7 @@ def junit_params_available(module_root: Path, project_root: Path | None = None) 
             return True
     return False
 def java_api_level(module_root: Path, project_root: Path | None = None) -> dict[str, Any] | None:
-    """FaT-JL: the Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
+    """The Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
 
     Read from the build files only, never by running them: Maven ``maven.compiler.release/source/target`` (and ``test*``)
     in properties or the compiler plugin, an animal-sniffer ``java1N`` signature that checks test classes, the parent poms
@@ -434,7 +434,7 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
     if unresolved_fields is None:
         required=("language","build_tool") if report.get("status")=="ready" else ("language",)
         expected={f"modules.{mid}.stack.{field}" for mid,module in modules.items() for field in required
-                  if not (field=="build_tool" and module.get("stack",{}).get("language")=="documents")  # FaT-DOC: nothing to build
+                  if not (field=="build_tool" and module.get("stack",{}).get("language")=="documents")  # nothing to build
                   and (not isinstance(module.get("stack",{}).get(field),str) or not module["stack"][field].strip())}
         if report.get("status") == "ready":
             expected |= {
@@ -465,7 +465,7 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
 DOCUMENT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".adoc", ".rst"})
 def _documents_module(root: Path, skill_pack_root: Path | None = None) -> dict[str, Any] | None:
-    """FaT-DOC: a project of requirement documents only — no build manifest and no source file — is one module `documents`
+    """A project of requirement documents only — no build manifest and no source file — is one module `documents`
     at the root: cases from its documents (cases-only-v1), nothing to build or run. Any source file keeps the old refusal."""
     from tools.scan_rules import SOURCE_SUFFIXES as ANY_SOURCE
 
@@ -481,7 +481,7 @@ def discover_project(project_dir:Path, skill_pack_root:Path|None=None)->dict[str
     manifests=find_confined_manifests(root,pack)
     if not manifests:
         documents = _documents_module(root, pack)
-        if documents is not None:  # FaT-DOC
+        if documents is not None:  
             return build_report("ready", root.name, [documents], [], [], [], project_fingerprint(root, documents["detected_from"]))
         return build_report("error",root.name,[],[],[],["build manifests were not found"])
     modules,qs,warnings,errors,unresolved=analyze_module_roots(root,manifests); evidence=[_rel(root,p) for p in manifests]

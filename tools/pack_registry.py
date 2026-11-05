@@ -3,7 +3,7 @@
 A pack is one of three builds, told apart by the exact set of its registry files (never by a flag):
 
 * ``universal`` — the repository: every runtime file, the maintainer registry ``evals/`` and the tools of development;
-* ``mode-b`` — the delivery with automated tests (V4b): the files of mode B (``materialize``/``ingest``, the adapters, the roles) but
+* ``mode-b`` — the delivery with automated tests: the files of mode B (``materialize``/``ingest``, the adapters, the roles) but
   no tool of development (``ci_gate`` and ``release_manifest`` run ``git``) and no maintainer file; no file of it starts a process;
 * ``cases-only`` — the delivery for cases without a project run: no ``tools/exec_*.py`` (the commands of mode B), no file of mode B,
   no maintainer files and no tool of development.
@@ -29,7 +29,7 @@ from tools.schema_validation import StrictJsonError, load_json_strict, schema_di
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
 MAINTAINER_ROOTS = ("evals",)
 REGISTRY_ROOTS = RUNTIME_ROOTS + MAINTAINER_ROOTS
-# The files of the root a pack carries, so that the check covers them (V4b): the two documents generated from the contract, the texts a
+# The files of the root a pack carries, so that the check covers them: the two documents generated from the contract, the texts a
 # human follows (README, HOW-TO-USE), what ``pip`` would read (``requirements*.txt``) and the example of ``.skillsrc``.
 ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "HOW-TO-USE.md", "requirements.txt", "requirements-dev.txt", ".skillsrc.example")
 RUNTIME_SUFFIXES = {".json", ".md", ".py"}
@@ -43,17 +43,17 @@ CASES_ONLY_EXCLUDED_FILES = (
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
     "schemas/release-eval-run.schema.json", "schemas/scenario-observation-receipt.schema.json",
     "tools/review_legacy.py", "requirements-dev.txt",
-    # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b`` (F6)
+    # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b``
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
     "tools/autotest_hints.py", "tools/trace_check.py", "tools/build_trace_document.py", "tools/quarantine.py", "tools/code_slices.py",
-    "tools/execution_core.py",  # the interface of the core for the execution files (V1)
+    "tools/execution_core.py",  # the interface of the core for the execution files
 )
-CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe (P8a-1)
+CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a
 # delivery of cases does not carry (PT).
 CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/autotest-reviewer/")
 
-# What the delivery of mode B leaves out (V4b): the tools of development and the maintainer files.  ``ci_gate`` and ``release_manifest``
+# What the delivery of mode B leaves out: the tools of development and the maintainer files.  ``ci_gate`` and ``release_manifest``
 # run ``git`` and write the manifest; the others check the contract, render its documents and keep the evidence of the release
 # evaluation.  ``scenario-observation-receipt`` stays: a run of mode B writes it.
 MODE_B_EXCLUDED_FILES = (

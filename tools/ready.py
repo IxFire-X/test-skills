@@ -1,7 +1,7 @@
-"""Readiness of a project for a first run: every check at once, each problem with the command that fixes it (FaT-R).
+"""Readiness of a project for a first run: every check at once, each problem with the command that fixes it.
 
 ``python -m tools.ready --project <abs> --docs <path> [--docs …] [--profile …] [--module <ID>]`` reads, and starts one
-project process: the offline validate phase of a Maven module with the flags of the selected-tests run (FaT-L).  It never
+project process: the offline validate phase of a Maven module with the flags of the selected-tests run.  It never
 stops at the first problem: Python and the package dependencies, the pack itself (doctor), git, the requirement
 documents, ``.skillsrc``, the module, the scan with its exclusions and — as a separate block that cases do not need — the
 build (wrapper, system ``mvn``, JDK, the module interpreter, the project's style checks, the validate probe).  The JSON
@@ -69,7 +69,7 @@ def check_pack() -> dict[str, Any]:
     if report.get("status") == "PASS":
         return _row("pack", CASES, "OK", "пакет цел (doctor PASS)")
     missing = report.get("integrity", {}).get("missing") or []
-    crlf = report.get("crlf")  # P6a: only the line endings differ — the fix is the .gitattributes line, not a new copy of the package
+    crlf = report.get("crlf")  # only the line endings differ — the fix is the .gitattributes line, not a new copy of the package
     return _row("pack", CASES, "STOP", "doctor: " + "; ".join([*map(str, missing), *map(str, report.get("messages") or [])]),
                 crlf["fix"] if isinstance(crlf, dict) else "сверьте папку пакета с поставкой (файлы и SHA-256)", {"doctor": report})
 
@@ -88,7 +88,7 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
     from tools.doc_sections import resolve_spec
 
     for raw in docs:
-        spec, heading = resolve_spec(root, raw)  # FaT-P3: path#Section
+        spec, heading = resolve_spec(root, raw)  # path#Section
         candidate = Path(spec)
         path = (candidate if candidate.is_absolute() else root / candidate).resolve()
         check_id = f"docs:{raw}"
@@ -138,11 +138,11 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
         text = path.read_bytes().decode("utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
-    if not text.strip() or text.lstrip().startswith(("{", "[")):  # F5: a JSON array is no YAML either (invalid_shape, with its fix)
+    if not text.strip() or text.lstrip().startswith(("{", "[")):  # a JSON array is no YAML either (invalid_shape, with its fix)
         return None
     from tools.skillsrc_manifest import json_with_comments
 
-    if json_with_comments(text):  # V9b (8.15): a file that begins with // is JSON with comments, not YAML
+    if json_with_comments(text):  # a file that begins with // is JSON with comments, not YAML
         return None
     lines, found, depth = text.splitlines(), [], None
     for number, line in enumerate(lines, 1):
@@ -160,7 +160,7 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
 
 
 def check_run_root(project: Path) -> list[dict[str, Any]]:
-    """V9b (8.12): a ``.pilot-runs`` that is a link (a junction, a symlink) is a STOP row with the fix of scan's refusal; no row when it is not."""
+    """A ``.pilot-runs`` that is a link (a junction, a symlink) is a STOP row with the fix of scan's refusal; no row when it is not."""
     from tools.fixes import fix_for
     from tools.pilot_state import run_root_is_unsafe
 
@@ -175,14 +175,14 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
     from tools.init_skillsrc import ensure_skillsrc
     from tools.skillsrc_manifest import COMMENTS_FIX, COMMENTS_MESSAGE, json_with_comments, skillsrc_file_problem
 
-    unreadable = skillsrc_file_problem(Path(project) / ".skillsrc")  # F5: the scan's SKILLSRC_UNREADABLE, seen here first
+    unreadable = skillsrc_file_problem(Path(project) / ".skillsrc")  # the scan's SKILLSRC_UNREADABLE, seen here first
     if unreadable is not None:
         return [_row("skillsrc", CASES, "STOP", f"SKILLSRC_UNREADABLE: {unreadable}", fix_for("SKILLSRC_UNREADABLE"))]
     try:
         commented = json_with_comments((Path(project) / ".skillsrc").read_bytes().decode("utf-8-sig"))
     except (OSError, UnicodeDecodeError):
         commented = False
-    if commented:  # V9b (8.15): said as it is, before the file is taken for anything else
+    if commented:  # said as it is, before the file is taken for anything else
         return [_row("skillsrc", CASES, "STOP", COMMENTS_MESSAGE, COMMENTS_FIX)]
     legacy = legacy_yaml_keys(project)
     if legacy is not None:
@@ -219,7 +219,7 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
     if status == "conflict":
         return [_row("skillsrc", CASES, "STOP", f".skillsrc требует ответа ({status})", _init_command(project) + " --answers <файл ответов>",
                      {"questions": receipt.get("questions")})]
-    if receipt.get("_fix"):  # F5: a foreign file — what is wrong in it (the key or the line) and the way out
+    if receipt.get("_fix"):  # a foreign file — what is wrong in it (the key or the line) and the way out
         return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {receipt.get('_message')}", str(receipt["_fix"]))]
     return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {', '.join(map(str, receipt.get('errors') or [status]))}", _init_command(project) + " --write")]
 
@@ -264,7 +264,7 @@ def select_module(modules: Sequence[Mapping[str, Any]], module_id: str | None) -
     if module_id is not None:
         from tools.module_ids import select
 
-        found = select(modules, module_id)  # P6a: the exact id first, then the id of the folder in its current or old form
+        found = select(modules, module_id)  # the exact id first, then the id of the folder in its current or old form
         return (found, None) if found is not None else (None, f"модуля {module_id} нет; есть: {', '.join(str(m.get('id')) for m in modules)}")
     if len(modules) == 1:
         return modules[0], None
@@ -278,19 +278,19 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     from tools.module_ids import legacy_warning
     from tools.pilot_state import module_path_problem
 
-    problem = module_path_problem(Path(project).resolve(), module.get("root"))  # F5: what create_attempt checks, before the scan meets it
+    problem = module_path_problem(Path(project).resolve(), module.get("root"))  # what create_attempt checks, before the scan meets it
     if problem is not None:
         return _row("module", CASES, "STOP", f"модуль {module.get('id')}: {problem}",
                     "в .skillsrc у модуля root — путь его папки от корня проекта (папка есть, без «..» и ссылок); поправьте и повторите ready"), None
     legacy = legacy_warning(module, module_id)
-    if legacy is not None:  # P6a: the old hex id works; the row says what to write instead
+    if legacy is not None:  # the old hex id works; the row says what to write instead
         return _row("module", CASES, "WARN", f"модуль {module.get('id')} ({module.get('root')}); {legacy}",
                     legacy.split("пишите ", 1)[1]), module
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
 
 
 def check_test_level(module: Mapping[str, Any]) -> dict[str, Any]:
-    """P6b: the level of the module's autotests — declared (OK) or derived (WARN with the key to write); a module without tests has none."""
+    """The level of the module's autotests — declared (OK) or derived (WARN with the key to write); a module without tests has none."""
     from tools.skillsrc_manifest import level_derived_note, module_test_level
 
     found = module_test_level(module)
@@ -304,7 +304,7 @@ def check_test_level(module: Mapping[str, Any]) -> dict[str, Any]:
 
 def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
     """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business).
-    FaT-P3: ``путь#Раздел`` is the file ``путь``; the heading is the docs row's business."""
+    ``путь#Раздел`` is the file ``путь``; the heading is the docs row's business."""
     from tools.doc_sections import resolve_spec
 
     rels = []
@@ -327,7 +327,7 @@ def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = (
     except ValueError:
         pack = None
     started = time.monotonic()
-    # P6a: a task document outside the module (the root of a multi-module project) joins the inventory, as in scan
+    # a task document outside the module (the root of a multi-module project) joins the inventory, as in scan
     outside, _problems = outside_task_documents(root, module_root, _docs_rels(root, docs), skill_pack_root=pack)
     inventory = build_inventory(root, module_root, skill_pack_root=pack, generated_roots=(root / ".pilot-runs",),
                                 proved_dependency_files=outside)
@@ -343,7 +343,7 @@ def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = (
 
 def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any],
                   target: str | None = None) -> dict[str, Any]:
-    """FaT-A: what will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
+    """What will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
     from tools.project_inventory import ContextStop, skipped_summary
     from tools.run_pipeline import HostStop, context_preview
 
@@ -355,7 +355,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
         row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
         return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
     except HostStop as stop:
-        if stop.code == "SOURCE_TARGET_INVALID":  # FaT-B2: the scan would stop on the same --target
+        if stop.code == "SOURCE_TARGET_INVALID":  # the scan would stop on the same --target
             return _row("context:target", CASES, "STOP", f"{stop.code}: --target {target}: {stop}",
                         "укажите --target путём внутри модуля (от его корня), который существует")
         # a task document problem is the task-documents check's row
@@ -368,7 +368,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
 
 
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
-    """FaT-3: a document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
+    """A document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
     from tools.project_inventory import outside_task_documents
     from tools.run_pipeline import TASK_DOC_FIX, _exclusion_note
 
@@ -384,7 +384,7 @@ def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequen
 
         candidate = Path(resolve_spec(root, raw)[0])
         relative = (candidate if candidate.is_absolute() else root / candidate).resolve().relative_to(root).as_posix()
-        if relative in problems:  # P6a: outside the module, left out by a rule of the inventory
+        if relative in problems:  # outside the module, left out by a rule of the inventory
             row.update(level="STOP", fix=TASK_DOC_FIX, message=f"{raw}: документ задачи не может войти в inventory: {problems[relative]} — модель его не получит")
         elif relative not in paths:
             row.update(level="STOP", fix=TASK_DOC_FIX,
@@ -401,7 +401,7 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     if test is None:
         from tools.init_skillsrc import build_tool_missing
 
-        # FaT-NB: the reason init gave (no build tool), else the general one
+        # the reason init gave (no build tool), else the general one
         problems.append(build_tool_missing(module, root) or ("у модуля нет тестового адаптера в .skillsrc", _init_command(project)))
     else:
         adapter = str(test.get("adapter_id"))
@@ -457,7 +457,7 @@ def _pack_folder(project: Path) -> str:
 
 
 def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """FaT-L: the project's style checks (read from its build files) and what its own build needs to skip the package."""
+    """The project's style checks (read from its build files) and what its own build needs to skip the package."""
     from tools import execution_gate
 
     GRADLE, MAVEN, SYSTEM_MAVEN, project_style_checks, style_notes, whole_project_checks = execution_gate.from_mode_b(
@@ -481,7 +481,7 @@ def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]
         pack = _pack_folder(root)
         rows.append(_row(
             "execution:project-checks", EXECUTION, "WARN",
-            # FaT-H2a P6: RAT fell on a task document in commons-lang — the checks see every file outside the project's git.
+            # RAT fell on a task document in commons-lang — the checks see every file outside the project's git.
             f"проверки проекта ({', '.join(whole)}) видят файлы, которых нет в git проекта: {pack}/ (окружение пакета, "
             "в нём есть ссылки http), .pilot-runs/, новые документы требований; ваша собственная сборка проекта "
             "на них упадёт, запуск тестов пакета эти проверки пропускает",
@@ -490,7 +490,7 @@ def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]
 
 
 def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """FaT-JL: the Java level the module's build gives its tests — the generated tests use only that API."""
+    """The Java level the module's build gives its tests — the generated tests use only that API."""
     if ((module.get("stack") or {}) if isinstance(module.get("stack"), Mapping) else {}).get("language") != "java":
         return []
     from tools.discover_project import java_api_level
@@ -504,7 +504,7 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
 
 
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:
-    """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim (package python)."""
+    """The full scan command of this very request plus the flag — an agent runs a fix verbatim (package python)."""
     parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
              f"--profile {profile}", *([f'--module "{module}"'] if module else []), *([f'--target "{target}"'] if target else []),
              "--accept-self-review"]
@@ -516,7 +516,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     from tools import execution_gate
 
     project = Path(project).resolve()
-    profile = profile or execution_gate.default_profile()  # P8a-1: what this package can do
+    profile = profile or execution_gate.default_profile()  # what this package can do
     rows: list[dict[str, Any]] = [check_python()]
     if profile == "local-pilot-v1" and not execution_gate.execution_available():
         rows.append(_row("profile", CASES, "STOP", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает",
@@ -556,7 +556,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1" and ((selected.get("stack") or {}) if isinstance(selected.get("stack"), Mapping) else {}).get("language") == "documents":
-                # FaT-DOC: the same refusal as scan — nothing to build, local-pilot is not lowered here
+                # the same refusal as scan — nothing to build, local-pilot is not lowered here
                 rows.append(_row("execution:build", CASES, "STOP", "в проекте только документы, сборки и тестов нет: local-pilot-v1 недоступен",
                                  "ready и scan с --profile cases-only-v1 — кейсы по документам без автотестов"))
             elif profile == "local-pilot-v1":
@@ -566,7 +566,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
                 rows.extend(style_rows(project, selected))
                 rows.extend(java_level_rows(project, selected))
-                # FaT-S: the baseline refusals the scan would meet, the same code; cases are not blocked by them.
+                # the baseline refusals the scan would meet, the same code; cases are not blocked by them.
                 from tools.run_pipeline import _baseline_blockers
 
                 for blocker in _baseline_blockers(project, selected):
@@ -579,10 +579,10 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish: иначе status покажет дрейф (drift) "
                   "и предложит вернуть файлы или начать новый scan")
     rows.append(_row("run:freeze", CASES, "OK", freeze))
-    # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
+    # a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     from tools.skillsrc_manifest import skillsrc_review_self
 
-    if skillsrc_review_self(project):  # P2: the project has answered once, in .skillsrc
+    if skillsrc_review_self(project):  # the project has answered once, in .skillsrc
         rows.append(_row("review:isolation", CASES, "OK", "в .skillsrc review.self: true — ревью в той же сессии принимается с пометкой SELF, "
                          "вопрос не задаётся (свежий контекст всё равно лучше)"))
     else:
@@ -625,7 +625,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if report["status"] == "READY" else 2
 
 
-# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# Public names for execution_core: the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 
 

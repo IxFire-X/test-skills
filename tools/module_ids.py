@@ -1,4 +1,4 @@
-"""P6a: the id of a module of .skillsrc is the path of its folder (``api``, ``services/core``).
+"""The id of a module of .skillsrc is the path of its folder (``api``, ``services/core``).
 
 Hex of the folder name (``root--617069``) is kept for names the id cannot carry, and as the old form: ``--module`` still
 takes it, with the warning MODULE_ID_LEGACY and the new id.  A ``.`` stays out of the plain set: ``modules.<id>.stack.language``
@@ -14,7 +14,7 @@ _PLAIN = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
 
 
 def legacy_module_id(root: str) -> str:
-    """The id before P6a: ``root`` for the project folder, else ``root--`` and the hex of each path part."""
+    """The earlier id: ``root`` for the project folder, else ``root--`` and the hex of each path part."""
     if root == ".":
         return "root"
     return "root--" + "--".join(part.encode("utf-8").hex() for part in root.split("/"))

@@ -39,7 +39,7 @@ _TEST_LEVELS = ("in-process", "stand")
 
 
 def module_test_level(module: Mapping[str, Any]) -> tuple[str, str] | None:
-    """P6b: ``(level, source)`` of a module's autotests — ``declared`` by ``test.level``, else ``derived`` by the old rule (a module that
+    """``(level, source)`` of a module's autotests — ``declared`` by ``test.level``, else ``derived`` by the old rule (a module that
     reads the sources of an application it does not start, ``paths.context``, is a ``stand``; any other is ``in-process``).  None when
     the module has no ``test`` block (documents): there is nothing to run, so no level."""
     test = module.get("test")
@@ -52,7 +52,7 @@ def module_test_level(module: Mapping[str, Any]) -> tuple[str, str] | None:
 
 
 def level_derived_note(module: Mapping[str, Any]) -> tuple[str, str] | None:
-    """P6b: ``(what, fix)`` when the level of the module's autotests is derived, not declared — the fix names the key and the value to write."""
+    """``(what, fix)`` when the level of the module's autotests is derived, not declared — the fix names the key and the value to write."""
     found = module_test_level(module)
     if found is None or found[1] != "derived":
         return None
@@ -62,7 +62,7 @@ def level_derived_note(module: Mapping[str, Any]) -> tuple[str, str] | None:
 
 
 def _validate_test_levels(document: Mapping[str, Any]) -> None:
-    """P6b: a declared ``test.level`` must agree with the keys that say the same: ``stand`` has the address of its stand
+    """A declared ``test.level`` must agree with the keys that say the same: ``stand`` has the address of its stand
     (``service_url_env``), ``in-process`` has neither it nor ``paths.context``.  A derived level is never refused here."""
     for module in document.get("modules") or []:
         if not isinstance(module, Mapping) or not isinstance(module.get("test"), Mapping) or module["test"].get("level") not in _TEST_LEVELS:
@@ -82,7 +82,7 @@ def _validate_test_levels(document: Mapping[str, Any]) -> None:
 
 
 def skillsrc_file_problem(path: Path) -> str | None:
-    """F5: why *path* cannot be read as ``.skillsrc`` — a directory, a junction or a link (the file must lie in the project itself),
+    """Why *path* cannot be read as ``.skillsrc`` — a directory, a junction or a link (the file must lie in the project itself),
     or an unreadable one; None when it is absent or a regular readable file."""
     import stat
 
@@ -139,7 +139,7 @@ def _strip_json_comments(text: str) -> str:
 
 
 def json_with_comments(text: str) -> bool:
-    """V9b (8.15): a text that is JSON once its comments are cut — it has some, and what is left opens an object or an array.  It is no YAML:
+    """A text that is JSON once its comments are cut — it has some, and what is left opens an object or an array.  It is no YAML:
     the first character alone (``{``) does not tell, and a file that begins with ``//`` is not a YAML one."""
     source = text.removeprefix("\ufeff")
     stripped = _strip_json_comments(source)
@@ -159,7 +159,7 @@ def _legacy_yaml_row(project: Path | None) -> dict[str, Any] | None:
 
 
 def skillsrc_review_self(project: Path) -> bool:
-    """P2 (item 7): ``.skillsrc`` ``review.self: true`` — the project admits a review in the same session at every run, so scan asks
+    """``.skillsrc`` ``review.self: true`` — the project admits a review in the same session at every run, so scan asks
     nothing.  A missing, unreadable or invalid manifest, a missing key or ``self: false`` is the question asked as before."""
     try:
         document = load_skillsrc(Path(project) / ".skillsrc")
@@ -169,7 +169,7 @@ def skillsrc_review_self(project: Path) -> bool:
 
 
 def _fix_text(cause: str, project: Path | None) -> str:
-    """F5: every refusal of a foreign ``.skillsrc`` says what is wrong (the key or the line) and how to get a valid one."""
+    """Every refusal of a foreign ``.skillsrc`` says what is wrong (the key or the line) and how to get a valid one."""
     import sys
 
     where = f'"{project}"' if project is not None else "<проект>"
@@ -274,7 +274,7 @@ def select_module(normalized: Mapping[str, Any], module_id: str | None) -> dict[
         raise SkillsrcError("module_required", "module selection is required")
     matches = [(index, module) for index, module in enumerate(modules) if module["id"] == module_id]
     if not matches:
-        from tools.module_ids import alias_match  # P6a: the id of the folder, in its current or old (hex) form
+        from tools.module_ids import alias_match  # the id of the folder, in its current or old (hex) form
 
         alias = alias_match(modules, module_id)
         if alias is not None:

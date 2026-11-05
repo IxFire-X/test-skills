@@ -1,4 +1,4 @@
-"""FaT-IMP stage 1: ready test cases from a Zephyr CSV (``scan --cases``) become the source of a run.
+"""Ready test cases from a Zephyr CSV (``scan --cases``) become the source of a run.
 
 The CSV is the requirement document of the run.  ``tools.api cases-import`` answers the marker step
 ``context-marker:requirements`` by code, not by a model: one source requirement per case, its text the case objective
@@ -6,7 +6,7 @@ The CSV is the requirement document of the run.  ``tools.api cases-import`` answ
 step with the model id ``controller:cases-import``.  A CSV exported by the package in profile v4 carries the machine
 model in Test Data and is refused: machine text never becomes a human field.
 
-FaT-IMP3 (stage 2): with ``--docs`` the model answers ``context-marker:requirements`` from the documents as in any run
+With ``--docs`` the model answers ``context-marker:requirements`` from the documents as in any run
 and links every case of the CSV to the source requirements it checks (``analytics_documentation.case_links``), checked
 before the write.  The merged marker keeps the linked requirements and adds one code-made requirement per case linked to
 none («вне документов»); a document requirement no case links is a gap of the report, never a model-made case.
@@ -38,7 +38,7 @@ _FIXES = {code: FIXES[code] for code in (
     "IMPORT_NOT_CASES_RUN",
     "IMPORT_CSV_CHANGED",
     "IMPORT_REQUIREMENTS_INVALID",
-)}  # P1: the texts live in tools.fixes
+)}  # the texts live in tools.fixes
 
 
 class CasesImportError(ValueError):
@@ -63,7 +63,7 @@ def split_expected(text: str) -> list[str]:
     return parts
 
 
-# FaT-PW: a password as plain text in a cell of an import — key, «:» or «=», a value; only for the CSV of --cases
+# a password as plain text in a cell of an import — key, «:» or «=», a value; only for the CSV of --cases
 _CELL_PASSWORD = re.compile(r"(?i)(?<![\w-])(?P<key>пароль|password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*(?P<value>[^\s,;]+)")
 _NOT_A_VALUE = re.compile(r"^(?:—|-|\*+|<[^<>]*>?)$")
 
@@ -84,7 +84,7 @@ def password_cells(cases: list[dict[str, Any]]) -> list[str]:
 
 
 def secret_cell(cases: list[dict[str, Any]], rule_id: str) -> str | None:
-    """FaT-H4c: «строка N, колонка X» of the first cell the inventory's signature rule ``rule_id`` finds — never the value."""
+    """«строка N, колонка X» of the first cell the inventory's signature rule ``rule_id`` finds — never the value."""
     from tools.project_inventory import token_signature_rule
 
     for row, column, text in _cells(cases, ("Name", "Objective", "Precondition")):
@@ -102,9 +102,9 @@ def _cells(cases: list[dict[str, Any]], case_columns: tuple[str, ...]) -> list[t
 
 
 def read_cases(data: bytes) -> list[dict[str, Any]]:
-    """The cases of the CSV; a v4 export of the package is refused by the one check of REF and IMP (``require_human_csv``).
+    """The cases of the CSV; a v4 export of the package is refused by the one check of the reference and import readers (``require_human_csv``).
 
-    FaT-IMP2: a cell no faithful answer could keep is refused by row — an empty Step or Expected Result, a service mark
+    A cell no faithful answer could keep is refused by row — an empty Step or Expected Result, a service mark
     as the expected result (the canonical rule ``service_expected``)."""
     from tools.canonical_document import service_expected
 
@@ -136,16 +136,16 @@ def source_requirements(path: str, data: bytes, cases: list[dict[str, Any]]) -> 
             for number, case in enumerate(cases, start=1)]
 
 
-OUTSIDE = "SREQ-CSV-"  # FaT-IMP3: the requirement code makes for a case linked to no document requirement («вне документов»)
+OUTSIDE = "SREQ-CSV-"  # the requirement code makes for a case linked to no document requirement («вне документов»)
 
 
 def case_sources(case: Mapping[str, Any]) -> list[str]:
-    """FaT-IMP3: the source requirements a skeleton case traces to — its links (stage 2) or its own row's one (stage 1)."""
+    """The source requirements a skeleton case traces to — its links (stage 2) or its own row's one (stage 1)."""
     return list(case["source_requirement_ids"]) if "source_requirement_ids" in case else [str(case["source_requirement_id"])]
 
 
 def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-IMP3 (hunt 3.10): the canonical management of an imported case — Key, folder, labels, custom fields as the CSV has them."""
+    """The canonical management of an imported case — Key, folder, labels, custom fields as the CSV has them."""
     management = case["management"]
     return {"status": management["status"], "folder": management["folder"], "components": management["components"],
             "labels": management["labels"], "owner": management["owner"], "estimated_time": management["estimated_time"],
@@ -155,7 +155,7 @@ def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[str, Any]], links: Any) -> None:
-    """FaT-IMP3: one link per case row of the CSV, to source requirements of the answer; no requirements only with a reason."""
+    """One link per case row of the CSV, to source requirements of the answer; no requirements only with a reason."""
     known = {str(item["source_requirement_id"]) for item in requirements}
     rows = [case["row"] for case in cases]
     if not isinstance(links, list) or not all(isinstance(link, Mapping) for link in links):
@@ -177,7 +177,7 @@ def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[s
 
 
 def marker_requirements(path: str, data: bytes, requirements: list[Mapping[str, Any]], links: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """FaT-IMP3: the requirements of the merged marker of an import with documents — the linked ones of the answer in its
+    """The requirements of the merged marker of an import with documents — the linked ones of the answer in its
     order, then one per case linked to none (text the objective, else the name, provenance ``<csv>#строка N``);
     ``display_order`` 1..N again, as the plan requires."""
     linked = {item for link in links for item in link["source_requirement_ids"]}
@@ -191,14 +191,14 @@ def marker_requirements(path: str, data: bytes, requirements: list[Mapping[str, 
 
 
 def gaps(requirements: list[Mapping[str, Any]], links: list[Mapping[str, Any]]) -> list[dict[str, str]]:
-    """FaT-IMP3: the document requirements no case of the CSV links — the gaps of the import, for the report and the analyst."""
+    """The document requirements no case of the CSV links — the gaps of the import, for the report and the analyst."""
     linked = {item for link in links for item in link["source_requirement_ids"]}
     return [{"source_requirement_id": str(item["source_requirement_id"]), "text": str(item["text"])}
             for item in requirements if item["source_requirement_id"] not in linked]
 
 
 def outside_rows(imported: Mapping[str, Any]) -> list[int]:
-    """FaT-IMP3: the CSV rows of the cases linked to no document requirement («вне документов»)."""
+    """The CSV rows of the cases linked to no document requirement («вне документов»)."""
     return [int(case["row"]) for case in imported["cases"] if any(source.startswith(OUTSIDE) for source in case_sources(case))]
 
 
@@ -209,14 +209,14 @@ def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None
     Preconditions are one element (the cell), the expected result of a step is cut at blank lines (v5 joins the
     expectations with one), an empty priority is MEDIUM.  The model completes only the machine part around it.
 
-    FaT-IMP3: with the links of an import with documents a case traces to ``source_requirement_ids`` (its links, else its
+    With the links of an import with documents a case traces to ``source_requirement_ids`` (its links, else its
     «вне документов» requirement) and the skeleton names the ``gaps``; without links it is the skeleton of stage 1."""
     from tools.batch_assembly import with_digest
 
     cases = read_cases(data)
     by_row = {link["row"]: link for link in links or []}
     rows = []
-    normalized: list[dict[str, Any]] = []  # FaT-IMP2: the cells code fills in one way only; the check compares with them
+    normalized: list[dict[str, Any]] = []  # the cells code fills in one way only; the check compares with them
     for requirement, case in zip(source_requirements(path, data, cases), cases):
         if not case["objective"].strip():
             normalized.append({"row": case["row"], "field": "objective"})
@@ -238,7 +238,7 @@ def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None
 
 
 def slice_value(imported: Mapping[str, Any], plan: Mapping[str, Any], batch_id: str) -> dict[str, Any]:
-    """FaT-SKB: the skeleton of one batch — the imported cases it owns, in the order of the plan, and the normalized cells
+    """The skeleton of one batch — the imported cases it owns, in the order of the plan, and the normalized cells
     of their rows only.  The last tc-generator input of that batch; the whole skeleton is no batch's input."""
     from tools.batch_assembly import with_digest
 
@@ -247,7 +247,7 @@ def slice_value(imported: Mapping[str, Any], plan: Mapping[str, Any], batch_id: 
         raise ValueError(f"{batch_id} is not a batch of the plan {plan.get('digest')}")
     owned = batch["owned_source_requirement_ids"]
     order = {source: index for index, source in enumerate(owned)}
-    cases = sorted((case for case in imported["cases"] if set(case_sources(case)) & set(owned)),  # FaT-IMP3: by its first source
+    cases = sorted((case for case in imported["cases"] if set(case_sources(case)) & set(owned)),  # by its first source
                    key=lambda case: (min(order.get(source, len(order)) for source in case_sources(case)), case["row"]))
     rows = {case["row"] for case in cases} | {step["row"] for case in cases for step in case["steps"]}
     normalized = [cell for cell in imported.get("normalized") or [] if cell["row"] in rows]
@@ -268,7 +268,7 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     row = next((item for item in inventory["files"] if item["project_path"] == path), None)  # bytes bound by the inventory
     secret = next((item for item in inventory.get("exclusions") or [] if item.get("project_path") == path and item.get("reason_code") == "SECRET_SUSPECTED"), None)
-    if row is None and secret is not None:  # FaT-IMP2: left out by a secret rule — not a changed file
+    if row is None and secret is not None:  # left out by a secret rule — not a changed file
         raise CasesImportError("IMPORT_CSV_SECRET", f"{path}: правило секретов {secret.get('rule_id')} — файл не вошёл в опись")
     data = (root.parents[1] / path).read_bytes()
     if row is None or row["content_digest"] != "sha256:" + hashlib.sha256(data).hexdigest():
@@ -277,7 +277,7 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
 
 
 def _manifest(root: Path) -> dict[str, Any]:
-    """V9a (A1-10): the manifest of the run the strict way (sealed, with its schema, the boundary of the run) — not a second raw read of the file."""
+    """The manifest of the run the strict way (sealed, with its schema, the boundary of the run) — not a second raw read of the file."""
     from tools import pilot_state
 
     return dict(pilot_state.read_run(Path(root))["manifest"])
@@ -300,7 +300,7 @@ def requirements_artifact(path: str, data: bytes) -> dict[str, Any]:
 
 
 def is_code_requirements(root: Path, attempt: Mapping[str, Any], value: Mapping[str, Any]) -> bool:
-    """FaT-R2: a fact of the journal, not a label — an import without documents whose requirements answer is byte for
+    """A fact of the journal, not a label — an import without documents whose requirements answer is byte for
     byte the one code builds from the CSV the inventory binds.  Such requirements are the cases, not an OpenSpec reading."""
     root = Path(root).resolve()
     if cases_path(root) is None:
@@ -316,7 +316,7 @@ def is_code_requirements(root: Path, attempt: Mapping[str, Any], value: Mapping[
 
 
 def docs_run(root: Path) -> bool:
-    """FaT-IMP3: an import with documents (``scan --cases`` with ``--docs``) — the model answers the requirements step."""
+    """An import with documents (``scan --cases`` with ``--docs``) — the model answers the requirements step."""
     if cases_path(root) is None:
         return False
     manifest = _manifest(root)
@@ -324,7 +324,7 @@ def docs_run(root: Path) -> bool:
 
 
 def requirements_answer(root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """FaT-IMP3: the recorded answer of ``context-marker:requirements``; refused while there is none."""
+    """The recorded answer of ``context-marker:requirements``; refused while there is none."""
     from tools import pilot_state
 
     answered = [event for event in pilot_state.derive_state(root)["events"] if event.get("attempt_id") == attempt_id
@@ -351,7 +351,7 @@ def run_skeleton(root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | Non
 
 
 def run_marker_requirements(root: Path, attempt: Mapping[str, Any], answer: Mapping[str, Any]) -> list[dict[str, Any]] | None:
-    """FaT-IMP3: the requirements of the merged marker of an import with documents; None for any other run (the answer's own)."""
+    """The requirements of the merged marker of an import with documents; None for any other run (the answer's own)."""
     if not docs_run(root):
         return None
     found = run_csv(root, attempt)
@@ -360,7 +360,7 @@ def run_marker_requirements(root: Path, attempt: Mapping[str, Any], answer: Mapp
 
 
 def check_requirements_answer(root: Path, attempt: Mapping[str, Any], value: Mapping[str, Any]) -> None:
-    """FaT-IMP3: the links of a model answer of the requirements step of an import with documents, before the write."""
+    """The links of a model answer of the requirements step of an import with documents, before the write."""
     if not docs_run(root):
         return
     path, data = run_csv(root, attempt)
@@ -380,7 +380,7 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     state = pilot_state.derive_state(root)
     attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
     stage = "context-marker:requirements"
-    if docs_run(root):  # FaT-IMP3: the model answered the requirements and the links; code publishes the skeleton only
+    if docs_run(root):  # the model answered the requirements and the links; code publishes the skeleton only
         requirements_answer(root, attempt_id)
         return {"imported": pilot_state.publish_imported_cases(root, attempt_id)}
     answered = [event for event in state["events"] if event.get("attempt_id") == attempt_id
@@ -392,12 +392,12 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     path, data = run_csv(root, attempt)
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the last tc-generator input
     artifact = requirements_artifact(path, data)
-    try:  # FaT-R2: the answer is checked before its request is written — a refusal leaves no orphan request behind
+    try:  # the answer is checked before its request is written — a refusal leaves no orphan request behind
         pilot_state.check_model_stage_artifact("context-marker:requirements", artifact)
     except ValueError as error:
         raise CasesImportError("IMPORT_REQUIREMENTS_INVALID", str(error)) from None
     pilot_state.publish_code_step_request(root, attempt_id, stage, model_id=IMPORT_MODEL_ID, invocation_id=f"cases-import-{attempt_id[:12]}",
-                                          input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])  # F2: an import cut here goes on
+                                          input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])  # an import cut here goes on
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, stage, artifact))
     published["warning"] = None  # the import is code, not a model answer
     published["imported"] = pilot_state.publish_imported_cases(root, attempt_id)

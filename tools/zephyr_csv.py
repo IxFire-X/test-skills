@@ -1,4 +1,4 @@
-"""FaT-Z5: one reader of a Zephyr Scale step-row CSV — the inverse of ``render_zephyr_csv`` for the human fields.
+"""One reader of a Zephyr Scale step-row CSV — the inverse of ``render_zephyr_csv`` for the human fields.
 
 ``parse_zephyr_csv(bytes)`` returns the cases of the CSV with their human text byte for byte: a row with ``Name`` opens
 a case, the rows below without ``Name`` are its further steps.  The v5 profile (and a plain Zephyr export) has only
@@ -33,7 +33,7 @@ def detect_delimiter(text: str) -> str:
     first = text.splitlines()[0] if text.strip() else ""
     try:
         splits = {delimiter: next(csv.reader([first], delimiter=delimiter), []) for delimiter in (",", ";")}
-    except csv.Error:  # FaT-R3: e.g. a first line over the field limit — not a CSV (a minified JSON in --docs)
+    except csv.Error:  # e.g. a first line over the field limit — not a CSV (a minified JSON in --docs)
         raise ValueError("ZEPHYR_CSV_NOT_CSV") from None
     if max(len(cells) for cells in splits.values()) < 2:
         raise ValueError("ZEPHYR_CSV_NOT_CSV")
@@ -69,7 +69,7 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
         raise ZephyrCsvError(str(error), "нужен экспорт тест-кейсов Zephyr Scale в CSV с разделителем «,» или «;»") from None
     try:
         records = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
-    except csv.Error as error:  # FaT-R3: a field over the csv limit is a refusal, not a traceback
+    except csv.Error as error:  # a field over the csv limit is a refusal, not a traceback
         raise ZephyrCsvError("ZEPHYR_CSV_NOT_CSV", f"CSV не читается: {error}") from None
     header = [cell.strip() for cell in records[0]]
     unknown = [cell for cell in header if cell not in _HEADERS]
@@ -109,13 +109,13 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
     return cases
 
 
-# FaT-REF: the first line the package's v4 profile puts into Test Data (``test_case_projections._operation_text``)
+# the first line the package's v4 profile puts into Test Data (``test_case_projections._operation_text``)
 _V4_FIRST_LINE = re.compile(r"^(?:(Операция:) не определена$|(HTTP:) [A-Z]+ \S.*; базовый URL: |(Действие проекта:) \S+; адаптер: )")
 
 
 def own_v4_marker(cells: Iterable[str]) -> str | None:
-    """FaT-REF: the marker of a CSV in the package's own v4 profile — the machine part as the first line of a Test Data
-    cell («Операция:», «HTTP:», «Действие проекта:»); None for a v5 or a plain Zephyr export.  One check for REF and IMP."""
+    """The marker of a CSV in the package's own v4 profile — the machine part as the first line of a Test Data
+    cell («Операция:», «HTTP:», «Действие проекта:»); None for a v5 or a plain Zephyr export.  One check for the reference and import readers."""
     for cell in cells:
         match = _V4_FIRST_LINE.match(str(cell).split("\n", 1)[0])
         if match:
@@ -124,7 +124,7 @@ def own_v4_marker(cells: Iterable[str]) -> str | None:
 
 
 def require_human_csv(cases: Iterable[dict[str, Any]]) -> None:
-    """FaT-REF/IMP: refuse a CSV of the package's v4 profile — its Test Data is the machine part, not the human data."""
+    """Refuse a CSV of the package's v4 profile — its Test Data is the machine part, not the human data."""
     rows = [(step["row"], str(step["test_data"]).split("\n", 1)[0]) for case in cases for step in case["steps"]
             if own_v4_marker([step["test_data"]]) is not None]
     if rows:
