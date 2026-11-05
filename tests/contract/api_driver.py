@@ -137,7 +137,7 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         code, aborted = rr._api("review-abort", *_flags(run), "--reason", "REVIEW_UNUSABLE")
         assert code == 0, aborted
         shutil.rmtree(tmp_path / "abort", ignore_errors=True)
-        assert rr._complete(reviewed)[0] in (0, 2)  # the run of (3) after its selection: the old closing command
+        assert rr._complete(reviewed)[0] == 0  # the run of (3) after its selection: the old closing command
 
         def direct(argv: list[str]) -> tuple[int, dict]:
             code, payload = call_in_process(argv)
