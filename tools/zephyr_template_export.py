@@ -242,6 +242,14 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     closed, automated = _automation_facts(root)
     if not closed:
         raise ZephyrTemplateError("ZEPHYR_EXPORT_NOT_CLOSED")
+    from tools.publish_test_case_bundle import build_bundle
+
+    try:  # V9a (A1-10): the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has
+        expected = build_bundle(document).csv_bytes
+    except Exception:  # noqa: BLE001 - a document that cannot build its bundle is not a document to export
+        raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
+    if expected != cases_bytes:
+        raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", f"{bundle_csv}: файл не соответствует документу рядом (.json); пересоберите bundle: review-select --verdict")
     data = build_import_csv(cases_bytes, document, template, automated_case_ids=automated)
     target = bundle_csv.with_name(base + ".zephyr-import.csv")
     _install(target, data)

@@ -102,7 +102,14 @@ def test_a_test_file_changed_after_the_scan_and_a_generated_one_are_not_in_the_m
     run.mkdir(parents=True)
     (run / "a.json").write_text(json.dumps({"payload": {"files": [{"path": "src/test/java/org/example/owner/OwnerControllerTests.java"}]}}),
                                 encoding="utf-8")
-    assert build_map(project, inventory, context) == {}
+    assert build_map(project, inventory, context) != {}  # V9a: a receipt no journal binds excludes nothing
+    from tools import pilot_state
+
+    with pytest.MonkeyPatch.context() as journal:  # the receipt of a run, read through that run's journal
+        journal.setattr(pilot_state, "derive_state", lambda root: {"attempts": [{"attempt_id": "a" * 32}], "events": []})
+        journal.setattr(pilot_state, "read_attempt_receipt", lambda *_args: {"record": {"payload": {
+            "files": [{"path": "src/test/java/org/example/owner/OwnerControllerTests.java"}]}}})
+        assert build_map(project, inventory, context) == {}
 
 
 def test_the_map_is_cut_at_its_limit_with_a_line_for_the_rest() -> None:

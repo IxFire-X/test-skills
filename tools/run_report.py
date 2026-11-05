@@ -7,6 +7,7 @@ it never copies code, specification text, cases or model answers.  Times are the
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import re
@@ -199,7 +200,7 @@ def _answer_bytes(root: Path, call: Mapping[str, Any]) -> int | None:
 
 
 def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[str, int] | None = None, *,
-          state: Any = None, journals: dict[str, Any] | None = None) -> None:
+          state: Any = None, journals: dict[str, Any] | None = None, limits: Mapping[str, Any] | None = None) -> None:
     from tools import pilot_state as pilot
     from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget
 
@@ -230,18 +231,18 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     answer = _answer_bytes(root, call)
     # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
     raw = (raw_sizes or {}).get(str(call.get("response_digest") or ""))
-    if raw is not None and answer is not None and raw < answer:
-        raw = None  # F1: the raw answer cannot be smaller than its own compact JSON in the journal; a row that says so is not believed
-    call["output_basis"] = None if answer is None and raw is None else ("raw" if raw is not None else "compact")
-    answer = raw if raw is not None else answer
-    call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer) is not None)
+    # V9a: the raw size is the agent's measurement (a file nothing in the journal binds): printed as such, never the ground of a warning —
+    # STEP_OUTPUT_LARGE is judged by the stored answer, whose bytes the journal seals
+    call["output_raw_bytes"] = raw
+    call["output_basis"] = None if answer is None else "compact"
+    call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer, limits) is not None)
     role = str(call["stage"]).split(":", 1)[0]
     try:
         role_bytes = sum(path.stat().st_size for path in role_files(role)) if role in _ROLES else 0
     except ValueError:
         role_bytes = 0
     total = resolved + role_bytes
-    budget = step_budget(project)
+    budget = step_budget(project, limits)
     call.update(input_bytes=resolved, role_bytes=role_bytes, unresolved_inputs=unresolved, size_complete=unresolved == 0,
                 by="code" if by_code else "reuse" if isinstance(reuse, Mapping) else "model")
     if isinstance(reuse, Mapping):  # FaT-CR: nothing was sent to a model; the input it would have read is the saving
@@ -450,11 +451,13 @@ def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
     return usage
 
 
-def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]]) -> list[str]:
-    """FaT-RV: ``STEP_OVER_BUDGET`` when a measured step or a journaled model call is over the step budget."""
+def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]] = ()) -> list[str]:
+    """FaT-RV / V9a: ``STEP_OVER_BUDGET`` when a model call of the journal is over the step budget; the rows of ``step-sizes.jsonl`` (``sizes``) are
+    the agent's measurement — they are printed, they warn of nothing."""
     from tools.step_size import OVER_BUDGET
 
-    over = any(call.get("by") == "model" and call.get("fits") is False for call in calls) or any(row.get("fits") is False for row in sizes)
+    del sizes
+    over = any(call.get("by") == "model" and call.get("fits") is False for call in calls)
     return [OVER_BUDGET] if over else []
 
 
@@ -624,11 +627,21 @@ def render_autotest_assertions(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+ZEPHYR_BASIS = "по файлу zephyr-import.json, журналом не подтверждено"
+
+
 def _zephyr_import(root: Path) -> Any:
-    """FaT-7: only the template path and digest of the import CSV, never its values."""
+    """FaT-7: only the template path and digest of the import CSV, never its values.  V9a (A1-10): the file has no event in the journal (the export runs after
+    ``finish``, the attempt is closed): it is printed only for the template it names — the digest of the file at ``template_path`` in the project — and
+    labelled as the file's."""
     try:
         record = json.loads((root / "zephyr-import.json").read_text(encoding="utf-8"))
-        return {key: record[key] for key in ("template_path", "template_digest", "columns_added", "rows")}
+        shown = {key: record[key] for key in ("template_path", "template_digest", "columns_added", "rows")}
+        template = (Path(root).parent.parent / str(shown["template_path"])).resolve()
+        template.relative_to(Path(root).parent.parent.resolve())
+        if "sha256:" + hashlib.sha256(template.read_bytes()).hexdigest() != shown["template_digest"]:
+            return None
+        return {**shown, "basis": ZEPHYR_BASIS}
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -738,8 +751,13 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     journals: dict[str, Any] = {}  # FaT-U7: the journal of an attempt is read once for all its calls
 
     raw_sizes = output_sizes(root)
+    limits, limits_note = ({}, None)
+    if attempt_id:
+        from tools.step_size import run_limits
+
+        limits, limits_note = run_limits(project, root, state, attempt_id)  # V9a: the limits of the .skillsrc the run froze
     for call in calls:
-        _size(project, root, call, raw_sizes, state=state, journals=journals)
+        _size(project, root, call, raw_sizes, state=state, journals=journals, limits=limits)
     measured = step_sizes(root)
     composition = input_composition(calls)
 
@@ -830,6 +848,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else [])
                     + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else [])
+                    + ([f"SKILLSRC_CHANGED: {limits_note}"] if limits_note else [])
                     + ([EFFECTIVE_UNREADABLE] if effective_unreadable else [])
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
@@ -924,6 +943,15 @@ def _composition_lines(report: Mapping[str, Any]) -> list[str]:
                   for r in rows), ""])]
 
 
+def _step_size_lines(report: Mapping[str, Any]) -> list[str]:
+    return ["## Размер входа шагов", "", "Замер агента (`tools.step_size --run` и model-request): строки файла step-sizes.jsonl, журналом не подтверждены; "
+            "предупреждение STEP_OVER_BUDGET строится по вызовам модели из журнала.", "",
+            *(["замеров нет", ""] if not report["step_sizes"] else [
+                "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
+                *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
+                  f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), ""])]
+
+
 def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
     summary = report.get("refusals")
     if summary is None:
@@ -997,11 +1025,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *_canary_lines(report),
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),
-        "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",
-        *(["замеров нет", ""] if not report["step_sizes"] else [
-            "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
-            *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
-              f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), ""]),
+        *_step_size_lines(report),
         *_phase_lines(report), *_composition_lines(report), *_refusal_lines(report), *_canon_lines(report),
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]

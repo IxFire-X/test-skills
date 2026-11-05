@@ -60,19 +60,42 @@ def whole_limit(value: Any) -> int | None:
     return None
 
 
-def _limit(project: Path, key: str, default: int, *, zero: bool = False) -> int:
+LIMITS_DRIFT_NOTE = ".skillsrc изменён после scan: пороги по умолчанию; новый прогон возьмёт новые"
+
+
+def _live_limits(project: Path) -> Mapping[str, Any]:
     path = Path(project) / ".skillsrc"
     if not path.is_file():
-        return default
+        return {}
     from tools.skillsrc_manifest import load_skillsrc
 
-    value = (load_skillsrc(path).get("limits") or {}).get(key)
-    value = whole_limit(value)
+    return load_skillsrc(path).get("limits") or {}
+
+
+def run_limits(project: Path, root: Path, state: Any, attempt_id: str) -> tuple[Mapping[str, Any], str | None]:
+    """V9a (A1-6): the ``limits`` of the ``.skillsrc`` the run froze — ``(limits, note)``.  The baseline keeps the digest of the file's bytes, not its
+    values: the live file counts only while its bytes are those of the baseline; edited since the scan it gives ``({}, LIMITS_DRIFT_NOTE)`` — the defaults,
+    named.  Warnings and measurements only: the limits that shape a plan are read at plan time, before it is published."""
+    from tools.pilot_state import frozen_baseline
+
+    path = Path(project) / ".skillsrc"
+    try:
+        attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+        frozen = frozen_baseline(root, attempt)["skillsrc_authority"]["skillsrc_digest"]
+        if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != frozen:
+            return {}, LIMITS_DRIFT_NOTE
+        return _live_limits(project), None
+    except (OSError, KeyError, StopIteration, TypeError, ValueError):
+        return {}, None  # no .skillsrc or no frozen baseline to compare with: the defaults, as for a project without the file
+
+
+def _limit(project: Path, key: str, default: int, *, zero: bool = False, limits: Mapping[str, Any] | None = None) -> int:
+    value = whole_limit((_live_limits(project) if limits is None else limits).get(key))
     return value if value is not None and (value > 0 or zero and value == 0) else default
 
 
-def step_budget(project: Path) -> int:
-    return _limit(project, "step_input_bytes", DEFAULT_BUDGET)
+def step_budget(project: Path, limits: Mapping[str, Any] | None = None) -> int:
+    return _limit(project, "step_input_bytes", DEFAULT_BUDGET, limits=limits)
 
 
 def step_window(project: Path) -> int:
@@ -160,17 +183,13 @@ def output_sizes(root: Path) -> dict[str, int]:
     return sizes
 
 
-def output_warning(project: Path, byte_count: int) -> str | None:
-    """FaT-O: ``STEP_OUTPUT_LARGE`` when one model answer is over the output warning threshold, else ``None``."""
+def output_warning(project: Path, byte_count: int, limits: Mapping[str, Any] | None = None) -> str | None:
+    """FaT-O: ``STEP_OUTPUT_LARGE`` when one model answer is over the output warning threshold, else ``None``.  V9a: a run passes its frozen ``limits``
+    (``run_limits``); without them the live ``.skillsrc`` is read."""
     limit = DEFAULT_OUTPUT_WARN
-    path = Path(project) / ".skillsrc"
     try:  # called after the answer is published: an unreadable .skillsrc must not fail the step, the default applies
-        if path.is_file():
-            from tools.skillsrc_manifest import load_skillsrc
-
-            value = (load_skillsrc(path).get("limits") or {}).get("step_output_warn_bytes")
-            value = whole_limit(value)
-            limit = value if value is not None and value > 0 else DEFAULT_OUTPUT_WARN
+        value = whole_limit((_live_limits(project) if limits is None else limits).get("step_output_warn_bytes"))
+        limit = value if value is not None and value > 0 else DEFAULT_OUTPUT_WARN
     except (OSError, ValueError):  # SkillsrcError is a ValueError
         limit = DEFAULT_OUTPUT_WARN
     return OUTPUT_LARGE if byte_count > limit else None
@@ -189,8 +208,9 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
     digest of their projection, ``run_pipeline`` requirement) and, in an import with documents, the CSV whose cases the
     requirements step links (FaT-IMP3; without documents that step is answered by code from the CSV)."""
     from tools.cases_import import cases_path, docs_run
+    from tools.pilot_state import read_run
 
-    request = json.loads((root / "run-manifest.json").read_text(encoding="utf-8")).get("scan_request") or {}
+    request = read_run(root)["manifest"].get("scan_request") or {}
     from tools.doc_sections import resolve_spec, view_name
 
     files: list[Path] = []
@@ -212,7 +232,7 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
     """The input files of ``stage`` as the journal knows them before the call (context-marker only)."""
     if stage not in {"context-marker", "context-marker:requirements"}:
         raise ValueError("the journal knows the input of context-marker only; give --files for other steps")
-    from tools.pilot_state import derive_state
+    from tools.pilot_state import derive_state, read_context_selection
 
     project = Path(project).resolve()
     root = project / ".pilot-runs" / run_id
@@ -221,8 +241,10 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
         raise ValueError("the run has no attempt yet")
     attempt = attempts[-1]
     files: list[Path] = []
-    for receipt_path in sorted((root / "context-selections" / str(attempt["attempt_id"])).glob("*.json")):
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    selected = [str(event["artifact_digest"]) for event in derive_state(root)["events"]
+                if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "CONTEXT_SELECTED"]
+    for digest in sorted(dict.fromkeys(selected)):  # V9a: the receipts the journal selected, read the strict way — never a glob of the folder
+        receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if batch is None or receipt.get("batch_index") == batch:
             files.extend(project / item["project_path"] for item in receipt["files"])
     answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
@@ -275,7 +297,9 @@ class _Journal:
         for event in events:
             digest = str(event.get("artifact_digest"))
             if event["event_type"] == "CONTEXT_SELECTED":
-                receipt = json.loads((root / "context-selections" / attempt_id / (digest.removeprefix("sha256:") + ".json")).read_text(encoding="utf-8"))
+                from tools.pilot_state import read_context_selection
+
+                receipt = read_context_selection(root, attempt_id, digest)  # V9a: the strict reader, not the bytes of a file at that name
                 self.expands[digest] = ([project / item["project_path"] for item in receipt["files"]], True)
             elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
                 self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
@@ -341,9 +365,10 @@ class _Journal:
 
 
 def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str, list[str]]:
-    """The digest and the input digests of the last published request of ``stage``, from its journal slot (a measurement:
-    the request was checked when it was published; the full predecessor check of ``read_model_request`` is not repeated)."""
-    from tools.pilot_state import _model_request_target
+    """The digest and the input digests of the last published request of ``stage``, from its journal slot.  V9a: the bytes are the ones the journal
+    sealed (the body hashes to the digest field and to the digest of the event); the predecessor check of ``read_model_request`` is not repeated
+    — the request was checked when it was published."""
+    from tools.pilot_state import _model_request_target, check_sealed_value
 
     requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
                  and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
@@ -351,6 +376,7 @@ def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str
         raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
     request_digest = str(requested[-1]["artifact_digest"])
     request = json.loads(_model_request_target(root, attempt_id, request_digest).read_text(encoding="utf-8"))
+    check_sealed_value(request, "model request")
     if request.get("digest") != request_digest or request.get("stage_instance_id") != stage:
         raise ValueError(f"the model request of {stage} does not match its journal event")
     return request_digest, [str(digest) for digest in request.get("input_digests") or []]
@@ -581,7 +607,15 @@ def main(argv: list[str] | None = None) -> int:
             elif args.stage:
                 files += journal_files(project, args.run, args.stage, args.batch)
         role = args.role or stage_role
-        report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes,
+        budget = args.budget_bytes
+        if budget is None and args.run:  # V9a: the budget of the .skillsrc the run froze
+            from tools.pilot_state import derive_state
+
+            run_root = project / ".pilot-runs" / args.run
+            state = derive_state(run_root)
+            if state["attempts"]:
+                budget = step_budget(project, run_limits(project, run_root, state, str(state["attempts"][-1]["attempt_id"]))[0])
+        report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=budget,
                          extra_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
         if requested is not None:
             report.update(files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],

@@ -145,9 +145,10 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert [row["step"] for row in report["step_sizes"]] == ["tc-reviewer:canonical", "context-marker"]
-    assert [code for code in report["warnings"] if code != "REVIEW_UNMEASURED"] == ["STEP_OVER_BUDGET"]  # P7: a run of the nine commands has no canaries
-    assert "## Размер входа шагов" in markdown and "| tc-reviewer:canonical | 732886 |" in markdown
-    assert "STEP_OVER_BUDGET" in markdown.split("## Предупреждения", 1)[1].split("##", 1)[0]
+    # V9a: the rows of step-sizes.jsonl are the agent's measurement — printed, labelled, and no ground of a warning (the journal's model calls are)
+    assert [code for code in report["warnings"] if code != "REVIEW_UNMEASURED"] == []  # P7: a run of the nine commands has no canaries
+    assert "## Размер входа шагов" in markdown and "| tc-reviewer:canonical | 732886 |" in markdown and "журналом не подтверждены" in markdown
+    assert "STEP_OVER_BUDGET" not in markdown.split("## Предупреждения", 1)[1].split("##", 1)[0]
 
 
 def test_a_data_mismatch_is_in_the_report_by_id_and_count_without_the_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,7 +175,7 @@ def test_a_journaled_model_call_over_the_budget_is_a_warning_too() -> None:
 
     assert budget_warnings([{"by": "model", "fits": True}, {"by": "code", "fits": None}], []) == []
     assert budget_warnings([{"by": "model", "fits": False}], []) == ["STEP_OVER_BUDGET"]
-    assert budget_warnings([], [{"fits": False}]) == ["STEP_OVER_BUDGET"]
+    assert budget_warnings([], [{"fits": False}]) == []  # V9a: a row of the measurement file is the agent's, not a model call of the journal
 
 
 def test_report_is_a_pipeline_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -466,7 +467,7 @@ def test_a_broken_skillsrc_after_publication_still_returns_the_record(tmp_path: 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     original_warning = step_size.output_warning
 
-    def broken_then_measure(project, byte_count):  # .skillsrc is unreadable only at the moment of the measurement
+    def broken_then_measure(project, byte_count, limits=None):  # .skillsrc is unreadable only at the moment of the measurement (V9a: the live file, when no frozen limits come)
         path = Path(project) / ".skillsrc"
         before = path.read_bytes() if path.is_file() else None
         path.write_bytes(b"limits: [unclosed\n\x00")

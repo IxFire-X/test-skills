@@ -136,16 +136,27 @@ def _python_names(text: str) -> set[str]:
 
 
 def _excluded(project: Path) -> set[str]:
-    """Files the package wrote into the project (materialization ownership of any run): not the project's own tests."""
+    """Files the package wrote into the project (materialization ownership of any run): not the project's own tests.
+
+    V9a (A1-8): every run's receipt is read through the journal of THAT run (``read_attempt_receipt`` for each of its attempts); a file the journal
+    of its run does not bind, or cannot read, excludes nothing.  A run planted whole — journal and receipt — is not told apart this way; what it
+    changes is a hint of the map, not a verdict."""
+    from tools import pilot_state
+
     paths: set[str] = set()
-    for receipt in sorted((project / ".pilot-runs").glob("*/materialization-ownership/*.json")):
+    for run_root in sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "materialization-ownership").is_dir()):
         try:
-            payload = json.loads(receipt.read_text(encoding="utf-8")).get("payload") or {}
-        except (OSError, ValueError):
+            attempts = [str(item["attempt_id"]) for item in pilot_state.derive_state(run_root)["attempts"]]
+        except (OSError, KeyError, TypeError, ValueError):
             continue
-        for row in payload.get("files") or []:
-            if isinstance(row, Mapping):
-                paths.update(str(row[key]) for key in ("path", "project_path") if isinstance(row.get(key), str))
+        for attempt_id in attempts:
+            try:
+                payload = pilot_state.read_attempt_receipt(run_root, attempt_id, "materialization-ownership", "ARTIFACT_READ_BACK")["record"].get("payload") or {}
+            except (OSError, KeyError, TypeError, ValueError):
+                continue
+            for row in payload.get("files") or []:
+                if isinstance(row, Mapping):
+                    paths.update(str(row[key]) for key in ("path", "project_path") if isinstance(row.get(key), str))
     return paths
 
 
@@ -285,22 +296,29 @@ def hint_line(case_ids: list[str]) -> str | None:
             "снижаются; дубль без нового условия — замечание.")
 
 
-def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]]) -> dict[str, Any]:
-    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files.
+def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]], root: Path | None = None) -> dict[str, Any]:
+    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files.  V9a: with ``root`` the inventory
+    is that run's; without it (plan-batches knows only the project) the first run whose own journal froze that digest.
 
     FaT-AU3: for the context receipts of one plan (one inventory) the one map of all their files — the HTTP keys of the
     tests do not depend on the context, so a map per receipt would repeat them."""
-    from tools.project_inventory import read_inventory_receipt
-
     project = Path(project).resolve()
     receipts = list(context_receipt) if isinstance(context_receipt, list) else [context_receipt]
     if not receipts:
         return {}
-    name = str(receipts[0].get("inventory_digest", "")).removeprefix("sha256:") + ".json"
-    frozen = sorted((project / ".pilot-runs").glob("*/inventories/" + name))
-    if not frozen:
+    digest = str(receipts[0].get("inventory_digest", ""))
+    inventory = None
+    from tools import pilot_state
+
+    runs = [Path(root)] if root is not None else sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "inventories").is_dir())
+    for run_root in runs:
+        try:  # V9a (A1-8): the inventory the journal of that run froze under this digest — never the first file of that name
+            inventory = pilot_state.frozen_inventory(project, Path(run_root).resolve(), digest)
+            break
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+    if inventory is None:
         return {}
-    inventory = read_inventory_receipt(frozen[0])
     return build_map(project, inventory, [str(row["project_path"]) for receipt in receipts for row in receipt.get("files") or []])
 
 

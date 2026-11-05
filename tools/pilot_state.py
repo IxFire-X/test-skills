@@ -322,18 +322,30 @@ def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
     The structure is the same when the run has frozen inventories, they read back whole (their own digest), and every file
     they list is in ``project`` at the same relative path.  Contents are not compared here: a changed file is a drift,
     which status reports as before.  Only reads."""
-    from tools.project_inventory import InventoryError, read_inventory_receipt
+    from tools.project_inventory import InventoryError, read_execution_baseline, read_inventory_receipt
 
     project, root = Path(project).resolve(), Path(run_root)
-    try:
-        recorded = json.loads((root / "run-manifest.json").read_bytes().decode("utf-8")).get("project")
-    except (OSError, ValueError, AttributeError):
+    try:  # V9a: the sealed manifest (the boundary itself asks here, so not read_run)
+        recorded = _read_artifact(project, root, root / "run-manifest.json", "run manifest").get("project")
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
         return None
     if not isinstance(recorded, str) or recorded == str(project):
         return None
     missing: list[str] = []
-    paths = sorted((root / "inventories").glob("*.json")) if (root / "inventories").is_dir() else []
-    same = bool(paths)
+    # the inventories the attempts froze: attempt (sealed) -> its baseline (sealed, the digest the attempt names) -> the inventory digest the baseline binds;
+    # the journal cannot be read here (it asks the boundary, which asks this), so an inventory lying in the folder that no baseline names is not one
+    paths: list[Path] = []
+    same = True
+    for attempt_path in sorted((root / "attempts").glob("*.json")) if (root / "attempts").is_dir() else []:
+        try:
+            attempt = _read_artifact(project, root, attempt_path, "attempt")
+            baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+            if baseline["digest"] != attempt["baseline_digest"]:
+                raise ValueError("baseline digest mismatch")
+            paths.append(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+        except (OSError, KeyError, TypeError, ValueError):
+            same = False
+    same = same and bool(paths)
     for path in paths:
         try:
             files = [str(row["project_path"]) for row in read_inventory_receipt(path)["files"]]
@@ -2238,7 +2250,9 @@ def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id:
     stage = stage_instance_id.split(":", 1)[0]
     try:
         found = step_size.request_files(root, stage_instance_id) if stage in step_size._REQUEST_STAGES else step_size.stage_inputs(root, stage_instance_id)
-        report = step_size.measure(project, [Path(row["path"]) for row in found["files"]], stage,
+        state = derive_state(root)
+        limits, _note = step_size.run_limits(project, root, state, str(state["attempts"][-1]["attempt_id"]))  # V9a: the limits the run froze
+        report = step_size.measure(project, [Path(row["path"]) for row in found["files"]], stage, budget=step_size.step_budget(project, limits),
                                    extra_bytes=sum(row["bytes"] for row in found["bindings"]))
         step_size.record(project, run_id, stage_instance_id, report)
     except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
@@ -2663,13 +2677,14 @@ def _publish_model_stage_artifact(
         )
     published = dict(read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest))
     # FaT-O: the answer size of every call, and a warning (never a stop) when it is large
-    from tools.step_size import output_warning, record_output
+    from tools.step_size import output_warning, record_output, run_limits
 
+    limits, _limits_note = run_limits(project, root, state, attempt_id)  # V9a: the output limit of the .skillsrc the run froze
     measured = int(raw_bytes) if raw_bytes is not None else published["byte_count"]
     if raw_bytes is not None:
         record_output(project, root, stage_instance_id, content_digest, measured)
     published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
-                     warning=output_warning(project, measured))
+                     warning=output_warning(project, measured, limits))
     if mechanics or filled:  # audit U2 / V6: what the code put into the answer — the mechanics by name and count, then the digest fields
         published["filled"] = [*mechanics, *filled]
     if normalized:  # P1: what the code put in order
@@ -7458,6 +7473,8 @@ def exit_code(result: Mapping[str, Any] | None, controller_error: bool = False) 
 # Public names for execution_core / finalize_attempt (V1): the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
 append_journal_event = _append_event
+check_sealed_value = _check_sealed
+frozen_inventory = _frozen_inventory
 publish_artifact_value = _publish
 read_artifact_value = _read_artifact
 sealed_value = _sealed

@@ -276,8 +276,15 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     return path, data
 
 
+def _manifest(root: Path) -> dict[str, Any]:
+    """V9a (A1-10): the manifest of the run the strict way (sealed, with its schema, the boundary of the run) — not a second raw read of the file."""
+    from tools import pilot_state
+
+    return dict(pilot_state.read_run(Path(root))["manifest"])
+
+
 def cases_path(root: Path) -> str | None:
-    manifest = json.loads((Path(root) / "run-manifest.json").read_text(encoding="utf-8"))
+    manifest = _manifest(root)
     value = (manifest.get("scan_request") or {}).get("cases")
     return str(value) if value else None
 
@@ -298,7 +305,7 @@ def is_code_requirements(root: Path, attempt: Mapping[str, Any], value: Mapping[
     root = Path(root).resolve()
     if cases_path(root) is None:
         return False
-    manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    manifest = _manifest(root)
     if (manifest.get("scan_request") or {}).get("docs"):
         return False
     try:
@@ -312,7 +319,7 @@ def docs_run(root: Path) -> bool:
     """FaT-IMP3: an import with documents (``scan --cases`` with ``--docs``) — the model answers the requirements step."""
     if cases_path(root) is None:
         return False
-    manifest = json.loads((Path(root) / "run-manifest.json").read_text(encoding="utf-8"))
+    manifest = _manifest(root)
     return bool((manifest.get("scan_request") or {}).get("docs"))
 
 

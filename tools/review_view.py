@@ -265,10 +265,10 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
         return {}
     plan, receipt = found
     if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
-        return for_context(Path(root).parent.parent, receipt)
+        return for_context(Path(root).parent.parent, receipt, Path(root))
     # FaT-AU3: the one map of all the context receipts the generator read
     return for_context(Path(root).parent.parent, [dict(read_context_selection(Path(root), attempt_id, str(digest)))
-                                                 for digest in plan["context_receipt_digests"]])
+                                                 for digest in plan["context_receipt_digests"]], Path(root))
 
 
 def run_context_note(root: Path, attempt_id: str) -> str | None:
