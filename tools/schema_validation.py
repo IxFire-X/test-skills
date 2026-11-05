@@ -33,6 +33,34 @@ def _reject_constant(token: str) -> None:
     raise StrictJsonError(f"non-finite JSON constant: {token}")
 
 
+def _reject_float(token: str) -> float:
+    """``1e999`` is a valid JSON number that Python reads as infinity: refuse it as the literals NaN and Infinity are refused."""
+    value = float(token)
+    if not math.isfinite(value):
+        raise StrictJsonError(f"non-finite JSON number: {token[:40]}")
+    return value
+
+
+# A text that can hold an unpaired surrogate: an escape of a surrogate (\ud800-\udfff) or the character itself.  Nearly no text does, so the walk below
+# costs nothing on an ordinary response; a valid pair of escapes (an emoji) lets the walk run and passes it, because json joins a pair into one character.
+_SURROGATE_HINT = re.compile(r"\\u[dD][89a-fA-F][0-9a-fA-F]{2}|[\ud800-\udfff]")
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def _reject_surrogates(value: Any) -> None:
+    """A string or a key with a lone surrogate cannot be written as UTF-8: the digests and the files of the package would fail on it far from here."""
+    if isinstance(value, str):
+        if _SURROGATE.search(value):
+            raise StrictJsonError("unpaired UTF-16 surrogate in a string")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _reject_surrogates(key)
+            _reject_surrogates(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_surrogates(item)
+
+
 def _reject_duplicates(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -68,7 +96,10 @@ def loads_json_strict(text: str) -> Any:
         raise StrictJsonError("UTF-8 BOM is not permitted")
     _check_json_depth(text)
     try:
-        return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_reject_duplicates)
+        value = json.loads(text, parse_constant=_reject_constant, parse_float=_reject_float, object_pairs_hook=_reject_duplicates)
+        if _SURROGATE_HINT.search(text):
+            _reject_surrogates(value)
+        return value
     except StrictJsonError:
         raise
     except (json.JSONDecodeError, TypeError) as error:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -22,6 +23,7 @@ import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
 referencing = pytest.importorskip("referencing")
+from referencing.jsonschema import DRAFT202012  # noqa: E402
 
 from tools import schema_engine  # noqa: E402
 from tools.schema_validation import _error_code, _error_path, loads_json_strict  # noqa: E402
@@ -78,18 +80,38 @@ def _ecma_pattern(pattern: str) -> str:
     return result
 
 
-def _build_oracle(raw: dict[str, Any] = RAW) -> dict[str, Any]:
+def _build_oracle(raw: dict[str, Any] = RAW, validator_class: Any = None) -> dict[str, Any]:
     registry = referencing.Registry()
     for contents in raw.values():
-        registry = registry.with_resource(contents["$id"], referencing.Resource.from_contents(contents))
-    return {name: jsonschema.Draft202012Validator(contents, registry=registry, format_checker=jsonschema.FormatChecker())
+        registry = registry.with_resource(contents["$id"], referencing.Resource.from_contents(contents, default_specification=DRAFT202012))
+    validator_class = validator_class or jsonschema.Draft202012Validator
+    return {name: validator_class(contents, registry=registry, format_checker=jsonschema.FormatChecker())
             for name, contents in raw.items()}
+
+
+def _strict_bound(keyword: str, wording: str, holds: Any):
+    """A bound that a number must be inside: NaN is inside none (jsonschema writes ``instance < minimum`` and lets NaN through)."""
+    def check(validator, bound, instance, schema):
+        if validator.is_type(instance, "number") and not holds(instance, bound):
+            yield jsonschema.ValidationError(f"{instance!r} {wording} {bound!r}")
+    return check
+
+
+# jsonschema Draft 2020-12 with the three bounds written so that NaN breaks them: the oracle of the named allowance NONFINITE_BOUND
+_STRICT_BOUNDS = jsonschema.validators.extend(jsonschema.Draft202012Validator, {
+    "minimum": _strict_bound("minimum", "is less than the minimum of", lambda instance, bound: instance >= bound),
+    "maximum": _strict_bound("maximum", "is greater than the maximum of", lambda instance, bound: instance <= bound),
+    "exclusiveMinimum": _strict_bound("exclusiveMinimum", "is less than or equal to the minimum of", lambda instance, bound: instance > bound),
+})
 
 
 ORACLE = _build_oracle()
 ECMA_ORACLE = _build_oracle({name: _ecma_schema(contents) for name, contents in RAW.items()})
 ECMA_END_OF_STRING: list[str] = []  # the named allowances: the labels of the pairs each forgave (the tests below need them to be exercised)
 ECMA_DOT: list[str] = []
+NONFINITE_BOUND: list[str] = []
+# a document that names its dialect ("$schema") is read by the plain class when another schema $refs it, which would drop the strict bounds: the copies do not name it
+NONFINITE_ORACLE = _build_oracle({name: {key: value for key, value in contents.items() if key != "$schema"} for name, contents in RAW.items()}, validator_class=_STRICT_BOUNDS)
 ENGINE = {name: schema_engine.Draft202012Validator(contents, registry=STORE, format_checker=schema_engine.FormatChecker())
           for name, contents in RAW.items()}
 
@@ -115,6 +137,16 @@ def _holds_a_string(instance: Any, wanted: Any) -> bool:
     return False
 
 
+def _holds_a_nonfinite_number(instance: Any) -> bool:
+    if isinstance(instance, float):
+        return not math.isfinite(instance)
+    if isinstance(instance, dict):
+        return any(_holds_a_nonfinite_number(value) for value in instance.values())
+    if isinstance(instance, list):
+        return any(_holds_a_nonfinite_number(value) for value in instance)
+    return False
+
+
 def _ends_on_a_newline(text: str) -> bool:
     return text.endswith("\n")
 
@@ -131,7 +163,10 @@ def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
     ``ECMA_END_OF_STRING``: ``$`` also matches before a final newline in Python, it does not in ECMA.
     ``ECMA_DOT``: ``.`` also matches ``\\r``, ``\\u2028`` and ``\\u2029`` in Python, it does not in ECMA.
     A difference is forgiven only if the instance holds a string that can bring it about (one with a final newline, one with a line terminator) and the
-    engine gives exactly the errors of the same oracle over the schemas written the ECMA way — any other difference stays one."""
+    engine gives exactly the errors of the same oracle over the schemas written the ECMA way — any other difference stays one.
+    The third, ``NONFINITE_BOUND`` (F9): NaN is inside no ``minimum`` / ``maximum`` / ``exclusiveMinimum`` for the engine and inside every one for jsonschema.
+    Forgiven only if the instance holds a NaN or an infinity and the engine gives exactly the errors of jsonschema extended with those three bounds
+    written the strict way."""
     expected = sorted((_signature(error) for error in ORACLE[name].iter_errors(instance)), key=repr)
     try:
         actual = sorted((_signature(error) for error in ENGINE[name].iter_errors(instance)), key=repr)
@@ -153,6 +188,11 @@ def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
                 return not ecma
         only_oracle = [item for item in expected if item not in actual][:2]
         only_engine = [item for item in actual if item not in expected][:2]
+        if _holds_a_nonfinite_number(instance):
+            strict = sorted((_signature(error) for error in NONFINITE_ORACLE[name].iter_errors(instance)), key=repr)
+            if actual == strict:
+                NONFINITE_BOUND.append(f"{label} x {name}")
+                return not strict
         problems.append(f"{label} x {name}: oracle-only {only_oracle!r} engine-only {only_engine!r}")
     return not expected
 
@@ -219,6 +259,9 @@ def _mutations(instance: Any) -> Iterator[tuple[str, Any]]:
             yield f"num-negative {tag}", put(-1)
             yield f"num-huge {tag}", put(10**10)
             yield f"num-float {tag}", put(1.5)
+            yield f"num-nan {tag}", put(math.nan)
+            yield f"num-inf {tag}", put(math.inf)
+            yield f"num--inf {tag}", put(-math.inf)
         elif node is None:
             yield f"null-to-str {tag}", put("x")
         yield f"to-object {tag}", put({})
@@ -402,6 +445,25 @@ def _string_mutants(instance: Any, change: Any, limit: int = 40) -> Iterator[tup
             target = target[step]
         target[path[-1]] = change(value)
         yield "/".join(map(str, path)), clone
+
+
+def test_the_named_allowance_nonfinite_bound_is_exercised_and_is_nothing_more() -> None:
+    """Every number of a valid fixture, made NaN, +inf and -inf: the engine and jsonschema differ exactly where a bound meets NaN (jsonschema accepts, the
+    engine refuses), the allowance forgives them all, the two walks of the engine agree on every pair, and no other difference is left."""
+    forgiven_before = len(NONFINITE_BOUND)
+    problems: list[str] = []
+    refused = 0
+    for label, instance in _fixture_instances():
+        for name in RAW:
+            if not _compare(name, instance, label, problems):
+                continue
+            for mutation, mutant in _mutations(instance):
+                if mutation.startswith(("num-nan", "num-inf", "num--inf")):
+                    _compare(name, mutant, f"{label} [{mutation}]", problems)
+                    refused += (not ENGINE[name].is_valid(mutant)) and ORACLE[name].is_valid(mutant)
+    assert not problems, "\n".join(problems[:40])
+    # the fixtures' bounded numbers are integers, which NaN fails by type in both: the differences are in the errors (the engine adds the broken bound), not in the verdict
+    assert len(NONFINITE_BOUND) - forgiven_before >= max(refused, 1), (refused, len(NONFINITE_BOUND) - forgiven_before)
 
 
 def test_hand_made_broken_instances_of_every_schema() -> None:

@@ -12,8 +12,17 @@ import re
 from typing import NamedTuple
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*$")
-_CLOSING = re.compile(r"[ \t]+#+$")
+_HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+")  # the opening of a heading line; the title is cut by hand below: a lazy `(.*?)[ \t]*$` and a `[ \t]+#+$` are n squared on a long run of blanks
+
+
+def _title_of(rest: str) -> str:
+    """The title of a heading: *rest* (what follows the hashes and the blank after them) without trailing blanks and without a closing run of hashes
+    that a blank sets off (``Title ##``), its words separated by one space."""
+    rest = rest.rstrip(" \t")
+    bare = rest.rstrip("#")
+    if bare != rest and bare.endswith((" ", "\t")):
+        rest = bare
+    return " ".join(rest.split())
 
 
 class Section(NamedTuple):
@@ -50,7 +59,7 @@ def headings(text: str) -> list[tuple[int, int, str]]:
             continue
         match = _HEADING.match(line)
         if match:
-            title = " ".join(_CLOSING.sub("", match.group(2)).split())
+            title = _title_of(line[match.end():])
             found.append((number, len(match.group(1)), title))
     return found
 

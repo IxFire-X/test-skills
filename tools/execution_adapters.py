@@ -217,8 +217,52 @@ _STYLE_CHECKS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str | None, st
     ("pmd", (r"<artifactId>\s*maven-pmd-plugin\s*</artifactId>",), (), None, None, False),
     ("spotbugs", (r"<artifactId>\s*spotbugs-maven-plugin\s*</artifactId>",), (), None, None, False),
 )
-_XML_COMMENTS = re.compile(r"<!--.*?-->", re.S)
-_GRADLE_COMMENTS = re.compile(r"(?<![:\"'])//[^\n]*|/\*.*?\*/", re.S)
+
+
+def _strip_xml_comments(text: str) -> str:
+    """*text* with every ``<!-- … -->`` replaced by a space.  By ``find``: the regex ``<!--.*?-->`` read the whole rest of the file from every ``<!--`` that
+    has no ``-->`` (100 KB of them — 8.5 s); once one has none, no later one has."""
+    parts: list[str] = []
+    position = 0
+    while True:
+        start = text.find("<!--", position)
+        end = -1 if start < 0 else text.find("-->", start + 4)
+        if end < 0:
+            parts.append(text[position:])
+            return "".join(parts)
+        parts.append(text[position:start])
+        parts.append(" ")
+        position = end + 3
+
+
+def _strip_gradle_comments(text: str) -> str:
+    """*text* with every ``// …`` (not after «:», «"» or «'») and every ``/* … */`` replaced by a space: what the regex
+    ``(?<![:"'])//[^\\n]*|/\\*.*?\\*/`` did, by ``find``, because that one read the rest of the file from every ``/*`` without ``*/`` (100 KB — 21 s)."""
+    parts: list[str] = []
+    position = 0
+    block_closes = True  # once a «/*» has no «*/» after it, none has
+    while True:
+        line = text.find("//", position)
+        while line > 0 and text[line - 1] in ":\"'":
+            line = text.find("//", line + 1)
+        block = text.find("/*", position) if block_closes else -1
+        end = -1
+        if block >= 0:
+            end = text.find("*/", block + 2)
+            if end < 0:
+                block_closes = False
+                block = -1
+        if line < 0 and block < 0:
+            parts.append(text[position:])
+            return "".join(parts)
+        if block >= 0 and (line < 0 or block < line):
+            parts.append(text[position:block])
+            position = end + 2
+        else:
+            newline = text.find("\n", line)
+            parts.append(text[position:line])
+            position = len(text) if newline < 0 else newline
+        parts.append(" ")
 
 
 def _build_files(project_root: Path, module_root: Path) -> tuple[list[str], list[str]]:
@@ -230,9 +274,9 @@ def _build_files(project_root: Path, module_root: Path) -> tuple[list[str], list
                              ("settings.gradle", gradle), ("settings.gradle.kts", gradle)):
             path = current / name
             if path.is_file():
-                comments = _XML_COMMENTS if bucket is maven else _GRADLE_COMMENTS
+                strip = _strip_xml_comments if bucket is maven else _strip_gradle_comments
                 try:
-                    bucket.append(comments.sub(" ", path.read_text(encoding="utf-8", errors="replace")))
+                    bucket.append(strip(path.read_text(encoding="utf-8", errors="replace")))
                 except OSError:
                     pass
         if current == project or project not in current.parents:

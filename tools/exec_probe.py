@@ -23,7 +23,9 @@ def _probe_runner(argv: Sequence[str], cwd: Path, *, timeout: int) -> Any:
 _URL_USERINFO = re.compile(r"://[^/\s@]+@")
 
 
-_SECRET_VALUE = re.compile(r"(?i)((?:password|passwd|pwd|token|secret)[\w.-]*['\"]?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;)]+)")
+# F9 (8.D6-10): one attempt per run of word characters — what follows a key (a quote, a blank, «:», «=») is not one, so every keyword of the run ends at the same
+# place and the first is enough (a line of «password» x 8 000 was k x n and did not finish).  The prefix before the keyword is now in group 1 and is kept.
+_SECRET_VALUE = re.compile(r"(?i)((?<![\w.-])(?>[\w.-]*?(?:password|passwd|pwd|token|secret)[\w.-]*)['\"]?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;)]+)")
 
 
 PROBE_LINE_CHARS = 200

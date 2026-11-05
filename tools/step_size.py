@@ -45,6 +45,19 @@ INPUT_UNRESOLVED = "STEP_INPUT_UNRESOLVED"
 _REQUEST_STAGES = ("tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
 
+def whole_limit(value: Any) -> int | None:
+    """A ``.skillsrc`` limit as an int: an integer, or a float that is whole (``2000.0``, ``2e3``, ``0.0`` — the schema's ``type: integer`` accepts them,
+    JSON Schema says they are integers); None for anything else (missing, boolean, fractional).  The one reader of the limits, so that a limit written
+    as ``2e3`` is honoured and never silently replaced by the default."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
 def _limit(project: Path, key: str, default: int, *, zero: bool = False) -> int:
     path = Path(project) / ".skillsrc"
     if not path.is_file():
@@ -52,7 +65,8 @@ def _limit(project: Path, key: str, default: int, *, zero: bool = False) -> int:
     from tools.skillsrc_manifest import load_skillsrc
 
     value = (load_skillsrc(path).get("limits") or {}).get(key)
-    return int(value) if isinstance(value, int) and (value > 0 or zero and value == 0) else default
+    value = whole_limit(value)
+    return value if value is not None and (value > 0 or zero and value == 0) else default
 
 
 def step_budget(project: Path) -> int:
@@ -153,7 +167,8 @@ def output_warning(project: Path, byte_count: int) -> str | None:
             from tools.skillsrc_manifest import load_skillsrc
 
             value = (load_skillsrc(path).get("limits") or {}).get("step_output_warn_bytes")
-            limit = int(value) if isinstance(value, int) and value > 0 else DEFAULT_OUTPUT_WARN
+            value = whole_limit(value)
+            limit = value if value is not None and value > 0 else DEFAULT_OUTPUT_WARN
     except (OSError, ValueError):  # SkillsrcError is a ValueError
         limit = DEFAULT_OUTPUT_WARN
     return OUTPUT_LARGE if byte_count > limit else None

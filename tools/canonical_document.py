@@ -95,16 +95,28 @@ def service_expected(text: str) -> bool:
     return _SERVICE_EXPECTED.fullmatch(text.strip()) is not None
 
 
+# A bracket that opens a line and can open a JSON value: what follows it is the end of the container or the start of a value.  A necessary condition only (the
+# parser decides); it spares the parser the lines that cannot be JSON, because a failing parse costs a pass over the text up to its position (the message of
+# JSONDecodeError counts the lines) — 300 000 lines of `{x` were 300 000 such passes.  `\s*` after the line start would run over the blank lines: n squared.
+_LINE_OPENING_BRACKET = re.compile(r"(?m)^[^\S\n]*([\[{])(?=\s*[\]}\[{\"\-0-9tfnNI])")
+_BLANK_TO_THE_END = re.compile(r"\s*\Z")
+_CLOSER = {"{": "}", "[": "]"}
+
+
 def _trailing_json(text: str) -> Any:
-    """Return a trailing JSON object/array from a human field, if present."""
+    """Return a trailing JSON object/array from a human field, if present.  Every bracket that opens a line is tried, with no copy of the rest of the text;
+    the value must end the text, so a bracket whose closer is not the last character of the text is not tried at all."""
+    last = text.rstrip()[-1:]
     decoder = json.JSONDecoder()
-    for match in re.finditer(r"(?m)^\s*([\[{])", text):
+    for match in _LINE_OPENING_BRACKET.finditer(text):
         start = match.start(1)
-        try:
-            value, end = decoder.raw_decode(text[start:])
-        except json.JSONDecodeError:
+        if _CLOSER[text[start]] != last:
             continue
-        if isinstance(value, (dict, list)) and not text[start + end:].strip():
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except (json.JSONDecodeError, RecursionError):
+            continue
+        if isinstance(value, (dict, list)) and _BLANK_TO_THE_END.match(text, end):
             return value
     return _NO_JSON
 

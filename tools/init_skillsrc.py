@@ -488,7 +488,9 @@ def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any
 
 def _sanitize(value: Any) -> Any:
     if isinstance(value, str):
-        return re.sub(r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@", r"\1[redacted]@", value)
+        from tools.project_inventory import URL_USERINFO_TEXT
+
+        return URL_USERINFO_TEXT.sub(r"\1[redacted]@", value)
     if isinstance(value, list):
         return [_sanitize(item) for item in value]
     if isinstance(value, dict):

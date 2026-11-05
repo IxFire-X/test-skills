@@ -259,7 +259,7 @@ def _credential_like(value: str) -> bool:
 
 def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
     """Return the only publishable UTF-8 runner-output representation."""
-    from tools.project_inventory import token_signature_rule
+    from tools.project_inventory import URL_CREDENTIALS_TEXT, token_signature_rule
 
     if not isinstance(text, str) or not text:
         return b""
@@ -267,8 +267,8 @@ def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
     lines: list[str] = []
     for line in normalized.splitlines(keepends=True):
         content = line[:-1] if line.endswith("\n") else line
-        if token_signature_rule(content.encode("utf-8", errors="replace")) or _credential_like(content) or any(_credential_like(fragment) for fragment in content.split()) or re.search(
-            r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@", content,
+        if token_signature_rule(content.encode("utf-8", errors="replace")) or _credential_like(content) or any(_credential_like(fragment) for fragment in content.split()) or URL_CREDENTIALS_TEXT.search(
+            content,
         ):
             line = "<redacted>" + ("\n" if line.endswith("\n") else "")
         lines.append(line)

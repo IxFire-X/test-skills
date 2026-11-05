@@ -33,7 +33,9 @@ _STATUS = re.compile(r"status\(\)\s*\.\s*(is\w+)\s*\(\s*(\d{3})?\s*\)|HttpStatus
                      r"|status_code\s*==\s*(\d{3})")
 _VIEW = re.compile(r"view\(\)\s*\.\s*name\s*\(\s*\"([^\"]+)\"\s*\)")
 # the model attribute (first quoted name) is left out, the field names after it are kept
-_FIELD_ERRORS = re.compile(r"attributeHasFieldErrors\s*\(\s*\"\w+\"\s*,((?:\s*\"\w+\"\s*,?)+)\)"
+# F9 (8.D6-11): the names are one unambiguous list — a blank between two names belongs to the second one's ``\s*``, or to the comma's ``\s*,`` when a comma follows —
+# so a call that is never closed is tried once, not 2^k ways (16 names in quotes without commas — 3.3 s).
+_FIELD_ERRORS = re.compile(r"attributeHasFieldErrors\s*\(\s*\"\w+\"\s*,((?:\s*\"\w+\"(?:\s*,)?)+)(?:(?<=,)|(?<!,)\s*)\)"
                            r"|attributeHasFieldErrorsCode\s*\(\s*\"\w+\"\s*,(\s*\"\w+\")")
 _EXCEPTION = re.compile(r"\b([A-Z]\w*(?:Exception|Error))\s*\.\s*class\b|pytest\.raises\s*\(\s*([A-Z]\w*(?:Exception|Error))\b")
 _NAMED_STATUS = {"isOk": 200, "isCreated": 201, "isAccepted": 202, "isNoContent": 204, "isFound": 302, "isBadRequest": 400,

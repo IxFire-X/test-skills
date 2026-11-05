@@ -20,7 +20,7 @@
   },
   "allOf": [{"if": {"properties": {"test_cases": {"contains": {"required": ["param_group"]}}}, "required": ["test_cases"]}, "then": {"properties": {"schema_version": {"const": "1.1.0"}}}}],
   "$defs": {
-    "nonempty": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+    "nonempty": {"type": "string", "minLength": 1, "pattern": "\\S"},
     "id_suffix": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]+$"},
     "json_value": {},
     "custom_field_scalar": {"oneOf": [{"$ref": "#/$defs/nonempty"}, {"type": "number"}, {"type": "boolean"}]},

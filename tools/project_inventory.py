@@ -42,6 +42,11 @@ _GENERATED_SUFFIXES = frozenset({".coverage", ".map", ".min.js"})
 _PRIVATE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".kdbx", ".key", ".p12", ".pfx", ".pem"})
 _PRIVATE_NAMES = frozenset({"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"})
 _SECRET_NAME = re.compile(r"(?:^|[._-])(credential|credentials|password|passwd|private|secret|token|api[_-]?key)(?:$|[._-])", re.I)
+# F9 (8.D6-10): the FaT-S1 form of «scheme://user:password@» for text (str), where the old ``[A-Za-z][A-Za-z0-9+.-]*://…`` was still written: one attempt per
+# run of scheme characters instead of one per letter of it (100 KB of letters — 8 s).  ``URL_CREDENTIALS_TEXT`` finds the credentials,
+# ``URL_USERINFO_TEXT`` any user info (group 1 is everything before the user info, so a sub keeps it); the matches are the old ones.
+URL_CREDENTIALS_TEXT = re.compile(r"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")
+URL_USERINFO_TEXT = re.compile(r"(?<![A-Za-z0-9+.-])((?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://)[^/@\s]+@")
 _TOKEN_SIGNATURES = (
     ("token-assignment-v1", re.compile(rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{8,}")),
     ("github-token-v1", re.compile(rb"\b(?:ghp|github_pat)_[A-Za-z0-9_]{16,}\b")),
@@ -49,7 +54,11 @@ _TOKEN_SIGNATURES = (
     ("service-token-v1", re.compile(rb"\b(?:glpat[-_]|sk_live_|rk_live_|xox[bpars]-|hf_|npm_|pypi-)[A-Za-z0-9_-]{8,}")),
     ("aws-key-v1", re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{20,}")),
-    ("jwt-v1", re.compile(rb"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")),
+    # F9 (8.D6-9): ``\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`` tried every «-eyJ» of a long run of base64url characters as a start and ran each to the
+    # end of the run (100 KB of «-eyJ» — 2.4 s).  Every start of that kind ends at the same place, so one attempt per run says it all: from the start of a
+    # run (nothing of the class before it), look ahead for an «eyJ» at a word boundary inside the run (at its start or after a dash) with a character after
+    # it, then take the three dotted segments without backtracking.  The same matches, found once per run.
+    ("jwt-v1", re.compile(rb"(?<![A-Za-z0-9_-])(?=(?:[A-Za-z0-9_]*+-)*?eyJ[A-Za-z0-9_-])[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++")),
     # FaT-S1: the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
     # run: the old pattern re-read a long run of letters without «://» from each of its letters (140 KB — 28 s).
     ("url-credentials-v1", re.compile(rb"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")),
@@ -64,13 +73,18 @@ _PROPERTY_NAME = re.compile(rb"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
 # ${X:default} with a default, a short secret.  Not a secret: an empty value, ${X} or ${X:}, a true/false/yes/no/on/off
 # flag.  Message bundles (messages*.properties, ValidationMessages*.properties) are texts, never passwords.
 _CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties"})
-_PASSWORD_KEY = rb"[\w.-]*(?:password|passwd|pwd|secret)[\w.-]*"
+# F9 (8.D6-9): the key is one atomic group.  What follows a key (a quote, a blank, «:», «=», «>») is not a word character, so the key must run to the end of its
+# word run whichever keyword it holds — and trying every keyword of a long run, each with a second ``[\w.-]*`` to the end of the run, was k x n (100 KB of
+# «pwd» did not finish).  The earliest keyword is enough.
+_PASSWORD_KEY = rb"(?>[\w.-]*?(?:password|passwd|pwd|secret)[\w.-]*)"
 _PASSWORD_LINE = re.compile(rb"(?im)^[ \t]*(?:-[ \t]+)?(['\"]?)" + _PASSWORD_KEY + rb"\1[ \t]*[:=][ \t]*(?P<value>[^\r\n]*)")
-_PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*)"')
-_PASSWORD_XML = re.compile(rb"(?is)<(?P<tag>" + _PASSWORD_KEY + rb")(?:\s[^>]*)?(?<!/)>(?P<value>[^<]*)</(?P=tag)\s*>")
+_PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*+)"')
+# A tag is read up to its «>» and never over a «<»: neither may stand inside a start tag of well-formed XML, and a look-ahead that runs to the end of the text
+# from every «<» of a file with no «>» was n squared (100 KB of «<a » — it did not finish).
+_PASSWORD_XML = re.compile(rb"(?is)<(?P<tag>" + _PASSWORD_KEY + rb")(?:\s[^<>]*+)?(?<!/)>(?P<value>[^<]*)</(?P=tag)\s*>")
 # FaT-RL: a Spring XML bean property or map entry — <property name="password" value="…"/>, <entry key="secret" value="…"/>
 _PASSWORD_XML_ATTR = re.compile(
-    rb"(?is)<[\w:.-]+\s(?=[^>]*\b(?:name|key)\s*=\s*([\"'])" + _PASSWORD_KEY + rb"\1)[^>]*?\bvalue\s*=\s*([\"'])(?P<value>[^\"'>]*)\2")
+    rb"(?is)<[\w:.-]+\s(?=[^<>]*\b(?:name|key)\s*=\s*([\"'])" + _PASSWORD_KEY + rb"\1)[^<>]*?\bvalue\s*=\s*([\"'])(?P<value>[^\"'>]*)\2")
 _PLACEHOLDER = re.compile(rb"\$\{\{[^}]*\}\}|\$\{[^}:]*(?::(?P<default>[^}]*))?\}")  # ${{ secrets.X }}: a CI reference
 _FLAG_VALUES = frozenset({b"true", b"false", b"yes", b"no", b"on", b"off"})
 _MESSAGE_BUNDLE = re.compile(r"(?i)^(?:validation)?messages[\w.-]*\.properties$")

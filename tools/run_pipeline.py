@@ -887,7 +887,10 @@ def _scan_context_budget(inventory: Mapping[str, Any], project: Path | None = No
         from tools.skillsrc_manifest import load_skillsrc
 
         value = (load_skillsrc(path).get("limits") or {}).get("context_batch_bytes")
-        if isinstance(value, int) and value > 0:
+        from tools.step_size import whole_limit
+
+        value = whole_limit(value)
+        if value is not None and value > 0:
             return value
     return _SCAN_CONTEXT_BYTE_BUDGET
 

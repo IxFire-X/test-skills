@@ -262,6 +262,8 @@ class _Compiler:
             _check(isinstance(value, str), keyword, "must be a string")
 
     def resolve(self, ref: str, base: str) -> _Node:
+        if any(char in ref for char in "\t\r\n"):  # urljoin drops them silently: a tab inside the index would not change the pointer
+            raise SchemaError(f"unresolvable $ref {ref!r}: a control character in the reference")
         uri = urljoin(base, ref)
         document_uri, _, fragment = uri.partition("#")
         if document_uri not in self.documents:
@@ -273,11 +275,16 @@ class _Compiler:
                 raise SchemaError(f"unresolvable $ref {ref!r}: only JSON pointer fragments are supported")
             for token in fragment[1:].split("/"):
                 token = token.replace("~1", "/").replace("~0", "~")
+                if isinstance(target, list) and _ARRAY_INDEX.fullmatch(token) is None:  # RFC 6901: no sign, no leading zero, no spaces, ASCII digits only
+                    raise SchemaError(f"unresolvable $ref {ref!r}: {fragment!r} does not exist")
                 try:
                     target = target[int(token)] if isinstance(target, list) else target[token]
                 except (KeyError, IndexError, ValueError, TypeError):
                     raise SchemaError(f"unresolvable $ref {ref!r}: {fragment!r} does not exist") from None
         return self.node(target, document_uri)
+
+
+_ARRAY_INDEX = re.compile(r"0|[1-9][0-9]*", re.ASCII)
 
 
 def _b_schema(compiler: _Compiler, value: Any, raw: dict, base: str) -> _Node:
@@ -418,10 +425,25 @@ _UNICODE_CLASSES = frozenset("dDwW")  # frozensets, not strings: the empty slice
 _WORD_BOUNDARIES = frozenset("bB")  # a boundary between \w and \W: as Unicode-dependent as they are
 
 
+def _search_core(pattern: str) -> str:
+    r"""*pattern* without a greedy ``.*`` at its very start and at its very end.  A pattern is searched, not matched from the start, so ``.*X.*`` finds what
+    ``X`` finds — but tries every start and runs the first ``.*`` to the end of the line from each of them: n squared on a line of blanks for ``.*\S.*``.
+    Only a plain greedy ``.*`` (not ``.*?``, ``.*+``, not an escaped dot) goes; the rest, an alternation included, is searched alternative by alternative
+    and a ``.*`` that can be empty at the edge of an alternative changes none of them.  The error message keeps the pattern as written."""
+    if pattern.startswith(".*") and pattern[2:3] not in ("?", "+", "*", "{"):
+        pattern = pattern[2:]
+    if pattern.endswith(".*"):
+        slashes = len(pattern) - 2 - len(pattern[:-2].rstrip("\\"))
+        if slashes % 2 == 0:  # an even run of backslashes before the dot: the dot is not escaped
+            pattern = pattern[:-2]
+    return pattern
+
+
 def _b_pattern(compiler: _Compiler, value: Any, raw: dict, base: str) -> tuple[re.Pattern, str]:
     _check(isinstance(value, str), "pattern", "must be a string")
     try:
-        return re.compile(_ecma_pattern(value)), value
+        _ecma_pattern(value)  # the refusals (inline flags, \d \w \b) are decided on the pattern as written
+        return re.compile(_ecma_pattern(_search_core(value))), value
     except re.error as error:
         raise SchemaError(f"keyword 'pattern': {value!r} is not a regular expression: {error}") from None
 
@@ -602,17 +624,17 @@ def _v_max_properties(validator, bound, instance, raw):
 
 
 def _v_minimum(validator, bound, instance, raw):
-    if _is_number(instance) and instance < bound:
+    if _is_number(instance) and not instance >= bound:  # not `<`: nan is below no bound and satisfies none
         return [ValidationError(f"{instance!r} is less than the minimum of {bound!r}")]
 
 
 def _v_maximum(validator, bound, instance, raw):
-    if _is_number(instance) and instance > bound:
+    if _is_number(instance) and not instance <= bound:
         return [ValidationError(f"{instance!r} is greater than the maximum of {bound!r}")]
 
 
 def _v_exclusive_minimum(validator, bound, instance, raw):
-    if _is_number(instance) and instance <= bound:
+    if _is_number(instance) and not instance > bound:
         return [ValidationError(f"{instance!r} is less than or equal to the minimum of {bound!r}")]
 
 

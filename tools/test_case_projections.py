@@ -116,20 +116,30 @@ def _reject_unknown_profile(profile: str) -> None:
         raise ValueError(f"ZEPHYR_CSV_PROFILE: unknown Zephyr CSV profile: {profile}; known: {', '.join(sorted(_PROFILES))}")
 
 
+_BLANK_TO_THE_END = re.compile(r"\s*\Z")
+_CLOSER = {"{": "}", "[": "]"}
+_MAY_OPEN_JSON = re.compile(r"[\[{]\s*[\]}\[{\"\-0-9tfnNI]")  # a necessary condition for a JSON container (the parser decides); it spares the parser the lines that cannot be JSON
+
+
 def _trailing_json(value: str) -> tuple[str, str | None]:
     """Split a human field into its prose and a trailing JSON object or array."""
     lines = value.replace("\r\n", "\n").replace("\r", "\n").strip().splitlines()
+    joined = "\n".join(lines)
+    last = joined[-1:]  # the value must end the text: a line whose bracket has another closer is not tried (a failing parse costs a pass over the text)
+    decoder = json.JSONDecoder()
+    offset = 0  # where the line begins in `joined`: the rest of the text is read in place, not joined again for every line
     for index, line in enumerate(lines):
-        if not line.lstrip().startswith(("{", "[")):
+        start = offset + len(line) - len(line.lstrip())
+        offset += len(line) + 1
+        if not line.lstrip().startswith(("{", "[")) or _CLOSER[joined[start]] != last or _MAY_OPEN_JSON.match(joined, start) is None:
             continue
-        candidate = "\n".join(lines[index:]).strip()
         try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
+            parsed, end = decoder.raw_decode(joined, start)
+        except (json.JSONDecodeError, RecursionError):
             continue
-        if isinstance(parsed, (dict, list)):
-            return "\n".join(lines[:index]).strip(), candidate
-    return "\n".join(lines).strip(), None
+        if isinstance(parsed, (dict, list)) and _BLANK_TO_THE_END.match(joined, end):
+            return "\n".join(lines[:index]).strip(), joined[start:].strip()
+    return joined.strip(), None
 
 
 # FaT-PT: a parameter group is shown once — the texts of its first case with a slot where the variants differ, and a

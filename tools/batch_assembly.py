@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
@@ -127,7 +128,38 @@ def _norm(text: str) -> str:
     return " ".join(text.split())
 
 
-def _section_of(text: str, documents: dict[str, str]) -> str | None:
+class _SectionIndex:
+    """The lines of the documents that sit under a heading, normalised once and joined by newlines (a normalised line has none), with the section of each:
+    the first line that holds a snippet is the leftmost occurrence of it in the joined text.  Walking and normalising every line again for every requirement
+    was n requirements x n lines (4 000 requirements in a 290 KB document = 5.5 s)."""
+
+    def __init__(self, documents: dict[str, str]) -> None:
+        lines: list[str] = []
+        self.starts: list[int] = []
+        self.sections: list[str] = []
+        position = 0
+        for path in sorted(documents):
+            section = None
+            for line in documents[path].splitlines():
+                heading = _HEADING.match(line.strip())
+                if heading:
+                    section = f"{path}#{_norm(heading.group(1))}"
+                elif section is not None:
+                    normalised = _norm(line)
+                    lines.append(normalised)
+                    self.starts.append(position)
+                    self.sections.append(section)
+                    position += len(normalised) + 1
+        self.text = "\n".join(lines)
+
+    def section_holding(self, snippet: str) -> str | None:
+        found = self.text.find(snippet)
+        if found < 0:
+            return None
+        return self.sections[bisect.bisect_right(self.starts, found) - 1]
+
+
+def _section_of(text: str, documents: dict[str, str], index: _SectionIndex | None = None) -> str | None:
     """The ``#``/``##`` section of the documents that holds the first line of *text*, or the heading *text* opens."""
     first = _norm(text.split("\n", 1)[0])
     own = _HEADING.match(first)
@@ -136,15 +168,7 @@ def _section_of(text: str, documents: dict[str, str]) -> str | None:
     snippet = first[:120]
     if len(snippet) < 8:
         return None
-    for path in sorted(documents):
-        section = None
-        for line in documents[path].splitlines():
-            heading = _HEADING.match(line.strip())
-            if heading:
-                section = f"{path}#{_norm(heading.group(1))}"
-            elif section is not None and snippet in _norm(line):
-                return section
-    return None
+    return (index if index is not None else _SectionIndex(documents)).section_holding(snippet)
 
 
 def _group_keys(source: list[dict[str, Any]], id_pattern: re.Pattern[str] | None,
@@ -165,8 +189,9 @@ def _group_keys(source: list[dict[str, Any]], id_pattern: re.Pattern[str] | None
         for source_id, letter in letters.items():
             keys[source_id] = "prefix:" + letter
             counts["id_prefix"] += 1
+    index = _SectionIndex(documents)  # built once for all the requirements
     for item in source:
-        if keys[item["source_requirement_id"]] is None and (section := _section_of(item["text"], documents)) is not None:
+        if keys[item["source_requirement_id"]] is None and (section := _section_of(item["text"], documents, index)) is not None:
             keys[item["source_requirement_id"]] = "section:" + section
             counts["section"] += 1
     return keys, counts
