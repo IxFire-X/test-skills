@@ -148,7 +148,7 @@ def test_the_composition_of_prior_capabilities_is_listed(monkeypatch: pytest.Mon
     monkeypatch.setattr(pilot_state, "derive_state", lambda root: {"events": []})
     monkeypatch.setattr(pilot_state, "_prior_capabilities_value", lambda *args: value)
     monkeypatch.setattr(pilot_state, "_receipt_target", lambda root, attempt, kind: run / "receipts" / "prior.json")
-    monkeypatch.setattr(pilot_state, "_publish_bound_attempt_receipt", lambda *args: None)
+    monkeypatch.setattr(pilot_state, "publish_bound", lambda *args, **kwargs: None)
     answer = pilot_state.publish_prior_capabilities(run, "b" * 32, "BATCH-x")
     assert answer["capabilities"] == 80 and answer["capability_ids"][0] == "CAP-B1-name0" and len(answer["capability_ids"]) == 60
     assert answer["capability_ids_more"] == 20 and answer["body_at"] == "record.prior_capabilities.operation_capabilities"

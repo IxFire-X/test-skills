@@ -2995,17 +2995,17 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
         ):
             raise ValueError("reviewer session ledger must prefix-extend its latest revision")
     data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    try:
-        created, _identity = create_confined_bytes_exclusive(project, root, target, data, return_identity=True)
-        raw = read_confined_bytes(project, root, target)
-        readback = loads_json_strict(raw.decode("utf-8")) if raw is not None else None
-    except (OutputConfinementError, OSError, UnicodeDecodeError, StrictJsonError) as error:
+    try:  # J1: the file and its pair of events — the one contract of bind_bytes (the file is only compared with the bytes computed here)
+        bound = bind_bytes(run_root, attempt_id, target, data, digest=digest, batch_id="reviewer-ledger-v1", label="reviewer session ledger")
+    except ReceiptFileUnbound as error:
+        raise ReviewLedgerUnbound(
+            f"REVIEW_LEDGER_UNBOUND: файл леджера {target.name} лежит без событий журнала и это не та ревизия, что публикуется сейчас; "
+            "ничего не записано; fix: повтори ту же команду с теми же входами (ответом ревьюера, --path) — она допишет события файла; "
+            "иные входы — новое ревью: новый прогон (scan --new-run)") from error
+    except (OSError, ValueError) as error:
         raise ValueError("reviewer session ledger readback failed") from error
-    if readback != value or raw != data:
-        raise ValueError("reviewer session ledger readback mismatch")
-    if digest not in recorded_publish_digests:
-        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
-    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
+    created = bound["created"]
+    readback = loads_json_strict(data.decode("utf-8"))
     return {"record": readback, "digest": digest, "created": created, "path": str(target.relative_to(root)).replace("\\", "/")}
 
 
@@ -4390,73 +4390,111 @@ def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_
         f"; fix: квитанции {kind} в прогоне нет — её пишет код шага, который её создаёт; run_pipeline status называет, какой шаг следующий"))
 
 
-def _publish_bound_attempt_receipt(
-    run_root: Path,
-    attempt_id: str,
-    kind: str,
-    facts: Mapping[str, Any],
-) -> Mapping[str, Any]:
-    """Publish one fixed receipt and add each lifecycle binding at most once."""
-    published = publish_attempt_receipt(
-        run_root,
-        attempt_id,
-        kind,
-        facts,
-        _controller_token=(
-            _DEDICATED_RECEIPT_TOKEN
-            if kind in {"execution-inputs", "resume-validation"}
-            else None
-        ),
-    )
-    return _bind_published_attempt_receipt(run_root, attempt_id, kind, published)
-
-
 class ReceiptFileUnbound(ValueError):
-    """F2 (A2-4): the file of a fixed receipt lies without its events and its bytes are not the ones being published."""
+    """The file of a receipt lies without its events and its bytes are not the ones being published (J1: one code for every family)."""
 
     code = "RECEIPT_FILE_UNBOUND"
 
 
-def _publish_fixed_receipt_resuming(run_root: Path, attempt_id: str, kind: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
-    """F2 (A2-4): ``_publish_bound_attempt_receipt`` for a receipt a cut command may have left half done — the file there with the
-    same bytes gets its missing events; the file there with other bytes is RECEIPT_FILE_UNBOUND (nothing written), not a bare
-    read-back error."""
-    try:
-        return _publish_bound_attempt_receipt(run_root, attempt_id, kind, facts)
-    except ValueError as error:
-        _project, root = _run_root(run_root)
-        if _receipt_target(root, attempt_id, kind).exists() and ("read-back mismatch" in str(error) or str(error).startswith("unsafe ")):
-            raise ReceiptFileUnbound(
-                f"RECEIPT_FILE_UNBOUND: файл {_receipt_target(root, attempt_id, kind).relative_to(root).as_posix()} лежит без событий журнала, а его "
-                "байты не те, что публикуются сейчас; ничего не записано; fix: повтори команду с теми же входами, что дали файл (она допишет "
-                "события), иные входы — новый прогон (scan --new-run)") from error
-        raise
+_UNBOUND_FIX = ("fix: повтори команду с теми же входами, что дали файл (она допишет события журнала), иные входы — новый прогон "
+                "(scan --new-run)")
 
 
-def _bind_published_attempt_receipt(
-    run_root: Path,
-    attempt_id: str,
-    kind: str,
-    published: Mapping[str, Any],
-) -> Mapping[str, Any]:
-    """Append only the missing ordered events for one installed fixed receipt."""
-    _project, root = _run_root(run_root)
+def _bind_events(root: Path, attempt_id: str, digest: str, *, batch_id: str | None = None) -> None:
+    """The one place the pair ARTIFACT_PUBLISHED / ARTIFACT_READ_BACK of a published file is written: only the events the journal
+    does not have yet, in order (READ_BACK without PUBLISHED is refused).  ``batch_id`` names the family (``reviewer-ledger-v1``,
+    ``left-v1`` …); none for a fixed receipt of the attempt."""
     relevant = [
         event["event_type"]
         for event in derive_state(root)["events"]
         if event.get("attempt_id") == attempt_id
-        and event.get("artifact_digest") == published["digest"]
+        and event.get("artifact_digest") == digest
+        and event.get("batch_id") == batch_id
         and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
     ]
+    extra = {} if batch_id is None else {"batch_id": batch_id}
     if relevant == []:
-        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
+        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=digest, **extra)
+        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=digest, **extra)
     elif relevant == ["ARTIFACT_PUBLISHED"]:
-        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
+        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=digest, **extra)
     elif relevant != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]:
         raise ValueError("invalid fixed receipt event order")
+
+
+def _file_is_bound(root: Path, attempt_id: str, target: Path) -> bool:
+    """Whether the journal has a ARTIFACT_READ_BACK for the digest the file at ``target`` names (its own ``digest`` field) — a bound file is
+    a fact of the run; a file without it is what a cut command left."""
+    try:
+        digest = json.loads(target.read_bytes().decode("utf-8")).get("digest")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("artifact_digest") == digest
+               for event in derive_state(root)["events"])
+
+
+def publish_bound(run_root: Path, attempt_id: str, kind: str, facts: Mapping[str, Any], *, batch_id: str | None = None) -> Mapping[str, Any]:
+    """J1: publish one fixed receipt of the attempt and bind it to the journal — the single way, for every family, that a command may
+    leave half done and run again.
+
+    Contract: the bytes are the ones this call computes from ``facts`` (validated as ``publish_attempt_receipt`` does); the file at the
+    receipt's slot is only compared with them, never read as their source.
+      * no file                → written, then ARTIFACT_PUBLISHED and ARTIFACT_READ_BACK;
+      * the file, the same bytes → the events the journal lacks are written (none twice, in order);
+      * the file, other bytes   → ReceiptFileUnbound (RECEIPT_FILE_UNBOUND with its fix), nothing is written.
+    ``batch_id`` marks the events of a family (canaries, ledger …).  Returns the read-back receipt (``record``, ``digest``, ``path``,
+    ``bytes``) with ``created`` and ``installed_identity``."""
+    try:
+        published = publish_attempt_receipt(
+            run_root, attempt_id, kind, facts,
+            _controller_token=(_DEDICATED_RECEIPT_TOKEN if kind in {"execution-inputs", "resume-validation"} else None),
+        )
+    except ValueError as error:
+        _project, root = _run_root(run_root)
+        if (_receipt_target(root, attempt_id, kind).exists() and ("read-back mismatch" in str(error) or str(error).startswith("unsafe "))
+                and not _file_is_bound(root, attempt_id, _receipt_target(root, attempt_id, kind))):  # a bound file of another value is a conflict, not a cut
+            raise ReceiptFileUnbound(
+                f"RECEIPT_FILE_UNBOUND: файл {_receipt_target(root, attempt_id, kind).relative_to(root).as_posix()} лежит без событий журнала, "
+                f"а его байты не те, что публикуются сейчас ({error}); ничего не записано; {_UNBOUND_FIX}") from error
+        raise
+    _project, root = _run_root(run_root)
+    _bind_events(root, attempt_id, published["digest"], batch_id=batch_id)
     readback = read_attempt_receipt(root, attempt_id, kind, "ARTIFACT_READ_BACK")
     return {**readback, "created": published["created"], "installed_identity": published["installed_identity"]}
+
+
+def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, digest: str, batch_id: str | None = None,
+               label: str) -> Mapping[str, Any]:
+    """J1: the same contract for a content-addressed file that is no fixed receipt (a ledger revision, a run artifact of the attempt).
+
+    ``data`` is what the caller computed; ``digest`` the identity the events carry (the record's own digest).  The file at ``target`` is compared with ``data`` and is never the
+    source of the bytes (what is found on a disk is not a fact of the run).  No file → written; the same bytes → only the missing events
+    are written; other bytes → ReceiptFileUnbound.  Returns ``{created, installed_identity, path, digest}``."""
+    project, root = _run_root(run_root)
+    if not isinstance(data, (bytes, bytearray)) or not _DIGEST.fullmatch(str(digest)):
+        raise ValueError(f"invalid {label}: bytes and a sha256 digest are required")
+    data = bytes(data)
+    try:
+        created, identity = create_confined_bytes_exclusive(project, root, target, data, return_identity=True)
+        raw = read_confined_bytes(project, root, target)
+    except OutputConfinementError as error:
+        if target.exists():
+            raise ReceiptFileUnbound(f"RECEIPT_FILE_UNBOUND: файл {target.relative_to(root).as_posix()} ({label}) лежит не с теми байтами, что публикуются "
+                                     f"сейчас; ничего не записано; {_UNBOUND_FIX}") from error
+        raise ValueError(f"unsafe {label} path") from error
+    if raw != data:
+        if created:
+            try:
+                remove_confined_bytes_if_equal(project, root, target, raw or b"", expected_identity=identity)
+            except OutputConfinementError:
+                pass
+        raise ValueError(f"{label} read-back mismatch")
+    _bind_events(root, attempt_id, digest, batch_id=batch_id)
+    return {"created": created, "installed_identity": identity, "path": str(target.relative_to(root)).replace("\\", "/"), "digest": digest}
+
+
+# the names the code and the tests used before J1
+_publish_bound_attempt_receipt = publish_bound
 
 
 def publish_execution_trace_pair(
@@ -4516,7 +4554,7 @@ def publish_execution_trace_pair(
         )
     except (KeyError, TypeError, ValueError, TraceBuildError) as error:
         raise ValueError("authoritative execution trace cannot be built") from error
-    trace_receipt = _publish_bound_attempt_receipt(root, attempt_id, "execution-trace", {
+    trace_receipt = publish_bound(root, attempt_id, "execution-trace", {
         "effective_canonical_digest": effective["document_digest"],
         "generated_delta_digest": delta["digest"],
         "execution_receipt_digest": execution_record["digest"],
@@ -4526,7 +4564,7 @@ def publish_execution_trace_pair(
         "payload": trace,
     })
     audit = check(trace, require_execution=True, canonical=effective["document"])
-    audit_receipt = _publish_bound_attempt_receipt(root, attempt_id, "trace-audit", {
+    audit_receipt = publish_bound(root, attempt_id, "trace-audit", {
         "execution_trace_receipt_digest": trace_receipt["digest"],
         "trace_sha256": trace_receipt["record"]["trace_sha256"],
         "payload": audit,
@@ -4549,23 +4587,14 @@ def publish_effective_canonical(
             "effective_bundle_receipt_digest": "sha256:" + hashlib.sha256(_canonical_bytes(bundle)).hexdigest(),
             "reviewer_session_digest": reviewer_session_digest,
         }
-        published = publish_attempt_receipt(run_root, attempt_id, "effective-canonical", value)
+        published = publish_bound(run_root, attempt_id, "effective-canonical", value)
     except (AttributeError, ValueError) as error:
+        if isinstance(error, ReceiptFileUnbound):
+            raise
         raise ValueError("invalid effective canonical selection") from error
     if any(published["record"].get(key) != value.get(key) for key in value):
         raise ValueError("conflicting effective canonical selection")
-    _project, root = _run_root(run_root)
-    state = derive_state(root)
-    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("artifact_digest") == published["digest"]]
-    published_event = any(event["event_type"] == "ARTIFACT_PUBLISHED" for event in events)
-    readback_event = any(event["event_type"] == "ARTIFACT_READ_BACK" for event in events)
-    if readback_event and not published_event:
-        raise ValueError("invalid effective canonical event order")
-    if not published_event:
-        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    if not readback_event:
-        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    return {**read_attempt_receipt(run_root, attempt_id, "effective-canonical", "ARTIFACT_READ_BACK"), "created": published["created"]}
+    return {key: item for key, item in published.items() if key != "installed_identity"}
 
 
 def publish_execution_inputs(
@@ -4603,7 +4632,7 @@ def publish_execution_inputs(
         return {**recovered, "created": False, "installed_identity": None}
     if _execution_inputs_frontier_closed(run_root, attempt_id):
         raise ValueError("execution-inputs frontier is closed")
-    return _publish_bound_attempt_receipt(
+    return publish_bound(
         run_root,
         attempt_id,
         "execution-inputs",
@@ -4686,7 +4715,7 @@ def publish_resume_validation(
     execution = read_attempt_receipt(
         root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
     )["record"]
-    return _publish_bound_attempt_receipt(
+    return publish_bound(
         root,
         attempt_id,
         "resume-validation",
@@ -4872,12 +4901,8 @@ def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapp
         if attempt["policy_profile"] != "local-pilot-v1" or run["authorization"].get("execution_requested") is not True:
             raise ValueError("automation review boundary lacks local execution authorization")
     kind = f"automation-review-boundary-r{revision}"
-    published = publish_attempt_receipt(run_root, attempt_id, kind, facts)
-    _project, root = _run_root(run_root)
-    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    readback = read_attempt_receipt(run_root, attempt_id, kind, "ARTIFACT_READ_BACK")
-    return {**readback, "created": published["created"]}
+    published = publish_bound(run_root, attempt_id, kind, facts)
+    return {key: item for key, item in published.items() if key != "installed_identity"}
 
 
 class IndependenceUnverified(ValueError):
@@ -4936,7 +4961,7 @@ def publish_reference_cases(run_root: Path, attempt_id: str, path: str, data: by
     """FaT-REF: the reference cases of ``scan --reference`` (parsed by ``zephyr_csv``) as a receipt of the attempt; they
     never enter the context, the generator input or the canon."""
     facts = {"reference": {"path": path, "sha256": "sha256:" + hashlib.sha256(bytes(data)).hexdigest(), "cases": [dict(case) for case in cases]}}
-    return _publish_bound_attempt_receipt(run_root, attempt_id, "reference-cases", facts)
+    return publish_bound(run_root, attempt_id, "reference-cases", facts)
 
 
 def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
@@ -5040,7 +5065,7 @@ def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
             if prior is not None and prior != value:
                 raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {row['batch_id']} already has another skeleton")
         if prior is None:
-            _publish_fixed_receipt_resuming(run_root, attempt_id, kind, {"imported": dict(value)})
+            publish_bound(run_root, attempt_id, kind, {"imported": dict(value)})
         published[row["batch_id"]] = str(value["digest"])
     return published
 
@@ -5065,7 +5090,7 @@ def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     value = run_skeleton(root, attempt)
     if value is None:
         raise ValueError("IMPORT_NOT_CASES_RUN: the run has no --cases")
-    _publish_bound_attempt_receipt(run_root, attempt_id, "imported-cases", {"imported": value})
+    publish_bound(run_root, attempt_id, "imported-cases", {"imported": value})
     target = _receipt_target(root, attempt_id, "imported-cases")
     return {"digest": value["digest"], "cases": len(value["cases"]), "path": target.relative_to(root).as_posix()}
 
@@ -5087,7 +5112,7 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
         if prior is not None and prior != value:
             raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {batch_id} already has other prior capabilities; another one needs "
                              "a new run (scan --new-run)")
-    _publish_fixed_receipt_resuming(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
+    publish_bound(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
     ids = [str(row.get("capability_id")) for row in value["operation_capabilities"]]
     # PT2: the composition in a line — the ids (their names), the body in the file: record.prior_capabilities.operation_capabilities
     return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(ids), "capability_ids": ids[:60],
@@ -5449,7 +5474,7 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
     if prior is not None and prior != item:
         raise ValueError(f"GENERATOR_INPUT_CONFLICT: this attempt already has the {kind} {prior.get('digest')}; "
                          "another one needs a new run (scan --new-run)")
-    _publish_bound_attempt_receipt(run_root, attempt_id, receipt_kind, {kind: item})
+    publish_bound(run_root, attempt_id, receipt_kind, {kind: item})
     skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # FaT-SKB: the last input of each batch
     if kind == "plan":  # FaT-H4a (hunt 4.1): which context batches of the attempt the generator sees — the line of the reviewer view
         from tools.review_view import run_context_note
@@ -5800,10 +5825,7 @@ def _fill_response_bindings(
 
 def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bind one complete materialization receipt to the active attempt and read it back."""
-    published = publish_attempt_receipt(run_root, attempt_id, "generated-delta", {"delta": dict(delta)})
-    _project, root = _run_root(run_root)
-    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
+    publish_bound(run_root, attempt_id, "generated-delta", {"delta": dict(delta)})
     return read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
 
 
@@ -5813,27 +5835,14 @@ def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str,
     again change nothing."""
     from tools.review_canaries import BATCH_ID
 
-    published = publish_attempt_receipt(run_root, attempt_id, "review-canaries", dict(facts))
-    _project, root = _run_root(run_root)
-    seen = {event["event_type"] for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id
-            and event.get("batch_id") == BATCH_ID and event.get("artifact_digest") == published["digest"]}
-    for event_type in ("ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"):
-        if event_type not in seen:
-            append_event(root, event_type, actor="controller", attempt_id=attempt_id, batch_id=BATCH_ID, artifact_digest=published["digest"])
-    return {**read_attempt_receipt(root, attempt_id, "review-canaries", "ARTIFACT_READ_BACK"),
-            "created": published["created"], "installed_identity": published["installed_identity"]}
+    return publish_bound(run_root, attempt_id, "review-canaries", dict(facts), batch_id=BATCH_ID)
 
 
 def publish_phase5_receipt(run_root: Path, attempt_id: str, kind: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back one fixed-slot Phase 5 receipt before its project effect."""
     if kind not in {"materialization-ownership", "disposition-plan", "disposition-receipt"}:
         raise ValueError("invalid phase5 receipt kind")
-    published = publish_attempt_receipt(run_root, attempt_id, kind, {"payload": dict(payload)})
-    _project, root = _run_root(run_root)
-    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    readback = read_attempt_receipt(run_root, attempt_id, kind, "ARTIFACT_READ_BACK")
-    return {**readback, "created": published["created"], "installed_identity": published["installed_identity"]}
+    return publish_bound(run_root, attempt_id, kind, {"payload": dict(payload)})
 
 
 def remove_attempt_receipt_if_created(run_root: Path, receipt: Mapping[str, Any]) -> bool:
@@ -6623,8 +6632,7 @@ def publish_terminal_result(run_root: Path, facts: Mapping[str, Any], policy_pro
     target = root / "terminal-results" / f"{result['attempt_id']}.json"
     record, created, identity = _publish(project, root, target, {key: value for key, value in result.items() if key != "digest"}, "terminal result", return_created=True)
     if finalization_receipt is not None:
-        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=result["attempt_id"], artifact_digest=record["digest"])
-        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=result["attempt_id"], artifact_digest=record["digest"])
+        _bind_events(root, result["attempt_id"], record["digest"])
     return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": _canonical_bytes(record), "record": record, "created": created, "installed_identity": identity}
 
 

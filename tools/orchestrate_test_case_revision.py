@@ -357,10 +357,10 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
         "canonical_branch_digest": package["candidate_digest"],
         "package_digest": package["package_digest"],
     }
-    from tools.pilot_state import _publish_bound_attempt_receipt
+    from tools.pilot_state import publish_bound
 
     # F2: the one way a fixed receipt is published and bound — an opening cut short is opened again, no event is written twice
-    bound = _publish_bound_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
+    bound = publish_bound(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
     boundary = dict(bound["record"])
     created = {
         "schema_version": "1.0.0",
