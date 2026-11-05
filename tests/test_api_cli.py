@@ -339,7 +339,9 @@ def test_each_command_calls_exactly_one_package_function() -> None:
     tree = ast.parse(source)
     modules = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "tools"
                for alias in node.names}
-    assert {"pilot_state", "batch_assembly", "canonical_document", "automation_validation", "run_tests"} <= modules
+    # F6: the two modules of mode B are not imported by api — their four handlers reach them through the gate, one call each
+    assert {"pilot_state", "batch_assembly", "canonical_document", "execution_gate"} <= modules
+    assert not {"automation_validation", "run_tests"} & modules
     handlers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name.startswith("_cmd_")]
     from tools import api
 
