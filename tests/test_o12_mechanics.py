@@ -331,3 +331,48 @@ def test_model_response_stores_the_full_form_of_a_lean_answer_and_prints_the_sum
     assert record["context_receipt"] == context and record["test_cases"][0]["steps"][0]["step_id"] == f"STEP-{SUFFIX}-01"
     assert {key: value for key, value in record.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")} \
         == {key: value for key, value in full.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")}
+
+
+def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code_puts(tmp_path: Path) -> None:
+    """The receipt put into a lean answer is the one the published plan binds to the batch; a digest of another receipt of the run in the answer
+    is a refusal of the digest binding, and nothing is stored."""
+    from tests.test_batch_journal import _response, _run
+    from tests.test_digest_traps import _generator_request
+    from tests.test_review_requested import _put
+    from tools import pilot_state
+    from tools.pilot_state import derive_state, publish_context_selection
+    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
+
+    run, plan_digest, header_digest, fragments = _run(tmp_path)
+    root, attempt_id, project = Path(run["run_root"]), run["attempt_id"], run["project"]
+    attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
+    baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    other = select_context_batches(inventory, project, [next(item["opaque_id"] for item in inventory["files"] if item["project_path"] == "src/extra.py")],
+                                   byte_budget=4096)[0]["receipt"]
+    other_digest = publish_context_selection(root, attempt_id, other)["digest"]
+    plan = json.loads(Path(run["plan"]).read_bytes())
+    context = json.loads(Path(run["context"]).read_bytes())
+    assert other_digest != context["digest"]
+    lean = _lean(_full_fragment(plan, context))
+    lean["context_receipt_digest"] = other_digest
+    first = fragments[0]["batch_id"]
+    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
+    asked: list[str] = []
+    real = pilot_state.read_context_selection
+
+    def spy(run_root, attempt, digest):
+        asked.append(str(digest))
+        return real(run_root, attempt, digest)
+
+    pilot_state.read_context_selection = spy
+    try:
+        code, refused = _response(run, first, _put(run["tmp"] / "other-context.json", lean))
+    finally:
+        pilot_state.read_context_selection = real
+    assert code == 2 and refused["code"] == "MODEL_RESPONSE_DIGEST_MISMATCH", refused
+    assert other_digest not in asked, asked  # the receipt the answer names is never read to be put into it
+    assert not list((root / "model-stage-artifacts" / attempt_id).glob("*.json")) or all(
+        json.loads(path.read_text(encoding="utf-8")).get("context_receipt_digest") != other_digest
+        for path in (root / "model-stage-artifacts" / attempt_id).glob("*.json"))
+    assert pilot_state.derive_state(root) is not None

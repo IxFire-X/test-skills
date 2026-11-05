@@ -2547,13 +2547,17 @@ def _publish_model_stage_artifact(
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
-            if stage_instance_id.startswith("tc-generator:") and isinstance(value, dict) and value.get("status") == "COMPLETE"                     and value.get("context_receipt") in (None, ""):
-                # V6: the context receipt of the batch — from the journal, by the digest the request binds
+            if (stage_instance_id.startswith("tc-generator:") and isinstance(value, dict) and value.get("status") == "COMPLETE"
+                    and value.get("context_receipt") in (None, "")):
+                # V6: the context receipt of the batch — by the digest the published plan binds to this batch (never the digest the answer
+                # names: a different one is the refusal of the digest binding)
                 try:
-                    receipt = read_context_selection(root, attempt_id, str(value.get("context_receipt_digest") or prior["input_digests"][1]))
+                    batch = next(row for row in _generator_input(project, root, state, attempt_id, "plan")["batches"]
+                                 if row.get("batch_id") == stage_instance_id.partition(":")[2])
+                    receipt = read_context_selection(root, attempt_id, str(batch["context_receipt_digest"]))
                     value, mechanics = {**value, "context_receipt": dict(receipt)}, [*mechanics, "/context_receipt"]
-                except (KeyError, IndexError, OSError, TypeError, ValueError):
-                    pass  # no receipt of that digest: the checks name it
+                except (KeyError, StopIteration, OSError, TypeError, ValueError):
+                    pass  # no plan, no such batch or no receipt: the checks name it
             value, filled = _fill_response_bindings(project, root, state, attempt_id, stage_instance_id, prior, value)
     data = _model_stage_artifact_bytes(value)
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()

@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import _json_type, validate_canonical_document_all
+from tools.canonical_document import json_type, validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -767,7 +767,7 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                 if "semantic_type" not in item and isinstance(source, dict):
                     derived = None
                     if source.get("kind") == "literal" and "value" in source:
-                        derived = _json_type(source["value"])
+                        derived = json_type(source["value"])
                     elif source.get("kind") == "step_output":
                         derived = outputs_by_step.get(source.get("step_id"), {}).get(source.get("output_id"))
                     elif isinstance(target, dict) and target.get("location") == "arg":

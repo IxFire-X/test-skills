@@ -1001,3 +1001,7 @@ def load_canonical_document(path: Path) -> dict[str, Any]:
         first = diagnostics[0]
         raise ValueError(f"canonical document validation failed at {first['path']}: {first['code']}: {first['message']}")
     return document
+
+
+# Public name for batch_assembly (V1/V6): the same object under a name without an underscore; a rename of the private name is then a rename here.
+json_type = _json_type
