@@ -174,7 +174,7 @@ def _construct(document: Mapping[str, Any], automation: Mapping[str, Any], autot
         "files": [{"file_id": row["file_id"], "path": row["path"], "language": row["language"], "framework": row["framework"], "file_digest": row["content_digest"]} for row in artifacts["generated_files"]],
         "symbols": [dict(row) for row in artifacts["generated_symbols"]], "implementation_relations": [dict(row) for row in artifacts["implementation_relations"]],
         "manual_dispositions": [dict(row) for row in artifacts["manual_dispositions"]], "automation_diagnostics": [dict(row) for row in artifacts["diagnostics"]],
-        **({"excluded_cases": [dict(row) for row in artifacts["excluded_cases"]]} if "excluded_cases" in artifacts else {}),  
+        **({"excluded_cases": [dict(row) for row in artifacts["excluded_cases"]]} if "excluded_cases" in artifacts else {}),
         "execution": execution, "lifecycle": {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE" if execution is None else execution["verdict"]},
     }
 

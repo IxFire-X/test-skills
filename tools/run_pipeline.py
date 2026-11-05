@@ -879,7 +879,7 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
-    sectioned = _sectioned_ids(inventory, project, docs)  
+    sectioned = _sectioned_ids(inventory, project, docs)
     selected = [opaque for opaque in selected if opaque not in sectioned]
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
@@ -1031,7 +1031,7 @@ def _scan_request(args: Any) -> dict[str, Any]:
         "disposition_policy": getattr(args, "disposition_policy", None),
         **({"no_pause": True} if getattr(args, "no_pause", False) else {}),  # a run without the pause after the marker
         **({"reference": str(args.reference)} if getattr(args, "reference", None) else {}),
-        **({"cases": str(cases)} if cases else {}),  
+        **({"cases": str(cases)} if cases else {}),
     }
 
 

@@ -430,7 +430,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
         start = len(lines)
         lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
-        if "technique" in case:  
+        if "technique" in case:
             lines.extend([f"Техника: {technique_name(case['technique'])}", ""])
         lines.append("**Предусловия:**")
         if case["preconditions"]:

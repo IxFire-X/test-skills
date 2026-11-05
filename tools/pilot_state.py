@@ -1371,7 +1371,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
     return event
 
 
-@closure_cached  
+@closure_cached
 def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str | None = None, batch_id: str | None = None, artifact_digest: str | None = None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> Mapping[str, Any]:
     if event_type == "MODEL_REQUESTED":
         raise ValueError("MODEL_REQUESTED requires publish_model_request")
@@ -1392,7 +1392,7 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
 _REVIEW_STAGE = re.compile(r"^(?:tc-reviewer:canonical|autotest-reviewer:r[12])$")
 
 
-@closure_cached  
+@closure_cached
 def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, candidate_digest: str) -> Mapping[str, Any]:
     """The one REVIEW_REQUESTED of a reviewer stage, on the exact candidate it reviews.
 
@@ -2102,7 +2102,7 @@ def _codeword_lost_note(root: Path, state: Mapping[str, Any], attempt_id: str, s
             "only its sha256 — if that output was lost the generator works without the word (the report says so);") if held else ""
 
 
-@closure_cached  
+@closure_cached
 def publish_model_request(
     run_root: Path,
     attempt_id: str,
@@ -2464,7 +2464,7 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
 _RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "
 
 
-@closure_cached  
+@closure_cached
 def publish_model_stage_artifact(
     run_root: Path,
     attempt_id: str,
@@ -2541,7 +2541,7 @@ def _publish_model_stage_artifact(
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
     project, root = _run_root(run_root)
-    _refuse_left(root, attempt_id)  
+    _refuse_left(root, attempt_id)
     state = derive_state(root)
     attempt = next(
         (item for item in state["attempts"] if item["attempt_id"] == attempt_id), None,
@@ -2606,7 +2606,7 @@ def _publish_model_stage_artifact(
         if len(requests) == 1 and len(responses) == 1:
             raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
-        if not requests:  
+        if not requests:
             if stage_instance_id == "tc-reviewer:canonical":  # the request of the reviewer is the work of review-open
                 from tools.fixes import REVIEW_CHAIN
 
@@ -2813,7 +2813,7 @@ def read_model_stage_artifact(
     )
 
 
-@closure_cached  
+@closure_cached
 def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back one inventory-owned exact C-lite byte-set receipt."""
     from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
@@ -4784,7 +4784,7 @@ def _read_effective_canonical_with_state(
     return readback["record"]
 
 
-@closure_cached  
+@closure_cached
 def read_effective_canonical(
     run_root: Path,
     attempt_id: str,
@@ -4882,7 +4882,7 @@ def recover_phase5_receipt_events(run_root: Path, attempt_id: str, kind: str) ->
     return _recover_attempt_receipt_events(run_root, attempt_id, kind)
 
 
-@closure_cached  
+@closure_cached
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back the controller-owned isolation boundary for one V5 revision."""
     revision = facts.get("automation_revision")
@@ -4927,7 +4927,7 @@ def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None
         )
 
 
-@closure_cached  
+@closure_cached
 def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *, fresh_context: bool, reviewer_invocation_id: str) -> dict[str, Any]:
     """The ``--facts`` of ``open-automation-boundary`` for revision N from the journal; writes nothing.
 
@@ -4958,7 +4958,7 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
     }
 
 
-_GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  
+_GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}
 
 
 def publish_reference_cases(run_root: Path, attempt_id: str, path: str, data: bytes, cases: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
@@ -5084,7 +5084,7 @@ def _imported_for_answer(project: Path, root: Path, state: Mapping[str, Any], at
     return _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + batch_id, "ARTIFACT_READ_BACK")["record"]["imported"]
 
 
-@closure_cached  
+@closure_cached
 def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     """Publish the skeleton of an import run from its CSV; the same value again changes nothing."""
     from tools.cases_import import run_skeleton
@@ -5099,7 +5099,7 @@ def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     return {"digest": value["digest"], "cases": len(value["cases"]), "path": target.relative_to(root).as_posix()}
 
 
-@closure_cached  
+@closure_cached
 def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -> dict[str, Any]:
     """Publish the fifth tc-generator input of batch k>=2 — built from the journal, one receipt per batch; the same value
     again changes nothing, another one is refused."""
@@ -5396,7 +5396,7 @@ def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
     )
 
 
-@closure_cached  
+@closure_cached
 def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], header_digest: str, state: Mapping[str, Any]) -> None:
     """The checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
     attempt, the receipts are a prefix in batch_index order.  They write nothing, so ``tools.api plan`` can run them before it

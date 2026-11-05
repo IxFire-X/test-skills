@@ -488,7 +488,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
            " сверка человеческих полей идёт с ними"] if imported and normalized else []),
         *([f"- Импорт с документами: требований без кейса в CSV — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
-           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"] if import_gaps else []),  
+           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"] if import_gaps else []),
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",

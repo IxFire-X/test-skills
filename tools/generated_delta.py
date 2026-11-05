@@ -321,7 +321,7 @@ def _plan_files(
     return planned, ownership
 
 
-@_closure_cached  
+@_closure_cached
 def materialization_precheck(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any], run_root: Path, attempt_id: str,
@@ -388,7 +388,7 @@ def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
     return None
 
 
-@_closure_cached  
+@_closure_cached
 def materialize_delta(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,

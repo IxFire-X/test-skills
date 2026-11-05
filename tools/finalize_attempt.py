@@ -687,7 +687,7 @@ def _durable_branch(
     return branch, unknown_evidence
 
 
-@_closure_cached  
+@_closure_cached
 def finalize_attempt(
     branch: Mapping[str, Any], delta: Mapping[str, Any] | None, *, project: Path, verification: str,
     facts: Mapping[str, Any], publish: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None,
@@ -1278,7 +1278,7 @@ def finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: st
     Branches: an accepted cases-only canonical, and an early negative outcome of the canonical review (rework or a
     reviewer abort).  Any other state is not a closing point yet, and the error names the missing fact instead of a guess.
     """
-    with pilot_state.closure_cache():  
+    with pilot_state.closure_cache():
         return _finalize_durable_branch_attempt(run_root, attempt_id, abandon)
 
 

@@ -722,7 +722,7 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     from tools.cases_import import outside_rows
 
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}  
+            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}
 
 
 def _left(root: Path) -> str | None:
@@ -917,10 +917,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
-        "automation_split": _split(root, attempt_id),  
+        "automation_split": _split(root, attempt_id),
         "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
-                  "left": _left(root),  
+                  "left": _left(root),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
             "requirements": requirements,
@@ -968,7 +968,7 @@ def _size_cell(call: Mapping[str, Any]) -> str:
 
 
 def _tokens_cell(call: Mapping[str, Any]) -> str:
-    if call.get("by") == "reuse":  
+    if call.get("by") == "reuse":
         return f"повтор {str(call.get('reused_from') or '')[:8]}"
     return "код" if call.get("by") == "code" else _dash(call.get("tokens_est"))
 

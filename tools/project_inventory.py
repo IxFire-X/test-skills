@@ -62,7 +62,7 @@ _TOKEN_SIGNATURES = (
     # the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
     # run: the old pattern re-read a long run of letters without «://» from each of its letters (140 KB — 28 s).
     ("url-credentials-v1", re.compile(rb"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")),
-    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  
+    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),
 )
 # token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
 _SOURCE_TOKEN_LITERAL = re.compile(

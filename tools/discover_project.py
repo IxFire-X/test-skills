@@ -481,7 +481,7 @@ def discover_project(project_dir:Path, skill_pack_root:Path|None=None)->dict[str
     manifests=find_confined_manifests(root,pack)
     if not manifests:
         documents = _documents_module(root, pack)
-        if documents is not None:  
+        if documents is not None:
             return build_report("ready", root.name, [documents], [], [], [], project_fingerprint(root, documents["detected_from"]))
         return build_report("error",root.name,[],[],[],["build manifests were not found"])
     modules,qs,warnings,errors,unresolved=analyze_module_roots(root,manifests); evidence=[_rel(root,p) for p in manifests]

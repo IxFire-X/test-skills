@@ -282,7 +282,7 @@ def reviewer_package_binding(
     return binding
 
 
-@_closure_cached  
+@_closure_cached
 def reviewer_session_start(
     run_root: Path,
     attempt_id: str,
@@ -331,7 +331,7 @@ def reviewer_session_start(
     }
 
 
-@_closure_cached  
+@_closure_cached
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
     """Reserve the only canonical reviewer session for an active attempt before invocation."""
     package = _plain(package_binding)
@@ -403,7 +403,7 @@ def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[st
 _VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}
 
 
-@_closure_cached  
+@_closure_cached
 def complete_reviewer_session(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The completed reviewer session for `select`, built from the published ledger and the recorded review.
 
@@ -458,7 +458,7 @@ def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]
     return session
 
 
-@_closure_cached  
+@_closure_cached
 def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str]) -> dict[str, Any]:
     """One C-lite evidence pair for the open reviewer session.
 
@@ -529,7 +529,7 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
 _ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE")
 
 
-@_closure_cached  
+@_closure_cached
 def abort_reviewer_session(run_root: Path, attempt_id: str, reason_code: str) -> dict[str, Any]:
     """The aborted reviewer session for `select` (no verdict). Nothing is written: `select` validates and publishes it."""
     from tools.pilot_state import reviewer_lifecycle_projection
@@ -652,7 +652,7 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": admitted and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
 
 
-@_closure_cached  
+@_closure_cached
 def publish_unreviewed_candidate(
     candidate: Mapping[str, Any],
     output_dir: str | os.PathLike[str],
@@ -769,7 +769,7 @@ def _run_imported(run_root: Path, attempt_id: str) -> bool:
         return False
 
 
-@_closure_cached  
+@_closure_cached
 def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receipt, package_binding: Mapping[str, Any], reviewer_session: Mapping[str, Any], review_artifact: Mapping[str, Any] | None, output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, *, run_root: Path, attempt_id: str, reviewer_evidence_receipts: Sequence[Mapping[str, Any]] = (), publisher=publish_bundle, verifier=verify_bundle, dry_run: bool = False) -> OrchestrationResult:
     """Select the published r1 and publish reviewer-produced r2 only when needed.
 
