@@ -19,7 +19,7 @@ RECEIPT_KEYS = {"schema_version", "run_id", "request_id", "policy_profile", "exe
 
 def _run(tmp_path: Path, profile: str = "local-pilot-v1", *, flag: bool) -> tuple[Path, str]:
     from tests.helpers import build_phase_two_baseline
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests").mkdir(exist_ok=True)

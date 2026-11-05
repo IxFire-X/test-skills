@@ -120,7 +120,7 @@ def _sealed_authorization(*, profile: str, execution_requested: bool) -> dict:
 def _local_attempt(project: Path, *, module: str = ".") -> tuple[Path, str, dict, dict]:
     from tests.helpers import build_phase_two_baseline
     from tools.pilot_state import read_run
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     # The copied fixture names a Windows interpreter; bind the host path before freezing.
     skillsrc = project / ".skillsrc"

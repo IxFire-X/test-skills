@@ -35,7 +35,7 @@ def test_durable_closure_binds_readbacks_then_terminal_event_and_derives_accepta
     from tests.test_exit_policy import _local
     from tools.execution_adapters import request_digest
     from tools import pilot_state
-    from tools.run_pipeline import finalize_phase_one_spine
+    from tests.spine_helpers import finalize_phase_one_spine
 
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     pilot_state.claim_execution_start(root, attempt_id, request_digest(request))

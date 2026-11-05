@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from tools import pilot_state
-from tools.run_pipeline import resume_phase_one_spine, run_phase_one_spine
+from tests.spine_helpers import resume_phase_one_spine, run_phase_one_spine
 from helpers import build_phase_two_baseline, phase_two_baseline
 from tools import exec_commands
 
@@ -116,7 +116,7 @@ def test_spine_result_is_bound_to_run_attempt_and_profile(tmp_path: Path) -> Non
 
 
 def test_spine_uses_confined_publishers_and_never_invokes_model_executor_or_project_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import tools.run_pipeline as pipeline
+    from tests import spine_helpers
 
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("forbidden dependency invoked")
@@ -125,8 +125,8 @@ def test_spine_uses_confined_publishers_and_never_invokes_model_executor_or_proj
     monkeypatch.setattr(exec_commands, "cmd_ingest", forbidden)  # what takes the result of a run
     result = _run(tmp_path)
     assert result["exit_code"] == 3
-    source = Path(pipeline.__file__).read_text(encoding="utf-8")
-    spine = source[source.index("def run_phase_one_spine"):source.index("def build_parser")]
+    source = Path(spine_helpers.__file__).read_text(encoding="utf-8")
+    spine = source[source.index("def run_phase_one_spine"):]
     assert ".write_bytes(" not in spine
 
 
@@ -164,7 +164,7 @@ def test_fresh_process_resume_is_recursive_byte_and_mtime_noop(tmp_path: Path) -
     root = Path(result["run"]["run_root"])
     before = _tree(root)
     code = (
-        "from pathlib import Path; import json,sys; from tools.run_pipeline import resume_phase_one_spine; "
+        "from pathlib import Path; import json,sys; from tests.spine_helpers import resume_phase_one_spine; "
         "r=resume_phase_one_spine(Path(sys.argv[1])); print(json.dumps({'artifact':r['artifact']['digest'],'result':r['result']['digest'],'exit':r['exit_code']},sort_keys=True))"
     )
     output = subprocess.check_output([sys.executable, "-c", code, str(root)], cwd=Path(__file__).parents[1], text=True)

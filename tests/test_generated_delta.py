@@ -213,7 +213,7 @@ def _inputs(
     automation_lifecycle: bool = True,
 ):
     from tests.helpers import build_phase_two_baseline
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
     from tests.test_automation_revision_budget import automated_document, automation as automation_artifact, durable_boundary, host_evidence, review as review_artifact
 
     (tmp_path / "tests").mkdir(exist_ok=True)
@@ -434,7 +434,7 @@ def test_actual_phase4_selection_is_consumed_by_phase5_materialization(tmp_path:
     from tools.generated_delta import materialize_delta
     from tools.orchestrate_test_case_revision import orchestrate_revision
     from tools.pilot_state import read_effective_canonical
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     document = automated_document()

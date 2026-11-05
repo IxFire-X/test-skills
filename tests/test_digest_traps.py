@@ -137,7 +137,7 @@ def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_
     from tests.test_automation_revision_budget import automated_document, automation, review
     from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
     from tools.pilot_state import publish_effective_canonical
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}

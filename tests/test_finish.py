@@ -96,7 +96,7 @@ def _axes(result: dict) -> dict:
 def test_finish_closes_an_executed_attempt_like_the_manual_sequence(tmp_path: Path, capsys: pytest.CaptureFixture[str], verdict: str) -> None:
     from tests import test_durable_execution_trace as trace
     from tools.pilot_state import read_attempt_receipt
-    from tools.run_pipeline import finalize_phase_one_spine
+    from tests.spine_helpers import finalize_phase_one_spine
 
     outcomes = []
     for name in ("manual", "finish"):

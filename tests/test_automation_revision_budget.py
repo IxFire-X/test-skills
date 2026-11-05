@@ -78,7 +78,7 @@ def durable_boundary(tmp_path, artifact: dict, session_id: str, evidence: dict, 
             run_root, attempt_id = _new_run(tmp_path)
         else:
             from tests.helpers import build_phase_two_baseline
-            from tools.run_pipeline import run_phase_one_spine
+            from tests.spine_helpers import run_phase_one_spine
 
             (tmp_path / "tests").mkdir(exist_ok=True)
             identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
@@ -256,7 +256,7 @@ def test_static_review_boundary_rejects_wrong_effective_selection_before_publica
     from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import open_automation_review_boundary, publish_effective_canonical
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     document = automated_document()

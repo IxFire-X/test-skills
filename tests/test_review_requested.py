@@ -52,7 +52,7 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     (project / "src" / "extra.py").write_text("extra = 2\n", encoding="utf-8")  # FaT-10c: evidence the reviewer may ask for
     if self_review:  # FaT-10d: a run started with scan --accept-self-review (SELF admitted)
         from tests.helpers import build_phase_two_baseline
-        from tools.run_pipeline import run_phase_one_spine
+        from tests.spine_helpers import run_phase_one_spine
 
         identity = {"project": str(project.resolve()), "module": ".", "policy_profile": "cases-only-v1"}
         baseline_value = build_phase_two_baseline(project, identity, skill_pack_root=project / ".pilot-runs")
@@ -475,7 +475,7 @@ def test_automation_boundary_facts_from_the_journal_by_commands_only(tmp_path: P
     from tests.test_automation_revision_budget import automated_document, automation
     from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
     from tools.pilot_state import publish_effective_canonical
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}

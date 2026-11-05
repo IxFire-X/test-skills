@@ -67,7 +67,7 @@ def test_d4_requirements_that_follow_openspec_merge(tmp_path: Path) -> None:
 
 def _automation_run(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
     from tests.helpers import build_phase_two_baseline
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}

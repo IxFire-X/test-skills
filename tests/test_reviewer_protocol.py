@@ -65,7 +65,7 @@ def _session(*events, same_model=True, same_invocation=False, host=True, status=
 
 
 def _new_run(tmp_path: Path, profile: str = "cases-only-v1"):
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": profile}
     baseline = build_phase_two_baseline(tmp_path, identity, skill_pack_root=tmp_path / ".pilot-runs")

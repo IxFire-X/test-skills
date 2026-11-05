@@ -118,7 +118,7 @@ def test_cases_only_attempt_never_creates_ownership_or_test_bytes(tmp_path: Path
     from tests.helpers import build_phase_two_baseline
     from tests.test_automation_revision_budget import automated_document, automation as automation_artifact, host_evidence, review as review_artifact
     from tools.generated_delta import GeneratedDeltaError, materialize_delta
-    from tools.run_pipeline import run_phase_one_spine
+    from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
     document = automated_document()

@@ -103,7 +103,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("review_legacy", "orchestrate_test_case_revision", "_load_receipt"): 1,
     ("review_legacy", "orchestrate_test_case_revision", "_read_existing_context_receipts"): 2,
     ("review_legacy", "orchestrate_test_case_revision", "_receipt_json"): 2,
-    ("run_pipeline", "pilot_state", "_PublicationUnknown"): 1,
     ("run_pipeline", "pilot_state", "_frozen_inventory"): 1,
     ("run_pipeline", "pilot_state", "_generator_input"): 1,
     ("run_pipeline", "pilot_state", "_read_artifact"): 1,

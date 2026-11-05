@@ -5376,11 +5376,6 @@ def _generator_input_digest(value: Mapping[str, Any]) -> str:
     return with_digest({key: item for key, item in value.items() if key != "digest"})["digest"]
 
 
-def generator_input_digest(value: Mapping[str, Any]) -> str:
-    """P2: the self-digest ``publish_generator_input`` gives a plan or a header — known before it is published."""
-    return _generator_input_digest(value)
-
-
 def _plan_contexts(plan: Mapping[str, Any]) -> list[str]:
     """FaT-AU3: the context receipts every generator batch of the plan reads, in order (one before the list)."""
     from tools.batch_assembly import context_digests

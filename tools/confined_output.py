@@ -14,7 +14,6 @@ __all__ = [
     "ConfinedOutputTarget",
     "OutputConfinementError",
     "acquire_confined_output",
-    "atomic_write_confined_bytes",
     "atomic_write_confined_bytes_at_root",
     "create_confined_directory_exclusive",
     "create_confined_bytes_exclusive",
@@ -322,11 +321,6 @@ def _write_bytes(target: ConfinedOutputTarget, data: bytes) -> None:
                 os.unlink(temporary.name, dir_fd=target.parent_guard)
         except FileNotFoundError:
             pass
-
-
-def atomic_write_confined_bytes(project_root: Path, value: str | Path, data: bytes) -> None:
-    with acquire_confined_output(project_root, value) as target:
-        target.write_bytes(data)
 
 
 def atomic_write_confined_bytes_at_root(project_root: Path, confined_root: Path, target: Path, data: bytes) -> None:

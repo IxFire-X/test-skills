@@ -9,7 +9,6 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import date
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -28,7 +27,6 @@ _PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROF
 # machine-model step columns as an explicit compatibility opt-in.  Their HTML/Markdown are identical.
 _PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
-_XML_PROFILE = "zephyr-scale-xml-observed-v1"
 # The company's Zephyr accepts only High/Normal/Low (FaT-3): CRITICAL goes out as High.
 _PRIORITIES = {"CRITICAL": "High", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
 _HEADERS = (
@@ -603,132 +601,6 @@ def _custom_field_warnings(case: dict[str, Any]) -> tuple[str, ...]:
         f"UNMAPPED_ZEPHYR_CUSTOM_FIELD: case_id={json.dumps(case['case_id'], ensure_ascii=False)}, key={json.dumps(key, ensure_ascii=False)}"
         for key in unmapped
     )
-
-
-def _xml_rich_text(value: str) -> str:
-    """Render observed Zephyr rich text without exposing XML markup to input."""
-    if any(
-        ord(character) not in (0x09, 0x0A, 0x0D)
-        and not 0x20 <= ord(character) <= 0xD7FF
-        and not 0xE000 <= ord(character) <= 0xFFFD
-        and not 0x10000 <= ord(character) <= 0x10FFFF
-        for character in value
-    ):
-        raise ValueError("Zephyr XML text contains an XML 1.0-incompatible character")
-    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
-    escaped = normalized.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return escaped.replace("]]>", "]]&gt;").replace("\n", "<br />")
-
-
-def _xml_cdata(name: str, value: str, level: int) -> str:
-    return "    " * level + f"<{name}><![CDATA[{_xml_rich_text(value)}]]></{name}>"
-
-
-def _xml_export_date(value: str) -> str:
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError:
-        raise ValueError("Zephyr XML metadata.date must be an ISO date") from None
-    if parsed.isoformat() != value:
-        raise ValueError("Zephyr XML metadata.date must be an ISO date")
-    return f"{value} 00:00:00 UTC"
-
-
-def _xml_empty_or_values(container: str, item: str, values: list[str], level: int) -> list[str]:
-    indent = "    " * level
-    if not values:
-        return [f"{indent}<{container}/>"]
-    rows = [f"{indent}<{container}>"]
-    rows.extend(_xml_cdata(item, value, level + 1) for value in values)
-    rows.append(f"{indent}</{container}>")
-    return rows
-
-
-def _xml_management_warnings(case: dict[str, Any]) -> tuple[str, ...]:
-    management = case["management"]
-    unsupported = []
-    for field in ("folder", "components", "estimated_time", "external_keys"):
-        if management[field]:
-            unsupported.append(field)
-    if management["external_links"]["pages"]:
-        unsupported.append("external_links.pages")
-    for name, value in management["custom_fields"].items():
-        if name not in _CUSTOM_KEYS or type(value) is not str:
-            unsupported.append(f"custom_fields.{name}")
-    return tuple(
-        f"UNSUPPORTED_ZEPHYR_XML_MANAGEMENT: case_id={json.dumps(case['case_id'], ensure_ascii=False)}, field={json.dumps(field, ensure_ascii=False)}"
-        for field in sorted(unsupported)
-    )
-
-
-def render_zephyr_xml(document: dict[str, Any], profile: str = _XML_PROFILE) -> Projection:
-    """Render the narrow, sample-faithful Zephyr XML candidate profile."""
-    if profile != _XML_PROFILE:
-        raise ValueError(f"unknown Zephyr XML profile: {profile}")
-    require_valid_canonical_document(document)
-    metadata = document["metadata"]
-    warnings: list[str] = []
-    rows = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        "<project>",
-        "    <modelVersion>1.0</modelVersion>",
-        f"    <exportDate>{_xml_export_date(metadata['date'])}</exportDate>",
-        "    <testCases>",
-    ]
-    for case in document["test_cases"]:
-        management = case["management"]
-        warnings.extend(_xml_management_warnings(case))
-        rows.append("        <testCase>")
-        custom_fields = [
-            (name, management["custom_fields"][name])
-            for name in _CUSTOM_KEYS
-            if type(management["custom_fields"].get(name)) is str
-        ]
-        if not custom_fields:
-            rows.append("            <customFields/>")
-        else:
-            rows.append("            <customFields>")
-            for name, value in custom_fields:
-                rows.extend((
-                    f'                <customField name="{name}" type="SINGLE_CHOICE_SELECT_LIST">',
-                    _xml_cdata("value", value, 5),
-                    "                </customField>",
-                ))
-            rows.append("            </customFields>")
-        issues = management["external_links"]["issues"]
-        if not issues:
-            rows.append("            <issues/>")
-        else:
-            rows.append("            <issues>")
-            for issue in issues:
-                rows.extend(("                <issue>", _xml_cdata("key", issue, 5), "                </issue>"))
-            rows.append("            </issues>")
-        rows.extend(_xml_empty_or_values("labels", "label", management["labels"], 3))
-        rows.extend((
-            _xml_cdata("name", case["title"], 3),
-            _xml_cdata("objective", case["objective"], 3),
-        ))
-        if management["owner"] is not None:
-            rows.append(_xml_cdata("owner", management["owner"], 3))
-        if case["preconditions"]:
-            rows.append(_xml_cdata("precondition", "\n\n".join(case["preconditions"]), 3))
-        rows.append(_xml_cdata("priority", _PRIORITIES[case["priority"]], 3))
-        if management["status"] is not None:
-            rows.append(_xml_cdata("status", management["status"], 3))
-        rows.extend(("            <testScript type=\"steps\">", "                <steps>"))
-        for index, step in enumerate(case["steps"]):
-            expected = "\n\n".join(expectation["text"] for expectation in step["expectations"])
-            rows.extend((
-                f'                    <step index="{index}">',
-                "                        <customFields/>",
-                _xml_cdata("description", step["action"], 6),
-                _xml_cdata("expectedResult", expected, 6),
-                _xml_cdata("testData", step["test_data"], 6),
-                "                    </step>",
-            ))
-        rows.extend(("                </steps>", "            </testScript>", "        </testCase>"))
-    rows.extend(("    </testCases>", "</project>"))
-    return Projection("\r\n".join(rows).encode("utf-8"), tuple(warnings))
 
 
 def render_zephyr_csv(document: dict[str, Any], profile: str = _PROFILE) -> Projection:

@@ -715,7 +715,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `OutputConfinementError`, `ConfinedOutputTarget`, `acquire_confined_output`, `atomic_write_confined_bytes`, `atomic_write_confined_bytes_at_root`, `create_confined_bytes_exclusive`, `create_confined_directory_exclusive`, `ensure_project_child_directory`, `read_confined_bytes`, `remove_confined_bytes_if_equal`.
+**Основные определения в коде:** `OutputConfinementError`, `ConfinedOutputTarget`, `acquire_confined_output`, `atomic_write_confined_bytes_at_root`, `create_confined_bytes_exclusive`, `create_confined_directory_exclusive`, `ensure_project_child_directory`, `read_confined_bytes`, `remove_confined_bytes_if_equal`.
 
 </details>
 
@@ -1129,7 +1129,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `HostStop`, `cmd_scan`, `cmd_status`, `run_phase_one_spine`, `resume_phase_one_spine`, `finalize_phase_one_spine`, `build_parser`, `argparse_parent`, `main`.
+**Основные определения в коде:** `HostStop`, `cmd_scan`, `cmd_status`, `build_parser`, `argparse_parent`, `main`.
 
 Команды: `scan`, `status`, `finish`, `report`; `exec` (заменён), `materialize` и `ingest` добавляются, только если в поставке есть файл `tools/exec_commands.py` (см. `tools/execution_gate.py`).
 
@@ -1227,7 +1227,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `Projection`, `escape_inline`, `render_html_preview`, `render_markdown`, `render_zephyr_xml`, `render_zephyr_csv`.
+**Основные определения в коде:** `Projection`, `escape_inline`, `render_html_preview`, `render_markdown`, `render_zephyr_csv`.
 
 </details>
 
