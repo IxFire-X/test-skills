@@ -2131,8 +2131,9 @@ def build_parser() -> JsonArgumentParser:
                              help="FaT-REF: a Zephyr Scale CSV of reference cases — compared with the new cases as a review hint")
     scan_parser.add_argument("--new-run", action="store_true",
                              help="FaT-G: start a new run although an unfinished run of the same request exists.")
-    scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
-                             help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
+    if execution_gate.execution_available():  # V8 (A5-9): the policy of failed generated tests is a flag of mode B, not of a delivery of cases
+        scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
+                                 help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
     status_parser = sub.add_parser("status", parents=[shared])
     finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
     finish_parser.add_argument("--run", required=True)

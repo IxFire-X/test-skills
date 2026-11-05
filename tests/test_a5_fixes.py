@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.contract
 
 # the codes of the cases-only path (generator input, reviewer session, marker parts, bundle publication, review) that had no fix anywhere
 CODES = (

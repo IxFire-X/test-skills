@@ -11,7 +11,6 @@ import pytest
 
 from tools.run_pipeline import _MODEL_RESPONSE, _NEXT_STEPS, _TERMINAL
 
-pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"

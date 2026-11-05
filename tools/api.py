@@ -213,7 +213,7 @@ def _cmd_validate_canonical(a):
 
 def _review_files(a):
     """FaT-U5: the reviewer-package files the agent passed — compared with the journal, never the source."""
-    return {"candidate": a.candidate, "candidate_receipt": getattr(a, "candidate_receipt", None), "assembly_receipt": getattr(a, "assembly_receipt", None),
+    return {"candidate": getattr(a, "candidate", None), "candidate_receipt": getattr(a, "candidate_receipt", None), "assembly_receipt": getattr(a, "assembly_receipt", None),
             "inventory_receipt": getattr(a, "inventory_receipt", None), "context_receipts": getattr(a, "context_receipt", None),
             "context_marker_output": getattr(a, "context_marker_output", None), "generator_fragments": getattr(a, "generator_fragment", None)}
 
@@ -225,8 +225,8 @@ def _cmd_session_start(a):
 
 
 def _cmd_review_publish(a):
-    return orchestrate_test_case_revision.review_step("publish", a.run_root, a.attempt, files={"candidate": a.candidate},
-                                                      output_dir=a.output_dir, csv_profile=a.csv_profile)
+    return orchestrate_test_case_revision.review_step("publish", a.run_root, a.attempt, files={"candidate": getattr(a, "candidate", None)},
+                                                      output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE))
 
 
 def _refuse_legacy_flags(a, *names: str) -> None:
@@ -244,8 +244,8 @@ def _cmd_review_open(a):
     """P2: without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
     FaT-U5 command of the nine, as before — one package function either way."""
     return orchestrate_test_case_revision.review_open_step(
-        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=a.csv_profile, model_id=a.model_id,
-        invocation_id=a.invocation_id, fresh_context=a.fresh_context, session_start=a.session_start)
+        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE), model_id=a.model_id,
+        invocation_id=a.invocation_id, fresh_context=a.fresh_context, session_start=getattr(a, "session_start", None))
 
 
 def _cmd_review_select(a):
@@ -253,9 +253,10 @@ def _cmd_review_select(a):
     ledger when it is not given; ``--dry-run`` writes nothing."""
     verdict = a.verdict
     return orchestrate_test_case_revision.review_select_step(
-        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=a.csv_profile,
+        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE),
         verdict=None if verdict is None else verdict.value, verdict_bytes=None if verdict is None else verdict.raw_bytes,
-        transport_attempts=a.transport_attempts, reviewer_session=a.reviewer_session, review=a.review, dry_run=a.dry_run)
+        transport_attempts=a.transport_attempts, reviewer_session=getattr(a, "reviewer_session", None), review=getattr(a, "review", None),
+        dry_run=a.dry_run)
 
 
 def _cmd_complete_review(a):
@@ -395,6 +396,14 @@ _LEGACY_REVIEW_COMMANDS = ("session-start", "review-requested", "complete-review
 if not execution_gate.legacy_available():
     for _name in _LEGACY_REVIEW_COMMANDS:
         COMMANDS.pop(_name, None)
+    # V8 (A5-9): nor the flags of that way in on the commands that stay — package files the code takes from the journal, and the profile of the nine;
+    # `--session-start`, `--reviewer-session` and `--review` stay: a text of before names them, and F4b refuses them with the way in
+    _LEGACY_REVIEW_FLAGS = frozenset(("--candidate", "--candidate-receipt", "--assembly-receipt", "--inventory-receipt", "--context-receipt",
+                                      "--context-marker-output", "--generator-fragment", "--csv-profile"))
+    for _name in ("review-publish", "review-open", "review-select"):
+        _function, _specs, _check, _parts = COMMANDS[_name]
+        COMMANDS[_name] = (_function, tuple(spec for spec in _specs if (spec if isinstance(spec, str) else spec[0]) not in _LEGACY_REVIEW_FLAGS),
+                           _check, _parts)
 
 
 def _parser() -> JsonArgumentParser:

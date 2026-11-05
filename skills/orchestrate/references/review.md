@@ -18,5 +18,5 @@
 Одна logical stage invocation: `transport_attempts` 1 или 2; повтор — у каждой model stage, только при ошибке схемы или валидации ответа,
 вход проверь тем же `step_size`; третьей попытки нет — стоп. В сессии допустимы нуль и больше C-lite `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED`;
 запрещены per-batch/hierarchical reviewers, вторая сессия и больше одного authoritative verdict. Не хватает бюджета на evidence — закрой
-сессию `review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови `review-select` с этим `--reviewer-session`; ответ
+сессию `review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови `review-select` без `--verdict` (последняя ревизия журнала; флага `--reviewer-session` в этой поставке нет); ответ
 дважды не прошёл проверку, а сессия ждёт вердикта — то же с `--reason REVIEW_UNUSABLE`.
