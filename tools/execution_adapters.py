@@ -22,7 +22,8 @@ SYSTEM_MAVEN = "maven:selected-symbols-v1"
 GRADLE = "gradle-wrapper:selected-symbols-v1"
 ADAPTER_IDS = frozenset({PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE})
 SAFE_ENVIRONMENT_LABELS = frozenset({"PROJECT_NATIVE_ENV"})
-_UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r")
+# V4b: ``% ^ " ( ) !`` are what cmd.exe expands, escapes, quotes, groups and delay-expands in the command a human pastes
+_UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r%^\"()!")
 # FaT-L: the project's style, license-header and static-analysis checks never change how a selected test behaves, so the
 # selected-tests run skips this closed list (absent plugins ignore the property).  maven-enforcer is NOT here: it checks
 # the environment.  Each property is the plugin's own user property:

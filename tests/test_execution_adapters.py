@@ -186,3 +186,25 @@ def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path
     source = {"source_digest": "sha256:" + "a" * 64}
     row = _process_row("OS_ERROR", ProcessOutcome(127, "", "", "OS_ERROR"), "RUN-system", source, request.adapter_id, 1.0)
     assert validate_process_evidence([row], "RUN-system", source, 127, 1.0, {"runner": "maven", "command": request.adapter_id}) == []
+
+
+@pytest.mark.parametrize("char", list('%^"()!|><;&$`') + ["\n", "\r"])
+def test_a_selector_or_profile_with_a_shell_character_is_not_runnable(tmp_path: Path, char: str):
+    """V4b: the characters cmd.exe reads as expansion, escape, quote, group and delayed expansion are refused like the unix ones."""
+    from tools.execution_adapters import AdapterRequestError, build_request
+
+    adapter = "maven-wrapper:selected-symbols-v1"
+    with pytest.raises(AdapterRequestError, match="NOT_RUNNABLE"):
+        build_request(adapter, _module(tmp_path, adapter, "mvnw"), [{"selector": f"pkg.SampleTest#works{char}"}])
+    module = _module(tmp_path, adapter, "mvnw")
+    module["test"]["build_profile"] = f"default{char}"
+    with pytest.raises(AdapterRequestError, match="NOT_RUNNABLE"):
+        build_request(adapter, module, [{"selector": "pkg.SampleTest#works"}])
+
+
+@pytest.mark.parametrize("selector", ["pkg.SampleTest#works", "tests/test_a.py::TestA::test_a[1-b]", "pkg.Outer.Inner#m_1"])
+def test_a_plain_selector_still_builds(tmp_path: Path, selector: str):
+    from tools.execution_adapters import build_request
+
+    adapter = "maven-wrapper:selected-symbols-v1"
+    assert build_request(adapter, _module(tmp_path, adapter, "mvnw"), [{"selector": selector}]).selectors == (selector,)
