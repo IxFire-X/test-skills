@@ -258,3 +258,52 @@ def test_a_ledger_file_with_no_events_at_all_is_not_in_the_journal_yet(tmp_path:
     assert code == 0 and ledger["result"]["status"] == "WAITING", ledger
     code, again = _main(capsys, _select_argv(run, verdict))
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
+
+
+# --------------------------------------------------------------------------------------
+# the protection of the write: a stale reading leads to a repeat or a refusal, never to a second decision
+# --------------------------------------------------------------------------------------
+
+def _cut_after_published(monkeypatch, capsys, tmp_path: Path) -> tuple[dict, str]:
+    run = _opened(tmp_path, capsys)
+    verdict = _verdict(run)
+    with monkeypatch.context() as broken:
+        _crash_event(broken, "ARTIFACT_READ_BACK", LEDGER)
+        assert _main(capsys, _select_argv(run, verdict))[0] == 2
+    return run, verdict
+
+
+def test_another_verdict_after_the_cut_is_refused_and_writes_nothing(tmp_path: Path, monkeypatch, capsys) -> None:
+    run, _verdict_given = _cut_after_published(monkeypatch, capsys, tmp_path)
+    other = _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ")
+    before = _journal(run["run_root"])
+    def files():  # refusals.jsonl is the one file a refusal adds by design (P1: the code of the refusal, no content)
+        return {str(path.relative_to(run["run_root"])): path.read_bytes() for path in sorted(run["run_root"].rglob("*"))
+                if path.is_file() and path.name != "refusals.jsonl"}
+
+    tree = files()
+    code, refused = _main(capsys, _select_argv(run, other))
+    assert code == 2 and refused["code"] == "MODEL_STAGE_ANSWERED", refused
+    assert _journal(run["run_root"]) == before
+    assert files() == tree
+    events = _events(run["run_root"])
+    assert sum(row["event_type"] == "MODEL_RESPONSE_RECEIVED" and row.get("stage_instance_id") == "tc-reviewer:canonical" for row in events) == 1
+    assert not (run["run_root"] / "effective-canonicals" / f"{run['attempt_id']}.json").exists()  # no effective canonical was published
+
+
+def test_status_after_the_cut_leads_to_the_select_and_the_repeat_closes_the_review(tmp_path: Path, monkeypatch, capsys) -> None:
+    from tools.run_pipeline import main
+
+    run, verdict = _cut_after_published(monkeypatch, capsys, tmp_path)
+    capsys.readouterr()
+    code = main(["status", "--project", str(run["project"]), "--run", run["run_root"].name])
+    out = capsys.readouterr().out
+    assert code in {0, 1, 3}, out
+    status = json.loads(out[out.index("{"):])
+    assert "review-select" in status["next_step"]["command"], status["next_step"]
+    code, closed = _main(capsys, _select_argv(run, verdict))
+    assert code == 0 and closed["result"]["status"] == "EFFECTIVE_SELECTED", closed
+    other = _generated_run(tmp_path / "uncut")
+    assert _main(capsys, _open_argv(other))[0] == 0
+    assert _main(capsys, _select_argv(other, _verdict(other)))[0] == 0
+    assert _shape(run["run_root"]) == _shape(other["run_root"])  # the form of the journal is the uncut one
