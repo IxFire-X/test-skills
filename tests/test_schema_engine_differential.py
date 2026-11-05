@@ -138,6 +138,8 @@ def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
     except Exception as error:  # an engine crash is a difference too
         problems.append(f"{label} x {name}: engine raised {type(error).__name__}: {error}")
         return not expected
+    if ENGINE[name].is_valid(instance) != (not actual):  # F8: the boolean walk is the verdict of the error walk, on every pair
+        problems.append(f"{label} x {name}: is_valid says {ENGINE[name].is_valid(instance)}, the engine reports {len(actual)} errors")
     if actual != expected:
         newline = _holds_a_string(instance, _ends_on_a_newline)
         terminator = _holds_a_string(instance, _holds_a_line_terminator)

@@ -529,3 +529,124 @@ def test_a_duplicate_in_type_or_required_and_an_empty_prefix_items_are_schema_er
 def test_the_distinct_forms_of_type_required_and_prefix_items_still_load() -> None:
     _validator({"type": ["string", "null"], "required": ["a", "b"], "prefixItems": [{"type": "string"}]})
     _validator({"type": "string", "required": []})
+
+
+# --- F8: the boolean walk (is_valid) is the same verdict as the error walk, and a valid instance builds no error object -------------------------------
+
+_EDGE_SCHEMAS = [  # (schema, instances); every keyword of the engine appears in at least one
+    ({"type": "string"}, ["a", 1, None, True]),
+    ({"type": ["integer", "null"]}, [1, None, 1.5, "x", True]),
+    ({"enum": ["a", "b", 1, True, None]}, ["a", "c", 1, 1.0, True, None, 0, False]),
+    ({"const": {"a": [1, 2]}}, [{"a": [1, 2]}, {"a": [2, 1]}, {"a": [1.0, 2]}, 1]),
+    ({"properties": {"a": {"type": "integer"}}}, [{"a": 1}, {"a": "x"}, {}, [], "x"]),
+    ({"required": ["a", "b"]}, [{"a": 1, "b": 2}, {"a": 1}, {}, [], 1]),
+    ({"properties": {"a": {}}, "additionalProperties": False}, [{"a": 1}, {"a": 1, "b": 2}, {}, 1]),
+    ({"properties": {"a": {}}, "additionalProperties": {"type": "integer"}}, [{"a": "x", "b": 1}, {"b": "x"}, {}, 1]),
+    ({"items": {"type": "integer"}}, [[1, 2], [1, "x"], [], "x"]),
+    ({"items": False}, [[], [1], 1]),
+    ({"prefixItems": [{"type": "integer"}, {"type": "string"}]}, [[1, "a"], ["a", 1], [1], [], 1]),
+    ({"prefixItems": [{"type": "integer"}], "items": {"type": "string"}}, [[1, "a"], [1, 2], [], ["a"]]),
+    ({"contains": {"type": "integer"}}, [[1], ["a"], [], [1, 2], 1]),
+    ({"contains": {"type": "integer"}, "minContains": 2, "maxContains": 3}, [[1], [1, 2], [1, 2, 3], [1, 2, 3, 4], ["a", 1, 2]]),
+    ({"uniqueItems": True}, [[1, 2], [1, 1], [1, True], [{"a": 1}, {"a": 1}], [], "x"]),
+    ({"minItems": 1, "maxItems": 2}, [[], [1], [1, 2], [1, 2, 3], "x"]),
+    ({"minLength": 1, "maxLength": 2}, ["", "a", "ab", "abc", 1]),
+    ({"pattern": "^a.c$"}, ["abc", "ab", "a\nc", "abc\n", 1]),
+    ({"minimum": 1, "maximum": 3, "exclusiveMinimum": 1}, [1, 2, 3, 4, 0, 1.5, "x", True]),
+    ({"minProperties": 1, "maxProperties": 2}, [{}, {"a": 1}, {"a": 1, "b": 2}, {"a": 1, "b": 2, "c": 3}, []]),
+    ({"propertyNames": {"pattern": "^[a-z]+$"}}, [{"a": 1}, {"A": 1}, {}, 1]),
+    ({"allOf": [{"type": "integer"}, {"minimum": 2}]}, [1, 2, 2.5, "x"]),
+    ({"anyOf": [{"type": "string"}, {"type": "integer"}]}, ["a", 1, 1.5, None]),
+    ({"oneOf": [{"type": "integer"}, {"minimum": 0}]}, [5, 1.5, -1, "x", 0]),
+    ({"oneOf": [{"type": "string"}, {"minimum": 0}, {"maximum": 10}]}, [5, "a", -1, 11, 1.5]),
+    ({"not": {"type": "string"}}, ["a", 1, None]),
+    ({"if": {"type": "integer"}, "then": {"minimum": 0}, "else": {"type": "string"}}, [1, -1, "a", None]),
+    ({"if": {"type": "integer"}, "then": {"minimum": 0}}, [1, -1, "a"]),
+    ({"if": {"type": "integer"}, "else": {"type": "string"}}, [1, "a", None]),
+    ({"if": {"type": "integer"}}, [1, "a"]),
+    ({"format": "date"}, ["2026-11-05", "2026-02-30", "x", 1]),
+    ({"$defs": {"n": {"type": "integer"}}, "properties": {"a": {"$ref": "#/$defs/n"}}}, [{"a": 1}, {"a": "x"}, {}]),
+    ({"$defs": {"tree": {"properties": {"c": {"items": {"$ref": "#/$defs/tree"}}, "v": {"type": "integer"}}}}, "$ref": "#/$defs/tree"},
+     [{"v": 1, "c": [{"v": 2}, {"c": [{"v": 3}]}]}, {"v": 1, "c": [{"v": "x"}]}, {"c": [{"c": [{"v": "x"}]}]}]),
+    ({"anyOf": [{"oneOf": [{"type": "integer"}, {"type": "string"}]}, {"not": {"type": "null"}}]}, [1, "a", None, 1.5, True]),
+    (True, [1, None]),
+    (False, [1, None]),
+    ({"properties": {"a": True, "b": False}}, [{"a": 1}, {"b": 1}, {}]),
+]
+
+
+@pytest.mark.parametrize("schema,instances", _EDGE_SCHEMAS, ids=lambda value: repr(value)[:60] if isinstance(value, (dict, bool)) else "instances")
+def test_is_valid_is_the_verdict_of_the_error_walk(schema, instances) -> None:
+    from tools.schema_engine import FormatChecker
+
+    validator = _validator(schema, format_checker=FormatChecker())
+    for instance in instances:
+        assert validator.is_valid(instance) == (next(validator.iter_errors(instance), None) is None), (schema, instance)
+
+
+def test_every_keyword_of_the_engine_is_in_the_table_of_edge_cases() -> None:
+    from tools.schema_engine import _VALIDATORS
+
+    mentioned: set[str] = set()
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            mentioned.update(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk([schema for schema, _ in _EDGE_SCHEMAS])
+    assert set(_VALIDATORS) - mentioned == set()
+
+
+def test_the_boolean_walk_and_the_error_walk_have_a_rule_for_the_same_keywords() -> None:
+    from tools.schema_engine import _CHECKS, _VALIDATORS
+
+    assert _CHECKS.keys() == _VALIDATORS.keys()
+
+
+@pytest.mark.parametrize("schema,instance", [
+    ({"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "object", "required": ["a"]}]}, 1),
+    ({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "object", "required": ["a"]}]}, {"a": 1}),
+    ({"properties": {"a": {"anyOf": [{"type": "string"}, {"items": {"type": "integer"}}]}}}, {"a": [1, 2, 3]}),
+    ({"not": {"type": "string"}}, 1),
+    ({"if": {"type": "integer"}, "then": {"minimum": 0}, "else": {"type": "string"}}, "a"),
+    ({"contains": {"type": "integer"}}, ["a", "b", 1]),
+])
+def test_a_valid_instance_builds_not_one_error_object(monkeypatch: pytest.MonkeyPatch, schema, instance) -> None:
+    from tools import schema_engine
+
+    built = []
+    original = schema_engine.ValidationError.__init__
+
+    def counting(self, *args, **kwargs):
+        built.append(args[:1])
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(schema_engine.ValidationError, "__init__", counting)
+    validator = _validator(schema)
+    assert validator.is_valid(instance)
+    assert built == [], built
+    assert list(validator.iter_errors(instance)) == []
+    assert built == [], built  # the walk that reports errors makes none for a valid instance either
+
+
+def test_the_errors_of_an_any_of_and_a_one_of_that_no_branch_satisfies_are_unchanged() -> None:
+    any_of = _errors({"anyOf": [{"type": "string"}, {"type": "integer"}]}, 1.5)
+    assert [e.message for e in any_of] == ["1.5 is not valid under any of the given schemas"]
+    assert [c.message for c in any_of[0].context] == ["1.5 is not of type 'string'", "1.5 is not of type 'integer'"]
+    one_of = _errors({"oneOf": [{"type": "string"}, {"type": "integer"}]}, 1.5)
+    assert [e.message for e in one_of] == ["1.5 is not valid under any of the given schemas"]
+    assert [c.message for c in one_of[0].context] == ["1.5 is not of type 'string'", "1.5 is not of type 'integer'"]
+
+
+@pytest.mark.parametrize("schema,instance,message", [
+    ({"oneOf": [{"type": "integer"}, {"minimum": 0}]}, 5, "5 is valid under each of {'minimum': 0}, {'type': 'integer'}"),
+    ({"oneOf": [{"minimum": 0}, {"type": "integer"}, {"maximum": 10}]}, 5, "5 is valid under each of {'type': 'integer'}, {'maximum': 10}, {'minimum': 0}"),
+    ({"oneOf": [{"type": "string"}, {"minimum": 0}, {"maximum": 10}]}, 5, "5 is valid under each of {'maximum': 10}, {'minimum': 0}"),
+])
+def test_the_error_of_a_one_of_that_several_branches_satisfy_is_unchanged(schema, instance, message) -> None:
+    assert [e.message for e in _errors(schema, instance)] == [message]

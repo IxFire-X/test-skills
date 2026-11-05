@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import json
 import math
+import os
 import re
+import threading
 from collections.abc import Iterable
 from functools import lru_cache
 from itertools import accumulate
@@ -92,8 +96,8 @@ def _loads_json_bytes_strict(raw: bytes) -> Any:
     return loads_json_strict(text)
 
 
-def _json_validation_key(value: Any) -> str | None:
-    """Cache only bounded, exact JSON types; never coerce Python tuples or keys."""
+def _exact_json_text(value: Any) -> str | None:
+    """The compact JSON text of *value* if it is made of exact JSON types only (never coerce Python tuples or keys), else None."""
     def exact(item: Any) -> bool:
         if type(item) is dict:
             return all(type(key) is str and exact(child) for key, child in item.items())
@@ -104,10 +108,25 @@ def _json_validation_key(value: Any) -> str | None:
     try:
         if not exact(value):
             return None
-        serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     except (ValueError, RecursionError):
         return None
-    return serialized if len(serialized) <= 65536 else None
+
+
+def _json_validation_key(value: Any) -> str | None:
+    """Cache only bounded, exact JSON types: the JSON text of *value* when it is at most 64 KB (the callers parse it back), else None."""
+    serialized = _exact_json_text(value)
+    return serialized if serialized is not None and len(serialized) <= 65536 else None
+
+
+def _instance_cache_key(value: Any) -> str | None:
+    """The key under which the errors of *value* are remembered in this process: its JSON text up to 64 KB, above that the digest of that text (a JSON
+    text never begins with "sha256:", so the two cannot meet).  None for what is not exact JSON: it is validated every time, as before.  Nothing of where
+    the instance came from (a run, a path) is in the key: the same bytes are the same instance."""
+    serialized = _exact_json_text(value)
+    if serialized is None:
+        return None
+    return serialized if len(serialized) <= 65536 else "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def classify_version(instance: Any) -> dict[str, str]:
@@ -134,8 +153,12 @@ def _checked_schema_path(schema_path: Path, root: Path) -> Path:
     return candidate
 
 
-def _schema_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
-    schemas = _schema_directory(root)
+_SNAPSHOTS: dict[tuple[str, tuple[tuple[str, int, int], ...]], tuple[tuple[str, bytes], ...]] = {}
+_SNAPSHOTS_LIMIT = 8  # directories of schemas: the package's own and a few copies in tests
+_SNAPSHOT_LOCK = threading.Lock()
+
+
+def _read_schema_snapshot(schemas: Path) -> tuple[tuple[str, bytes], ...]:
     snapshot: list[tuple[str, bytes]] = []
     for path in sorted(schemas.glob("*.json"), key=lambda item: item.name):
         try:
@@ -143,6 +166,32 @@ def _schema_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
         except OSError as error:
             raise StrictJsonError(f"JSON unreadable: {error}") from error
     return tuple(snapshot)
+
+
+def _schema_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
+    """The schemas of ``root/schemas`` as (name, bytes), read once per process.  The key is the directory and the name, size and modification time of
+    every ``*.json`` in it, so a changed, added or removed file is read again; the same tuple object comes back every time, which is what makes the
+    caches keyed by it cheap to look up (bytes remember their hash).  Files of the package, never of a run."""
+    schemas = _schema_directory(root)
+    try:
+        with os.scandir(schemas) as entries:
+            stamp = []
+            for entry in entries:
+                if fnmatch.fnmatch(entry.name, "*.json"):
+                    details = entry.stat()
+                    stamp.append((entry.name, details.st_size, details.st_mtime_ns))
+    except OSError:
+        return _read_schema_snapshot(schemas)  # what cannot be listed or stat'ed is not remembered: read as before, fail as before
+    key = (str(schemas), tuple(sorted(stamp)))
+    found = _SNAPSHOTS.get(key)
+    if found is not None:
+        return found
+    snapshot = _read_schema_snapshot(schemas)
+    with _SNAPSHOT_LOCK:
+        while len(_SNAPSHOTS) >= _SNAPSHOTS_LIMIT:
+            _SNAPSHOTS.pop(next(iter(_SNAPSHOTS)))
+        _SNAPSHOTS[key] = snapshot
+    return snapshot
 
 
 @lru_cache(maxsize=64)
@@ -193,10 +242,25 @@ def _error_code(error: Any) -> str:
     return "SCHEMA_" + name.upper()
 
 
-@lru_cache(maxsize=64)
-def _cached_schema_errors(schema_name: str, snapshot: tuple[tuple[str, bytes], ...], serialized: str) -> tuple[tuple[str, str, str], ...]:
-    validator = _compiled_validator(schema_name, snapshot)
-    return tuple((_error_path(error), _error_code(error), error.message) for error in validator.iter_errors(loads_json_strict(serialized)))
+_ERRORS: dict[tuple[str, tuple[tuple[str, bytes], ...], str], tuple[tuple[str, str, str], ...]] = {}
+_ERRORS_LIMIT = 64
+_ERRORS_LOCK = threading.Lock()
+
+
+def _cached_schema_errors(schema_name: str, snapshot: tuple[tuple[str, bytes], ...], key: str, instance: Any) -> tuple[tuple[str, str, str], ...]:
+    """The errors of one exact JSON instance under one snapshot of the schemas, found once per process.  The instance itself is validated (the key was
+    made from it, so it is plain JSON, and the engine reads it and never changes it).  The cache key is the schemas as read, the schema name and the
+    instance key, compared by content: a changed schema can never be answered with the errors of the old one."""
+    cache_key = (schema_name, snapshot, key)
+    found = _ERRORS.get(cache_key)
+    if found is None:
+        validator = _compiled_validator(schema_name, snapshot)
+        found = tuple((_error_path(error), _error_code(error), error.message) for error in validator.iter_errors(instance))
+        with _ERRORS_LOCK:
+            while len(_ERRORS) >= _ERRORS_LIMIT:
+                _ERRORS.pop(next(iter(_ERRORS)))
+            _ERRORS[cache_key] = found
+    return found
 
 
 # V3 precedence of the categories of a case: the order the canon keeps them in (the code puts it, P1)
@@ -304,11 +368,11 @@ def schema_diagnostics(instance: Any, schema_path: Path, root: Path) -> list[dic
         return sorted(precondition_diagnostics, key=lambda item: (item["path"], item["code"], item["message"]))
     checked = _checked_schema_path(schema_path, root)
     snapshot = _schema_snapshot(root)
-    serialized = _json_validation_key(instance)
-    if serialized is None:
+    key = _instance_cache_key(instance)
+    if key is None:
         errors = tuple((_error_path(error), _error_code(error), error.message) for error in _compiled_validator(checked.name, snapshot).iter_errors(instance))
     else:
-        errors = _cached_schema_errors(checked.name, snapshot, serialized)
+        errors = _cached_schema_errors(checked.name, snapshot, key, instance)
     diagnostics = [
         {"path": path, "code": code, "message": message}
         for path, code, message in errors

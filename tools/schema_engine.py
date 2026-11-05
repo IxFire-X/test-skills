@@ -626,12 +626,11 @@ def _all_of(validator, nodes, instance):
 
 
 def _v_any_of(validator, nodes, instance, raw):
+    if any(validator.is_valid_node(node, instance) for node in nodes):  # probe the branches first: the error objects are built only when none is valid
+        return None
     collected: list[ValidationError] = []
     for index, node in enumerate(nodes):
-        errors = list(validator.descend(instance, node, schema_path=index))
-        if not errors:
-            return None
-        collected.extend(errors)
+        collected.extend(validator.descend(instance, node, schema_path=index))
     return [ValidationError(f"{instance!r} is not valid under any of the given schemas", context=collected)]
 
 
@@ -641,12 +640,12 @@ def _v_one_of(validator, nodes, instance, raw):
     first_valid = None
     position = 0
     for position, node in enumerate(nodes, 1):
-        errors = list(validator.descend(instance, node, schema_path=position - 1))
-        if not errors:
+        if validator.is_valid_node(node, instance):  # probe; the errors of the failing branches are built only when none is valid
             first_valid = raw["oneOf"][position - 1]
             break
-        collected.extend(errors)
     else:
+        for index, node in enumerate(nodes):
+            collected.extend(validator.descend(instance, node, schema_path=index))
         result.append(ValidationError(f"{instance!r} is not valid under any of the given schemas", context=collected))
         position = len(nodes)
     more_valid = [raw["oneOf"][index] for index in range(position, len(nodes)) if validator.is_valid_node(nodes[index], instance)]
@@ -696,6 +695,180 @@ _VALIDATORS: dict[str, Callable[..., Any]] = {
 assert _BUILDERS.keys() == _VALIDATORS.keys()
 
 
+# The boolean twin of `descend`: the same rules, no error objects, the first failing keyword ends the walk.  `is_valid` and the probes of anyOf, oneOf,
+# not, if and contains use it, so a valid instance (the usual case) builds no ValidationError at all.  Every rule of _VALIDATORS has its twin in _CHECKS
+# (asserted below); tests/test_schema_engine*.py hold the two walks to the same verdict.
+def _ok(validator, node: _Node, instance: Any) -> bool:
+    raw = node.raw
+    if raw is True:
+        return True
+    if raw is False:
+        return False
+    for keyword, value, _function, argument in node.rules:
+        if not _CHECKS[keyword](validator, argument, instance, raw):
+            return False
+    return True
+
+
+def _c_ref(v, target, instance, raw):
+    return _ok(v, target, instance)
+
+
+def _c_type(v, names, instance, raw):
+    return any(_is_type(instance, name) for name in names)
+
+
+def _c_enum(v, strings, instance, raw):
+    if isinstance(instance, str):
+        return instance in strings
+    return any(_equal(each, instance) for each in raw["enum"])
+
+
+def _c_const(v, expected, instance, raw):
+    return _equal(instance, expected)
+
+
+def _c_properties(v, children, instance, raw):
+    if not isinstance(instance, dict):
+        return True
+    for name, child in children:
+        if name in instance and not _ok(v, child, instance[name]):
+            return False
+    return True
+
+
+def _c_required(v, names, instance, raw):
+    return not isinstance(instance, dict) or all(name in instance for name in names)
+
+
+def _c_additional(v, argument, instance, raw):
+    if not isinstance(instance, dict):
+        return True
+    allowed, known = argument
+    if isinstance(allowed, _Node):
+        return all(_ok(v, allowed, item) for name, item in instance.items() if name not in known)
+    return bool(allowed) or all(name in known for name in instance)
+
+
+def _c_items(v, argument, instance, raw):
+    if not isinstance(instance, list):
+        return True
+    node, prefix = argument
+    if len(instance) <= prefix:
+        return True
+    if node.raw is False:
+        return False
+    if node.raw is True:
+        return True
+    return all(_ok(v, node, instance[index]) for index in range(prefix, len(instance)))
+
+
+def _c_prefix_items(v, nodes, instance, raw):
+    return not isinstance(instance, list) or all(_ok(v, node, item) for item, node in zip(instance, nodes))
+
+
+def _c_contains(v, argument, instance, raw):
+    if not isinstance(instance, list):
+        return True
+    node, minimum, maximum = argument
+    maximum = len(instance) if maximum is None else maximum
+    matches = 0
+    for item in instance:
+        if _ok(v, node, item):
+            matches += 1
+            if matches > maximum:
+                return False
+    return matches >= minimum
+
+
+def _c_unique(v, flag, instance, raw):
+    return not (flag and isinstance(instance, list)) or _unique(instance)
+
+
+def _c_pattern(v, built, instance, raw):
+    return not isinstance(instance, str) or built[0].search(instance) is not None
+
+
+def _c_format(v, name, instance, raw):
+    checker = v.format_checker
+    return checker is None or checker.conforms(instance, name)
+
+
+def _c_min_length(v, bound, instance, raw):
+    return not isinstance(instance, str) or len(instance) >= bound
+
+
+def _c_max_length(v, bound, instance, raw):
+    return not isinstance(instance, str) or len(instance) <= bound
+
+
+def _c_min_items(v, bound, instance, raw):
+    return not isinstance(instance, list) or len(instance) >= bound
+
+
+def _c_max_items(v, bound, instance, raw):
+    return not isinstance(instance, list) or len(instance) <= bound
+
+
+def _c_min_properties(v, bound, instance, raw):
+    return not isinstance(instance, dict) or len(instance) >= bound
+
+
+def _c_max_properties(v, bound, instance, raw):
+    return not isinstance(instance, dict) or len(instance) <= bound
+
+
+def _c_minimum(v, bound, instance, raw):
+    return not _is_number(instance) or instance >= bound
+
+
+def _c_maximum(v, bound, instance, raw):
+    return not _is_number(instance) or instance <= bound
+
+
+def _c_exclusive_minimum(v, bound, instance, raw):
+    return not _is_number(instance) or instance > bound
+
+
+def _c_property_names(v, node, instance, raw):
+    return not isinstance(instance, dict) or all(_ok(v, node, name) for name in instance)
+
+
+def _c_all_of(v, nodes, instance, raw):
+    return all(_ok(v, node, instance) for node in nodes)
+
+
+def _c_any_of(v, nodes, instance, raw):
+    return any(_ok(v, node, instance) for node in nodes)
+
+
+def _c_one_of(v, nodes, instance, raw):
+    return sum(1 for node in nodes if _ok(v, node, instance)) == 1
+
+
+def _c_not(v, node, instance, raw):
+    return not _ok(v, node, instance)
+
+
+def _c_if(v, argument, instance, raw):
+    condition, then, otherwise = argument
+    if _ok(v, condition, instance):
+        return then is None or _ok(v, then, instance)
+    return otherwise is None or _ok(v, otherwise, instance)
+
+
+_CHECKS: dict[str, Callable[..., bool]] = {
+    "$ref": _c_ref, "type": _c_type, "enum": _c_enum, "const": _c_const, "properties": _c_properties, "required": _c_required,
+    "additionalProperties": _c_additional, "items": _c_items, "prefixItems": _c_prefix_items, "contains": _c_contains,
+    "uniqueItems": _c_unique, "minItems": _c_min_items, "maxItems": _c_max_items, "minLength": _c_min_length,
+    "maxLength": _c_max_length, "pattern": _c_pattern, "minimum": _c_minimum, "maximum": _c_maximum,
+    "exclusiveMinimum": _c_exclusive_minimum, "minProperties": _c_min_properties, "maxProperties": _c_max_properties,
+    "propertyNames": _c_property_names, "allOf": _c_all_of, "anyOf": _c_any_of, "oneOf": _c_one_of, "not": _c_not, "if": _c_if,
+    "format": _c_format,
+}
+assert _CHECKS.keys() == _VALIDATORS.keys()
+
+
 def _compile(schema: Any, registry: Mapping[str, Any] | None, link: bool) -> _Node:
     """Build the root node; whatever the standard library raises on a hostile schema (a broken URI, an absurd nesting) is a SchemaError."""
     try:
@@ -734,7 +907,7 @@ class Draft202012Validator:
             raise error
 
     def is_valid_node(self, node: _Node, instance: Any) -> bool:
-        return next(self.descend(instance, node), None) is None
+        return _ok(self, node, instance)
 
     def descend(self, instance: Any, node: _Node, path: Any = None, schema_path: Any = None) -> Iterator[ValidationError]:
         raw = node.raw
