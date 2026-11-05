@@ -223,7 +223,8 @@ def test_nothing_of_a_run_is_in_the_keys(tmp_path: Path) -> None:
     run_like = tmp_path / ".pilot-runs" / ("r" * 32) / "published"
     run_like.mkdir(parents=True)
     document = _fresh_candidate()
+    before = set(schema_validation._ERRORS)  # V8: only the keys this call adds — under xdist other tests fill the cache of the process with run-like paths
     schema_diagnostics(document, CANONICAL, ROOT)
-    for key in list(schema_validation._ERRORS):
+    for key in set(schema_validation._ERRORS) - before:
         assert str(tmp_path) not in repr(key) and ".pilot-runs" not in repr(key)
     shutil.rmtree(run_like.parent.parent)
