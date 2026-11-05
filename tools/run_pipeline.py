@@ -235,6 +235,12 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         except (KeyError, OSError, TypeError, ValueError):
             request = None
         result["next_step"] = _scope_pause_step(Path(run_root), str(result["attempt_id"]), _next_step(result, project, request))
+        cut = _scan_cut(Path(run_root), request if isinstance(request, Mapping) else None)
+        if cut is not None and _left_mark(Path(run_root)) is None:  # F3 (A2-3): nothing goes on from half a context
+            result["next_step"] = {"code": "SCAN_INCOMPLETE", "stage": "scan", "skill_section": "1",
+                                   "why": f"scan оборван: записано {cut}",
+                                   "action": f"scan не завершён: записано {cut}; повтори тот же scan — он достроит недостающее в этом прогоне",
+                                   "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
         note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
         if note:
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
@@ -1045,7 +1051,7 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
     return module, tuple(sorted(docs)), request.get("profile"), request.get("reference"), cases
 
 
-def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None, list[str]]:
+def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path] = ()) -> tuple[Path | None, list[str]]:
     """FaT-G: an unfinished run of the same request — its scan selected the context (CONTEXT_SELECTED) and its last
     attempt has no ATTEMPT_TERMINAL.  A run whose scan failed earlier never blocks; runs without ``scan_request``
     (created before FaT-G) are never compared.
@@ -1060,6 +1066,8 @@ def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None
         return None, abandoned
     key = _request_key(project, request)
     for root in sorted(path for path in runs.iterdir() if path.is_dir()):
+        if root in skip:  # F3: a cut run the scan could not finish - the caller named it
+            continue
         try:
             stored = pilot.read_run(root)["manifest"].get("scan_request")
             if not isinstance(stored, Mapping) or _request_key(project, stored) != key:
@@ -1070,6 +1078,8 @@ def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None
             attempt = state["attempts"][-1]
             selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
                            for event in state["events"])
+            if not selected and attempt.get("state") != "TERMINAL":  # F3 (A2-3): a scan cut before its first context batch
+                abandoned.append(f"{root.name} (scan оборван до первой пачки контекста)")
             if selected and attempt.get("state") != "TERMINAL":
                 why = _left_mark(root) or _abandoned(project, root, attempt)
                 if why is None:
@@ -1334,11 +1344,23 @@ def _scan(args: Any) -> int:
         # FaT-AU4: one inventory per module for every unfinished run the scan compares.  Only around the comparison: the
         # scan then writes project files (.skillsrc, the cases document) and a rewrite of the same size within one
         # timestamp tick (Windows) keeps the stamp, so the inventory of the new run is never taken from this cache.
-        with inventory_cache():
-            open_root, abandoned = _open_run_of(project, request)
-        if open_root is not None:
-            _print(_run_in_progress(project, open_root, request))
-            return 2
+        skipped_runs: list[Path] = []
+        cut_runs: list[str] = []
+        while True:
+            with inventory_cache():
+                open_root, abandoned = _open_run_of(project, request, skip=skipped_runs)
+            if open_root is None:
+                abandoned = [*abandoned, *cut_runs]
+                break
+            if _scan_cut(open_root, request) is None:
+                _print(_run_in_progress(project, open_root, request))
+                return 2
+            # F3 (A2-3): the scan of this run stopped before its last context batch — the same scan finishes it
+            outcome = _resume_scan(project, args, request, open_root, [*abandoned, *cut_runs])
+            if isinstance(outcome, int):
+                return outcome
+            skipped_runs.append(open_root)
+            cut_runs.append(f"{open_root.name} ({outcome})")
     run, receipt = _init_skillsrc_run(project, args, request)
     run_root = Path(str(run["run_root"]))
     stopped = _skillsrc_receipt_exit(project, run_root, receipt)
@@ -1351,7 +1373,6 @@ def _scan(args: Any) -> int:
             create_attempt,
             freeze_phase_two_inputs,
             module_selection_digest,
-            publish_context_selection,
         )
 
         skillsrc_document, _skillsrc_digest = _read_skillsrc_binding(project / ".skillsrc")
@@ -1389,36 +1410,9 @@ def _scan(args: Any) -> int:
             {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
             frozen["baseline"],
         )
-        selected_ids = _context_scope_ids(frozen_inventory, project, module_root, getattr(args, "target", None))
-        # FaT-3: the task document of --docs always goes to the model; the other tasks of to_do do not.
-        selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
-        selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
-        sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # FaT-P3: path#Section is no context file
-        selected_ids = [opaque for opaque in selected_ids if opaque not in sectioned]
-        task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
-        context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
-        by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
-        reference = _reference_cases(project, getattr(args, "reference", None))
-        if reference is not None:  # FaT-REF: the reference CSV is never context of a model
-            selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
-        context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
-        budget = _scan_context_budget(frozen_inventory, project)
-        selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget)
-        context_skipped = skipped_summary(skipped)
-        batches = select_context_batches(
-            frozen_inventory,
-            project,
-            selected_ids,
-            byte_budget=budget,
-            skipped=skipped,
-        )
-        for batch in batches:
-            publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
-        if reference is not None:  # FaT-REF: a receipt for the review hint; never context or generator input
-            from tools.pilot_state import publish_reference_cases
-
-            publish_reference_cases(run_root, str(attempt["attempt_id"]), *reference)
-            context_summary["reference_cases"] = len(reference[2])
+        plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
+        _publish_context(run_root, str(attempt["attempt_id"]), plan)
+        batches, context_skipped = plan["batches"], plan["context_skipped"]
     except ContextStop as stop:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=stop.detail, fix=stop.fix, scope=scope))
         return 2
@@ -1433,7 +1427,68 @@ def _scan(args: Any) -> int:
         detail = str(error) if isinstance(error, InventoryError) else "scan input is unreadable" if isinstance(error, OSError) else "scan input or receipt is invalid"
         _print(_durable_status(project, run_root, stage="scan", status="error", reason="INVENTORY_INVALID", detail=detail, scope=scope))
         return 2
-    payload = _durable_status(
+    _print(_scan_payload(project, run_root, args, module, scope, frozen_inventory, exclusion_receipt, frozen["baseline"]["digest"],
+                         str(attempt["attempt_id"]), plan, context_summary, context_warnings, abandoned))
+    return 0
+
+
+def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventory: Mapping[str, Any], module_root: Path,
+                       task_info: tuple[list[str], set[str], dict[str, Any]]) -> dict[str, Any]:
+    """The context batches of the scan from the frozen inventory and the request (F3: one function for a scan and for the repeat
+    that finishes it); ``task_info`` is the result of ``_task_document_scope`` — its summary is filled in place.  Writes only the
+    views of the document sections of the run."""
+    task_ids, other_task_ids, context_summary = task_info
+    selected_ids = _context_scope_ids(frozen_inventory, project, module_root, getattr(args, "target", None))
+    # FaT-3: the task document of --docs always goes to the model; the other tasks of to_do do not.
+    selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
+    selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
+    sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # FaT-P3: path#Section is no context file
+    selected_ids = [opaque for opaque in selected_ids if opaque not in sectioned]
+    task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
+    context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
+    by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
+    reference = _reference_cases(project, getattr(args, "reference", None))
+    if reference is not None:  # FaT-REF: the reference CSV is never context of a model
+        selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
+    context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
+    budget = _scan_context_budget(frozen_inventory, project)
+    selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget)
+    context_skipped = skipped_summary(skipped)
+    batches = select_context_batches(
+        frozen_inventory,
+        project,
+        selected_ids,
+        byte_budget=budget,
+        skipped=skipped,
+    )
+    if reference is not None:
+        context_summary["reference_cases"] = len(reference[2])
+    if not batches:  # the closed manifest .skillsrc is always in the context, so this is not an honest run: nothing to cut or finish
+        raise ContextSelectionError("the scan selected no context batch")
+    return {"batches": batches, "context_skipped": context_skipped, "reference": reference}
+
+
+def _publish_context(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -> None:
+    """The receipts of the plan the attempt has no event for, in batch order, then the reference receipt (all idempotent)."""
+    from tools import pilot_state as pilot
+
+    have = {str(event["artifact_digest"]) for event in pilot.derive_state(run_root)["events"]
+            if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"}
+    for batch in plan["batches"]:
+        if str(batch["receipt"]["digest"]) not in have:
+            pilot.publish_context_selection(run_root, attempt_id, batch["receipt"])
+    reference = plan["reference"]
+    if reference is not None:  # FaT-REF: a receipt for the review hint; never context or generator input
+        pilot.publish_reference_cases(run_root, attempt_id, *reference)
+
+
+def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str, Any], scope: Mapping[str, Any],
+                  frozen_inventory: Mapping[str, Any], exclusion_receipt: Mapping[str, Any], baseline_digest: str, attempt_id: str,
+                  plan: Mapping[str, Any], context_summary: Mapping[str, Any], context_warnings: Sequence[str],
+                  abandoned: Sequence[str], **extra: Any) -> dict[str, Any]:
+    """The answer of a scan that made (or, F3, finished) the run."""
+    context_skipped = plan["context_skipped"]
+    return _durable_status(
         project,
         run_root,
         stage="scan",
@@ -1443,18 +1498,82 @@ def _scan(args: Any) -> int:
         selected_target=getattr(args, "target", None),
         inventory_digest=frozen_inventory["digest"],
         exclusion_digest=exclusion_receipt["digest"],
-        baseline_digest=frozen["baseline"]["digest"],
+        baseline_digest=baseline_digest,
         inventory_file_count=len(frozen_inventory["files"]),
         exclusion_count=len(exclusion_receipt["exclusions"]),
-        context_batch_count=len(batches),
+        context_batch_count=len(plan["batches"]),
         context_summary=context_summary,
         **({"context_skipped": context_skipped} if context_skipped["files"] else {}),
-        **({"warnings": context_warnings} if context_warnings else {}),
+        **({"warnings": list(context_warnings)} if context_warnings else {}),
         **_skillsrc_defaults(project, module),
-        **({"abandoned_runs": abandoned} if abandoned else {}),
-        reuse=_marker_reuse(run_root, str(attempt["attempt_id"])),
+        **({"abandoned_runs": list(abandoned)} if abandoned else {}),
+        **extra,
+        reuse=_marker_reuse(run_root, attempt_id),
     )
-    _print(payload)
+
+
+def _scan_cut(run_root: Path, request: Mapping[str, Any] | None = None) -> str | None:
+    """F3 (A2-3): why the scan of the run stopped before it was done - the context batches written against the count the
+    receipts carry, or the reference receipt of ``--reference`` - else None.  Only reads."""
+    from tools import pilot_state as pilot
+
+    try:
+        state = pilot.derive_state(run_root)
+        attempt_id = str(state["attempts"][-1]["attempt_id"])
+        if state["attempts"][-1].get("state") == "TERMINAL":
+            return None
+        unfinished = pilot.context_incomplete(run_root, attempt_id, state)
+        if unfinished is not None:
+            return f"{unfinished[0]} из {unfinished[1]} пачек контекста"
+        if isinstance(request, Mapping) and request.get("reference") and pilot.read_reference_cases(run_root, attempt_id) is None:
+            return "нет квитанции --reference"
+    except (OSError, KeyError, IndexError, TypeError, ValueError):
+        return None
+    return None
+
+
+def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root: Path, abandoned: Sequence[str]) -> int | str:
+    """F3 (A2-3): the repeat of a scan finishes the run it cut.  The frozen inventory and baseline of the run are read from the
+    journal, the batches are made again from the request, the ones the run has must be the same (by digest), the missing ones are
+    written.  Returns the exit code of the scan, or why the run cannot be finished: it is then left as it is and a new one is made."""
+    from tools import pilot_state as pilot
+    from tools.project_inventory import ContextSelectionError, InventoryError, build_exclusion_receipt, read_execution_baseline
+
+    state = pilot.derive_state(run_root)
+    attempt = state["attempts"][-1]
+    attempt_id = str(attempt["attempt_id"])
+    scope: dict[str, Any] = {"module": None, "parent_files": None, "dependency_files": []}
+    try:
+        # the journal's readers only: the baseline is the attempt's (its self-digest is the attempt's baseline_digest), the
+        # inventory is the one the journal has as INVENTORY_READY
+        baseline = read_execution_baseline(run_root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        if baseline.get("digest") != attempt["baseline_digest"]:
+            return "baseline не совпал с записанным в попытке"
+        frozen_inventory = pilot._frozen_inventory(project, run_root, str(baseline["inventory_digest"]))
+        skillsrc_document, _skillsrc_digest = _read_skillsrc_binding(project / ".skillsrc")
+        module_root, module = _resolve_scan_module(project, getattr(args, "module", None), skillsrc_document)
+        module_path = module_root.resolve().relative_to(project).as_posix() or "."
+        if module_path != attempt.get("module"):
+            return "другой модуль"
+        scope["module"] = module_path
+        prefix = "" if module_path == "." else module_path + "/"
+        scope["parent_files"] = [item["project_path"] for item in frozen_inventory["files"]
+                                 if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
+        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(frozen_inventory, project, getattr(args, "docs", None))
+        from tools.module_ids import legacy_warning
+
+        legacy_module = legacy_warning(module, getattr(args, "module", None))
+        context_warnings = [*context_warnings, *([legacy_module] if legacy_module else [])]
+        plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
+        have = {str(event["artifact_digest"]) for event in state["events"]
+                if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"}
+        if not have <= {str(batch["receipt"]["digest"]) for batch in plan["batches"]}:
+            return "пачки контекста пересчитались иначе, чем записаны"
+        _publish_context(run_root, attempt_id, plan)
+    except (ContextSelectionError, InventoryError, HostStop, ValueError, OSError, KeyError) as error:
+        return f"пересчёт пачек не удался ({type(error).__name__})"
+    _print(_scan_payload(project, run_root, args, module, scope, frozen_inventory, build_exclusion_receipt(frozen_inventory),
+                         str(attempt["baseline_digest"]), attempt_id, plan, context_summary, context_warnings, abandoned, resumed=True))
     return 0
 
 
@@ -1657,6 +1776,17 @@ def _exact_fix(fix: str, project: Path, root: Path, attempt_id: str) -> str:
             .replace("<run>", f'"{root}"').replace("<attempt_id>", attempt_id))
 
 
+def _execution_receipt_bound(root: Path, attempt_id: str) -> bool:
+    """Whether the attempt has an execution receipt with its published and read-back events (only reads)."""
+    from tools.pilot_state import read_attempt_receipt
+
+    try:
+        read_attempt_receipt(root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return True
+
+
 def cmd_finish(args: Any) -> int:
     """FaT-4: close the current attempt in one command — the same order and checks as the manual sequence."""
     from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
@@ -1668,8 +1798,10 @@ def cmd_finish(args: Any) -> int:
         raise HostStop("FINISH_FACT_UNDETERMINED", "the run has no attempt yet")
     attempt = state["attempts"][-1]
     attempt_id = str(attempt["attempt_id"])
-    executed = (root / "execution-receipts" / f"{attempt_id}.json").exists() or any(
-        event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in derive_state(root)["events"])
+    # F3 (A1-4): the branch is the journal's - the start event, or an execution receipt the journal binds (a NOT_RUNNABLE
+    # execution has a receipt and no start); a bare file execution-receipts/<attempt>.json decides nothing
+    executed = (any(event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in derive_state(root)["events"])
+                or _execution_receipt_bound(root, attempt_id))
     refusal = None
     if not executed and attempt.get("state") != "TERMINAL":
         from tools.finalize_attempt import automation_next
@@ -1681,8 +1813,15 @@ def cmd_finish(args: Any) -> int:
             refusal = None
     abandon = getattr(args, "abandon", None)
     if abandon is not None and (executed or attempt.get("state") == "TERMINAL"):
+        from tools import execution_gate
+
+        # F3 (8.8): exec only where the attempt is open after an execution start and the package has the execution; a closed
+        # attempt is read with report/status
+        closes_by_exec = executed and attempt.get("state") != "TERMINAL" and execution_gate.execution_available()
         raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает exec или она уже закрыта: --abandon не нужен",
-                       _exact_fix("python -m tools.run_pipeline exec --project <project> --run <run_id>", project, root, attempt_id))
+                       _exact_fix("python -m tools.run_pipeline exec --project <project> --run <run_id>" if closes_by_exec else
+                                  "попытка закрыта: итог — python -m tools.run_pipeline report --project <project> --run <run_id> "
+                                  "(или status); следующий заход — next_run из ответа finish/status", project, root, attempt_id))
     if abandon == "LEFT_BEFORE_REVIEW":  # FaT-O12 O1: the run stays as it is; a plain scan of the request starts a new one
         if not _before_canonical_review(root, attempt_id):
             raise HostStop("ABANDON_NOT_NEEDED", "попытка уже дошла до ревью кейсов: LEFT_BEFORE_REVIEW только до него",

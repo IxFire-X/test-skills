@@ -54,6 +54,9 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     attempt_id = str(attempt["attempt_id"])
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
+    unfinished = pilot_state.context_incomplete(root, attempt_id, state)
+    if unfinished is not None:
+        raise ValueError(pilot_state.scan_incomplete_message(*unfinished))
     receipts = _receipts(root, state, attempt_id)
     responses = _responses(state, attempt_id)
     budget = step_budget(project) if budget is None else budget

@@ -215,6 +215,7 @@ FIXES: dict[str, str] = {
                                   "повтори с таким --output-dir",
     # --- the pause after the marker (tools.scope_pause) ---
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
+    "SCAN_INCOMPLETE": "повтори тот же scan (те же --module, --docs, --profile): он достроит недостающие пачки контекста в этом прогоне",
     "SCOPE_DECISION_INVALID": "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)",
     # --- the schema: every SCHEMA_* has the generic fix of fix_for; these are the ones that need more ---
     "SCHEMA_ENUM": "значение вне перечня — перечень в message; category: positive, negative, boundary, authorization, security, "

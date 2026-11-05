@@ -1334,7 +1334,7 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
 
 
 def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes,
-                     skipped: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                     skipped: list[dict[str, Any]] | None = None, batch_count: int | None = None) -> dict[str, Any]:
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0", "inventory_digest": inventory["digest"], "batch_index": batch_index,
         "files": [{key: item[key] for key in ("opaque_id", "project_path", "content_digest", "size")} for item in files],
@@ -1342,6 +1342,8 @@ def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list
     }
     if skipped:
         receipt["skipped"] = [dict(row) for row in skipped]
+    if batch_count is not None:  # F3: a scan cut between the batches is told by the count every receipt carries
+        receipt["batch_count"] = batch_count
     receipt["digest"] = _digest(receipt)
     _validate_receipt_schema(receipt, "context-selection-receipt.schema.json", ContextSelectionError)
     return receipt
@@ -1500,7 +1502,7 @@ def select_context_batches(
         seen.add(opaque_id)
         selected.append(item)
     selected.sort(key=lambda item: item["project_path"])
-    batches: list[dict[str, Any]] = []
+    groups: list[tuple[list[dict[str, Any]], int, bytes]] = []
     current: list[dict[str, Any]] = []
     current_count = 0
     current_bytes = bytearray()
@@ -1512,18 +1514,18 @@ def select_context_batches(
             raise ContextSelectionError("context file exceeds byte budget without truncation")
         prepared = {**dict(item), "bytes": contents}
         if current and current_count + len(contents) > byte_budget:
-            index_number = len(batches) + 1
-            receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes), skipped if index_number == 1 else None)
-            batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
+            groups.append((current, current_count, bytes(current_bytes)))
             current, current_count, current_bytes = [], 0, bytearray()
         current.append(prepared)
         current_count += len(contents)
         current_bytes.extend(item["opaque_id"].encode("ascii") + b"\0" + contents)
     if current:
-        index_number = len(batches) + 1
-        receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes), skipped if index_number == 1 else None)
-        batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
-    return batches
+        groups.append((current, current_count, bytes(current_bytes)))
+    return [
+        {"files": files, "byte_count": count,
+         "receipt": _context_receipt(inventory, number, files, count, byte_set, skipped if number == 1 else None, len(groups))}
+        for number, (files, count, byte_set) in enumerate(groups, start=1)
+    ]
 
 
 def freeze_context_receipt(path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:

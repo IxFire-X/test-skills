@@ -2737,6 +2737,41 @@ def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[
     return read_context_selection(root, attempt_id, readback["digest"])
 
 
+def context_progress(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """F3: the context batches the scan has written for the attempt against the count its receipts carry (``batch_count``,
+    bound by the journal through the receipt digest): ``{"have", "total"}``.  ``total`` is None before the first batch and for a
+    run from before F3 (no count) — the set is then taken as whole.  Only reads the receipt files and the journal."""
+    from tools.project_inventory import _digest
+    from tools.schema_validation import StrictJsonError, loads_json_strict
+
+    project, root = _run_root(run_root)
+    state = state if state is not None else derive_state(root)
+    digests = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
+                                 if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+    total = None
+    for digest in digests:
+        try:
+            receipt = loads_json_strict(_context_selection_target(root, attempt_id, digest).read_bytes().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, StrictJsonError, ValueError):
+            continue  # a receipt file that cannot be read is the business of the read that needs it (read_context_selection)
+        if isinstance(receipt, dict) and receipt.get("digest") == digest and _digest({k: v for k, v in receipt.items() if k != "digest"}) == digest:
+            count = receipt.get("batch_count")
+            if type(count) is int and (total is None or count > total):
+                total = count
+    return {"have": len(digests), "total": total}
+
+
+def context_incomplete(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> tuple[int, int] | None:
+    """F3: ``(have, total)`` when the scan of the attempt stopped before its last context batch, else None."""
+    progress = context_progress(run_root, attempt_id, state)
+    return (progress["have"], progress["total"]) if progress["total"] is not None and progress["have"] < progress["total"] else None
+
+
+def scan_incomplete_message(have: int, total: int) -> str:
+    return (f"SCAN_INCOMPLETE: scan записал {have} из {total} пачек контекста — разметка и план по неполному контексту не строятся; "
+            "fix: повтори тот же scan (те же --module, --docs, --profile) — он достроит недостающие пачки в этом прогоне")
+
+
 def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
     """Read a C-lite receipt only when immutable bytes and attempt event both bind it.  P2: once per closure — the receipt is
     content-addressed and its event is in the journal for good."""
@@ -5143,6 +5178,9 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], he
     """P2-fix: the checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
     attempt, the receipts are a prefix in batch_index order.  They write nothing, so ``tools.api plan`` can run them before it
     publishes the header and a refusal leaves the journal as it was."""
+    unfinished = context_incomplete(root, attempt_id, state)
+    if unfinished is not None:
+        raise ValueError(scan_incomplete_message(*unfinished))
     for row in item["batches"]:
         if row["header_digest"] != header_digest:
             raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
@@ -5153,6 +5191,10 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], he
             except ValueError as error:
                 selected = sorted({str(event["artifact_digest"]) for event in state["events"]
                                    if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
+                if context in selected:  # F3 (hunt 8.6): the receipt is the attempt's, its bytes no longer match the project
+                    raise ValueError(f"CONTEXT_DRIFTED: the context receipt {context} of batch {row['batch_id']} is the attempt's, but the "
+                                     "files of the context changed after the scan; fix: `run_pipeline status` shows drift.changed — "
+                                     "restore those files, or start the run again with `scan --new-run`") from error
                 raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
                                  f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
                                  "(tools.api read-context --digest <d>)") from error
