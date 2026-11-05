@@ -153,9 +153,9 @@ def test_the_neighbours_that_are_right_are_left_alone() -> None:
     assert [hint for hint in _hints(FINE_JAVA) if hint[0] == "AT_SELF_COMPUTED"] == []
 
 
-def test_the_same_accessor_is_its_own_rule() -> None:
+def test_the_same_getter_twice_is_the_same_call() -> None:
     text = "class T {\n    @Test\n    void t() {\n        assertEquals(owner.getName(), owner.getName());\n    }\n}\n"
-    assert _hints(text) == [("AT_SELF_COMPUTED", 4, "same-accessor")]
+    assert _hints(text) == [("AT_SELF_COMPUTED", 4, "same-call")]
 
 
 def test_a_very_long_assertion_is_not_read_to_the_end_of_the_file() -> None:
@@ -358,3 +358,88 @@ def test_a_test_method_that_is_cut_off_is_not_judged_for_what_it_expects() -> No
     text = 'class T {\n    @Test\n    void t() {\n        mockMvc.perform(post("/owners")).andExpect(status().isBadRequest());\n'
     assert _hints(text) == []
     assert _hints(text + "    }\n}\n") == [("AT_NO_STATE_CHECK", 4, "rejected-without-state-check")]
+
+
+# --- before and after: not a self-computed expected value, and the very check AT_NO_STATE_CHECK asks for -------------------------------------------------
+
+BEFORE_AFTER_JAVA = '''class OwnerControllerTest {
+    @Test
+    void refusedAndCountedAfter() throws Exception {
+        long before = ownerRepository.count();
+        mockMvc.perform(post("/owners/new").param("firstName", "")).andExpect(status().isBadRequest());
+        assertEquals(before, ownerRepository.count());
+    }
+
+    @Test
+    void refusedAndCountedAfterWithTheExpectedName() throws Exception {
+        long expectedCount = ownerRepository.count();
+        mockMvc.perform(post("/owners/new").param("firstName", "")).andExpect(status().isBadRequest());
+        assertThat(ownerRepository.count()).isEqualTo(expectedCount);
+    }
+
+    @Test
+    void refusedAndCountedAfterAndTheValueIsAnExpectedOne() throws Exception {
+        long expected = ownerRepository.count();
+        ownerRepository.save(new Owner());
+        assertThrows(IllegalStateException.class, () -> ownerService.save(null));
+        assertEquals(expected, ownerRepository.count());
+    }
+
+    @Test
+    void refusedAndNeverSaved() throws Exception {
+        long expected = ownerRepository.count();
+        mockMvc.perform(post("/owners/new").param("firstName", "")).andExpect(status().isBadRequest());
+        verify(ownerRepository, never()).save(any());
+    }
+}
+'''
+
+
+def test_the_before_and_after_pattern_is_not_a_self_computed_expected_value_and_it_closes_the_state_check() -> None:
+    assert _hints(BEFORE_AFTER_JAVA) == []
+
+
+def test_the_same_pattern_without_the_read_after_is_still_a_missing_state_check() -> None:
+    text = BEFORE_AFTER_JAVA.replace("        assertEquals(before, ownerRepository.count());\n", "")
+    assert [code for code, _line, _rule in _hints(text)] == ["AT_NO_STATE_CHECK"]
+
+
+def test_an_expected_variable_read_again_with_nothing_done_in_between_is_still_self_computed() -> None:
+    text = "class T {\n    @Test\n    void t() {\n        Money expected = calc.total(order);\n        assertThat(calc.total(order)).isEqualTo(expected);\n    }\n}\n"
+    assert _hints(text) == [("AT_SELF_COMPUTED", 5, "same-call")]
+    done_in_between = text.replace("        assertThat(", "        orderService.apply(order);\n        assertThat(")
+    assert _hints(done_in_between) == []
+
+
+BEFORE_AFTER_PY = '''def test_refused_and_counted_after(client, session):
+    before = session.query(Owner).count()
+    resp = client.post("/owners", json={"name": ""})
+    assert resp.status_code == 422
+    assert before == session.query(Owner).count()
+
+
+def test_refused_and_counted_after_expected_name(client, session):
+    expected_count = session.query(Owner).count()
+    resp = client.post("/owners", json={"name": ""})
+    assert resp.status_code == 422
+    assert session.query(Owner).count() == expected_count
+
+
+def test_refused_and_nothing_read_after(client, session):
+    expected_count = session.query(Owner).count()
+    resp = client.post("/owners", json={"name": ""})
+    assert resp.status_code == 422
+'''
+
+
+def test_the_before_and_after_pattern_in_pytest() -> None:
+    found = _hints(BEFORE_AFTER_PY, "python")
+    assert [code for code, _line, _rule in found] == ["AT_NO_STATE_CHECK"]
+    assert found[0][1] == _line(BEFORE_AFTER_PY, "assert resp.status_code == 422") + 0 or found[0][1] > _line(BEFORE_AFTER_PY, "def test_refused_and_nothing_read_after")
+
+
+def test_a_pytest_expected_variable_read_again_with_nothing_done_in_between_is_self_computed() -> None:
+    text = "def test_t(calc):\n    expected = calc.total(order)\n    assert calc.total(order) == expected\n"
+    assert _hints(text, "python") == [("AT_SELF_COMPUTED", 3, "same-call")]
+    text = "def test_t(calc, client):\n    expected = calc.total(order)\n    client.post('/orders')\n    assert calc.total(order) == expected\n"
+    assert _hints(text, "python") == []

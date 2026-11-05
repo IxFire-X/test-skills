@@ -251,8 +251,17 @@ _CALL_EXPRESSION = re.compile(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\([^()]*\)
 # how a value is made twice to compare the two values, and the methods whose contract is to be compared with themselves
 _FACTORY = re.compile(r"(?:^|\.)(?:of|ofNullable|valueOf|from|copyOf|parse\w*|create\w*|new\w*|getInstance|instance|asList|singleton\w*|empty\w*|unmodifiable\w*|builder|build|mock|spy)\(")
 _CONTRACT = re.compile(r"(?:^|\.)(?:hashCode|equals|toString|compareTo|clone|getClass)\(")
-_ACCESSOR = re.compile(r"(?:^|\.)(?:(?:get|is|has)[A-Z]\w*|size|length|isEmpty|name|id|value)\(\)$")
-_WRITE_VERB = re.compile(r"\b(?:save\w*|create\w*|insert\w*|update\w*|delete\w*|remove\w*|register\w*|submit\w*|persist\w*|merge\w*|store\w*|add\w*|put\w*|set\w*|clear\w*|reset\w*)\s*\(")
+# What makes a value read before and a value read after two different answers: any call between them that is not a plain read (a getter, a size) — a request, a
+# write, an execution, whatever its name.  A variable read again after one is the check «nothing changed», which AT_NO_STATE_CHECK asks for.
+_ANY_CALL = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\(")
+_PLAIN_READ = re.compile(r"(?:get|is|has)[A-Z]\w*|size|length|isEmpty|toString|hashCode|equals|name|id|value")
+
+
+def _does_something(piece: str) -> bool:
+    """Whether the statement calls anything that is not a plain read (a getter, ``size()``)."""
+    return any(_PLAIN_READ.fullmatch(call.group(1)) is None for call in _ANY_CALL.finditer(piece))
+
+
 
 
 def _closing(code: str, opening: int, limit: int) -> int:
@@ -320,7 +329,7 @@ def _self_computed(statements: list[tuple[int, str, str]], code: str, plain: str
     the test asks the code what it must answer.  The whole of the checked expression, text without blanks, must stand in the expected one: another receiver,
     another argument or another method is a different question.  The variable counts only when its name says that it is the expected value.  Left alone: how a value is made twice to compare the values (``of``, ``valueOf``,
     ``new``), the contract methods (``hashCode``, ``equals``, ``toString``), and a variable read again after the state or the receiver changed in between
-    (before and after — the very check ``AT_NO_STATE_CHECK`` asks for).  ``same-accessor``: the same for a bare accessor (``getName()``, ``size()``)."""
+    (before and after — the very check ``AT_NO_STATE_CHECK`` asks for).  One rule, ``same-call``, whatever the call is — a getter included: a check that asks the same getter twice can never fail."""
     initialisers: list[tuple[int, int, str, str]] = []  # (index of the statement, its offset, variable, initialiser)
     for index, (at, piece, raw) in enumerate(statements):
         declared = re.match(r"\s*(?:final\s+)?(?:[\w<>\[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.+)$", piece, re.DOTALL)
@@ -341,12 +350,12 @@ def _self_computed(statements: list[tuple[int, str, str]], code: str, plain: str
                     between = statements[init_index + 1:index]
                     receiver = re.match(r"[A-Za-z_$][\w$]*", actual).group()
                     # between the initialiser and the assertion something was done with the receiver, or the state was written: a value read before and after
-                    changed = any(_WRITE_VERB.search(piece_between) or re.search(rf"\b{re.escape(receiver)}\b", piece_between) for _at, piece_between, _raw in between)
+                    changed = any(_does_something(piece_between) or re.search(rf"\b{re.escape(receiver)}\b", piece_between) for _at, piece_between, _raw in between)
                     if not changed:
                         expected.append(initialiser)
                     break
         if any(actual in text for text in expected):
-            yield "AT_SELF_COMPUTED", at + len(piece) - len(piece.lstrip()), "same-accessor" if _ACCESSOR.search(actual) else "same-call"
+            yield "AT_SELF_COMPUTED", at + len(piece) - len(piece.lstrip()), "same-call"
 
 
 _JAVA_FAILURE = re.compile(
@@ -553,12 +562,12 @@ _PY_OBSERVATION = re.compile(
 def _python_self_computed(lines: list[str], body: list[int], starts: list[int]) -> Iterator[tuple[str, int, str]]:
     """``AT_SELF_COMPUTED`` of a pytest function: ``assert f(x) == f(x)`` (or ``self.assertEqual``) — the same call on both sides — or a variable whose name says it is the expected
     value and that holds the very call checked (the same rules as for Java: the contract methods and the factories are left alone)."""
-    assigned: dict[str, str] = {}
+    assigned: dict[str, tuple[str, int]] = {}  # variable -> (what it holds, the line it was set on)
     for position in body:
         text = lines[position].strip()
         declared = re.match(r"([A-Za-z_]\w*)\s*=\s*(.+)$", text)
         if declared and not re.match(r"[A-Za-z_]\w*\s*==", text):
-            assigned[declared.group(1)] = re.sub(r"\s+", "", declared.group(2))
+            assigned[declared.group(1)] = (re.sub(r"\s+", "", declared.group(2)), position)
         match = _PY_EQUALITY.match(lines[position])
         if not match:
             continue
@@ -568,9 +577,13 @@ def _python_self_computed(lines: list[str], body: list[int], starts: list[int]) 
             continue
         sides = [right]
         if _VARIABLE.fullmatch(right) and _EXPECTED_NAME.fullmatch(right) and right in assigned:
-            sides.append(assigned[right])
+            held, set_at = assigned[right]
+            receiver = re.match(r"[A-Za-z_]\w*", left).group()
+            # the same guard as for Java: a request, a write or a use of the receiver between the two reads makes them a before and an after
+            if not any(_does_something(lines[between]) or re.search(rf"\b{re.escape(receiver)}\b", lines[between]) for between in body if set_at < between < position):
+                sides.append(held)
         if any(left in side for side in sides):
-            yield "AT_SELF_COMPUTED", starts[position] + _indent(lines[position]), "same-accessor" if _ACCESSOR.search(left) else "same-call"
+            yield "AT_SELF_COMPUTED", starts[position] + _indent(lines[position]), "same-call"
 
 
 def _python_unchecked_rejection(lines: list[str], body: list[int], starts: list[int]) -> Iterator[tuple[str, int, str]]:
