@@ -93,7 +93,7 @@ def test_a_real_yaml_skillsrc_is_still_yaml_and_a_plain_invalid_json_is_not_comm
     assert legacy_yaml_keys(tmp_path) and "YAML" in check_skillsrc(tmp_path)[0]["message"]
     assert not json_with_comments(yaml)
     assert not json_with_comments('{"version": "3.0",}\n')  # a trailing comma is no comment
-    assert not json_with_comments('{"url": "http://x//y", "note": "/* not a comment */"}')  # comment marks inside strings are text
+    assert not json_with_comments('{"url": "https://x//y", "note": "/* not a comment */"}')  # comment marks inside strings are text
     assert not json_with_comments("# a YAML comment\nversion: 3.0\n")
     assert json_with_comments('// c\n{"a": 1}') and json_with_comments('{"a": 1 /* c */}')
 

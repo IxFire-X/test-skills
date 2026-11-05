@@ -394,7 +394,7 @@ def _moved_refusal(project: Path, root: Path) -> ValueError | None:
         return None
     where = f"прогон создан в {move['recorded']}, сейчас проект в {move['current']}"
     if move["same_structure"]:
-        fix = ("команды tools.api, finish и exec работают только там, где создан прогон: откройте ту папку; status и report читают прогон и здесь; "
+        fix = ("команды tools.api, finish, materialize и ingest работают только там, где создан прогон: откройте ту папку; status и report читают прогон и здесь; "
                "чтобы работать в этой папке, начните новый scan")
     else:
         shown = ", ".join(move["missing"][:5]) + (" и др." if len(move["missing"]) > 5 else "")
