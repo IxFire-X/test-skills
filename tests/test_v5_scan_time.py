@@ -139,3 +139,30 @@ def test_control_java_class_of_a_valid_300kb_file_is_linear() -> None:
     """, 2.0)
 
 
+
+
+# --- PQ4: the two new rules read the same texts in linear time ---------------------------------------------------------------------------------------
+
+def test_pq4_java_rules_on_a_cut_off_file_of_unclosed_assertions_are_not_quadratic() -> None:
+    _time(_HINTS + """
+        TEXT = "@Test void a() {\\n" + "assertEquals(" * 8_000 + "\\n" + "assertThat(x" * 8_000 + "\\n" + "assertThat(x).isEqualTo(" * 4_000
+        def run(): hints("java", TEXT)
+    """, 2.0)
+
+
+def test_pq4_java_rules_on_many_statements_and_many_tests_are_linear() -> None:
+    _time(_HINTS + """
+        STATEMENTS = "@Test void a() {\\n" + "assertEquals(f(x), f(x));\\n" * 4_000 + "}\\n"
+        TESTS = "@Test void a() { service.save(x); assertThrows(E.class, () -> g()); }\\n" * 3_000
+        def run():
+            hints("java", STATEMENTS); hints("java", TESTS)
+    """, 3.0)
+
+
+def test_pq4_python_rules_are_linear() -> None:
+    _time(_HINTS + """
+        MANY = "def test_a():\\n    assert f(x) == f(x)\\n    client.post('/a')\\n    assert r.status_code == 400\\n" * 3_000
+        LONG = "def test_b():\\n    assert " + "f(" * 20_000 + "x" + ")" * 20_000 + " == 1\\n"
+        def run():
+            hints("python", MANY); hints("python", LONG)
+    """, 3.0)

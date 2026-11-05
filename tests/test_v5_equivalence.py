@@ -50,8 +50,13 @@ PY_PIECES = [
 ]
 
 
+OLD_CODES = ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH")
+
+
 def _java_hints(module: Any, text: str, language: str = "java") -> list[dict[str, Any]]:
-    return module.autotest_hints({"artifacts": {"generated_files": [{"file_id": "FILE-1", "language": language, "content": text}]}})
+    """The hints of the three codes that existed before V5 (the two codes of PQ4 are not what is compared here)."""
+    hints = module.autotest_hints({"artifacts": {"generated_files": [{"file_id": "FILE-1", "language": language, "content": text}]}})
+    return [hint for hint in hints if hint["code"] in OLD_CODES]
 
 
 def _random_texts(seed: int, count: int, pieces: list[str], longest: int):

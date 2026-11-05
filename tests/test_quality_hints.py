@@ -403,7 +403,7 @@ def test_reviewer_skills_name_every_hint_code_and_the_generators_say_what_a_refu
         assert code in reviewer
     automation_reviewer = (root / "autotest-reviewer" / "SKILL.md").read_text(encoding="utf-8")
     assert "python -m tools.autotest_hints --automation" in automation_reviewer
-    for code in ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH"):
+    for code in ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH", "AT_SELF_COMPUTED", "AT_NO_STATE_CHECK"):
         assert code in automation_reviewer
     generator = (root / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
     assert "что именно наблюдается" in generator and "из требований" in generator and "нет в документе" in generator
@@ -446,4 +446,4 @@ def test_thrown_by_without_a_type_is_any_exception_once() -> None:
     untyped = [line for code, line, rule in hints if code == "AT_ANY_EXCEPTION" and rule == "thrown-by-untyped"]
     assert untyped == [_line(MOCKMVC, "assertThatThrownBy(() -> service.save(null));")], hints
     broad_line = _line(MOCKMVC, "isInstanceOf(Exception.class)")
-    assert [rule for code, line, rule in hints if line == broad_line] == ["broad-throws"], hints
+    assert [rule for code, line, rule in hints if line == broad_line and code == "AT_ANY_EXCEPTION"] == ["broad-throws"], hints  # V5: AT_NO_STATE_CHECK may stand on the same line

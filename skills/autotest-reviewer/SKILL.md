@@ -46,9 +46,14 @@ insufficient. Do not inspect generator dialogue, transport logs or unrelated run
    `automation_digest` without `sha256:`):
    `python -m tools.autotest_hints --automation "<run_root>/model-stage-artifacts/<attempt_id>/<digest>.json"`
    It prints JSON hints `AT_ANY_EXCEPTION` (incl. `assertThatThrownBy` without a type), `AT_ALWAYS_TRUE` (MockMvc
-   `andExpect` counts as a check), `AT_PARTIAL_MATCH` (`AT_MORE`) with
+   `andExpect` counts as a check), `AT_PARTIAL_MATCH`, `AT_SELF_COMPUTED` (the expected value is the very call the
+   test checks, or a variable named `expected…` that holds it: the test asks the code what it must answer) and
+   `AT_NO_STATE_CHECK` (the test writes, expects a refusal, and nothing after the refusal reads the state back: a
+   count, a find, a repeated GET, `verify(…, never())`) (`AT_MORE`) with
    file ID, line, rule and ASSERT ID. They are facts of code, not a verdict: check each against
-   the canonical Expected and report it as an ordinary finding when you agree.
+   the canonical Expected and report it as an ordinary finding when you agree. Ask of `AT_NO_STATE_CHECK` whether the
+   case's Expected says that nothing changed; of `AT_SELF_COMPUTED` whether the expected value is written down in the
+   case or taken from the code under test.
 3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
 4. One fresh role-isolated reviewer invocation serves each automation version. Before review, the controller must create and read back the exact attempt-owned `automation-review-boundary-r1` or `-r2`; bind its digest as `host_isolation_sha256`. A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` permits only one complete revision-2 regeneration and fresh second review; it never authorizes the old artifact or regeneration after runtime `FAIL`.
 

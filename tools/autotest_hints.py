@@ -2,7 +2,8 @@
 
 Reads the inline ``content`` of every generated file of a ``tc-to-autotest`` artifact with plain regular expressions,
 without a compiler: an assertion that accepts any exception, one that is always true, a path prefix instead of an
-exact value.  A hint names the file ID, the line, a short rule and the ASSERT ID on that line — never the code.
+exact value, an expected value that the test computes with the very call it checks (PQ4: ``AT_SELF_COMPUTED``), a rejected write after which nothing
+shows that the data did not change (PQ4: ``AT_NO_STATE_CHECK``).  A hint names the file ID, the line, a short rule and the ASSERT ID on that line — never the code.
 
 ``python -m tools.autotest_hints --automation <artifact.json>`` prints the hints as JSON for the static reviewer;
 the run report counts them on its own from the run's automation artifact.
@@ -21,7 +22,7 @@ from typing import Any, Iterator, Mapping
 from tools.json_cli import JsonArgumentParser, emit_error
 from tools.test_design_hints import capped
 
-CODES = ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH")
+CODES = ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH", "AT_SELF_COMPUTED", "AT_NO_STATE_CHECK")
 _ASSERT_ID = re.compile(r"ASSERT-[A-Za-z0-9_.:-]+")
 _BROAD = {"Exception", "Throwable", "RuntimeException", "BaseException"}
 _ZERO = r"0[LlDdFf]?"
@@ -235,6 +236,162 @@ def _path_calls(plain: str) -> list[int]:
     return found
 
 
+# --- PQ4: an expected value computed by the call it checks; a rejected write whose state is not checked ----------------------------------------------
+
+_ARGUMENT_WINDOW = 4000  # an assertion longer than this is not read: the scan of its arguments is bounded
+_JAVA_EQUALS_CALL = re.compile(r"\bassert(?:Equals|ArrayEquals|IterableEquals)\s*\(")  # not assertSame, isSameAs: an identity check is about repeated calls
+_JAVA_ASSERT_THAT = re.compile(r"\bassertThat\s*\(")
+_JAVA_EQUALITY_IN_CHAIN = re.compile(r"\.\s*(?:isEqualTo|isEqualToIgnoringCase|isEqualByComparingTo|containsExactly|containsExactlyInAnyOrder)\s*\(")
+_JAVA_MATCHER = re.compile(r"\s*(?:is|equalTo)\s*\(")  # used with ``match(code, start, end)``: no ``^`` (it would not stand at ``start``)
+_VARIABLE = re.compile(r"[A-Za-z_$][\w$]*")
+# a variable that says in its name that it is the expected value (the generator's habit); a variable called ``text`` or ``before`` that is read again after the call
+# is the idiom «the answer is stable», which people write on purpose (commons-lang, jsoup: 9 of 10 hits were that)
+_EXPECTED_NAME = re.compile(r"(?i)(?:expected|exp|want|wanted|should|reference|golden|baseline|oracle)[A-Z_0-9]?\w*|(?:expected|exp)$")
+_CALL_EXPRESSION = re.compile(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\([^()]*\))*\(.*\)", re.DOTALL)  # a call (a chain of calls), not a cast or a parenthesised value
+# how a value is made twice to compare the two values, and the methods whose contract is to be compared with themselves
+_FACTORY = re.compile(r"(?:^|\.)(?:of|ofNullable|valueOf|from|copyOf|parse\w*|create\w*|new\w*|getInstance|instance|asList|singleton\w*|empty\w*|unmodifiable\w*|builder|build|mock|spy)\(")
+_CONTRACT = re.compile(r"(?:^|\.)(?:hashCode|equals|toString|compareTo|clone|getClass)\(")
+_ACCESSOR = re.compile(r"(?:^|\.)(?:(?:get|is|has)[A-Z]\w*|size|length|isEmpty|name|id|value)\(\)$")
+_WRITE_VERB = re.compile(r"\b(?:save\w*|create\w*|insert\w*|update\w*|delete\w*|remove\w*|register\w*|submit\w*|persist\w*|merge\w*|store\w*|add\w*|put\w*|set\w*|clear\w*|reset\w*)\s*\(")
+
+
+def _closing(code: str, opening: int, limit: int) -> int:
+    """The index of the bracket that closes the one at ``opening`` (``(``, ``[`` or ``{``), or -1 when it is not closed within ``limit`` characters."""
+    depth = 0
+    for position in range(opening, min(len(code), opening + limit)):
+        char = code[position]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return position
+    return -1
+
+
+def _top_level_arguments(code: str, opening: int, closing: int) -> list[tuple[int, int]]:
+    """The (start, end) of every argument of the call whose parentheses are at ``opening`` and ``closing``: split at the commas of the first level."""
+    arguments, depth, start = [], 0, opening + 1
+    for position in range(opening + 1, closing):
+        char = code[position]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            arguments.append((start, position))
+            start = position + 1
+    arguments.append((start, closing))
+    return arguments
+
+
+def _equality_sides(code: str, start: int, end: int) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """For the statement ``[start, end)``: the (expected, actual) spans of an equality assertion — ``assertEquals(expected, actual)``, ``assertThat(actual).isEqualTo(expected)``
+    (AssertJ) or ``assertThat(actual, is(expected))`` (Hamcrest) — or None."""
+    found = _JAVA_EQUALS_CALL.search(code, start, end)
+    if found:
+        close = _closing(code, found.end() - 1, _ARGUMENT_WINDOW)
+        if close < 0:
+            return None
+        arguments = _top_level_arguments(code, found.end() - 1, close)
+        if len(arguments) == 3 and re.fullmatch(r"\s*\"\s*\"\s*", code[arguments[0][0]:arguments[0][1]]):  # a message (a string, blanked) first: JUnit 4
+            arguments = arguments[1:]
+        return (arguments[0], arguments[1]) if len(arguments) >= 2 else None
+    found = _JAVA_ASSERT_THAT.search(code, start, end)
+    if not found:
+        return None
+    close = _closing(code, found.end() - 1, _ARGUMENT_WINDOW)
+    if close < 0:
+        return None
+    arguments = _top_level_arguments(code, found.end() - 1, close)
+    if len(arguments) == 2:  # Hamcrest
+        matcher = _JAVA_MATCHER.match(code, arguments[1][0], arguments[1][1])
+        inner = _closing(code, matcher.end() - 1, _ARGUMENT_WINDOW) if matcher else -1
+        return (((matcher.end(), inner)), arguments[0]) if matcher and 0 < inner <= arguments[1][1] else None
+    equality = _JAVA_EQUALITY_IN_CHAIN.search(code, close, end)
+    if not equality:
+        return None
+    inner = _closing(code, equality.end() - 1, _ARGUMENT_WINDOW)
+    return ((equality.end(), inner), arguments[0]) if inner > 0 else None
+
+
+def _self_computed(statements: list[tuple[int, str, str]], code: str, plain: str) -> Iterator[tuple[str, int, str]]:
+    """``AT_SELF_COMPUTED``: an equality assertion whose expected side is — or holds, or is a variable that was initialised with — the very call it checks, so
+    the test asks the code what it must answer.  The whole of the checked expression, text without blanks, must stand in the expected one: another receiver,
+    another argument or another method is a different question.  The variable counts only when its name says that it is the expected value.  Left alone: how a value is made twice to compare the values (``of``, ``valueOf``,
+    ``new``), the contract methods (``hashCode``, ``equals``, ``toString``), and a variable read again after the state or the receiver changed in between
+    (before and after — the very check ``AT_NO_STATE_CHECK`` asks for).  ``same-accessor``: the same for a bare accessor (``getName()``, ``size()``)."""
+    initialisers: list[tuple[int, int, str, str]] = []  # (index of the statement, its offset, variable, initialiser)
+    for index, (at, piece, raw) in enumerate(statements):
+        declared = re.match(r"\s*(?:final\s+)?(?:[\w<>\[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.+)$", piece, re.DOTALL)
+        if declared:
+            initialisers.append((index, at, declared.group(1), re.sub(r"\s+", "", raw[declared.start(2):])))
+    for index, (at, piece, raw) in enumerate(statements):
+        sides = _equality_sides(code, at, at + len(piece)) if re.search(r"\bassert\w*\s*\(", piece) else None
+        if sides is None:
+            continue
+        (e_start, e_end), (a_start, a_end) = sides
+        actual = re.sub(r"\s+", "", plain[a_start:a_end])
+        if _CALL_EXPRESSION.fullmatch(actual) is None or _FACTORY.search(actual) or _CONTRACT.search(actual):
+            continue
+        expected = [re.sub(r"\s+", "", plain[e_start:e_end])]
+        if _VARIABLE.fullmatch(expected[0]) and _EXPECTED_NAME.fullmatch(expected[0]):
+            for init_index, _init_at, name, initialiser in reversed(initialisers):
+                if name == expected[0] and init_index < index:
+                    between = statements[init_index + 1:index]
+                    receiver = re.match(r"[A-Za-z_$][\w$]*", actual).group()
+                    # between the initialiser and the assertion something was done with the receiver, or the state was written: a value read before and after
+                    changed = any(_WRITE_VERB.search(piece_between) or re.search(rf"\b{re.escape(receiver)}\b", piece_between) for _at, piece_between, _raw in between)
+                    if not changed:
+                        expected.append(initialiser)
+                    break
+        if any(actual in text for text in expected):
+            yield "AT_SELF_COMPUTED", at + len(piece) - len(piece.lstrip()), "same-accessor" if _ACCESSOR.search(actual) else "same-call"
+
+
+_JAVA_FAILURE = re.compile(
+    r"\b(?:assertThrows|expectThrows|assertThatThrownBy|assertThatExceptionOfType|assertThatIllegal\w+|assertThatNullPointerException)\s*\("
+    r"|\bstatus\s*\(\s*\)\s*\.\s*(?:is(?:4xxClientError|5xxServerError|BadRequest|Unauthorized|Forbidden|NotFound|Conflict|Gone|MethodNotAllowed"
+    r"|NotAcceptable|UnprocessableEntity|UnsupportedMediaType|TooManyRequests|PreconditionFailed|InternalServerError)\b|is\s*\(\s*[45]\d\d\b)"
+    r"|\.\s*(?:isEqualTo|isBetween|hasStatus|statusCode)\s*\(\s*(?:HttpStatus\.(?:BAD_REQUEST|UNAUTHORIZED|FORBIDDEN|NOT_FOUND|CONFLICT|UNPROCESSABLE_ENTITY"
+    r"|INTERNAL_SERVER_ERROR)|[45]\d\d)\b"
+    r"|\battributeHas(?:Errors|FieldErrors|FieldErrorCode)\s*\(|\bhasFieldErrors\b|\bhasErrors\b")
+_JAVA_ERROR_CONTENT = re.compile(r"[\"'](?:field_)?error\w*[\"']|\bConstraintViolation\b|\brejectedValue\b")
+# The boundary of an application — a repository, a service, a mapper, a controller, a client, MockMvc, a template, an entity manager, a request helper — is what
+# keeps a state a test can look at again; without one in the method a «write» is a call of a library, and a library has no state to keep (commons-lang, jsoup: noise).
+_JAVA_BOUNDARY = re.compile(
+    r"\b\w*(?:Repository|Repo|Service|Dao|DAO|Mapper|Controller|Client|MockMvc|mockMvc|Template|EntityManager|entityManager|Session|WebTestClient|RequestBuilders)\b"
+    r"|\bmvc\b|\bperformRequest\b|\bjdbcTemplate\b|\b(?:repository|service|repo|dao|client|api)\b|\bperform\s*\(")
+_JAVA_WRITE = re.compile(
+    r"\b(?:save\w*|create\w*|insert\w*|update\w*|delete\w*|remove\w*|register\w*|submit\w*|persist\w*|merge\w*|store\w*)\s*\("
+    r"|\b(?:post|put|patch|delete)\s*\(")
+_JAVA_WRITE_BY_VERB = re.compile(r"\bperform\w*\s*\(\s*\"(?:POST|PUT|PATCH|DELETE)\"")  # the verb is a string literal: read where strings are kept
+_JAVA_OBSERVATION = re.compile(
+    r"\b(?:count|find|get\w*By\w*|getAll|list|exists|fetch|select|query|read|load|search|lookup)\w*\s*\("
+    r"|\.\s*(?:size|isEmpty|hasSize|isNotEmpty|isPresent)\s*\(|\bverifyNo(?:Interactions|MoreInteractions)\b|\bnever\s*\(\s*\)|\btimes\s*\(\s*0\s*\)"
+    r"|\bget\s*\(|\bjdbcTemplate\b|\bentityManager\b")
+_JAVA_OBSERVATION_BY_VERB = re.compile(r"\bperform\w*\s*\(\s*\"GET\"")
+
+
+def _unchecked_rejection(statements: list[tuple[int, str, str]]) -> Iterator[tuple[str, int, str]]:
+    """``AT_NO_STATE_CHECK``: a test method that makes a write (a save, a POST, a delete …), expects it to be refused, and has nothing after the last such
+    expectation that looks at the state again (a count, a find, a read, ``verify(…, never())``).  A method that writes nothing is left alone: there is no state to keep."""
+    failure = None
+    for index, (at, piece, raw) in enumerate(statements):
+        if _JAVA_FAILURE.search(piece) or (_JAVA_ERROR_CONTENT.search(raw) and re.search(r"\bassert\w*\s*\(", piece)):
+            failure = index
+    if failure is None:
+        return
+    if not any(_JAVA_WRITE.search(piece) or _JAVA_WRITE_BY_VERB.search(raw) for _at, piece, raw in statements[:failure + 1]):
+        return
+    if not any(_JAVA_BOUNDARY.search(raw) for _at, _piece, raw in statements):
+        return
+    if any(_JAVA_OBSERVATION.search(piece) or _JAVA_OBSERVATION_BY_VERB.search(raw) for _at, piece, raw in statements[failure + 1:]):
+        return
+    at, piece, _raw = statements[failure]
+    yield "AT_NO_STATE_CHECK", at + len(piece) - len(piece.lstrip()), "rejected-without-state-check"
+
+
 def _java(text: str) -> Iterator[tuple[str, int, str]]:
     code, plain = _mask_java(text, strings=True), _mask_java(text, strings=False)
     masked = _Code(code)
@@ -276,6 +433,9 @@ def _java(text: str) -> Iterator[tuple[str, int, str]]:
         if not_null and len(not_null) == len(checks):
             at, piece = not_null[0]
             yield "AT_ALWAYS_TRUE", at + len(piece) - len(piece.lstrip()), "not-null-only"
+        if brace in masked.pairs:  # a method that is never closed is a cut-off one: it is not judged for what it expects
+            yield from _self_computed(statements, code, plain)
+            yield from _unchecked_rejection(statements)
     for start in _path_calls(plain):
         yield "AT_PARTIAL_MATCH", start, "path-prefix"
 
@@ -374,6 +534,66 @@ def _python(text: str) -> Iterator[tuple[str, int, str]]:
             not_null = [position for position in checks if _PY_NOT_NULL.match(lines[position])]
             if not_null and len(not_null) == len(checks):
                 yield "AT_ALWAYS_TRUE", starts[not_null[0]] + _indent(lines[not_null[0]]), "not-null-only"
+            yield from _python_self_computed(lines, body, starts)
+            yield from _python_unchecked_rejection(lines, body, starts)
+
+
+_PY_EQUALITY = re.compile(r"^\s*assert\s+(.+?)\s*==\s*(.+?)\s*(?:,.*)?$|^\s*self\.assertEqual\(\s*(.+?)\s*,\s*(.+?)\s*(?:,\s*[\"'].*)?\)\s*$")
+_PY_CALL_EXPRESSION = re.compile(r"[A-Za-z_][\w.]*(?:\([^()]*\)|\.[A-Za-z_]\w*)*\(.*\)")
+_PY_FAILURE = re.compile(
+    r"\bpytest\.raises\(|\bassertRaises\(|\bstatus_code\s*(?:==|>=|>|in)\s*\(?\s*[45]\d\d\b|\bstatus_code\s*\)?\s*(?:==|in)\s*(?:HTTPStatus|status)\.\w*(?:BAD_REQUEST|UNAUTHORIZED|FORBIDDEN|NOT_FOUND|CONFLICT|UNPROCESSABLE)"
+    r"|\bassert_called_once_with\(.*\b(?:error|exception)\b")
+_PY_BOUNDARY = re.compile(r"\b(?:client|session|db|repo|repository|service|api|app|requests|conn|cursor|engine|store|dao)\b")
+_PY_WRITE = re.compile(
+    r"\b(?:client|requests|api|app)\.(?:post|put|patch|delete)\(|\.(?:save|add|add_all|commit|insert|update|delete|remove|create\w*|register\w*|persist\w*)\(|\b(?:create|update|delete|save|insert|remove|register|persist)_\w+\(")
+_PY_OBSERVATION = re.compile(
+    r"\b(?:client|requests|api|app)\.get\(|\.(?:count|query|filter|filter_by|all|first|one|scalar|fetchall|fetchone|exists|find\w*|select\w*|list\w*)\(|\blen\(|\b(?:get|find|list|count|read|load|fetch|select)_\w+\(|\bassert_not_called\b|\bsession\.")
+
+
+def _python_self_computed(lines: list[str], body: list[int], starts: list[int]) -> Iterator[tuple[str, int, str]]:
+    """``AT_SELF_COMPUTED`` of a pytest function: ``assert f(x) == f(x)`` (or ``self.assertEqual``) — the same call on both sides — or a variable whose name says it is the expected
+    value and that holds the very call checked (the same rules as for Java: the contract methods and the factories are left alone)."""
+    assigned: dict[str, str] = {}
+    for position in body:
+        text = lines[position].strip()
+        declared = re.match(r"([A-Za-z_]\w*)\s*=\s*(.+)$", text)
+        if declared and not re.match(r"[A-Za-z_]\w*\s*==", text):
+            assigned[declared.group(1)] = re.sub(r"\s+", "", declared.group(2))
+        match = _PY_EQUALITY.match(lines[position])
+        if not match:
+            continue
+        left, right = (match.group(1), match.group(2)) if match.group(1) is not None else (match.group(3), match.group(4))
+        left, right = re.sub(r"\s+", "", left), re.sub(r"\s+", "", right)
+        if _PY_CALL_EXPRESSION.fullmatch(left) is None or _FACTORY.search(left) or _CONTRACT.search(left):
+            continue
+        sides = [right]
+        if _VARIABLE.fullmatch(right) and _EXPECTED_NAME.fullmatch(right) and right in assigned:
+            sides.append(assigned[right])
+        if any(left in side for side in sides):
+            yield "AT_SELF_COMPUTED", starts[position] + _indent(lines[position]), "same-accessor" if _ACCESSOR.search(left) else "same-call"
+
+
+def _python_unchecked_rejection(lines: list[str], body: list[int], starts: list[int]) -> Iterator[tuple[str, int, str]]:
+    """``AT_NO_STATE_CHECK`` of a pytest function: a write (a ``client.post``, a ``save``, a ``create_…``), a refusal expected (``pytest.raises``, a status 4xx or 5xx),
+    and no read of the state (a ``client.get``, a ``count``, a ``query``, a ``len``) after the last refusal.  A function that writes nothing, or touches no
+    client, session or repository, is left alone."""
+    failure = None
+    for position in body:
+        if _PY_FAILURE.search(lines[position]):
+            failure = position
+    if failure is None:
+        return
+    end = failure
+    if re.match(r"\s*with\s+pytest\.raises\b", lines[failure]):  # the call under test is inside the block: the state is read after it
+        inside = _body(lines, failure)
+        end = inside[-1] if inside else failure
+    if not any(_PY_WRITE.search(lines[position]) for position in body if position <= end):
+        return
+    if not any(_PY_BOUNDARY.search(lines[position]) for position in body):
+        return
+    if any(_PY_OBSERVATION.search(lines[position]) for position in body if position > end):
+        return
+    yield "AT_NO_STATE_CHECK", starts[failure] + _indent(lines[failure]), "rejected-without-state-check"
 
 
 # --- the artifact ----------------------------------------------------------------------------------------
