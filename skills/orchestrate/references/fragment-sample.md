@@ -1,10 +1,8 @@
 # Фрагмент генератора: структура и как собрать большой
 
 Ответ `tc-generator` — один JSON-файл, **голый фрагмент** (без конверта): объект по `schemas/candidate-fragment.schema.json`; кейсы в нём
-— по `schemas/canonical-test-document.schema.json`. Ниже — только форма. Значения в `<…>` берёшь из входов пачки (план, header, квитанция
-контекста, ответ разметки). Digest-поля (`plan_digest`, `header_digest`, `context_receipt_digest`, `digest`) схема требует, но не считай их:
-`validate-fragment` принимает фрагмент и без них, пропущенные ставит `model-response`, неверные он отказывает с верным значением.
-Пиши JSON без отступов и лишних пробелов; перенос строки — только между кейсами.
+— по `schemas/canonical-test-document.schema.json`. Ниже — только форма. Значения в `<…>` берёшь из входов пачки (план, header, ответ
+разметки); механику код ставит сам (список под образцом кейса). Пиши JSON без отступов и лишних пробелов; перенос строки — только между кейсами.
 
 ```json
 {
@@ -12,13 +10,9 @@
   "status": "COMPLETE",
   "batch_id": "<BATCH-… из плана>",
   "namespace": "<B1, B2, … из плана>",
-  "plan_digest": "<можно опустить: поставит model-response>",
-  "header_digest": "<можно опустить: поставит model-response>",
-  "context_receipt_digest": "<можно опустить: поставит model-response>",
-  "context_receipt": { "…": "квитанция контекста пачки ЦЕЛИКОМ — файл receipt как есть, а не её digest" },
   "owned_source_requirement_ids": ["<SREQ-… этой пачки>"],
   "requirements": [
-    { "requirement_id": "CREQ-<ns>-001", "display_order": 1, "text": "<условие, выведенное из источника>", "provenance": ["<путь:строка-строка>"] }
+    { "requirement_id": "CREQ-<ns>-001", "text": "<условие, выведенное из источника>", "provenance": ["<путь:строка-строка>"] }
   ],
   "source_to_canonical_mappings": [
     { "source_requirement_id": "<SREQ-…>", "canonical_requirement_ids": ["CREQ-<ns>-001"] }
@@ -27,9 +21,7 @@
     { "capability_id": "CAP-<ns>-<имя>", "action": "<имя операции>", "adapter": "<адаптер из входов>", "arguments": [],
       "results": [ { "name": "count", "semantic_type": { "kind": "json", "type": "integer" } } ], "provenance": ["<фраза источника>"] }
   ],
-  "test_cases": [ "… кейсы, форма ниже …" ],
-  "diagnostics": [],
-  "digest": "<можно опустить: поставит model-response>"
+  "test_cases": [ "… кейсы, форма ниже …" ]
 }
 ```
 
@@ -37,30 +29,35 @@
 
 ```json
 {
-  "case_id": "TC-<ns>-001", "display_order": 1, "priority": "HIGH", "categories": ["positive", "functional"],
+  "case_id": "TC-<ns>-001", "priority": "HIGH", "categories": ["positive", "functional"],
   "title": "<название>", "objective": "<цель>", "preconditions": ["<условие данных, не условие работы над тестами>"],
   "requirement_ids": ["CREQ-<ns>-001"],
   "management": { "folder": "<папка>", "components": [], "labels": [], "owner": null, "status": null, "estimated_time": null,
                   "custom_fields": {}, "external_keys": {}, "external_links": { "issues": [], "pages": [] } },
   "steps": [
     {
-      "step_id": "STEP-<ns>-001-01", "display_order": 1, "action": "<что сделать>", "test_data": "<данные>",
-      "manual_only": false, "manual_reason": null, "automation_blockers": [],
+      "action": "<что сделать>", "test_data": "<данные>",
       "operation": { "kind": "project_action", "capability_id": "CAP-<ns>-<имя>" },
-      "inputs": [], "outputs": [ { "output_id": "count", "display_order": 1, "semantic_type": { "kind": "json", "type": "integer" },
-                                   "source": { "kind": "project_result", "name": "count" } } ],
+      "inputs": [ { "target": { "location": "arg", "name": "owner_id" }, "source": { "kind": "literal", "value": 7 } } ],
+      "outputs": [ { "source": { "kind": "project_result", "name": "count" } } ],
       "expectations": [
-        { "expectation_id": "EXP-<ns>-001-01-1", "display_order": 1, "text": "<наблюдаемый результат>",
-          "assertions": [ { "assertion_id": "ASSERT-<ns>-001-01-1-1", "display_order": 1, "operator": "equals",
-                            "actual": { "kind": "project_result", "name": "count" }, "expected": { "kind": "literal", "value": 0 } } ] }
+        { "text": "<наблюдаемый результат>",
+          "assertions": [ { "operator": "equals", "actual": { "kind": "project_result", "name": "count" }, "expected": { "kind": "literal", "value": 0 } } ] }
       ]
     }
   ]
 }
 ```
 
-Второй кейс — тот же каркас с другими `case_id` / `step_id` / `expectation_id` / `assertion_id` (счётчики внутри `<ns>`) и своими `requirement_ids`; у
-каждого шага свой `operation.capability_id` из `operation_capabilities`.
+Второй кейс — тот же каркас с другим `case_id` и своими `requirement_ids`; у каждого шага свой `operation.capability_id` из `operation_capabilities`.
+
+**Код ставит сам (не пиши):** `display_order` (позиция, с 1); `step_id` = `STEP-<хвост case_id после TC->-<NN>` (`TC-B1-003`, шаг 2 → `STEP-B1-003-02`),
+`input_id` = `INPUT-<хвост>-<NN>-<k>`, `expectation_id` = `EXP-…-<NN>-<k>`, `assertion_id` = `ASSERT-…-<NN>-<k>-<j>`; `output_id` = `name` источника;
+`context_receipt`, digest-поля, `diagnostics`; `manual_only: false`, `manual_reason: null`, `automation_blockers: []`, `sensitive`; `semantic_type`, когда тип
+выводится: у входа — тип литерала, выхода `step_output` или аргумента capability; у выхода — тип результата capability (`http_status` — integer, `http_header` — string).
+Не выводится (`fixture`, `environment`, `secret_handle`, `http_body`) — пиши сам. Свой тип код не меняет: отличающийся от типа литерала отказывает проверка.
+За тобой: `case_id`, `requirement_ids`, `capability_id`, тексты, значения, `output_id` у `http_body`/`http_status`; ссылка `step_output` — полным id шага
+по этой схеме (`"step_id": "STEP-B1-003-02"`).
 
 ## Входы `plan`
 
@@ -97,26 +94,26 @@
 
 ```jsonl
 {"name": "delta", "semantic_type": {"kind": "json", "type": "integer"}}
-{"assertion_id": "ASSERT-<ns>-001-02-1-1", "display_order": 1, "operator": "equals", "actual": {"kind": "project_result", "name": "delta"}, "expected": {"kind": "literal", "value": 1}}
+{"operator": "equals", "actual": {"kind": "project_result", "name": "delta"}, "expected": {"kind": "literal", "value": 1}}
 ```
 
 2. **Перенаправление** — шаг создания отдаёт `owner_id`, шаг отправки формы отдаёт `redirectId`; ожидание сверяет их, а не только «302»:
 
 ```jsonl
-{"assertion_id": "ASSERT-<ns>-001-03-1-1", "display_order": 1, "operator": "equals", "actual": {"kind": "project_result", "name": "redirectId"}, "expected": {"kind": "step_output", "step_id": "STEP-<ns>-001-01", "output_id": "owner_id"}}
+{"operator": "equals", "actual": {"kind": "project_result", "name": "redirectId"}, "expected": {"kind": "step_output", "step_id": "STEP-<хвост case_id>-01", "output_id": "owner_id"}}
 ```
 
 3. **Ошибка поля** — результат `telephoneError` (string) собирает пару «поле:код»; ожидание называет обе части:
 
 ```jsonl
-{"assertion_id": "ASSERT-<ns>-002-02-1-1", "display_order": 1, "operator": "equals", "actual": {"kind": "project_result", "name": "telephoneError"}, "expected": {"kind": "literal", "value": "telephone:typeMismatch"}}
+{"operator": "equals", "actual": {"kind": "project_result", "name": "telephoneError"}, "expected": {"kind": "literal", "value": "telephone:typeMismatch"}}
 ```
 
 Типы обеих сторон `equals` совместимы (integer с integer, string со string); `contains` — только строка в строке.
 
 ## Как собрать фрагмент на десятки кейсов
 
-1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id нумеруй по шаблонам выше, они уникальны в пачке.
+1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id шагов и проверок ставит код по схеме выше, `case_id` у тебя уникальны в пачке.
 2. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Дописывай в один файл, JSON без отступов; исходник `tools` ради формата не читай — форма выше и схемы достаточны.
 3. Проверь файл: `python -m tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>`;
    отказ называет, что исправить. Исправленный файл — единственный повтор стадии; после `model-response` ответ не меняется.

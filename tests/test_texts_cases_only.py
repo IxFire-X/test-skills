@@ -185,7 +185,8 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
     text = (ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
     fragment, case, *_forms = (json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S))  # PT2: then the forms of the plan inputs
     schema = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
-    assert sorted(set(schema["required"]) - set(fragment)) == [] and sorted(set(fragment) - set(schema["properties"])) == []
+    mechanics = {"plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "diagnostics", "digest"}  # V6: the code puts them
+    assert sorted(set(schema["required"]) - set(fragment) - mechanics) == [] and sorted(set(fragment) - set(schema["properties"])) == []
     tokens = {"<ns>": "B1", "<SREQ-… этой пачки>": "SREQ-0001", "<SREQ-…>": "SREQ-0001", "<имя>": "batch_ids", "<имя операции>": "batch_ids",
               "<адаптер из входов>": "project_native_junit"}
 
@@ -208,4 +209,14 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
         target = copy / f"sample-{name}.schema.json"
         target.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"schemas/sample-{name}.schema.json",
                                       "$ref": f"canonical-test-document.schema.json#/$defs/{definition}"}), encoding="utf-8")
+        if name == "case":  # V6: the sample case is the lean form — the code lays out its mechanics before the schema judges it
+            from tools.batch_assembly import fill_fragment_mechanics
+
+            laid, _summary = fill_fragment_mechanics({"status": "COMPLETE", "requirements": [], "operation_capabilities": [fill(fragment["operation_capabilities"][0])],
+                                                       "test_cases": [fill(value)]})
+            value = laid["test_cases"][0]
+            assert schema_diagnostics(value, target, tmp_path) == [], name
+            continue
+        if name == "requirement":
+            value = {**value, "display_order": 1}
         assert schema_diagnostics(fill(value), target, tmp_path) == [], name

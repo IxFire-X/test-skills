@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import validate_canonical_document_all
+from tools.canonical_document import _json_type, validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -700,6 +700,116 @@ def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[s
     return value, names
 
 
+def _missing(item: Mapping[str, Any], key: str) -> bool:
+    return item.get(key) in (None, "") if key in ("step_id", "input_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
+
+
+def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """V6 / O-12: what the model need not write — the mechanics of a fragment that the code lays out by rule.
+
+    ``display_order`` (the position, from 1) of requirements, cases, steps, inputs, outputs, expectations and assertions; the ids
+    ``STEP-<tail of case_id>-<NN>``, ``INPUT-…-<NN>-<k>``, ``EXP-…-<NN>-<k>``, ``ASSERT-…-<NN>-<k>-<j>``; ``output_id`` = the source name;
+    ``target.sensitive`` (true only for a secret_handle), ``manual_only`` false with ``manual_reason`` null, ``automation_blockers`` [],
+    ``diagnostics`` []; and the ``semantic_type`` the code can take without a guess: of a literal (its JSON type), of a step_output (the type of the
+    output), of a capability argument or result, of http_status (integer) and http_header (string).  A value the model wrote is never changed —
+    a different one is the refusal the checks make (CANONICAL_DISPLAY_ORDER, SEMANTIC_DUPLICATE_ID, SEMANTIC_TYPE_MISMATCH).  Returns the copy and a
+    summary ``["display_order ×N", …]`` (names and counts, not paths)."""
+    if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
+        return fragment, []
+    value = deepcopy(fragment)
+    counts: dict[str, int] = {}
+
+    def put(item: dict[str, Any], key: str, new: Any, name: str | None = None) -> None:
+        if _missing(item, key):
+            item[key] = new
+            counts[name or key] = counts.get(name or key, 0) + 1
+
+    if "diagnostics" not in value:
+        value["diagnostics"] = []
+        counts["diagnostics"] = 1
+    capabilities = {row["capability_id"]: row for row in value.get("operation_capabilities") or []
+                    if isinstance(row, dict) and isinstance(row.get("capability_id"), str)}
+    for index, requirement in enumerate(value.get("requirements") or [], start=1):
+        if isinstance(requirement, dict):
+            put(requirement, "display_order", index)
+    for case_number, case in enumerate(value.get("test_cases") or [], start=1):
+        if not isinstance(case, dict):
+            continue
+        put(case, "display_order", case_number)
+        case_id = case.get("case_id")
+        tail = case_id.removeprefix("TC-") if isinstance(case_id, str) else None
+        outputs_by_step: dict[str, dict[str, Any]] = {}
+        for number, step in enumerate(case.get("steps") or [], start=1):
+            if not isinstance(step, dict):
+                continue
+            if tail is not None:
+                put(step, "step_id", f"STEP-{tail}-{number:02d}")
+            put(step, "display_order", number)
+            put(step, "manual_only", False)
+            if step.get("manual_only") is False:
+                put(step, "manual_reason", None)
+            put(step, "automation_blockers", [])
+            operation = step.get("operation")
+            capability = capabilities.get(operation.get("capability_id")) if isinstance(operation, dict) and operation.get("kind") == "project_action" else None
+            arguments = {row.get("name"): row for row in (capability or {}).get("arguments") or [] if isinstance(row, dict)}
+            results = {row.get("name"): row for row in (capability or {}).get("results") or [] if isinstance(row, dict)}
+            step_id = step.get("step_id") if isinstance(step.get("step_id"), str) else None
+            kept = outputs_by_step.setdefault(step_id, {}) if step_id is not None else {}
+            for position, item in enumerate(step.get("inputs") or [], start=1):
+                if not isinstance(item, dict):
+                    continue
+                if tail is not None:
+                    put(item, "input_id", f"INPUT-{tail}-{number:02d}-{position}")
+                put(item, "display_order", position)
+                source, target = item.get("source"), item.get("target")
+                if isinstance(target, dict):
+                    put(target, "sensitive", isinstance(source, dict) and source.get("kind") == "secret_handle")
+                if "semantic_type" not in item and isinstance(source, dict):
+                    derived = None
+                    if source.get("kind") == "literal" and "value" in source:
+                        derived = _json_type(source["value"])
+                    elif source.get("kind") == "step_output":
+                        derived = outputs_by_step.get(source.get("step_id"), {}).get(source.get("output_id"))
+                    elif isinstance(target, dict) and target.get("location") == "arg":
+                        derived = (arguments.get(target.get("name")) or {}).get("semantic_type")
+                    if derived is not None:
+                        item["semantic_type"] = deepcopy(derived)
+                        counts["semantic_type"] = counts.get("semantic_type", 0) + 1
+            for position, item in enumerate(step.get("outputs") or [], start=1):
+                if not isinstance(item, dict):
+                    continue
+                source = item.get("source")
+                put(item, "display_order", position)
+                if isinstance(source, dict) and source.get("kind") in ("project_result", "http_header") and isinstance(source.get("name"), str):
+                    put(item, "output_id", source["name"])
+                if "semantic_type" not in item and isinstance(source, dict):
+                    derived = None
+                    if source.get("kind") == "project_result" and capability is not None:
+                        derived = (results.get(source.get("name")) or {}).get("semantic_type")
+                    elif isinstance(operation, dict) and operation.get("kind") == "http":
+                        derived = {"kind": "json", "type": "integer"} if source.get("kind") == "http_status" else (
+                            {"kind": "json", "type": "string"} if source.get("kind") == "http_header" else None)
+                    if derived is not None:
+                        item["semantic_type"] = deepcopy(derived)
+                        counts["semantic_type"] = counts.get("semantic_type", 0) + 1
+                if isinstance(item.get("output_id"), str) and isinstance(item.get("semantic_type"), dict):
+                    kept[item["output_id"]] = item["semantic_type"]
+            for e_position, expectation in enumerate(step.get("expectations") or [], start=1):
+                if not isinstance(expectation, dict):
+                    continue
+                if tail is not None:
+                    put(expectation, "expectation_id", f"EXP-{tail}-{number:02d}-{e_position}")
+                put(expectation, "display_order", e_position)
+                for a_position, assertion in enumerate(expectation.get("assertions") or [], start=1):
+                    if isinstance(assertion, dict):
+                        if tail is not None:
+                            put(assertion, "assertion_id", f"ASSERT-{tail}-{number:02d}-{e_position}-{a_position}")
+                        put(assertion, "display_order", a_position)
+    order = ["diagnostics", "display_order", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "manual_only", "manual_reason",
+             "automation_blockers", "sensitive", "semantic_type"]
+    return value, [f"{name} ×{counts[name]}" for name in order if name in counts]
+
+
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
     """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
     plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given
@@ -721,6 +831,29 @@ def _refusal(code: str, path: str, message: str, fix: str) -> BatchAssemblyError
     """PF-1: a refusal that stands alone (a binding): one row of ``diagnostics`` and its own fix, so a fix never points at rows
     the answer does not have."""
     return BatchAssemblyError(code, message, [{"path": path, "code": code, "message": message, "fix": fix}], fix)
+
+
+_REQUIRED_FIXES = {
+    "'semantic_type' is a required property": "укажи semantic_type: тип не выводится из значения (литерал, ссылка на выход и аргумент или результат capability его задали бы сами) — "
+                                              "{\"kind\":\"json\",\"type\":\"string|integer|number|boolean|array|object|null\"}",
+    "'output_id' is a required property": "укажи output_id: имя выхода, на которое ссылаются step_output; у project_result и http_header код ставит его сам как name источника, "
+                                          "у http_body и http_status имя за тобой",
+}
+
+
+def _required_fix(row: Mapping[str, str], fragment: Mapping[str, Any]) -> str | None:
+    """V6: the fix of a missing field the code could not put by rule — what the model writes there.  An input whose type is missing because its
+    step_output reference points nowhere gets the fix of that reference."""
+    if row["code"] != "SCHEMA_REQUIRED":
+        return None
+    if row["message"] == "'semantic_type' is a required property":
+        node: Any = fragment
+        for token in row["path"].split("/")[1:-1]:
+            node = node[int(token)] if isinstance(node, list) and token.isdigit() and int(token) < len(node) else node.get(token) if isinstance(node, dict) else None
+        source = node.get("source") if isinstance(node, dict) else None
+        if isinstance(source, dict) and source.get("kind") == "step_output":
+            return fix_for("SEMANTIC_UNKNOWN_STEP_OUTPUT")
+    return _REQUIRED_FIXES.get(row["message"])
 
 
 def _row(code: str, path: str, message: str, fix: str | None = None, *, controller: str = "BATCH_SEMANTIC_CONFLICT") -> dict[str, str]:
@@ -771,6 +904,10 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "", "fragment must be an object",
                        "ответ генератора — один JSON-объект фрагмента, без конверта artifacts и без обёртки")
     fragment, normalized = normalize_fragment(fragment)
+    fragment, filled = fill_fragment_mechanics(fragment)  # V6: ids, display_order, defaults, the types the code can take
+    if fragment.get("context_receipt") in (None, "") and isinstance(context_receipt, dict) and fragment.get("status") == "COMPLETE":
+        fragment = {**fragment, "context_receipt": deepcopy(context_receipt)}  # V6: the receipt of the batch given to the check (it is verified below), put by the code
+        filled = [*filled, "/context_receipt"]
     fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
     batch = batches.get(fragment.get("batch_id"))
     if batch is None:
@@ -787,8 +924,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     _validate_context_receipt(context_receipt, batch["context_receipt_digest"])
     if not isinstance(fragment.get("context_receipt"), dict):
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment lacks its context receipt",
-                       "добавь во фрагмент поле context_receipt — объект квитанции контекста пачки целиком, байт в байт тот же, что файл "
-                       "--context-receipt (его digest — context_receipt_digest пачки в плане); digest-поля код ставит сам, этот объект — нет")
+                       "у записанного ответа пачки квитанция контекста есть: передай его (path из model-response); validate-fragment ставит её сам из "
+                       "--context-receipt, assemble берёт из записанного ответа или из файла, где поле context_receipt есть")
     _validate_context_receipt(fragment["context_receipt"], batch["context_receipt_digest"])
     if fragment["context_receipt"] != context_receipt:
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment context receipt differs from verified receipt",
@@ -823,7 +960,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
             add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", f"/{key}", message, delete_field_fix(key))
     schema_rows = schema_diagnostics(fragment, _FRAGMENT_SCHEMA, _ROOT)
     for row in schema_rows:
-        add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"], f"candidate fragment schema is invalid: {row['code']} — {row['message']}")
+        add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"], f"candidate fragment schema is invalid: {row['code']} — {row['message']}",
+            _required_fix(row, fragment))
     if fragment.get("digest") != _digest({key: item for key, item in fragment.items() if key != "digest"}):
         add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", "/digest", "candidate fragment digest is invalid", delete_field_fix("digest"))
     if schema_rows:  # the shape is unreadable: the rest is judged on the corrected fragment
@@ -885,7 +1023,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
                 f"canonical pre-review audit failed: {row['code']} at {row['path']} (of this fragment) — {row['message']}")
     if rows:
         refuse()
-    return {"normalized": normalized} if normalized else None
+    result = {key: names for key, names in (("normalized", normalized), ("filled", filled)) if names}
+    return result or None
 
 
 # FaT-VF: the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
@@ -973,7 +1112,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     ordinals = {key: item["ordinal"] for key, item in batches.items()}
     # P1-fix2: the document is built from the canon validate-fragment and model-response lay out — the order of the ids and
     # categories and the bindings the code puts itself — so the agent's file and the recorded answer give the same bytes
-    fragments = [fill_fragment_bindings(normalize_fragment(item)[0], plan) if isinstance(item, dict) else item for item in fragments]
+    fragments = [fill_fragment_bindings(fill_fragment_mechanics(normalize_fragment(item)[0])[0], plan) if isinstance(item, dict) else item for item in fragments]
     for fragment in sorted(fragments, key=lambda item: ordinals.get(item.get("batch_id"), 0) if isinstance(item, dict) else 0):
         validate_fragment(fragment, plan, header, fragment.get("context_receipt"), list(by_batch.values()))
         batch_id = fragment["batch_id"]

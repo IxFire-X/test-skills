@@ -157,7 +157,7 @@ FIXES: dict[str, str] = {
     "CANONICAL_CAPABILITY_ORDER": "operation_capabilities — по capability_id в порядке кодовых точек Unicode",
     "CANONICAL_BLOCKER_ORDER": "automation_blockers шага — по blocker_id в порядке кодовых точек Unicode",
     "CANONICAL_SOURCE_REQUIREMENT_ORDER": "source_requirements — документы подряд, внутри документа по номеру строки как числу",
-    "CANONICAL_DISPLAY_ORDER": "display_order элементов списка — 1, 2, 3 … подряд без пропусков и повторов",
+    "CANONICAL_DISPLAY_ORDER": "display_order элементов списка — 1, 2, 3 … подряд без пропусков и повторов; удали поле display_order — код поставит его сам по позиции",
     "SCOPE_PLAN_UNREADABLE": "опубликованный план пачек есть в журнале, но не читается (файл удалён или изменён): охват не берётся из scope-decision.json; "
                              "run_pipeline status называет файл — восстановить его нельзя, начни новый прогон: scan --new-run",
     "RECEIPT_MISSING": "квитанции в прогоне нет: её пишет код шага, который её создаёт; run_pipeline status называет следующий шаг, файлы руками не создавай",
@@ -222,7 +222,8 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNKNOWN_CAPABILITY": "operation.capability_id ссылается на необъявленную capability: объяви её в operation_capabilities",
     "SEMANTIC_UNKNOWN_REQUIREMENT": "requirement_ids кейса ссылаются на требование, которого нет в requirements: поправь id",
     "SEMANTIC_UNKNOWN_SOURCE_REQUIREMENT": "mapping ссылается на SREQ, которого нет в плане: возьми id из batch-plan.json",
-    "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: поправь step_id/output_id или объяви выход",
+    "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: step_id шага — STEP-<хвост case_id после TC->-<NN, номер шага в кейсе двумя цифрами> "
+                                    "(STEP-B1-003-02 — шаг 2 кейса TC-B1-003), output_id — имя выхода этого шага; поправь ссылку или объяви выход",
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
     # --- the paths the agent names (tools.output_guard) ---

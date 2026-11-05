@@ -217,8 +217,8 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
     from tools.schema_validation import schema_diagnostics
 
     rows = _jsonl_rows()
-    results = [row for row in rows if "semantic_type" in row and "assertion_id" not in row]
-    assertions = [row for row in rows if "assertion_id" in row]
+    results = [row for row in rows if "semantic_type" in row and "operator" not in row]
+    assertions = [{**row, "assertion_id": "ASSERT-B1-001-01-1-1", "display_order": 1} for row in rows if "operator" in row]  # V6: the id and the order are the code's
     assert len(results) == 1 and len(assertions) == 3
     copy = tmp_path / "schemas"
     shutil.copytree(ROOT / "schemas", copy)
@@ -227,7 +227,7 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
         target = copy / f"sample-{name}.schema.json"
         target.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"schemas/sample-{name}.schema.json",
                                       "$ref": f"canonical-test-document.schema.json#/$defs/{definition}"}), encoding="utf-8")
-        return schema_diagnostics(json.loads(json.dumps(value).replace("<ns>", "B1")), target, tmp_path)
+        return schema_diagnostics(json.loads(json.dumps(value, ensure_ascii=False).replace("<ns>", "B1").replace("<хвост case_id>", "B1-001")), target, tmp_path)
 
     assert valid("result", "capability_member", results[0]) == []
     assert [valid(f"assertion-{index}", "assertion", row) for index, row in enumerate(assertions)] == [[], [], []]

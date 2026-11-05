@@ -16,14 +16,21 @@ from tests.test_review_requested import _api, _put
 pytestmark = pytest.mark.contract
 
 
+def _other_receipt(receipt: dict) -> dict:
+    from tests.test_batch_assembly import _self_digest
+
+    other = {**{key: value for key, value in receipt.items() if key != "digest"}, "batch_index": 7}
+    return {**other, "digest": _self_digest(other)}  # a receipt that is whole and sealed, but not the one of the batch
+
+
 def _validate(run: dict, fragment: Path, *extra: str) -> tuple[int, dict]:
     return _api("validate-fragment", "--fragment", str(fragment), "--plan", str(run["plan"]), "--header", str(run["header"]),
                 "--context-receipt", str(run["context"]), *extra)
 
 
-def test_a_fragment_without_its_context_receipt_gets_a_fix_that_names_the_object_and_its_source(tmp_path: Path) -> None:
+def test_a_fragment_with_another_context_receipt_gets_a_fix_that_names_the_object_and_its_source(tmp_path: Path) -> None:
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {key: value for key, value in fragments[0].items() if key not in ("context_receipt", "digest")}
+    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     code, refused = _validate(run, Path(_put(run["tmp"] / "bare.json", bare)))
     assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT", refused
     assert "смотри diagnostics" not in refused["fix"] and "context_receipt" in refused["fix"] and "--context-receipt" in refused["fix"], refused
@@ -62,7 +69,7 @@ def test_a_validate_fragment_refusal_with_a_run_is_in_the_journal_and_in_the_rep
     from tools.run_report import refusals
 
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {key: value for key, value in fragments[0].items() if key not in ("context_receipt", "digest")}
+    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     path = Path(_put(run["tmp"] / "bare.json", bare))
     assert _validate(run, path, "--run-root", str(run["run_root"]))[0] == 2
     (line,) = (Path(run["run_root"]) / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
@@ -75,7 +82,7 @@ def test_a_validate_fragment_refusal_with_a_run_is_in_the_journal_and_in_the_rep
 
 def test_a_validate_fragment_refusal_without_a_run_writes_nothing_and_an_ok_is_not_a_refusal(tmp_path: Path) -> None:
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {key: value for key, value in fragments[0].items() if key not in ("context_receipt", "digest")}
+    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     assert _validate(run, Path(_put(run["tmp"] / "bare.json", bare)))[0] == 2
     assert _validate(run, Path(run["fragments"][0]), "--run-root", str(run["run_root"]))[0] == 0
     assert not (Path(run["run_root"]) / "refusals.jsonl").exists()
@@ -102,7 +109,7 @@ def test_model_response_prints_the_receipt_of_the_record_and_not_the_answers_bod
 
 def test_a_run_root_that_is_no_run_leaves_the_refusal_as_it_was_and_writes_nothing(tmp_path: Path) -> None:
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {key: value for key, value in fragments[0].items() if key not in ("context_receipt", "digest")}
+    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     nowhere = tmp_path / "nowhere"
     nowhere.mkdir()
     code, refused = _validate(run, Path(_put(run["tmp"] / "bare.json", bare)), "--run-root", str(nowhere))

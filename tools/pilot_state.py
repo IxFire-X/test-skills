@@ -2534,10 +2534,12 @@ def _publish_model_stage_artifact(
     ]
     filled: list[str] = []
     normalized: list[str] = []
+    mechanics: list[str] = []
     if stage_instance_id.startswith("tc-generator:"):  # P1: the order of requirement_ids and categories is the code's work, as in validate-fragment
-        from tools.batch_assembly import normalize_fragment
+        from tools.batch_assembly import fill_fragment_mechanics, normalize_fragment
 
         value, normalized = normalize_fragment(value)
+        value, mechanics = fill_fragment_mechanics(value)  # V6 / O-12: ids, display_order, defaults, the types the code can take
     if stage_instance_id == "tc-reviewer:canonical":  # P7: the control word the reviewer names is kept as its sha256 only
         from tools.review_canaries import hash_codeword
 
@@ -2545,6 +2547,13 @@ def _publish_model_stage_artifact(
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
+            if stage_instance_id.startswith("tc-generator:") and isinstance(value, dict) and value.get("status") == "COMPLETE"                     and value.get("context_receipt") in (None, ""):
+                # V6: the context receipt of the batch — from the journal, by the digest the request binds
+                try:
+                    receipt = read_context_selection(root, attempt_id, str(value.get("context_receipt_digest") or prior["input_digests"][1]))
+                    value, mechanics = {**value, "context_receipt": dict(receipt)}, [*mechanics, "/context_receipt"]
+                except (KeyError, IndexError, OSError, TypeError, ValueError):
+                    pass  # no receipt of that digest: the checks name it
             value, filled = _fill_response_bindings(project, root, state, attempt_id, stage_instance_id, prior, value)
     data = _model_stage_artifact_bytes(value)
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
@@ -2630,7 +2639,7 @@ def _publish_model_stage_artifact(
         _validate_review_decision(root, state, attempt_id, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     if dry_run:  # P2: every check above ran; nothing below is written
-        return {"dry_run": True, "artifact": value, "content_digest": content_digest, "filled": filled, "normalized": normalized}
+        return {"dry_run": True, "artifact": value, "content_digest": content_digest, "filled": [*mechanics, *filled], "normalized": normalized}
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
         create_confined_bytes_exclusive(project, root, target, data)
@@ -2662,8 +2671,8 @@ def _publish_model_stage_artifact(
         record_output(project, root, stage_instance_id, content_digest, measured)
     published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
                      warning=output_warning(project, measured))
-    if filled:  # audit U2: what the code put into the answer
-        published["filled"] = filled
+    if mechanics or filled:  # audit U2 / V6: what the code put into the answer — the mechanics by name and count, then the digest fields
+        published["filled"] = [*mechanics, *filled]
     if normalized:  # P1: what the code put in order
         published["normalized"] = normalized
     return published
