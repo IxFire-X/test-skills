@@ -43,6 +43,8 @@ from tools.run_tests import (
 # journal — the durable state of the run: events, receipts, bound files
 from tools.pilot_state import (
     append_journal_event,
+    canonical_digest,
+    publish_fixed_receipt_resuming,
     publish_artifact_value,
     read_artifact_value,
     retained_native_rerun_target,
@@ -77,7 +79,7 @@ __all__ = (
     "report_digest_evidence", "report_inventory", "report_snapshots", "request_is_attempt_local", "request_report_path",
     "runner_diag", "runner_report",
     # journal
-    "append_journal_event", "publish_artifact_value", "read_artifact_value", "retained_native_rerun_target",
+    "append_journal_event", "canonical_digest", "publish_artifact_value", "publish_fixed_receipt_resuming", "read_artifact_value", "retained_native_rerun_target",
     "retained_rerun_context", "scenario_observation_target", "sealed_value",
     # cli
     "automation_split_fields", "baseline_check", "digest_bytes", "drift_report", "print_payload", "read_run_coordinate",

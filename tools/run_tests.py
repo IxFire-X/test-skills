@@ -72,7 +72,7 @@ class ProcessOutcome:
     exit_code: int
     stdout: str
     stderr: str
-    kind: Literal["EXIT", "TIMEOUT", "OS_ERROR"] = "EXIT"
+    kind: Literal["EXIT", "TIMEOUT", "OS_ERROR", "NOT_OBSERVED"] = "EXIT"
     process_scope_stopped: bool = False
     stop_proof: Literal["WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP"] | None = None
     _stop_attestation: object | None = None
@@ -798,7 +798,9 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
                 "Process-stop proof must be a controller-confirmed timeout scope.",
             ))
         cause = row.get("exit_cause")
-        if kind == "TIMEOUT":
+        if cause == "NOT_OBSERVED":  # P4: a human ran the build; its exit code is not known to the package
+            exit_valid = exit_code is None and kind in {"NO_TESTS_COLLECTED", "JUNIT_MISSING", "JUNIT_INVALID", "SOURCE_CHANGED", "BASELINE_DRIFT"}
+        elif kind == "TIMEOUT":
             exit_valid = type(exit_code) is int and exit_code == 124 and cause == "TIMEOUT"
         elif kind == "OS_ERROR":
             exit_valid = type(exit_code) is int and exit_code == 127 and cause == "OS_ERROR"
@@ -1373,7 +1375,7 @@ def _process_row(kind: str, outcome: ProcessOutcome, run_id: str, source: Mappin
     row = {
         "run_id": run_id, "source_digest": source["source_digest"], "kind": kind,
         "error_class": _PROCESS_ERROR_CLASSES[kind],
-        "exit_cause": "TIMEOUT" if outcome.kind == "TIMEOUT" else "OS_ERROR" if outcome.kind == "OS_ERROR" else "ZERO_EXIT" if outcome.exit_code == 0 else "NONZERO_EXIT",
+        "exit_cause": "TIMEOUT" if outcome.kind == "TIMEOUT" else "OS_ERROR" if outcome.kind == "OS_ERROR" else "NOT_OBSERVED" if outcome.kind == "NOT_OBSERVED" else "ZERO_EXIT" if outcome.exit_code == 0 else "NONZERO_EXIT",
         "command_profile": command_profile, "duration_sec": duration_sec,
         "stdout_tail": "", "stderr_tail": "",
     }
@@ -1430,7 +1432,7 @@ def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]
     }
 
 
-def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, failed_methods: Sequence[Mapping[str, str]] | None = None) -> dict[str, Any]:
+def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, failed_methods: Sequence[Mapping[str, str]] | None = None, execution_source: Mapping[str, Any] | None = None, ran_at: str | None = None) -> dict[str, Any]:
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     prestart = verdict == "NOT_RUNNABLE" and run_id is None
@@ -1446,7 +1448,8 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
         safe_key_labels = request.environment_labels
     source = dict(source)
     source.setdefault("effective_bundle_receipt_digest", "sha256:" + "0" * 64)
-    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": [dict(row) for row in failed_methods] if failed_methods else None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
+    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": [dict(row) for row in failed_methods] if failed_methods else None, "root_cause": None, "raw_output_excerpt": None, "ran_at": ran_at or datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))],
+              **({"execution_source": dict(execution_source)} if execution_source is not None else {})}  # P4: the run was a human's, not ours
     from tools.schema_validation import schema_diagnostics
     if schema_diagnostics(report, _ROOT / "schemas" / "run-tests-output.schema.json", _ROOT):
         raise RuntimeError("RUNNER_REPORT_SCHEMA")

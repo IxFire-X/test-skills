@@ -119,6 +119,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `execution-inputs-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `generated-delta.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `materialization-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `materialization-command-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `disposition-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `run-tests-output.schema.json` | `6` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `resume-validation-receipt.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

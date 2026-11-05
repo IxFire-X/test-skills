@@ -3210,7 +3210,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries"}
     if kind.startswith(_SKELETON_KIND):  # FaT-SKB: the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -3926,6 +3926,16 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid execution receipt")
         request = _execution_request_from_payload(payload)
+        if isinstance(payload.get("execution_source"), Mapping):  # P4: the command the human was given is the one the receipt names
+            try:
+                printed = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "materialization-command", "ARTIFACT_READ_BACK")["record"]
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError("invalid execution receipt") from error
+            if (
+                payload["execution_source"].get("human_command_digest") != printed.get("command_digest")
+                or (payload.get("verdict") != "NOT_RUNNABLE" and printed.get("execution_request_digest") != execution.get("request_digest"))
+            ):
+                raise ValueError("invalid execution receipt")
         starts = [
             event for event in state["events"]
             if event.get("attempt_id") == attempt["attempt_id"] and event.get("event_type") == "EXECUTION_STARTED"
@@ -3942,6 +3952,22 @@ def _validate_factual_receipt(
             _validate_closed_execution_request(project, root, attempt, payload, request, delta)
             if len(starts) != 1 or starts[0].get("artifact_digest") != request_digest(request):
                 raise ValueError("invalid execution receipt")
+    elif kind == "materialization-command":
+        # P4: the command printed to the human who runs the build — and the facts a report is later held against
+        _validate_schema("materialization-command-receipt.schema.json", receipt)
+        try:
+            delta = _phase5_generated_delta(project, root, state, attempt)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("invalid materialization command receipt") from error
+        materialized = {str(row.get("path")): row.get("content_digest") for row in delta.get("files", ()) if isinstance(row, Mapping) and row.get("materialization") == "MATERIALIZED"}
+        if (
+            not identity_matches
+            or receipt.get("baseline_digest") != attempt.get("baseline_digest")
+            or receipt.get("generated_delta_digest") != delta.get("digest")
+            or receipt.get("command_digest") != _digest({"working_directory": receipt.get("working_directory"), "command": receipt.get("command")})
+            or {row["path"]: row["content_digest"] for row in receipt.get("files", ())} != materialized
+        ):
+            raise ValueError("invalid materialization command receipt")
     elif kind == "resume-validation":
         _validate_schema("resume-validation-receipt.schema.json", receipt)
         expected_keys = common | {
@@ -4319,7 +4345,7 @@ def read_attempt_receipt(
 
 
 _RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-boundaries", "effective-canonicals", "automation-review-boundaries",
-                    "execution-inputs", "materialization-ownership", "generated-deltas", "execution-receipts", "resume-validations", "execution-traces",
+                    "execution-inputs", "materialization-ownership", "generated-deltas", "materialization-commands", "execution-receipts", "resume-validations", "execution-traces",
                     "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "review-canaries",
                     "imported-cases", "prior-capabilities")
 
@@ -7495,3 +7521,5 @@ run_root_of = _run_root
 terminal_retry_snapshot = _terminal_retry_snapshot
 generator_input = _generator_input  # V7: the published plan or header of the attempt (step_size, for the projection of the plan)
 validate_execution_event_branch = _validate_execution_event_branch
+publish_fixed_receipt_resuming = _publish_fixed_receipt_resuming
+canonical_digest = _digest
