@@ -178,7 +178,10 @@ def test_every_exec_file_on_disk_is_listed_by_the_gate_and_left_out_of_the_cases
     on_disk = sorted(path.stem for path in (ROOT / "tools").glob("exec_*.py"))
     assert on_disk == sorted(execution_gate.EXEC_MODULES), "a new exec_ file must be in EXEC_MODULES (and then it is left out of the profile)"
     assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in on_disk)
-    assert not any(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in ("execution_gate", "execution_adapters"))
+    # F6: the gate stays in the profile (the core reaches the left-out files only through it); every file of its closed lists is left out
+    assert not pack_registry.is_cases_only_excluded("tools/execution_gate.py")
+    for listed in (execution_gate.MODE_B_MODULES, execution_gate.LEGACY_MODULES):
+        assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in listed), listed
 
 
 # ---- the profile of cases has no launch, network or library loading --------------------------------------------------
