@@ -172,7 +172,7 @@ def test_the_help_of_the_cases_only_pack_lists_no_command_of_automation(cases_on
         assert command not in listing, command
         refused = _run_api(cases_only_pack, command, "--help")
         assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr, command
-    for kept in ("validate-fragment", "review-open", "review-select", "session-start", "complete-review", "plan"):
+    for kept in ("validate-fragment", "review-open", "review-select", "plan"):  # F4b: the three commands of the nine are not commands of this delivery
         assert _run_api(cases_only_pack, kept, "--help").returncode == 0, kept
 
 

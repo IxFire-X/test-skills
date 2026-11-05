@@ -38,6 +38,7 @@ CASES_ONLY_EXCLUDED_FILES = (
     "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
     "schemas/release-eval-run.schema.json", "schemas/scenario-observation-receipt.schema.json",
+    "tools/review_legacy.py",
 )
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe (P8a-1)
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a

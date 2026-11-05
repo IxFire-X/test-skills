@@ -180,7 +180,7 @@ def test_the_old_publish_and_select_check_the_same_paths(tmp_path: Path, capsys:
 # ---- every entry point -------------------------------------------------------------------------------------------
 
 FLAGS = {"--out", "--output-dir"}
-ENTRY_POINTS = {"tools/api.py", "tools/orchestrate_test_case_revision.py"}
+ENTRY_POINTS = {"tools/api.py", "tools/review_legacy.py"}  # F4b: the old CLI of the review lives in review_legacy.py
 
 
 def _flag_files() -> dict[str, ast.Module]:

@@ -91,13 +91,11 @@ def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_an
     from tools.step_size import OUTPUT_TRUNCATED
 
     path, size = _cut_answer(tmp_path)
-    with pytest.raises(SystemExit) as stop:  # refused as an argument, before the function (FaT-10)
-        _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-              "--artifact", str(path)], capsys)
-    output = json.loads(capsys.readouterr().out)
-    message = output["errors"][0]["message"]
-    assert stop.value.code == 2 and output["status"] == "error" and OUTPUT_TRUNCATED == "MODEL_OUTPUT_TRUNCATED"
-    assert f"{OUTPUT_TRUNCATED}: ответ модели оборван на {size} Б" in message and "без отступов" in message
+    code, output = _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
+                         "--artifact", str(path)], capsys)  # F4b: refused in main with its code and fix, before the function
+    message = output["message"]
+    assert code == 2 and output["status"] == "error" and OUTPUT_TRUNCATED == "MODEL_OUTPUT_TRUNCATED" and output["code"] == OUTPUT_TRUNCATED
+    assert f"{OUTPUT_TRUNCATED}: ответ модели оборван на {size} Б" in message and "без отступов" in message and output["fix"]
 
 
 def test_validate_artifact_names_a_cut_answer_and_gives_a_retry_prompt(tmp_path: Path) -> None:
@@ -120,10 +118,9 @@ def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: 
     path.write_text(text, encoding="utf-8")
     code, report = validate(str(ROOT / "schemas" / "canonical-test-document.schema.json"), str(path))
     assert code == 2 and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(report, ensure_ascii=False)
-    with pytest.raises(SystemExit) as stop:
-        _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-              "--artifact", str(path)], capsys)
-    assert stop.value.code == 2 and "MODEL_OUTPUT_TRUNCATED" not in capsys.readouterr().out
+    code, output = _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
+                         "--artifact", str(path)], capsys)
+    assert code == 2 and output["code"] == "ANSWER_JSON_INVALID" and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(output, ensure_ascii=False)
 
 
 @pytest.mark.parametrize("text", ['{"a": "abc', '{"a": [1, 2', '{"a": {"b": 1}', '{"a": "x\\"', '  '])

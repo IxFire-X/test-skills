@@ -66,6 +66,8 @@ def _plain(value: Any) -> Any:
         return {key: _plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):  # F4b (O-9): a scalar cannot be changed in place — no copy
+        return value
     return copy.deepcopy(value)
 
 
@@ -869,13 +871,6 @@ def _readback_rows(receipt: Any, document: Mapping[str, Any]) -> list[dict[str, 
     return [] if verified == receipt else [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")]
 
 
-class _Parser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_ARGUMENT")], "status": "error", "successor_bundle_receipt": None,
-                          "message": f"argument error: {message}", "fix": None, "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-        raise SystemExit(2)
-
-
 def _receipt_json(receipt: Receipt | None) -> dict[str, Any] | None:
     return None if receipt is None else {field: getattr(receipt, field) for field in ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")}
 
@@ -1327,121 +1322,20 @@ def _read_existing_context_receipts(paths: Sequence[Path], run_root: Path, attem
 _FIXES = {code: FIXES[code] for code in ("REVIEW_CONTEXT_LIMIT", "ORCHESTRATION_RECEIPT_SHAPE", "REVIEWER_PROTOCOL")}  # FaT-10d; P1: the texts live in tools.fixes
 
 
-# FaT-U5: the old command names stay until the release to testers; tools.api is the one CLI of the review layer
-_RENAMED = {name: {"code": "COMMAND_RENAMED", "message": f"tools.api {new}"}
-            for name, new in (("publish", "review-publish"), ("open-session", "review-open"), ("select", "review-select"))}
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = _Parser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    publish = commands.add_parser("publish", help="Publish and read back revision 1 as UNREVIEWED.")
-    publish.add_argument("--candidate", required=True, type=Path)
-    publish.add_argument("--output-dir", required=True, type=Path)
-    publish.add_argument("--run-root", required=True, type=Path)
-    publish.add_argument("--attempt-id", required=True)
-    publish.add_argument("--csv-profile", default=_PROFILE)
-    publish.add_argument("--out", type=Path, default=None, help="FaT-AU2: write the candidate receipt (--candidate-receipt) to <run>/tmp/<file>")
-    open_session = commands.add_parser("open-session", help="Reserve the attempt's only host-owned canonical reviewer session.")
-    open_session.add_argument("--candidate", required=True, type=Path)
-    open_session.add_argument("--candidate-receipt", required=True, type=Path)
-    open_session.add_argument("--assembly-receipt", required=True, type=Path)
-    open_session.add_argument("--inventory-receipt", required=True, type=Path)
-    open_session.add_argument("--context-receipt", required=True, action="append", type=Path)
-    open_session.add_argument("--context-marker-output", required=True, type=Path)
-    open_session.add_argument("--generator-fragment", required=True, action="append", type=Path)
-    open_session.add_argument("--session-start", required=True, type=Path)
-    open_session.add_argument("--run-root", required=True, type=Path)
-    open_session.add_argument("--attempt-id", required=True)
-    open_session.add_argument("--csv-profile", default=_PROFILE)
-    select = commands.add_parser("select", help="Validate one host-owned reviewer session and select the effective revision.")
-    select.add_argument("--candidate", required=True, type=Path)
-    select.add_argument("--candidate-receipt", required=True, type=Path)
-    select.add_argument("--assembly-receipt", required=True, type=Path)
-    select.add_argument("--inventory-receipt", required=True, type=Path)
-    select.add_argument("--context-receipt", required=True, action="append", type=Path)
-    select.add_argument("--context-marker-output", required=True, type=Path)
-    select.add_argument("--generator-fragment", required=True, action="append", type=Path)
-    select.add_argument("--reviewer-session", required=True, type=Path)
-    select.add_argument("--evidence-receipt", action="append", default=[], type=Path)
-    select.add_argument("--review", type=Path)
-    select.add_argument("--run-root", required=True, type=Path)
-    select.add_argument("--attempt-id", required=True)
-    select.add_argument("--output-dir", required=True, type=Path)
-    select.add_argument("--csv-profile", default=_PROFILE)
-    args = parser.parse_args(argv)
-    if hasattr(args, "csv_profile") and args.csv_profile not in _PROFILES:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("/csv_profile", "ORCHESTRATION_PROFILE")], "status": "error", "successor_bundle_receipt": None,
-                          "message": f"unknown csv profile {args.csv_profile}", "fix": f"one of {sorted(_PROFILES)}", "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    try:
-        candidate = load_json_strict(args.candidate)
-        if args.command == "publish":
-            from tools.api import _out_target, _write  # FaT-AU2: the one --out policy and writer of the package
+    """F4b: the old CLI of the review (``publish|open-session|select``) is ``tools/review_legacy.py`` — a file of the development
+    build.  A delivery of cases does not carry it: its one way into the review is ``tools.api review-open`` → ``review-select``."""
+    from tools import execution_gate
 
-            out = _out_target(str(args.out), args.run_root) if args.out is not None else None  # refused before anything is published
-            output_guard.run_output_directory(args.output_dir, args.run_root)
-            published = publish_command(candidate, args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
-            published["warnings"] = [*published["warnings"], _RENAMED["publish"]]
-            if out is not None:
-                published["out"] = _write(out, published["candidate_bundle_receipt"])
-            print(json.dumps(published, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
-        if args.command == "select":
-            output_guard.run_output_directory(args.output_dir, args.run_root)
-        receipt = _load_receipt(args.candidate_receipt)
-        base_contexts = [load_json_strict(path) for path in args.context_receipt]
-        if args.command == "open-session":
-            from tools.pilot_state import publish_context_selection
-
-            base_contexts = [publish_context_selection(args.run_root, args.attempt_id, value) for value in base_contexts]
-        else:
-            base_contexts = _read_existing_context_receipts(args.context_receipt, args.run_root, args.attempt_id)
-        package = reviewer_package_binding(
-            candidate,
-            receipt,
-            load_json_strict(args.assembly_receipt),
-            load_json_strict(args.inventory_receipt),
-            base_contexts,
-            context_marker_output=load_json_strict(args.context_marker_output),
-            generator_fragments=[load_json_strict(path) for path in args.generator_fragment],
-            run_root=args.run_root,
-            attempt_id=args.attempt_id,
-        )
-        if args.command == "open-session":
-            boundary = open_reviewer_session(args.run_root, args.attempt_id, package, load_json_strict(args.session_start))
-            print(json.dumps({"package_binding": package, "reviewer_session_boundary": boundary, "status": "opened",
-                              "warnings": [_RENAMED["open-session"]]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
-        result = orchestrate_revision(
-            candidate,
-            receipt,
-            package,
-            load_json_strict(args.reviewer_session),
-            None if args.review is None else load_json_strict(args.review),
-            args.output_dir,
-            args.csv_profile,
-            run_root=args.run_root,
-            attempt_id=args.attempt_id,
-            reviewer_evidence_receipts=_read_existing_context_receipts(args.evidence_receipt, args.run_root, args.attempt_id),
-        )
-    except OrchestrationError as error:
-        exit_code = 2 if error.code in {"ORCHESTRATION_PUBLICATION", "ORCHESTRATION_VERIFICATION"} else 1
-        print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt),
-                          "diagnostics": [dict(row) for row in error.diagnostics], "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)},
-                         ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
-    except output_guard.OutputRefused as error:  # --out / --output-dir outside the run or the project: its own code and fix
-        print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")],
-                          "successor_bundle_receipt": None, "reason_code": error.code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    except (StrictJsonError, OSError, ValueError) as error:
-        # FaT-10d: the inner refusal code and its fix; FaT-U5: the one envelope, the code is the refusal's own
-        envelope = error_envelope(error)  # FaT-U6: the same reading as tools.api
-        reason_code = error_code_prefix(envelope["message"])
-        print(json.dumps({**envelope, "code": reason_code or "ORCHESTRATION_INPUT", "fix": _FIXES.get(reason_code) or envelope["fix"],
-                          "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")], "successor_bundle_receipt": None,
-                          "reason_code": reason_code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    output = {**select_output(result), "warnings": [_RENAMED["select"]], **_canary_report(args.run_root, args.attempt_id, None)}
-    print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    return 0
+    legacy = execution_gate.load_legacy("review_legacy")
+    if legacy is None:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        print(json.dumps({"status": "error", "code": "COMMAND_NOT_IN_PACKAGE", "message": "COMMAND_NOT_IN_PACKAGE: the old CLI of the review is not in this package",
+                          "fix": "ревью — две команды: tools.api review-open … → вызов ревьюера → tools.api review-select --verdict <файл ответа ревьюера>",
+                          "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 2
+    return legacy.main(argv)
 
 
 if __name__ == "__main__":

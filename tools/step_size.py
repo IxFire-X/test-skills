@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from tools.json_cli import JsonArgumentParser
+from tools.json_cli import JsonArgumentParser, cli_error
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -38,6 +38,8 @@ OUTPUT_TRUNCATED = "MODEL_OUTPUT_TRUNCATED"
 OUTPUT_SIZES = "output-sizes.jsonl"
 TRUNCATED_HINT = ("похоже, ответ упёрся в лимит выхода модели; повтори стадию один раз (как при ошибке схемы) и попроси "
                   "ответить тем же JSON целиком, компактно, без отступов и переносов — так ответ почти вдвое меньше")
+TRUNCATED_FIX = ("повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без отступов "
+                 "и переносов; дальше — finish, если повтор тоже оборван")
 DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real output limit of the work model is not known yet
 TOKENS_PER_BYTE = 0.24
 _STAGE_ROLES = {"context-marker": "context-marker"}
@@ -591,7 +593,8 @@ def main(argv: list[str] | None = None) -> int:
             stage = args.stage and (f"{args.stage}:batch-{args.batch:03d}" if args.batch is not None else args.stage)
             report["recorded"] = record(project, args.run, args.step or stage or role or "step", report)
     except (OSError, ValueError, KeyError) as error:
-        print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
+        print(json.dumps(cli_error(error, fix="--project и --run — проект и id прогона (их создаёт scan); --stage — стадия прогона из списка в сообщении; "
+                                   "журнал прогона: `python -m tools.run_pipeline status --project <проект> --run <run_id>`"), ensure_ascii=False))
         return 2
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0

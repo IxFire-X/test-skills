@@ -69,7 +69,7 @@ Inventory учитывает файлы выбранного модуля, paren
    bundle receipt и `CANDIDATE_PUBLISHED` stage `assembly`.
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
-   candidate digest получает `REVIEW_REQUESTED` (`tools.api review-requested`) до reviewer `MODEL_REQUESTED`;
+   candidate digest получает `REVIEW_REQUESTED` (его пишет `tools.api review-open`) до reviewer `MODEL_REQUESTED`;
 8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
 9. Перейди к trace/finalization: pre-finalization trace -> finalization receipt/readback -> terminal result ->

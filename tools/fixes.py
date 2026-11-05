@@ -68,6 +68,14 @@ FIXES: dict[str, str] = {
     "REVIEW_CODEWORD_NAMED": "ревьюер назвал контрольное слово генератора — он видел задачу генератора: проведи ревью в новой сессии "
                              "(/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её ответ; ревью в той же сессии — "
                              "только если прогон начат с scan --accept-self-review",
+    "MODEL_OUTPUT_TRUNCATED": "повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без "
+                              "отступов и переносов; дальше — finish, если повтор тоже оборван",
+    "ANSWER_FILE_UNREADABLE": "--artifact/--verdict — путь к файлу ответа модели, который лежит на диске; запиши ответ в файл и подай его путь",
+    "ANSWER_JSON_INVALID": "файл ответа — один JSON-объект в UTF-8 без комментариев и дублей ключей; исправь файл и подай его единственным "
+                           "повтором стадии (--transport-attempts 2)",
+    "COMMAND_NOT_IN_PACKAGE": "ревью — две команды: tools.api review-open … → вызов ревьюера → tools.api review-select --verdict <файл ответа ревьюера>",
+    "LEGACY_REVIEW_NOT_IN_PACKAGE": "ревью — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → вызов "
+                                    "ревьюера → tools.api review-select --verdict <файл ответа ревьюера>",
     "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
     "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: tools.api review-select --verdict <файл ответа ревьюера> записывает его и "
                                  "выбирает ревизию; ревьюера ещё не вызывали — " + REVIEW_CHAIN,

@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from tools import pilot_state
 from tools.cases_import import cases_path, docs_run
-from tools.json_cli import JsonArgumentParser
+from tools.json_cli import JsonArgumentParser, cli_error
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
 MERGE_TEXT = "слияние частей кодом (не вызов модели): python -m tools.context_marker_parts merge --run-root <run>"
@@ -158,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
                                   "next": "пауза: покажи человеку пробелы разметки (status → next_step SCOPE_PENDING)"}
                                  if published.get("questions_draft") else {})}, ensure_ascii=False, sort_keys=True))
     except (OSError, ValueError, KeyError) as error:
-        print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
+        print(json.dumps(cli_error(error, fix="--run-root — каталог прогона .pilot-runs/<run_id> (его создаёт scan); команда запускается из каталога пакета; "
+                                   "что делать дальше, называет `python -m tools.run_pipeline status --project <проект> --run <run_id>` (next_step)"),
+                         ensure_ascii=False))
         return 2
     return 0
 

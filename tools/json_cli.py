@@ -41,6 +41,19 @@ def error_envelope(error: BaseException, next_step: str | None = None) -> dict[s
     return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step}
 
 
+def cli_error(error: BaseException, *, fix: str, code: str = "INVALID_INPUT") -> dict[str, object]:
+    """F4b (A5-9): the envelope ``{status, code, message, fix, next}`` of a CLI that had printed ``{status, message}`` — the refusal's own
+    code and fix when it has them (``CODE: …; fix: …``), else *code* (``FILE_UNREADABLE`` for a file that cannot be read) and the *fix* of
+    the CLI.  ``status`` and ``message`` stay as they were."""
+    envelope = error_envelope(error)
+    if envelope["code"] == type(error).__name__:  # no code of its own: the class of the exception is no code
+        envelope["code"] = "FILE_UNREADABLE" if isinstance(error, OSError) else code
+    envelope["fix"] = envelope["fix"] or fix
+    if isinstance(error, OSError):
+        envelope["message"] = str(error)
+    return envelope
+
+
 _MODEL_REQUEST_FLAGS = ("--model-id", "--invocation-id", "--input-digest", "--reuse-from")
 
 

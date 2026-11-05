@@ -54,18 +54,21 @@ class _Answer:
     raw_bytes: int
 
 
-def _answer(path: str) -> _Answer:
-    """FaT-O2: a model answer file — its strict JSON and its raw size; a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED."""
+def _load_answer(path: str) -> _Answer:
+    """FaT-O2: a model answer file — its strict JSON and its raw size.  F4b (A5-5): read in ``main`` and refused with the code of the
+    refusal and its fix (a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED), not by argparse as «check the flags»."""
     try:
         raw = Path(path).read_bytes()
     except OSError as error:
-        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
+        raise ValueError(f"ANSWER_FILE_UNREADABLE: {path}: {error.strerror or error}; fix: --artifact/--verdict — путь к файлу ответа модели, "
+                         "который лежит на диске; запиши ответ в файл и подай его путь") from error
     try:
         return _Answer(loads_json_strict(raw.decode("utf-8")), len(raw))
     except (UnicodeDecodeError, StrictJsonError) as error:
         if step_size.looks_truncated(raw.decode("utf-8", "replace")):
-            raise argparse.ArgumentTypeError(step_size.truncated_message(len(raw))) from error
-        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
+            raise ValueError(step_size.truncated_message(len(raw)) + "; fix: " + step_size.TRUNCATED_FIX) from error
+        raise ValueError(f"ANSWER_JSON_INVALID: {path}: {error}; fix: файл ответа — один JSON-объект в UTF-8 без комментариев и дублей ключей; "
+                         "исправь файл и подай его единственным повтором стадии (--transport-attempts 2)") from error
 
 
 def _yes_no(value: str) -> bool:
@@ -221,6 +224,17 @@ def _cmd_review_publish(a):
                                                       output_dir=a.output_dir, csv_profile=a.csv_profile)
 
 
+def _refuse_legacy_flags(a, *names: str) -> None:
+    """F4b: a flag of the nine commands where their old CLI is not — a refusal with the way in, not a failure deep in the old path."""
+    if execution_gate.legacy_available():
+        return
+    given = [f"--{name.replace('_', '-')}" for name in names if getattr(a, name, None) is not None]
+    if given:
+        raise ValueError(f"LEGACY_REVIEW_NOT_IN_PACKAGE: {', '.join(given)} — флаг прежнего порядка ревью, которого в этой поставке нет; "
+                         "fix: ревью — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → вызов ревьюера → "
+                         "tools.api review-select --verdict <файл ответа ревьюера>")
+
+
 def _cmd_review_open(a):
     """P2: without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
     FaT-U5 command of the nine, as before — one package function either way."""
@@ -314,7 +328,7 @@ def _not_runnable(result: Any) -> bool:
 # name: (handler, options, invalid-when, named parts of a tuple result)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
     "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional"), ("--reuse-from", str, None)), None, ()),
-    "model-response": (_cmd_model_response, (*RUN, "--stage", ("--artifact", _answer), ("--transport-attempts", int, 1)), None, ()),
+    "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None, ()),
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
@@ -346,7 +360,7 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                                        ("--session-start", _json, None), ("--model-id", str, None), ("--invocation-id", str, None),
                                        ("--fresh-context", _yes_no, None)), None, ()),
     "review-select": (_cmd_review_select, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
-                                           ("--reviewer-session", _json, None), ("--review", _json, None), ("--verdict", _answer, None),
+                                           ("--reviewer-session", _json, None), ("--review", _json, None), ("--verdict", str, None),
                                            ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
     "complete-review": (_cmd_complete_review, RUN, None, ()),
     "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
@@ -370,6 +384,11 @@ _AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary",
                         "runner-compat")
 if not execution_gate.execution_available():
     for _name in _AUTOMATION_COMMANDS:
+        COMMANDS.pop(_name, None)
+# F4b: the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is
+_LEGACY_REVIEW_COMMANDS = ("session-start", "review-requested", "complete-review")
+if not execution_gate.legacy_available():
+    for _name in _LEGACY_REVIEW_COMMANDS:
         COMMANDS.pop(_name, None)
 
 
@@ -466,6 +485,13 @@ def main(argv: list[str] | None = None) -> int:
     handler, _options, invalid, parts = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))
     try:
+        if args.command == "review-open":  # F4b: before the guards below — the flag is refused for what it is
+            _refuse_legacy_flags(args, "session_start")
+        elif args.command == "review-select":
+            _refuse_legacy_flags(args, "reviewer_session", "review")
+        for _flag in ("artifact", "verdict"):  # F4b: the answer file is read here, so that its refusal has its code and fix and a line in refusals.jsonl
+            if isinstance(getattr(args, _flag, None), str):
+                setattr(args, _flag, _load_answer(getattr(args, _flag)))
         run_root = getattr(args, "run_root", None)
         targets = {part: _out_target(getattr(args, f"out_{part}"), run_root) for part in parts}
         out = _out_target(args.out, run_root) if not parts and args.out is not None else None

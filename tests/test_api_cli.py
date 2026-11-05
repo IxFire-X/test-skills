@@ -183,9 +183,8 @@ def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, caps
     before = pilot_state.derive_state(root)
     answer = tmp_path / "answer.json"
     answer.write_text('{"stage": "context-marker", "stage": "x"}', encoding="utf-8")
-    with pytest.raises(SystemExit) as stop:
-        _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", str(answer)], capsys)
-    assert stop.value.code == 2 and json.loads(capsys.readouterr().out)["status"] == "error"
+    code, refused = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", str(answer)], capsys)
+    assert code == 2 and refused["status"] == "error" and refused["code"] == "ANSWER_JSON_INVALID" and refused["fix"]  # F4b: read in main, not by argparse
     assert pilot_state.derive_state(root) == before
 
 

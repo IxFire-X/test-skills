@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.json_cli import JsonArgumentParser
+from tools.json_cli import JsonArgumentParser, cli_error
 
 EDITABLE = ("title", "objective", "precondition", "action", "test_data", "expectation")
 _CASE_FIELDS = {"title", "objective"}
@@ -151,7 +151,8 @@ def main(argv: list[str] | None = None) -> int:
         value = json.loads(Path(args.edits).read_text(encoding="utf-8"))
         edits = value["artifacts"]["successor_edits"] if isinstance(value, Mapping) else value
     except (OSError, ValueError, KeyError, TypeError) as error:
-        print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
+        print(json.dumps(cli_error(error, fix="--candidate — файл кандидата r1, --edits — JSON-список правок или ответ ревьюера с "
+                                   "artifacts.successor_edits; оба файла должны существовать и быть JSON"), ensure_ascii=False))
         return 2
     successor, diagnostics = apply_edits(candidate, edits)
     if successor is not None:

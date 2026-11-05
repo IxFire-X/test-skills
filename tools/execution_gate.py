@@ -5,7 +5,7 @@ files; the core never imports them.  The profile of a delivery is the presence o
 without copying the code — so a delivery without them is cases-only, and ``local-pilot-v1`` is not offered by it.
 
 This module is the only place that loads a module by name (``find_spec`` and ``import_module``), and only ``tools.<name>`` for
-a name in the closed list ``EXEC_MODULES``.
+a name in the closed lists ``EXEC_MODULES`` and ``LEGACY_MODULES``.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import importlib.util
 from types import ModuleType
 
 EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
+# F4b: the way into the review of before (the CLI of the nine commands) is a file of the development build only
+LEGACY_MODULES = ("review_legacy",)
 LOCAL_PILOT = "local-pilot-v1"
 CASES_ONLY = "cases-only-v1"
 
@@ -34,6 +36,20 @@ def execution_available() -> bool:
 def default_profile() -> str:
     """The profile a delivery runs by default: what its files can do."""
     return LOCAL_PILOT if execution_available() else CASES_ONLY
+
+
+def legacy_available() -> bool:
+    """Whether the package has the old CLI of the review (``tools/review_legacy.py``): the build of development, not a delivery of cases."""
+    return all(_present(name) for name in LEGACY_MODULES)
+
+
+def load_legacy(name: str) -> ModuleType | None:
+    """The module ``name`` (one of ``LEGACY_MODULES``), or None when this delivery does not have the file."""
+    if name not in LEGACY_MODULES:
+        raise ValueError(f"not a module of the old review path: {name!r}")
+    if not _present(name):
+        return None
+    return importlib.import_module("tools." + name)
 
 
 def load(name: str) -> ModuleType | None:
