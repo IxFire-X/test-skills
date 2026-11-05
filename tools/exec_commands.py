@@ -301,7 +301,6 @@ _INGEST_REASONS = {"BUILD_FAILED": "NOT_RUNNABLE", "TESTS_NOT_STARTED": "NOT_RUN
 HUMAN_RESULT_NOTE = "результат запуска предоставлен человеком, пакет его не воспроизводил"
 _REVIEW_NOTICE = ("код этих тестов написала модель и ещё не запускала: просмотрите перечисленные файлы до запуска; не правьте и не "
                   "форматируйте их после materialize — напечатанная команда уже отключает проверки стиля, а правка файла даст SOURCE_CHANGED")
-_SAFE_TOKEN = re.compile(r"[A-Za-z0-9_./:=,#@%+\-]+")
 
 
 class _NotBuilt(Exception):
@@ -453,8 +452,38 @@ def _human_command(project: Path, module_root: Path, module_relative: str, reque
     return module_relative, [_relative_executable(request.executable, module_root), *argv[1:]]
 
 
-def _quote(token: str) -> str:
-    return token if _SAFE_TOKEN.fullmatch(token) else '"' + token.replace('"', '\\"') + '"'
+# V4b: the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
+# or a backslash in double quotes (the same in all three); any other token is not printed.  What quotes cannot hold: ``"`` closes them, ``%``
+# and ``!`` are expanded by cmd.exe inside them, ``^`` escapes there, ``$`` and the back quote are expanded by sh and PowerShell inside them, and
+# ``& | < > ; ' * ?`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.
+_BARE_TOKEN = re.compile(r"[A-Za-z0-9_./:=,#+\-]+")
+_QUOTABLE_MARKS = " _./:=,#@+-\\()[]{}~"
+
+
+def command_token(token: str) -> str:
+    """The token as it is printed - plain, or in double quotes - or ``HostStop COMMAND_NOT_PRINTABLE`` naming what cannot be printed."""
+    if _BARE_TOKEN.fullmatch(token):
+        return token
+    if all(char.isalnum() or char in _QUOTABLE_MARKS for char in token) and not token.endswith("\\") and "\\\\" not in token:
+        return '"' + token + '"'
+    bad = sorted({char for char in token if not (char.isalnum() or char in _QUOTABLE_MARKS)} | ({"\\"} if token.endswith("\\") or "\\\\" in token else set()))
+    shown = " ".join(repr(char)[1:-1] if not char.isprintable() else char for char in bad)
+    raise HostStop("COMMAND_NOT_PRINTABLE", f"в команде для человека есть символ(ы) {shown}: cmd.exe, PowerShell или sh прочтут их как подстановку, экранирование или кавычку "
+                   f"(в «{token[:80]}»)",
+                   f"переименуйте или переместите проект (или интерпретатор/модуль) в каталог, в имени которого нет {shown}, и начните прогон заново "
+                   "(scan --new-run): путь входит в напечатанную команду")
+
+
+def command_text(tokens: Sequence[str]) -> str:
+    return " ".join(command_token(token) for token in tokens)
+
+
+def _command_line(tokens: Sequence[str]) -> str:
+    """The command for a refusal's fix: its text, or the note that it cannot be printed."""
+    try:
+        return command_text(tokens)
+    except HostStop:
+        return "(команда не печатается: путь в ней нельзя записать безопасно, см. ответ materialize)"
 
 
 def _link(path: Path) -> bool:
@@ -582,12 +611,17 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
             changed.append((module_root / Path(row["path"])).relative_to(project).as_posix())
     command = printed["command"]
     working = printed["working_directory"]
-    ingest = (f'"{sys.executable}" -m tools.run_pipeline ingest --project "{project}" --run {root.name} --reports <каталог с отчётами внутри модуля '
-              f'или {(root / "incoming").relative_to(project).as_posix()}/>')
+    try:
+        shown = command_text(command)
+        ingest = (f'{command_token(sys.executable)} -m tools.run_pipeline ingest --project {command_token(str(project))} --run {root.name} --reports <каталог с отчётами внутри модуля '
+                  f'или {(root / "incoming").relative_to(project).as_posix()}/>')
+    except HostStop as stop:
+        _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
+        return 2
     _print({
         "status": "ok", "stage": "materialize", "run_id": coordinates["manifest"]["run_id"], "attempt_id": attempt_id,
         "repeated": repeated, "working_directory": working, "command": command,
-        "command_text": " ".join(_quote(token) for token in command),
+        "command_text": shown,
         "report_location": printed["report_location"], "challenge": printed["challenge"]["kind"],
         "files_to_review": [(module_root / Path(row["path"])).relative_to(project).as_posix() for row in printed["files"]],
         **({"files_changed_since_materialize": changed} if changed else {}),
@@ -624,6 +658,7 @@ def cmd_materialize(args: Any) -> int:
                 "fix": "materialize без --restore", "attempt_id": attempt_id})
         return 2
     try:
+        command_text([sys.executable, str(project), str(attempt["module"])])  # V4b: what the printed lines will hold, before anything is written
         _prepare_execution(coordinates)
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), **({"fix": stop.fix} if stop.fix else {}),
@@ -645,6 +680,11 @@ def cmd_materialize(args: Any) -> int:
     challenge = _challenge(request, nonce)
     module_relative = str(attempt["module"])
     working, command = _human_command(project, Path(coordinates["module_root"]), module_relative, request, challenge)
+    try:
+        command_text([working, *command])  # V4b: a command that cannot be printed is not published as one
+    except HostStop as stop:
+        _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
+        return 2
     taken = time.time_ns()  # before the look at the reports: a file touched after this has a later time than this
     entries = _report_files(Path(coordinates["module_root"]) / request.report_paths[0], [Path(coordinates["module_root"])])
     facts = {
@@ -922,7 +962,7 @@ def cmd_ingest(args: Any) -> int:
         except (HostStop, KeyError, TypeError, ValueError, OSError) as error:
             return _ingest_refusal(attempt_id, getattr(error, "code", "FINALIZATION"), str(error), "повторите ingest; если не помогает — новый scan")
         return _finish_ingest(coordinates, existing["payload"])
-    command_text = " ".join(_quote(token) for token in printed["command"])
+    command_text = _command_line(printed["command"])
     again = f"запустите команду из materialize (она напечатается снова: materialize --run {root.name}), затем повторите ingest"
     if not entries:
         return _ingest_refusal(attempt_id, "INGEST_REPORT_MISSING", f"в {location} нет XML-отчётов",
