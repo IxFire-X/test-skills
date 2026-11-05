@@ -270,6 +270,41 @@ FIXES: dict[str, str] = {
     "INGEST_REASON_AFTER_RESULT": "результат попытки уже записан: ingest без --no-reports печатает его снова",
     "MATERIALIZE_RESTORE_NOTHING": "тесты ещё не положены в проект: `materialize` без --restore",
     "MATERIALIZATION_COMMAND_UNBOUND": "файл команды materialize лежит без событий журнала: повторите `materialize` с теми же аргументами",
+    # --- V8 (A5-10): the refusals of the cases-only path that had no fix ---
+    "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и --attempt (`status` называет попытку) и входные файлы команды; "
+                     "повтори с исправленными аргументами",
+    "GENERATOR_INPUT_INVALID": "`publish-generator-input` берёт `--kind plan|header` и `--value` — JSON-объект; план без пачек не публикуется: "
+                               "построй его `tools.api plan` или `plan-batches`",
+    "GENERATOR_INPUT_DIGEST": "digest во входе не равен его self-digest: не правь план и header руками, опубликуй заново файл, который построил код; "
+                              "`result.digest` публикации — единственный digest входа",
+    "GENERATOR_INPUT_CONFLICT": "у попытки уже есть другой такой вход (скелет, capabilities, план или header): продолжай с опубликованным, "
+                                "`status` покажет следующий шаг; другое содержимое — новый прогон (`scan --new-run`)",
+    "GENERATOR_INPUT_ORDER": "header публикуется раньше плана: `tools.api publish-generator-input --kind header --value <f>`, затем план",
+    "REVIEWER_SESSION_CLOSED": "сессия ревью закрыта: вердикт в неё не добавить; `review-select` без --verdict выберет по записанному, "
+                               "новое ревью — новый прогон (`scan --new-run`)",
+    "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (`review-evidence --path <путь в проекте>`) или закрой сессию "
+                                      "`review-abort --reason REVIEW_CONTEXT_LIMIT`",
+    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (`read-ledger` называет уже выданные)",
+    "REVIEWER_EVIDENCE_DUPLICATE": "эти файлы уже выданы ревьюеру: возьми их из `read-ledger`, а новые пути — отдельным запросом",
+    "REVIEWER_ABORT_REASON_INVALID": "`review-abort --reason` — REVIEW_CONTEXT_LIMIT (не хватило бюджета на evidence) или REVIEW_UNUSABLE "
+                                     "(ответ дважды не прошёл проверку)",
+    "REVIEW_UNUSABLE": "ревью не может закончиться вердиктом: закрой сессию `review-abort --reason REVIEW_UNUSABLE`, затем `finish`; "
+                       "следующий заход — команда `next_run` из его вывода",
+    "REVIEW_CANDIDATE_NOT_PUBLISHED": "этот кандидат не тот, что опубликован журналом: не подставляй свои файлы, повтори `review-open` — "
+                                      "он возьмёт кандидата из журнала",
+    "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → next_step), новое — новый прогон",
+    "REVIEW_INPUTS_UNAVAILABLE": "попытки нет в прогоне: проверь --run-root и --attempt (`status` называет текущую попытку)",
+    "CONTEXT_MARKER_PARTS_INCOMPLETE": "не все части разметки отвечены: `python -m tools.context_marker_parts plan --run-root <run>` показывает недостающие; "
+                                       "ответь на них, затем повтори `merge`",
+    "CONTEXT_MARKER_REQUIREMENTS_CHANGED": "часть разметки может только добавлять наблюдения по коду, требования шага `context-marker:requirements` "
+                                           "не меняются: убери правки требований из ответа части и повтори единственный раз",
+    "HARDLINK_UNAVAILABLE": "каталог публикации не поддерживает жёсткие ссылки: возьми `--output-dir` на том же диске внутри проекта (`<run>/published`)",
+    "OUTPUT_DIRECTORY_ERROR": "каталог публикации недоступен: возьми `--output-dir` `<run>/published` внутри проекта вне .git и проверь права записи",
+    "TARGET_INSTALL_FAILED": "публикацию не удалось завершить: ничего не правь руками, повтори команду с теми же аргументами; повторный отказ — "
+                             "проверь права записи и свободное место в `--output-dir`",
+    "TEMPORARY_WRITE_FAILED": "временный файл публикации не записан: проверь права и свободное место в `--output-dir`, повтори команду",
+    "TARGET_READ_FAILED": "опубликованный файл не читается: проверь права доступа `--output-dir`, повтори команду с теми же аргументами",
+    "STEP_INPUT_UNRESOLVED": "не стоп: вход шага нашёлся не по журналу (или два файла с одним digest) — одна строка человеку, шаг продолжай",
 }
 
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"

@@ -7,13 +7,16 @@ import json
 
 import pytest
 
+from tools.fixes import fix_for
+
 pytestmark = pytest.mark.contract
 
 
 @pytest.mark.parametrize(("error", "fields"), [
-    (ValueError("invalid factual receipt"), {"code": "ValueError", "message": "invalid factual receipt"}),
-    (ValueError("GENERATOR_INPUT_DIGEST: the plan digest is not its self-digest"),
-     {"code": "GENERATOR_INPUT_DIGEST", "message": "GENERATOR_INPUT_DIGEST: the plan digest is not its self-digest"}),
+    # V8 (A5-10): a bare ValueError is INPUT_INVALID with the fix of the table; a code with no fix anywhere keeps no fix
+    (ValueError("invalid factual receipt"), {"code": "INPUT_INVALID", "message": "invalid factual receipt", "fix": fix_for("INPUT_INVALID")}),
+    (ValueError("UNLISTED_REFUSAL: the plan digest is not its self-digest"),
+     {"code": "UNLISTED_REFUSAL", "message": "UNLISTED_REFUSAL: the plan digest is not its self-digest"}),
     (ValueError("GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input"),
      {"code": "GENERATOR_INPUT_ORDER", "message": "GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input",
       "fix": "first tools.api publish-generator-input"}),
@@ -47,10 +50,10 @@ def _api(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], er
 
 
 def test_api_prints_the_prefixed_code_of_a_pilot_state_refusal(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    code, output = _api(monkeypatch, capsys, ValueError("GENERATOR_INPUT_DIGEST: the header digest x is not its self-digest y"))
-    assert code == 2 and output["status"] == "error" and output["code"] == "GENERATOR_INPUT_DIGEST"
+    code, output = _api(monkeypatch, capsys, ValueError("UNLISTED_REFUSAL: the header digest x is not its self-digest y"))
+    assert code == 2 and output["status"] == "error" and output["code"] == "UNLISTED_REFUSAL"
     # FaT-U5: the one envelope always carries fix (null when the refusal names none)
-    assert output["message"] == "GENERATOR_INPUT_DIGEST: the header digest x is not its self-digest y" and output["fix"] is None
+    assert output["message"] == "UNLISTED_REFUSAL: the header digest x is not its self-digest y" and output["fix"] is None
 
 
 def test_api_gives_the_fix_tail_as_its_own_field_too(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -65,7 +68,7 @@ def test_api_gives_the_fix_tail_as_its_own_field_too(monkeypatch: pytest.MonkeyP
 
 def test_a_plain_error_keeps_its_type_as_before(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _code, output = _api(monkeypatch, capsys, ValueError("invalid factual receipt"))
-    assert output["code"] == "ValueError" and output["message"] == "invalid factual receipt"
+    assert output["code"] == "INPUT_INVALID" and output["message"] == "invalid factual receipt" and output["fix"] == fix_for("INPUT_INVALID")
 
 
 @pytest.mark.parametrize("error", [KeyError("attempt_id"), TypeError("'NoneType' object is not subscriptable"),

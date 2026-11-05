@@ -131,7 +131,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    берётся последняя ревизия журнала. `review-select --dry-run` — только при сомнении в ответе.
 
 **`--output-dir`** — один каталог на всё ревью, внутри проекта и вне `.git`: `<run>/published` (там кандидат и HTML/Markdown/CSV для человека). Тот же
-путь — в `review-open`, `review-select`, `review-publish`; вне проекта — `OUTPUT_DIR_OUTSIDE_PROJECT`. `--fresh-context yes` — честное
+путь — в `review-open`, `review-select --run-root <run> --attempt <id> --output-dir <dir>` и `review-publish --run-root <run> --attempt <id> --output-dir <dir>`; вне проекта — `OUTPUT_DIR_OUTSIDE_PROJECT`. `--fresh-context yes` — честное
 заявление: ревьюер отдельный субагент или вызов без истории генерации; `no` допустим только в прогоне, принявшем SELF (§1) — там флаг можно
 опустить; иначе `FRESH_CONTEXT_REQUIRED` или `INDEPENDENCE_UNVERIFIED`. Бюджет сессии, `distinct_invocations` и `evidence_digest` считает
 код; бюджет меньше пакета — `REVIEW_CONTEXT_LIMIT` сразу.

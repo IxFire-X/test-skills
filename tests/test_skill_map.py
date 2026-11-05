@@ -24,7 +24,7 @@ def _text() -> str:
 
 
 def test_the_skill_is_a_map_not_a_manual() -> None:
-    assert len(_text().split("\n")) <= MAP_LINES
+    assert len(_text().splitlines()) <= MAP_LINES
 
 
 def test_the_texts_carry_no_fat_marks() -> None:
