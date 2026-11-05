@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state
+from tools import pack_registry, pilot_state
 from tools.contract_check import validate_pipeline_contract
 
 pytestmark = pytest.mark.contract
@@ -200,7 +200,7 @@ def _copy_of_the_pack(pack_root: Path, destination: Path) -> Path:
     contract = _contract(pack_root)
     for relative in ("contracts", "schemas", "skills", "tools", "evals", "release"):
         shutil.copytree(pack_root / relative, destination / relative)
-    for relative in contract["projections"].values():
+    for relative in (*contract["projections"].values(), *pack_registry.ROOT_FILES):  # V4b: the texts and the requirements are in the registry
         (destination / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(pack_root / relative, destination / relative)
     return destination
