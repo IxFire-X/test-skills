@@ -403,34 +403,55 @@ def _identifier(value: Any) -> str | None:
     return value if isinstance(value, str) and _IDENTIFIER.match(value) else None
 
 
-REFUSALS_BASIS = "по файлу refusals.jsonl, журналом не подтверждено"  # F1: the file has no event in the journal; the agent can change it
+REFUSALS_BASIS = "по журналу (событие COMMAND_REFUSED); подробности строки — из refusals.jsonl, сверенной с журналом по digest"  # J1: the journal counts, the file only gives the detail
 
 
-def refusals(root: Path) -> dict[str, Any] | None:
-    """P9 («Отказы»): ``<run>/refusals.jsonl`` (``{at, command, code, stage, batch}`` per refusal, written by ``tools.api``)
-    summed by command, code, stage and batch; ``None`` when the run has neither the journal nor the step
-    measurements of v0.2 (no way to tell a clean run from one before v0.2); a line that is no JSON is skipped."""
+def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
+    """P9 («Отказы»), J1: the refusals are COUNTED BY THE JOURNAL — one ``COMMAND_REFUSED`` event per refusal, its digest the sha256 of the
+    line ``<run>/refusals.jsonl`` got (``{at, command, code, stage, batch}``, written by ``tools.api``).  The line gives the detail
+    (command, code, stage, batch) of the event it is bound to; an event whose line is gone or changed is counted all the same and
+    its detail is ``details_lost``; a line no event confirms is not counted and is named in ``mismatch`` (the agent can edit the file,
+    not the journal).  ``None`` when the run has no event, no file and no step measurements of v0.2 (no way to tell a clean run from one
+    before v0.2)."""
+    import hashlib
+
+    if events is None:
+        from tools import pilot_state
+
+        events = pilot_state.derive_state(Path(root))["events"]
+    confirmed = [event.get("artifact_digest") for event in events if event.get("event_type") == "COMMAND_REFUSED"]
     try:
-        lines = (Path(root) / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
+        raw_lines = [line for line in (Path(root) / "refusals.jsonl").read_bytes().split(b"\n") if line.strip()]
     except OSError:
-        # The journal is created by the first refusal, so a clean run of v0.2 has none.  What only v0.2 writes is ``step-sizes.jsonl`` (it measures
+        # The file is created by the first refusal, so a clean run of v0.2 has none.  What only v0.2 writes is ``step-sizes.jsonl`` (it measures
         # every step it sends to the model): with it the run is v0.2 and had no refusal; without it there is no way to tell, and the report says so.
         from tools.step_size import RECORD
 
-        if not (Path(root) / RECORD).is_file():
+        if not confirmed and not (Path(root) / RECORD).is_file():
             return None
-        lines = []
-    rows = []
-    for line in lines:
-        try:
-            value = json.loads(line)
-        except ValueError:
-            continue
+        raw_lines = []
+    by_digest: dict[str, list[bytes]] = {}
+    for line in raw_lines:
+        by_digest.setdefault("sha256:" + hashlib.sha256(line).hexdigest(), []).append(line)
+    rows: list[Mapping[str, Any]] = []
+    details_lost = 0
+    for digest in confirmed:
+        found = by_digest.get(digest) or []
+        value = None
+        if found:
+            try:
+                value = json.loads(found.pop(0))
+            except ValueError:
+                value = None
         if isinstance(value, Mapping):
             rows.append(value)
+        else:
+            details_lost += 1
+    without_event = sum(len(rest) for rest in by_digest.values())
     times = sorted(str(row["at"]) for row in rows if isinstance(row.get("at"), str))
-    summary: dict[str, Any] = {"total": len(rows), "first_at": times[0] if times else None, "last_at": times[-1] if times else None,
-                               "basis": REFUSALS_BASIS}
+    summary: dict[str, Any] = {"total": len(confirmed), "first_at": times[0] if times else None, "last_at": times[-1] if times else None,
+                               "basis": REFUSALS_BASIS, "details_lost": details_lost,
+                               "mismatch": {"lines_without_event": without_event, "events_without_line": details_lost} if without_event or details_lost else None}
     for key, name in (("command", "by_command"), ("code", "by_code"), ("stage", "by_stage"), ("batch", "by_batch")):
         counts: dict[str, int] = {}
         for row in rows:
@@ -443,6 +464,9 @@ def refusals(root: Path) -> dict[str, Any] | None:
         pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")
         pairs[pair] = pairs.get(pair, 0) + 1
     summary["by_command_code"] = [{"command": command, "code": code, "count": count} for (command, code), count in sorted(pairs.items())]
+    # J1 (A2-5): a second model-request of a generator batch is refused (MODEL_REQUEST_DUPLICATE) and the word of the first one is not shown again
+    summary["codeword_lost"] = sorted({stage for row in rows if row.get("code") == "MODEL_REQUEST_DUPLICATE"
+                                       for stage in [_identifier(row.get("stage"))] if stage and stage.startswith("tc-generator:")})
     return summary
 
 
@@ -495,7 +519,9 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-_WARNING_TEXT = {"REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
+_WARNING_TEXT = {"CODEWORD_LOST": "model-request генератора повторяли (MODEL_REQUEST_DUPLICATE): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
+                 "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
+                 "REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
                  "REVIEW_WEAK": "ревьюер поймал не все контрольные ошибки (канарейки) своего вида",
                  "REVIEW_UNMEASURED": "ревью не измерено канарейками (прогон открыт до P7)",
                  "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией журнала",
@@ -866,6 +892,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     else:
         review = None
     scope = _scope(root, attempt_id, state)
+    refused = refusals(root, events)
     report = {
         "schema_version": "1.0.0", "run_id": run["manifest"]["run_id"], "policy_profile": run["manifest"]["policy_profile"], "test_level": test_level(project, root, attempt),
         "guarantee": GUARANTEE, "clock": CLOCK_NOTE,
@@ -875,7 +902,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
         "model_calls": calls, "step_sizes": measured,
-        "phases": phases(events), "input_composition": composition, "refusals": refusals(root), "canon": canon_numbers(document),
+        "phases": phases(events), "input_composition": composition, "refusals": refused, "canon": canon_numbers(document),
         "tmp": tmp_usage(root, project),
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
                     + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
@@ -884,6 +911,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else [])
                     + ([f"SKILLSRC_CHANGED: {limits_note}"] if limits_note else [])
                     + ([EFFECTIVE_UNREADABLE] if effective_unreadable else [])
+                    + (["refusals.mismatch"] if refused and refused["mismatch"] else [])
+                    + (["CODEWORD_LOST"] if refused and refused.get("codeword_lost") else [])
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
@@ -993,7 +1022,11 @@ def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
     if summary is None:
         return ["## Отказы", "", "журнала отказов нет (прогон до v0.2)", ""]
     return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.",
-            f"Число {summary.get('basis') or REFUSALS_BASIS}.", "",
+            f"Число {summary.get('basis') or REFUSALS_BASIS}.",
+            *([f"Контрольное слово генератора: повторный model-request у {', '.join(summary['codeword_lost'])} — слово показывали один раз, вывод мог быть потерян."]
+              if summary.get("codeword_lost") else []),
+            *([f"Расхождение журнала и файла refusals.jsonl: строк без события {summary['mismatch']['lines_without_event']} (не посчитаны), "
+               f"событий без строки {summary['mismatch']['events_without_line']} (посчитаны, подробности потеряны)."] if summary.get("mismatch") else []), "",
             "| Команда | Код | Сколько раз |", "|---|---|---|",
             *(f"| {row['command']} | {row['code']} | {row['count']} |" for row in summary["by_command_code"]), "",
             "- по стадиям: " + (", ".join(f"{key} {value}" for key, value in summary["by_stage"].items()) or "—"),

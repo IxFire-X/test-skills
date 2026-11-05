@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -65,7 +66,8 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
     """P1: one line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
     invalid) of a command that names its run; the run report counts the file.  No content, no paths, no messages — the code
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
-    never changes the refusal the agent gets."""
+    never changes the refusal the agent gets.  J1: the line is followed by a ``COMMAND_REFUSED`` event of the journal whose digest is
+    the sha256 of the line's bytes — the report counts the events, the line only carries the detail."""
     import datetime
     from pathlib import Path
 
@@ -83,7 +85,14 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
                "code": str(code or "INVALID"), "stage": stage, "batch": batch}
         path = root / _REFUSALS
         before = path.read_bytes() if path.is_file() else b""
-        atomic_write_confined_bytes_at_root(root.parent.parent, root, path, before + json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n")
+        line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        atomic_write_confined_bytes_at_root(root.parent.parent, root, path, before + line + b"\n")
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    try:  # J1 (A1-1): the fact of the refusal is an event of the journal, bound to its line by the digest; a journal that does not pass its checks takes none
+        from tools import pilot_state
+
+        pilot_state.append_event(root, "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
     except (OSError, ValueError, KeyError, TypeError):
         return
 

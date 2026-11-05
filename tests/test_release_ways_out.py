@@ -156,6 +156,11 @@ def test_o12b_the_mark_hides_only_its_own_attempt(tmp_path: Path, monkeypatch: p
     (root / LEFT_MARK).write_text(json.dumps({"attempt_id": "0" * 32, "reason": "LEFT_BEFORE_REVIEW"}), encoding="utf-8")
     assert left_attempt(root) is None and _left_mark(root) is None  # a mark of another attempt hides nothing
     (root / LEFT_MARK).write_text(json.dumps({"attempt_id": first["attempt_id"], "reason": "LEFT_BEFORE_REVIEW"}), encoding="utf-8")
+    assert left_attempt(root) is None and _left_mark(root) is None  # J1 (A1-5): a file without its events in the journal is no decision of the run
+    (root / LEFT_MARK).unlink()
+    from tools.run_pipeline import _leave
+
+    _leave(Path(first["project"]) if "project" in first else project, root, first["attempt_id"])  # the one writer: the file and its pair of events
     assert left_attempt(root) == first["attempt_id"] and _left_mark(root)
 
 

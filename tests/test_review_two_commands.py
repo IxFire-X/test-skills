@@ -63,7 +63,8 @@ def _shape(run_root: Path, without: str | None = None) -> list[tuple]:
         return f"batch-{batches.setdefault(str(value).removeprefix('tc-generator:'), len(batches) + 1)}"
 
     return [(row["event_type"], name(row.get("stage_instance_id")) if str(row.get("stage_instance_id")).startswith("tc-generator:") else row.get("stage_instance_id"),
-             name(row.get("batch_id"))) for row in _events(run_root) if without is None or row.get("artifact_digest") != without]
+             name(row.get("batch_id"))) for row in _events(run_root)
+            if row["event_type"] != "COMMAND_REFUSED" and (without is None or row.get("artifact_digest") != without)]  # J1: a refusal is a run-level event of its own, stated by the tests that cause one
 
 
 def _tree(root: Path) -> dict[str, bytes]:

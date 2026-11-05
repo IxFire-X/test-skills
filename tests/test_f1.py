@@ -133,16 +133,17 @@ def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path
 
 # --- 8.4 / A1-1 -------------------------------------------------------------------------------------------------------
 
-def test_the_number_of_refusals_says_it_comes_from_a_file_the_journal_does_not_confirm(tmp_path: Path) -> None:
+def test_the_number_of_refusals_comes_from_the_journal(tmp_path: Path) -> None:
+    """J1 (A1-1): the F1 caption «по файлу refusals.jsonl, журналом не подтверждено» is gone — every refusal is a COMMAND_REFUSED event."""
     from tools.run_report import render_markdown
 
     run = _opened(tmp_path)
     code, refused = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", "f" * 32)
     assert code == 2, refused
     report = _report(run)
-    assert report["refusals"]["total"] == 1
-    assert report["refusals"]["basis"] == "по файлу refusals.jsonl, журналом не подтверждено", report["refusals"]
-    assert "по файлу refusals.jsonl, журналом не подтверждено" in render_markdown(report)
+    assert report["refusals"]["total"] == 1 and report["refusals"]["mismatch"] is None
+    assert "по журналу" in report["refusals"]["basis"] and "не подтверждено" not in report["refusals"]["basis"], report["refusals"]
+    assert "по журналу" in render_markdown(report) and "журналом не подтверждено" not in render_markdown(report)
 
 
 # --- read-receipt before the boundary -----------------------------------------------------------------------------------

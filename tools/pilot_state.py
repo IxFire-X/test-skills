@@ -41,7 +41,7 @@ _MODEL_STAGE_REGISTRY = {
     "tc-to-autotest": ("automation-generator", "tc-to-autotest-v1"),
     "autotest-reviewer": ("automation-reviewer", "autotest-static-reviewer-v1"),
 }
-_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN", "COMMAND_REFUSED"}
 _ACTORS = {"controller"}
 _ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
@@ -1197,6 +1197,8 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
         raise ValueError("terminal retry event requires an observation digest")
     if event_type == "RETAINED_NATIVE_RERUN" and artifact_digest is None:
         raise ValueError("retained native rerun event requires a receipt digest")
+    if event_type == "COMMAND_REFUSED" and (artifact_digest is None or batch_id is not None):
+        raise ValueError("refusal event requires the digest of its line and names no batch")
     if event_type == "RUN_CREATED" and events:
         raise ValueError("invalid event")
     if event_type != "RUN_CREATED" and not events:
@@ -1205,7 +1207,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
         raise ValueError("module already selected")
     if event_type in _ATTEMPT_EVENTS and attempt_id is None:
         raise ValueError("attempt event requires attempt id")
-    if event_type in {"RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN"} and attempt_id is not None:
+    if event_type in {"RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "COMMAND_REFUSED"} and attempt_id is not None:
         raise ValueError("event must not name attempt")
     if event_type in _MODEL_EVENT_TYPES:
         if not isinstance(stage_instance_id, str) or _MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is None:
@@ -2066,22 +2068,30 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
 
 
 LEFT_MARK = "left-before-review.json"  # FaT-O12: finish --abandon LEFT_BEFORE_REVIEW
+LEFT_BATCH = "left-v1"  # J1 (A1-5): the events of the mark carry it
 
 
 def left_attempt(run_root: Path) -> str | None:
     """FaT-O12b: the attempt the run was left at before the canonical review — only while it is still the run's last
-    attempt (a later attempt is never hidden by an old mark); the mark is read confined."""
+    attempt (a later attempt is never hidden by an old mark); the mark is read confined.  J1 (A1-5): the mark is a decision of the
+    run, so it counts only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``left-v1``) — a file an agent put there
+    leaves the run as it was."""
     project, root = _run_root(run_root)
     try:
         data = read_confined_bytes(project, root, root / LEFT_MARK)
         value = json.loads(data) if data is not None else None
     except (OutputConfinementError, ValueError):
         return None
-    attempts = derive_state(root)["attempts"]
+    state = derive_state(root)
+    attempts = state["attempts"]
     if (
         not isinstance(value, Mapping) or value.get("reason") != "LEFT_BEFORE_REVIEW" or not attempts
         or value.get("attempt_id") != attempts[-1]["attempt_id"]
     ):
+        return None
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    if not any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == value["attempt_id"] and event.get("batch_id") == LEFT_BATCH
+               and event.get("artifact_digest") == digest for event in state["events"]):
         return None
     return str(value["attempt_id"])
 
@@ -2091,6 +2101,22 @@ def _refuse_left(root: Path, attempt_id: str) -> None:
     if left_attempt(root) == attempt_id:
         raise ValueError("RUN_LEFT: прогон оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW); "
                          "fix: простой scan того же запроса начнёт новый")
+
+
+def _codeword_lost_note(root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str) -> str:
+    """J1 (A2-5): a generator request carries the sha256 of its control word and shows the word once, in the output of the command that
+    wrote it.  A repeat cannot show it again: when the request already holds a word, the refusal says so (CODEWORD_LOST) — the generator
+    that did not get the word works without it, and the report calls such a stage's word lost."""
+    if not stage_instance_id.startswith("tc-generator:"):
+        return ""
+    digest = next((event.get("artifact_digest") for event in state["events"] if event["event_type"] == "MODEL_REQUESTED"
+                   and event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id), None)
+    try:
+        held = bool(digest and _read_model_request_with_state(_run_root(root)[0], root, state, attempt_id, stage_instance_id, str(digest)).get("nonce_sha256"))
+    except (OSError, ValueError):
+        held = False
+    return (" CODEWORD_LOST: the control word of that request was shown once, in the output of the command that wrote it, and the run keeps "
+            "only its sha256 — if that output was lost the generator works without the word (the report says so);") if held else ""
 
 
 @closure_cached  # FaT-9b
@@ -2154,8 +2180,8 @@ def publish_model_request(
     if any(event["event_type"] == "MODEL_REQUESTED" and event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id
            for event in state["events"]):
         raise ModelRequestDuplicate(
-            f"duplicate model request: {stage_instance_id} already has its request; fix: do not repeat model-request — the answer "
-            "goes to model-response, its one retry is model-response --transport-attempts 2"
+            f"duplicate model request: {stage_instance_id} already has its request;{_codeword_lost_note(root, state, attempt_id, stage_instance_id)} "
+            "fix: do not repeat model-request — the answer goes to model-response, its one retry is model-response --transport-attempts 2"
         )
     if reuse_from is not None and stage != "context-marker":
         raise ValueError("MODEL_REUSE_REFUSED: only a context-marker answer is reused")

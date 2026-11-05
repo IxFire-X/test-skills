@@ -151,6 +151,9 @@ def _error_of(call) -> dict:
     raise AssertionError("the direct call did not fail")
 
 
+from tests.journal_helpers import assert_refused_once, files_minus_journal, journal_minus_refusals, refusal_log, state_minus_refusals
+
+
 def test_a_refused_request_and_a_second_response_fail_like_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools import pilot_state
 
@@ -158,11 +161,12 @@ def test_a_refused_request_and_a_second_response_fail_like_the_function(tmp_path
     expected = _error_of(lambda: pilot_state.publish_model_request(direct_root, direct_attempt, "context-marker:baseline", model_id="m",
                                                                    invocation_id="inv", input_digests=list(reversed(direct_digests))))
     root, attempt_id, digests = _marker_run(tmp_path / "command")
-    before = pilot_state.derive_state(root)
+    before, seen = state_minus_refusals(root), refusal_log(root)
     code, refused = _api(["model-request", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
                           "--model-id", "m", "--invocation-id", "inv", *sum((["--input-digest", item] for item in reversed(digests)), [])], capsys)
     assert code == 2 and refused["status"] == "error" and {"code": refused["code"], "message": refused["message"]} == expected, refused
-    assert pilot_state.derive_state(root) == before
+    assert state_minus_refusals(root) == before
+    assert_refused_once(root, seen, refused["code"], "model-request")  # J1: the one event the refusal itself added
 
     pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="inv", input_digests=digests)
     pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", _marker_value())
@@ -182,12 +186,13 @@ def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, caps
 
     root, attempt_id, digests = _marker_run(tmp_path)
     pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="inv", input_digests=digests)
-    before = pilot_state.derive_state(root)
+    before, seen = state_minus_refusals(root), refusal_log(root)
     answer = tmp_path / "answer.json"
     answer.write_text('{"stage": "context-marker", "stage": "x"}', encoding="utf-8")
     code, refused = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", str(answer)], capsys)
     assert code == 2 and refused["status"] == "error" and refused["code"] == "ANSWER_JSON_INVALID" and refused["fix"]  # F4b: read in main, not by argparse
-    assert pilot_state.derive_state(root) == before
+    assert state_minus_refusals(root) == before
+    assert_refused_once(root, seen, "ANSWER_JSON_INVALID", "model-response")
 
 
 def test_the_removed_digest_commands_are_gone_everywhere() -> None:
@@ -284,13 +289,11 @@ def test_out_outside_the_run_tmp_directory_is_refused_and_writes_nothing(tmp_pat
     from tests.test_finish import _project
 
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    def files() -> dict:
-        return {path: path.read_bytes() for path in run_root.rglob("*") if path.is_file() and path.name != "refusals.jsonl"}  # P1: the refusal is journaled
-
-    before = files()
+    before, seen = (files_minus_journal(run_root), journal_minus_refusals(run_root)), refusal_log(run_root)
     code, refused = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / name)], capsys)
     assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
-    assert files() == before
+    assert (files_minus_journal(run_root), journal_minus_refusals(run_root)) == before  # P1/J1: the refusal is a line and one COMMAND_REFUSED event, nothing else
+    assert_refused_once(run_root, seen, "API_OUT_OUTSIDE_RUN", "read-effective")
     assert json.loads((run_root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()[-1])["code"] == "API_OUT_OUTSIDE_RUN"
 
 

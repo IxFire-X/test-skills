@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_once
+
 from tests.test_cases_import import HEADER, _generator_request, _manual_fragment, _skeleton, _to_generator
 
 
@@ -86,6 +88,7 @@ def test_a_case_of_another_batch_in_the_answer_is_refused_by_the_skeleton_of_the
     code, refused = _api(*response, "--artifact", _put(run["root"] / "tmp" / "wrong.json", with_digest(wrong)))
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases" in refused["message"], refused
     assert _journal(run["root"]) == before
+    assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     assert _api(*response, "--artifact", _put(run["root"] / "tmp" / "good.json", good), "--transport-attempts", "2")[0] == 0
 
 

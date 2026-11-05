@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_in_order
+
 from tests.test_cases_import import CSV, _generator_request, _project, _scan
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
@@ -213,6 +215,7 @@ def test_the_trace_goes_through_the_documents_and_the_management_stays_byte_for_
     code, refused = _api(*response, "--artifact", _put(tmp / "trace.json", _changed(good, trace)))
     assert code == 2 and refused["code"] == "IMPORT_TRACE_CHANGED" and "SREQ-0001, SREQ-0003" in refused["message"], refused
     assert _journal(run["root"]) == before
+    assert_refused_in_order(run["root"], before, ("model-response", "IMPORT_HUMAN_FIELD_CHANGED"), ("model-response", "IMPORT_TRACE_CHANGED"))  # J1: the two refusals of the test
     code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
     assert code == 0, answered
 

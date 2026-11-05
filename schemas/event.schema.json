@@ -7,7 +7,7 @@
   "properties": {
     "schema_version": {"const": "1.0.0"},
     "seq": {"type": "integer", "minimum": 1},
-    "event_type": {"enum": ["RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"]},
+    "event_type": {"enum": ["RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN", "COMMAND_REFUSED"]},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "actor": {"const": "controller"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -25,6 +25,7 @@
     {"if": {"properties": {"event_type": {"const": "RUN_CREATED"}}, "required": ["event_type"]}, "then": {"properties": {"seq": {"const": 1}, "prev_digest": {"const": null}}, "not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
     {"if": {"properties": {"event_type": {"const": "MODULE_SELECTED"}}, "required": ["event_type"]}, "then": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
     {"if": {"properties": {"event_type": {"enum": ["INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN"]}}, "required": ["event_type"]}, "then": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"event_type": {"const": "COMMAND_REFUSED"}}, "required": ["event_type"]}, "then": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
     {"if": {"properties": {"event_type": {"const": "CONTEXT_SELECTED"}}, "required": ["event_type"]}, "then": {"required": ["attempt_id", "batch_id"], "not": {"required": ["stage_instance_id"]}}},
     {"if": {"properties": {"event_type": {"const": "ATTEMPT_CREATED"}}, "required": ["event_type"]}, "then": {"required": ["attempt_id"], "not": {"anyOf": [{"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
     {"if": {"properties": {"event_type": {"enum": ["MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"]}}, "required": ["event_type"]}, "then": {"required": ["attempt_id", "stage_instance_id"]}},

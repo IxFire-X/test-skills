@@ -769,6 +769,8 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
     from tools.pilot_state import create_lowered_run, create_run
     from tools.skillsrc_manifest import skillsrc_review_self as _skillsrc_review_self
 
+    if (project / ".skillsrc").is_file():
+        _read_skillsrc_binding(project / ".skillsrc")  # J1 (A2-6): an input that is refused is refused before the run exists — no orphan run without MODULE_SELECTED
     profile = getattr(args, "profile", "local-pilot-v1")
     skipped = _execution_skipped(project, args) if profile == "local-pilot-v1" else None
     if skipped is not None:
@@ -787,7 +789,6 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
     else:
         run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
     if (project / ".skillsrc").is_file():
-        _read_skillsrc_binding(project / ".skillsrc")
         receipt = {"status": "unchanged"}
     else:
         # ``--target`` is C-lite context scope, not an instruction to mutate .skillsrc.
@@ -1769,18 +1770,15 @@ _INTERRUPTED_FIX = ("запуск тестов начался, но квитан
 
 
 def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-O12 O1: the mark «оставлен» of a run stopped before the canonical review — outside the journal, the attempt is
-    not closed (that is FaT-AB2); only the same-request check of scan skips the run.  Written once; a repeat reads it."""
-    from tools.confined_output import create_confined_bytes_exclusive, read_confined_bytes
+    """FaT-O12 O1: the mark «оставлен» of a run stopped before the canonical review — the attempt is not closed (that is FaT-AB2);
+    only the same-request check of scan skips the run.  J1 (A1-5): a decision of the run, so a file and its pair of events
+    (``bind_bytes``, batch ``left-v1``): written once, a repeat only finishes the events; a file of other bytes is RECEIPT_FILE_UNBOUND."""
+    from tools.pilot_state import LEFT_BATCH, LEFT_MARK, bind_bytes
 
-    from tools.pilot_state import LEFT_MARK
-
-    target = root / LEFT_MARK
     value = {"attempt_id": attempt_id, "reason": "LEFT_BEFORE_REVIEW"}
     data = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    if read_confined_bytes(project, root, target) is None:
-        create_confined_bytes_exclusive(project, root, target, data)
-    return json.loads(read_confined_bytes(project, root, target) or data)
+    bind_bytes(root, attempt_id, root / LEFT_MARK, data, digest="sha256:" + hashlib.sha256(data).hexdigest(), batch_id=LEFT_BATCH, label="left mark")
+    return value
 
 
 def _left_mark(root: Path) -> str | None:

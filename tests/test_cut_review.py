@@ -13,6 +13,7 @@ import pytest
 
 from tests.test_review_open_recovery import _crash_once, _main, _open_argv
 from tests.test_review_requested import _generated_run, _journal
+from tests.journal_helpers import assert_refused_once, files_minus_journal, refusal_log
 from tests.test_review_two_commands import _bundles, _flags, _shape, _verdict
 
 LEDGER = "reviewer-ledger-v1"
@@ -77,7 +78,8 @@ def test_review_open_cut_between_the_ledger_file_and_its_events(tmp_path: Path, 
     assert code == 0 and again["result"]["model_request"]["stage"] == "tc-reviewer", f"{point}: {again}"
     other = _generated_run(tmp_path / "plain")
     assert _main(capsys, _open_argv(other))[0] == 0
-    assert _shape(run["run_root"]) == _shape(other["run_root"]), point
+    assert _shape(run["run_root"]) == _shape(other["run_root"]), point  # the shape leaves COMMAND_REFUSED out; the cut call's refusal is stated here
+    assert refusal_log(run["run_root"]) == [("review-open", first["code"])] and refusal_log(other["run_root"]) == [], refusal_log(run["run_root"])
     code, selected = _main(capsys, _select_argv(run, _verdict(run)))
     assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", selected
 
@@ -224,6 +226,7 @@ def test_a_ledger_file_without_events_and_with_other_bytes_is_refused_with_its_c
     code, refused = _main(capsys, _open_argv(run))
     assert code == 2 and refused["code"] == "REVIEW_LEDGER_UNBOUND" and "scan --new-run" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_after_a_cut_between_published_and_read_back_no_command_falls_back_to_the_older_revision(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -277,14 +280,14 @@ def test_another_verdict_after_the_cut_is_refused_and_writes_nothing(tmp_path: P
     run, _verdict_given = _cut_after_published(monkeypatch, capsys, tmp_path)
     other = _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ")
     before = _journal(run["run_root"])
-    def files():  # refusals.jsonl is the one file a refusal adds by design (P1: the code of the refusal, no content)
-        return {str(path.relative_to(run["run_root"])): path.read_bytes() for path in sorted(run["run_root"].rglob("*"))
-                if path.is_file() and path.name != "refusals.jsonl"}
+    def files():  # refusals.jsonl and the COMMAND_REFUSED event are what a refusal adds by design (P1, J1: the code of the refusal, no content)
+        return files_minus_journal(run["run_root"])
 
     tree = files()
     code, refused = _main(capsys, _select_argv(run, other))
     assert code == 2 and refused["code"] == "MODEL_STAGE_ANSWERED", refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, "MODEL_STAGE_ANSWERED", "review-select")
     assert files() == tree
     events = _events(run["run_root"])
     assert sum(row["event_type"] == "MODEL_RESPONSE_RECEIVED" and row.get("stage_instance_id") == "tc-reviewer:canonical" for row in events) == 1

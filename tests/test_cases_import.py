@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.journal_helpers import assert_refused_once
+
 from tests.helpers import MODULE_PYTHON
 
 pytestmark = pytest.mark.contract
@@ -232,6 +234,7 @@ def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_check
     code, refused = _api(*response, "--artifact", _put(tmp / "changed.json", with_digest(changed)))
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/steps/0/test_data" in refused["message"], refused
     assert "--transport-attempts 2" in refused["message"] and _journal(run["root"]) == before
+    assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, validated = _api("validate-fragment", "--fragment", _put(tmp / "changed2.json", with_digest(changed)), "--plan", _put(tmp / "plan.json", run["plan"]),
                            "--header", _put(tmp / "header.json", run["header"]), "--context-receipt", _put(tmp / "ctx.json", run["context"]),
                            "--imported", _put(tmp / "imported.json", run["imported"]))
@@ -425,6 +428,7 @@ def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path
     code, refused = _api(*response, "--artifact", _put(tmp / "crossed.json", with_digest(crossed)))
     assert code == 2 and refused["code"] == "IMPORT_TRACE_CHANGED", refused
     assert "/test_cases/0/requirement_ids" in refused["message"] and "SREQ-0001" in refused["message"] and _journal(run["root"]) == before
+    assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
     assert code == 0, answered
 

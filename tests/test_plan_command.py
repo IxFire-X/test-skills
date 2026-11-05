@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_no_refusal_event, assert_refused_once, journal_minus_refusals
 from tests.test_batch_assembly import _header
 from tests.test_scope_pause import GAP, _api, _marker_rows, _paused_run
 
@@ -78,18 +79,20 @@ def test_plan_again_publishes_nothing_twice(tmp_path: Path, capsys: pytest.Captu
 def test_a_header_digest_of_the_grouping_that_is_not_the_headers_is_refused_with_the_way_out(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, attempt_id, _b, receipts = _paused_run(tmp_path, warnings=[])
     files = _files(root, receipts, "sha256:" + "c" * 64)
-    before = (root / "events.jsonl").read_bytes()
+    before = journal_minus_refusals(root)
     code, refused = _api(capsys, _plan_argv(root, attempt_id, files))
     assert code == 2 and refused["code"] == "GENERATOR_INPUT_HEADER" and "удали" in refused["fix"], refused
-    assert (root / "events.jsonl").read_bytes() == before  # nothing published
+    assert journal_minus_refusals(root) == before  # nothing published
+    assert_refused_once(root, before, "GENERATOR_INPUT_HEADER")
 
 
 def test_the_pause_after_the_marker_stops_plan_before_it_publishes_anything(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, attempt_id, _b, receipts = _paused_run(tmp_path, warnings=[GAP])
     files = _files(root, receipts, None)
-    before = (root / "events.jsonl").read_bytes()
+    before = journal_minus_refusals(root)
     code, refused = _api(capsys, _plan_argv(root, attempt_id, files))
     assert code == 2 and refused["code"] == "SCOPE_PENDING", refused
-    assert (root / "events.jsonl").read_bytes() == before
+    assert journal_minus_refusals(root) == before
+    assert_no_refusal_event(root, before)  # the pause of the human is routine (tools.api._record_refusal): a SCOPE_PENDING stop is no refusal and adds no event
     code, answered = _api(capsys, _plan_argv(root, attempt_id, files, "--continue"))
     assert code == 0, answered

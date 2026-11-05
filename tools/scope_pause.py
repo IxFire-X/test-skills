@@ -11,6 +11,7 @@ This is a pause, not a driver: the code lists, checks and records; it decides no
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any, Mapping, Sequence
 from tools.fixes import fix_for
 
 DECISION_NAME = "scope-decision.json"
+DECISION_BATCH = "scope-decision-v1"  # J1 (A1-9): the events of the decision carry it
 REASON_LIMIT = 200  # the reason is the human's text and goes into the report: a line, not a document
 LISTED = 20  # the gaps `status` lists inline; the whole list is the draft questions-for-analyst.md
 _SEPARATOR = " — "
@@ -85,9 +87,32 @@ def draft_questions(marker: Mapping[str, Any]) -> str:
     return analyst_questions(marker.get("warnings") or [])
 
 
-def read_decision(root: Path, attempt_id: str) -> dict[str, Any] | None:
+def _bound(root: Path, attempt_id: str, raw: bytes, state: Mapping[str, Any] | None) -> bool:
+    """J1 (A1-9): the decision is a fact of the run only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``scope-decision-v1``)."""
+    from tools import pilot_state
+
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    events = (state if state is not None else pilot_state.derive_state(root))["events"]
+    return any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == DECISION_BATCH
+               and event.get("artifact_digest") == digest for event in events)
+
+
+def decision_file_unbound(root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> bool:
+    """A file of a decision lies in the run without the events of the journal — an agent's file or the leftover of a cut command; it decides nothing."""
+    from tools.confined_output import OutputConfinementError, read_confined_bytes
+
+    root = Path(root).resolve()
+    try:
+        raw = read_confined_bytes(root.parents[1], root, root / "artifacts" / attempt_id / DECISION_NAME)
+    except (OutputConfinementError, OSError):
+        return False
+    return raw is not None and not _bound(root, attempt_id, raw, state)
+
+
+def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     """The recorded answer of the human, read the way it was written (confined, strict JSON) and checked for its shape: a file
-    that is not what ``record_decision`` writes is ``SCOPE_DECISION_INVALID`` — never a decision, never silently «none»."""
+    that is not what ``record_decision`` writes is ``SCOPE_DECISION_INVALID`` — never a decision, never silently «none».  J1 (A1-9): and
+    a decision only from the journal — a file of the right shape without its events (planted, or left by a cut command) is none."""
     from tools.confined_output import OutputConfinementError, read_confined_bytes
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
@@ -116,6 +141,8 @@ def read_decision(root: Path, attempt_id: str) -> dict[str, Any] | None:
         raise ScopeRefused("SCOPE_DECISION_INVALID", f"{DECISION_NAME} не имеет вида решения человека (schema_version, kind scope-decision, "
                            "decision exclude|continue, excluded: пусто при continue и не пусто при exclude); "
                            "fix: не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)")
+    if not _bound(root, attempt_id, raw, state):
+        return None
     return value
 
 
@@ -137,7 +164,7 @@ def scope_state(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
     state = state if state is not None else pilot_state.derive_state(root)
     marker = _marker(root, state, attempt_id)
     gaps = gap_rows(marker) if marker is not None else []
-    decision = read_decision(root, attempt_id)
+    decision = read_decision(root, attempt_id, state)
     no_pause = _no_pause(root)
     return {"pending": bool(gaps) and decision is None and not no_pause, "gaps": gaps, "decision": decision, "no_pause": no_pause,
             "known": marker is not None}
@@ -152,9 +179,10 @@ def pending_fix(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any]]) 
 
 def pending_message(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any]]) -> str:
     named = [f"{', '.join(row['source_requirement_ids']) or row['requirement']}: {row['missing']}" for row in gaps[:LISTED]]
+    unbound = (f" (файл {DECISION_NAME} лежит в прогоне без событий журнала — решением не считается)" if decision_file_unbound(root, attempt_id) else "")
     more = f" (и ещё {len(gaps) - LISTED})" if len(gaps) > LISTED else ""
     return (f"SCOPE_PENDING: разметка оставила {len(gaps)} требований без наблюдаемого канала или другого пробела; "
-            f"человек ещё не решил, исключать ли их — {'; '.join(named)}{more}; fix: {pending_fix(root, attempt_id, gaps)}")
+            f"человек ещё не решил, исключать ли их — {'; '.join(named)}{more}{unbound}; fix: {pending_fix(root, attempt_id, gaps)}")
 
 
 def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> Path | None:
@@ -203,13 +231,14 @@ def record_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str],
                                  "excluded": [{"source_requirement_id": item, "reason": text[:REASON_LIMIT]} for item in sorted(set(excluded))]}
     else:
         value = {"schema_version": "1.0.0", "kind": "scope-decision", "decision": "continue", "excluded": []}
-    existing = read_decision(root, attempt_id)
+    existing = read_decision(root, attempt_id, state)
     if existing is not None and existing != value:
         raise ScopeRefused("SCOPE_DECISION_CONFLICT", f"решение уже записано ({existing['decision']}: "
                            f"{', '.join(row['source_requirement_id'] for row in existing['excluded']) or 'без исключений'}); "
                            "fix: другое решение — новый прогон (scan --new-run)")
     data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    published = pilot_state.publish_run_artifact_bytes(root, attempt_id, DECISION_NAME, data)
+    published = pilot_state.bind_bytes(root, attempt_id, root / "artifacts" / attempt_id / DECISION_NAME, data,
+                                       digest="sha256:" + hashlib.sha256(data).hexdigest(), batch_id=DECISION_BATCH, label="scope decision")
     return {**value, "path": published["path"], "digest": published["digest"]}
 
 

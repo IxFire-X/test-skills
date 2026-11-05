@@ -10,11 +10,9 @@ import pytest
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_open_recovery import _main
 from tests.test_review_requested import _generated_run, _journal, _put
+from tests.journal_helpers import assert_refused_once
 from tests.test_cut_review import _crash_event, _crash_nth, _events
 
-
-def _run_flags(run: dict) -> list[str]:
-    return ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"]]
 
 
 def _run_flags(run: dict) -> list[str]:
@@ -77,3 +75,78 @@ def test_a_prior_capabilities_file_with_other_bytes_and_no_events_is_refused_wit
     code, refused = _main(capsys, argv)
     assert code == 2 and refused["code"] == "RECEIPT_FILE_UNBOUND" and refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
+
+
+# --------------------------------------------------------------------------------------
+# J1 (A2-5): the control word of a generator request after a cut
+# --------------------------------------------------------------------------------------
+
+def _request_argv(run: dict, stage: str, inputs: list[str], invocation: str = "invoke-generator") -> list[str]:
+    return ["model-request", *_run_flags(run), "--stage", stage, "--model-id", "model-generator", "--invocation-id", invocation,
+            *[flag for digest in inputs for flag in ("--input-digest", digest)]]
+
+
+def _crash_raw_event(monkeypatch, event_type: str) -> None:
+    from tools import pilot_state
+
+    _crash_nth(monkeypatch, pilot_state, "_append_event", lambda project, root, et, *a, **k: et == event_type)
+
+
+def _generator_request(tmp_path: Path):
+    run = _generated_run(tmp_path, generated=False)
+    plan_digest, header_digest = _publish_inputs(run)
+    batch = json.loads(Path(run["fragments"][0]).read_bytes())["batch_id"]
+    return run, f"tc-generator:{batch}", _generator_inputs(run, plan_digest, header_digest)
+
+
+def test_a_request_cut_before_its_event_leaves_a_receipt_only_the_disk_knows(tmp_path: Path, monkeypatch, capsys) -> None:
+    """The first call wrote the receipt (word N1) and died before MODEL_REQUESTED; the repeat writes its own (N2) and binds it.  The first
+    receipt is an orphan on the disk: every reader goes by the events, so the run sees the word the agent was shown and no other."""
+    from tools import review_canaries
+    from tools.pilot_state import read_model_request
+    from tools.run_report import build_report
+
+    run, stage, inputs = _generator_request(tmp_path)
+    with monkeypatch.context() as broken:
+        _crash_raw_event(broken, "MODEL_REQUESTED")
+        code, first = _main(capsys, _request_argv(run, stage, inputs))
+        assert code == 2, first
+    requests = run["run_root"] / "model-requests" / run["attempt_id"]
+    cut_left = len(list(requests.glob("*.json")))  # the context-marker request of the run, and the generator's receipt the cut left
+    code, again = _main(capsys, _request_argv(run, stage, inputs))
+    assert code == 0, again
+    bound = again["result"]["digest"]
+    assert len(list(requests.glob("*.json"))) == cut_left + 1  # the orphan stays where it is, nothing deletes in a run
+    shown = review_canaries.nonce_digest(again["result"]["nonce"])
+    assert review_canaries.generator_nonce_digests(run["run_root"], run["attempt_id"]) == [shown]
+    assert read_model_request(run["run_root"], run["attempt_id"], stage, bound)["nonce_sha256"] == shown
+    report = build_report(run["project"], run["run_root"].name)[0]
+    assert "CODEWORD_LOST" not in report["warnings"], report["warnings"]  # the word was shown once for the one request the run has
+
+
+def test_a_repeated_request_after_its_event_says_the_word_is_lost_and_the_report_says_so(tmp_path: Path, capsys) -> None:
+    from tools.run_report import build_report, render_markdown
+
+    run, stage, inputs = _generator_request(tmp_path)
+    code, first = _main(capsys, _request_argv(run, stage, inputs))
+    assert code == 0 and first["result"]["nonce"], first
+    receipts = len(list((run["run_root"] / "model-requests" / run["attempt_id"]).glob("*.json")))
+    code, again = _main(capsys, _request_argv(run, stage, inputs))  # the agent lost the output and asks again
+    assert code == 2 and again["code"] == "MODEL_REQUEST_DUPLICATE", again
+    assert "CODEWORD_LOST" in again["message"] and "model-response" in again["fix"], again
+    requests = run["run_root"] / "model-requests" / run["attempt_id"]
+    assert len(list(requests.glob("*.json"))) == receipts + 0  # no second receipt
+    report, _warnings = build_report(run["project"], run["run_root"].name)
+    assert "CODEWORD_LOST" in report["warnings"] and report["refusals"]["codeword_lost"] == [stage], report["refusals"]
+    assert "Контрольное слово генератора" in render_markdown(report)
+
+
+def test_only_the_generator_request_has_a_word_to_lose(tmp_path: Path, capsys) -> None:
+    from tools import pilot_state
+
+    run, stage, inputs = _generator_request(tmp_path)
+    assert _main(capsys, _request_argv(run, stage, inputs))[0] == 0
+    state = pilot_state.derive_state(run["run_root"])
+    assert pilot_state._codeword_lost_note(run["run_root"], state, run["attempt_id"], stage).strip().startswith("CODEWORD_LOST")
+    assert pilot_state._codeword_lost_note(run["run_root"], state, run["attempt_id"], "context-marker:baseline") == ""

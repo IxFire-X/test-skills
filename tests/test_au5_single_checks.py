@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_once
+
 from tests.test_digest_traps import _api, _journal, _put
 from tests.test_marker_parts import _marker, _publish_part, _run
 from tools import pilot_state
@@ -87,6 +89,7 @@ def test_u1_every_refusal_of_the_removed_automation_block_still_holds(tmp_path: 
     before = _journal(run_root)
     code, refused = _api(*generator, "--input-digest", "sha256:" + "a" * 64, "--input-digest", "sha256:" + "b" * 64)
     assert code != 0 and refused["status"] != "ok" and _journal(run_root) == before, refused  # no effective canonical yet
+    assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     document = automated_document()
     publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
     effective = _api("read-effective", *run)[1]["result"]
@@ -97,6 +100,7 @@ def test_u1_every_refusal_of_the_removed_automation_block_still_holds(tmp_path: 
     before = _journal(run_root)
     code, refused = _api(*reviewer, "--invocation-id", "reviewer-1", "--input-digest", "sha256:" + "a" * 64, "--input-digest", "sha256:" + "b" * 64)
     assert code != 0 and "OUT_OF_ORDER" not in json.dumps(refused) and _journal(run_root) == before, refused  # no review boundary yet
+    assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
     assert _api("automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))[0] == 0
     assert _api("open-automation-boundary", *run, "--facts", str(tmp / "facts.json"))[0] == 0

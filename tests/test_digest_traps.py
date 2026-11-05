@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from tests.test_review_requested import _api, _generated_run, _journal, _put
+from tests.journal_helpers import assert_refused_once
 
 
 def _sha_file(path: str) -> str:
@@ -55,6 +56,7 @@ def test_commons_lang_b1a27c0b_bytes_digest_of_the_header(tmp_path: Path) -> Non
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH", refused
     assert "вход 4" in refused["message"] and header_digest in refused["message"] and "publish-generator-input --kind header" in refused["message"], refused
     assert "вход 3" not in refused["message"] and _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, requested = _generator_request(run, batch, plan_digest, header_digest)
     assert code == 0, requested
 
@@ -68,6 +70,7 @@ def test_jpetstore_05b4a6e3_bytes_digests_of_plan_and_header(tmp_path: Path) -> 
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH", refused
     assert plan_digest in refused["message"] and header_digest in refused["message"] and "вход 3" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_a_request_before_the_plan_is_published_names_the_command(tmp_path: Path) -> None:
@@ -102,6 +105,7 @@ def test_microservices_4d8491a2_uncovered_requirement_before_the_write(tmp_path:
     assert code == 2 and refused["code"] == "BATCH_UNCOVERED_REQUIREMENT", refused
     assert bad["requirements"][1]["requirement_id"] in refused["message"] and "--transport-attempts 2" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     # the one retry of the stage is still there
     code, answered = _api(*response, "--artifact", run["fragments"][0], "--transport-attempts", "2")
     assert code == 0, answered
@@ -172,6 +176,7 @@ def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_
     expected = good["artifacts"]["autotest_review"]["reviewed_relations_sha256"]
     assert "/artifacts/autotest_review/reviewed_relations_sha256" in refused["message"] and expected in refused["message"], refused
     assert "relations-digest" in refused["message"] and _journal(run_root) == before
+    assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = _api(*response, "--artifact", _put(tmp / "review.json", good), "--transport-attempts", "2")
     assert code == 0, answered
 
@@ -213,6 +218,7 @@ def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tm
     code, refused = _api(*response, "--artifact", _put(run["tmp"] / "foreign.json", with_digest(bad)))
     assert code == 2 and refused["code"] == "BATCH_PARTITION_CONFLICT" and "--transport-attempts 2" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = _api(*response, "--artifact", run["fragments"][0], "--transport-attempts", "2")
     assert code == 0, answered
 
@@ -228,6 +234,7 @@ def test_a_plan_before_its_header_is_refused(tmp_path: Path) -> None:
     code, refused = _publish(run, "plan", json.loads(Path(run["plan"]).read_bytes()))
     assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_ORDER") and "--kind header" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_a_plan_with_another_header_digest_is_refused_with_the_published_one(tmp_path: Path) -> None:
@@ -243,6 +250,7 @@ def test_a_plan_with_another_header_digest_is_refused_with_the_published_one(tmp
     code, refused = _publish(run, "plan", with_digest(plan))
     assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_HEADER") and published["result"]["digest"] in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, ok = _publish(run, "plan", json.loads(Path(run["plan"]).read_bytes()))  # the right plan still goes: no conflict was written
     assert code == 0, ok
 
@@ -259,3 +267,4 @@ def test_a_plan_with_a_context_that_is_not_of_the_attempt_is_refused(tmp_path: P
     context = json.loads(Path(run["context"]).read_bytes())["digest"]
     assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_CONTEXT") and context in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added

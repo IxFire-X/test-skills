@@ -30,7 +30,11 @@ def _put(path: Path, value) -> str:
 
 
 def _journal(run_root: Path) -> bytes:
-    return (run_root / "events.jsonl").read_bytes()
+    """J1: the journal WITHOUT its COMMAND_REFUSED events (every refusal adds one); the value remembers how many there were, so a test
+    that compares «before / after a refusal» states the one event the refusal added with ``assert_refused_once``."""
+    from tests.journal_helpers import journal_minus_refusals
+
+    return journal_minus_refusals(run_root)
 
 
 def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True) -> dict:

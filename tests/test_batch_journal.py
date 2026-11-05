@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tests.test_digest_traps import _generator_request, _publish_inputs
 from tests.test_review_requested import _api, _generated_run, _journal, _put
+from tests.journal_helpers import assert_refused_in_order, assert_refused_once
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -69,9 +70,11 @@ def test_batch_two_before_the_answer_of_batch_one_is_refused_by_name(tmp_path: P
     before = _journal(run["run_root"])
     code, refused = _prior(run, second)
     assert code == 2 and "сначала" in refused["message"] and first in refused["message"], refused
+    first_refusal = refused
     code, refused = _second_request(run, second, plan_digest, header_digest, "sha256:" + "b" * 64)
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and first in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_in_order(run["run_root"], before, ("prior-capabilities", first_refusal["code"]), ("model-request", refused["code"]))  # J1: the two refusals of the test
 
 
 def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps_the_retry(tmp_path: Path) -> None:
@@ -91,6 +94,7 @@ def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps
     code, refused = _response(run, second, _put(run["tmp"] / "changed.json", with_digest(changed)))
     assert code == 2 and refused["code"] == "BATCH_CAPABILITY_CONFLICT" and "--transport-attempts 2" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
     code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *[flag for path in run["fragments"] for flag in ("--fragment", path)],
