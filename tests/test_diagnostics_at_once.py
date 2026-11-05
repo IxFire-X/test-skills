@@ -13,6 +13,8 @@ import pytest
 
 from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh, _self_digest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 BATCH_CODES = {"BATCH_ID_CONFLICT", "BATCH_PARTITION_CONFLICT", "BATCH_SEMANTIC_CONFLICT"}
 

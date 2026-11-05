@@ -12,6 +12,8 @@ from tests.test_digest_traps import _api, _journal, _put
 from tests.test_marker_parts import _marker, _publish_part, _run
 from tools import pilot_state
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 SPEC = "## Requirements\n### Requirement: Search\nSearch the catalog.\n#### Scenario: Found\n- WHEN search\n- THEN results\n"
 SPEC_PATH = "openspec/specs/catalog/spec.md"
 
@@ -51,7 +53,7 @@ def test_d4_requirements_that_follow_openspec_merge(tmp_path: Path) -> None:
 
     root, attempt_id, baseline, receipts = _spec_run(tmp_path)
     entry = {"path": SPEC_PATH, "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
-    rows = build_context(Path.cwd(), docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
+    rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
     _request_requirements(root, attempt_id, baseline)
     requirements = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements",
                                                             _marker([REQUIREMENTS_PLACEHOLDER], requirements=rows))
@@ -115,7 +117,7 @@ def test_a_marker_request_over_an_openspec_receipt_is_published(tmp_path: Path) 
     entry = {"path": SPEC_PATH, "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
     from tools.build_context import build_context
 
-    rows = build_context(Path.cwd(), docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
+    rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
     _request_requirements(root, attempt_id, baseline)
     requirements = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements",
                                                             _marker([REQUIREMENTS_PLACEHOLDER], requirements=rows))

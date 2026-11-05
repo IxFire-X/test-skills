@@ -11,6 +11,8 @@ import pytest
 
 from tools.run_pipeline import _MODEL_RESPONSE, _NEXT_STEPS, _TERMINAL, _next_step
 
+pytestmark = pytest.mark.contract
+
 
 def _commands() -> list[str]:
     return sorted({row[4] for row in _NEXT_STEPS.values()} | {_MODEL_RESPONSE[3], _TERMINAL[4]})

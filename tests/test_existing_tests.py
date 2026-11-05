@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 OWNER_CONTROLLER = """package org.example.owner;
 
 public class OwnerController {

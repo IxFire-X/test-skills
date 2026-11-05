@@ -7,6 +7,8 @@ import pytest
 
 from tests.test_requirement_traceability import canonical_fixture
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 V3 = "zephyr-scale-step-row-24-v3"
 V4 = "zephyr-scale-step-row-24-v4"
@@ -75,7 +77,7 @@ def test_v4_csv_preserves_v3_transport_bytes() -> None:
 
 
 def test_orchestrator_schema_is_5_and_only_accepts_preview_receipt_fields() -> None:
-    schema = json.loads((Path.cwd() / "schemas" / "orchestrator-output.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads((PACK_ROOT / "schemas" / "orchestrator-output.schema.json").read_text(encoding="utf-8"))
     receipt = schema["$defs"]["receipt"]
     assert schema["properties"]["schema_version"] == {"const": "5.0.0"}
     assert {"preview_path", "preview_sha256"}.issubset(receipt["required"])

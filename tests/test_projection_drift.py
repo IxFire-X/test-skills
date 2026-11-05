@@ -2,6 +2,10 @@ from pathlib import Path
 
 from helpers import projection_fixture, run_module
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 
 def test_checked_in_projections_are_exact_machine_truth_renders(pack_root: Path) -> None:
     result = run_module(pack_root, "tools.render_contract_docs", "--root", str(pack_root), "--check")

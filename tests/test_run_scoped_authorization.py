@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from tools import exec_commands, exec_runner
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def _controller_inputs(tmp_path: Path) -> tuple[Path, dict, dict, dict, dict, dict, dict]:
     """Create one real active attempt with a reviewed, materialized delta."""
@@ -72,7 +74,7 @@ def test_runner_v5_environment_receipt_has_safe_labels_never_values() -> None:
     from tools.schema_validation import schema_diagnostics
 
     report = _report(
-        "NOT_RUNNABLE", Path.cwd(), "python",
+        "NOT_RUNNABLE", PACK_ROOT, "python",
         {"document_id": "TCDOC-run", "revision": 1, "source_digest": "sha256:" + "a" * 64, "effective_bundle_receipt_digest": "sha256:" + "d" * 64},
         "sha256:" + "b" * 64, "sha256:" + "c" * 64,
         diagnostics=[{"path": "/authorization", "code": "RUNNER_AUTHORIZATION", "message": "Execution was not authorized."}],
@@ -80,7 +82,7 @@ def test_runner_v5_environment_receipt_has_safe_labels_never_values() -> None:
 
     assert report["schema_version"] == "5.0.0"
     assert report["environment"]["safe_key_labels"] == []
-    assert schema_diagnostics(report, Path("schemas/run-tests-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(report, (PACK_ROOT / "schemas/run-tests-output.schema.json"), PACK_ROOT) == []
 
 
 def test_runner_v5_unknown_preserves_non_authoritative_timeout_receipt() -> None:
@@ -89,7 +91,7 @@ def test_runner_v5_unknown_preserves_non_authoritative_timeout_receipt() -> None
     source = {"document_id": "TCDOC-run", "revision": 1, "source_digest": "sha256:" + "a" * 64, "effective_bundle_receipt_digest": "sha256:" + "d" * 64}
     timeout = ProcessOutcome(124, "", "", "TIMEOUT")
     report = _report(
-        "UNKNOWN", Path.cwd(), "python", source, "sha256:" + "b" * 64, "sha256:" + "c" * 64,
+        "UNKNOWN", PACK_ROOT, "python", source, "sha256:" + "b" * 64, "sha256:" + "c" * 64,
         run_id="RUN-timeout", process_evidence=[_process_row("TIMEOUT", timeout, "RUN-timeout", source, "pytest:selected-symbols-v1", 1.0)],
         authoritative=False, exit_code=124, runner="pytest", interpreter="python", command_profile="pytest:selected-symbols-v1", duration_sec=1.0,
     )
@@ -158,7 +160,7 @@ def test_windows_job_assignment_failure_is_not_process_stop_proof(tmp_path: Path
 def test_doctor_marks_company_runner_non_core_and_no_language_broadly_verified() -> None:
     from tools.doctor import inspect_environment
 
-    report = inspect_environment(Path.cwd())
+    report = inspect_environment(PACK_ROOT)
 
     assert report["adapters"]["company_runner"]["core"] is False
     assert all(language["verified"] is False for language in report["languages"].values())
@@ -174,7 +176,7 @@ def test_local_core_closure_has_no_company_runner_import_dependency() -> None:
         "tools/build_trace_document.py",
         "tools/orchestrate_test_case_revision.py",
     ):
-        assert "tools.company_runner" not in Path(relative).read_text(encoding="utf-8")
+        assert "tools.company_runner" not in (PACK_ROOT / relative).read_text(encoding="utf-8")
 
 
 def test_controller_exec_is_local_only_and_requires_sealed_run_coordinates() -> None:

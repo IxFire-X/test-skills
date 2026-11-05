@@ -4,6 +4,8 @@ import pytest
 
 from tests.test_generated_delta import _add_second_file, _inputs
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def test_partial_materialization_publishes_readback_delta_and_plan_before_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.generated_delta as generated_delta
@@ -37,9 +39,9 @@ def test_partial_materialization_publishes_readback_delta_and_plan_before_cleanu
     dispositions = read_attempt_receipt(run_root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     assert [item["disposition"] for item in dispositions["files"]] == ["CLEANED", "NOT_MATERIALIZED"]
     assert materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id, fail_after=1) == delta
-    assert schema_diagnostics(delta, Path("schemas/generated-delta.schema.json"), Path.cwd()) == []
-    assert schema_diagnostics(delta["files"][0], Path("schemas/materialization-receipt.schema.json"), Path.cwd()) == []
-    assert schema_diagnostics(dispositions, Path("schemas/disposition-receipt.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(delta, (PACK_ROOT / "schemas/generated-delta.schema.json"), PACK_ROOT) == []
+    assert schema_diagnostics(delta["files"][0], (PACK_ROOT / "schemas/materialization-receipt.schema.json"), PACK_ROOT) == []
+    assert schema_diagnostics(dispositions, (PACK_ROOT / "schemas/disposition-receipt.schema.json"), PACK_ROOT) == []
 
 
 def test_unbound_generated_delta_cannot_authorize_disposition_plan(tmp_path: Path):

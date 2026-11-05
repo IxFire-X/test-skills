@@ -1,4 +1,7 @@
 from tools.finalize_attempt import build_pre_finalization_trace, disposition_receipt, publish_terminal_result, verify_finalization
+from pathlib import Path
+
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
 
 def _branch():
@@ -173,7 +176,7 @@ def test_cases_only_uses_no_generated_delta_and_invalid_receipt_still_terminaliz
     def read(kind, key):
         if kind == "terminal_result": raise KeyError(key)
         return storage[(kind, key)]
-    result = finalize_attempt(branch, None, project=__import__("pathlib").Path.cwd(), verification="NOT_APPLICABLE", facts=facts, publish=publish, read=read)
+    result = finalize_attempt(branch, None, project=PACK_ROOT, verification="NOT_APPLICABLE", facts=facts, publish=publish, read=read)
     assert result["result"]["accepted"] is False
     assert result["result"]["reason_code"] == "FINALIZATION_INVALID"
     assert result["pre_finalization_trace"]["evidence"]["execution"] == "NOT_APPLICABLE"

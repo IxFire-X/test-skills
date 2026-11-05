@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 from tools import exec_commands, exec_stand
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 
 

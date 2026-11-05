@@ -584,7 +584,7 @@ def main(argv: list[str] | None = None) -> int:
         report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes,
                          extra_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
         if requested is not None:
-            report.update(input_files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],
+            report.update(files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],
                           input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
             report.update({key: requested[key] for key in ("java_level", "junit_params") if key in requested})

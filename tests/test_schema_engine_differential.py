@@ -28,6 +28,8 @@ from referencing.jsonschema import DRAFT202012  # noqa: E402
 from tools import schema_engine  # noqa: E402
 from tools.schema_validation import _error_code, _error_path, loads_json_strict  # noqa: E402
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 LIVE = Path(os.environ.get("TRASSA_LIVE_DIR", r"D:\AI-Projects\live"))
 FULL = os.environ.get("TRASSA_DIFF_FULL") == "1"
@@ -324,8 +326,11 @@ def _live_instances() -> list[tuple[str, Any]]:
     return result
 
 
-def test_the_oracle_and_the_engine_cover_the_same_44_schemas() -> None:
-    assert len(RAW) == 44 and set(ORACLE) == set(ENGINE)
+def test_the_oracle_and_the_engine_cover_the_same_schemas_and_they_are_the_schemas_of_the_contract() -> None:
+    from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
+
+    assert_every_schema_is_in_the_contract_or_the_list(set(RAW))  # V0: was `len(RAW) == 44`
+    assert set(ORACLE) == set(ENGINE) == set(RAW)
 
 
 def test_fixtures_and_documents_against_every_schema() -> None:
@@ -336,6 +341,7 @@ def test_fixtures_and_documents_against_every_schema() -> None:
 
 
 @pytest.mark.skipif(not LIVE.is_dir(), reason="no live/ directory with earlier runs on this machine")
+@pytest.mark.slow
 def test_artifacts_of_earlier_runs_and_their_mutations() -> None:
     instances = _live_instances()
     if not instances:
@@ -344,6 +350,7 @@ def test_artifacts_of_earlier_runs_and_their_mutations() -> None:
     assert not problems, f"{len(problems)} differences\n" + "\n".join(problems[:40])
 
 
+@pytest.mark.slow
 def test_the_named_allowance_ecma_end_of_string_is_exercised_and_is_nothing_more() -> None:
     """Every string of a valid fixture, with a final newline or CRLF: the engine and the oracle differ exactly where a pattern ends on "$"
     (the oracle accepts, the engine refuses), the allowance forgives them all, and no other difference is left."""

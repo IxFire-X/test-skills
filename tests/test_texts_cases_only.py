@@ -15,6 +15,8 @@ import pytest
 
 from tests.test_pack_profile import copy_profile
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 OLD_SKILL_BYTES = 61838  # skills/orchestrate/SKILL.md before PT: the agent at work reads it whole into a window of 239k tokens
 ALLOWED = (

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
@@ -670,7 +672,7 @@ def test_ownership_receipt_precedes_writes_and_exact_retry_recovers_orphans(tmp_
     assert set(ownership) == {"schema_version", "stage", "module", "test_root", "baseline_digest", "automation_digest", "review_digest", "effective_canonical_digest", "effective_bundle_receipt_digest", "files"}
     assert ownership["stage"] == "materialization-ownership"
     assert all(set(row) == {"file_id", "path", "content_digest", "baseline_absent", "ownership_digest"} for row in ownership["files"])
-    assert schema_diagnostics(ownership, Path("schemas/materialization-receipt.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(ownership, (PACK_ROOT / "schemas/materialization-receipt.schema.json"), PACK_ROOT) == []
     with pytest.raises(ValueError, match="missing generated-delta"):
         read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
     first = tmp_path / "tests" / "test_products.py"
@@ -778,7 +780,7 @@ def test_delta_is_closed_schema_valid_and_unknown_never_cleans(tmp_path: Path):
     inputs = _inputs(tmp_path)
     baseline, automation, review, document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
-    assert schema_diagnostics(delta, Path("schemas/generated-delta.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(delta, (PACK_ROOT / "schemas/generated-delta.schema.json"), PACK_ROOT) == []
     evidence = "sha256:" + "a" * 64
     result = apply_dispositions(tmp_path, delta, {"tests/test_products.py": "PRESERVED_EXECUTION_UNKNOWN"}, run_root=run_root, attempt_id=attempt_id, verification="UNKNOWN", execution_unknown_evidence_digest=evidence)
     assert result["files"][0]["disposition"] == "PRESERVED_EXECUTION_UNKNOWN"
@@ -890,7 +892,7 @@ def test_disposition_recovery_publishes_plan_before_cleanup_and_recovers_deleted
     assert not path.exists()
     plan = read_attempt_receipt(run_root, attempt_id, "disposition-plan", "ARTIFACT_READ_BACK")["record"]["payload"]
     assert plan["stage"] == "disposition-plan"
-    assert schema_diagnostics(plan, Path("schemas/disposition-receipt.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(plan, (PACK_ROOT / "schemas/disposition-receipt.schema.json"), PACK_ROOT) == []
 
     recovered = apply_dispositions(tmp_path, delta, {relative_path: "CLEANED"}, run_root=run_root, attempt_id=attempt_id, verification="FAIL")
     assert recovered["files"][0]["disposition"] == "CLEANED"
@@ -1335,7 +1337,7 @@ def test_case_collision_and_escape_are_rejected_before_any_write(tmp_path: Path)
 def test_generated_delta_schema_rejects_unknown_facts_verification(tmp_path: Path):
     delta = _materialize(tmp_path, _inputs(tmp_path))
     delta["facts"]["verification"] = "UNSUPPORTED"
-    schema = json.loads(Path("schemas/generated-delta.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads((PACK_ROOT / "schemas/generated-delta.schema.json").read_text(encoding="utf-8"))
 
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(delta)
@@ -1343,7 +1345,7 @@ def test_generated_delta_schema_rejects_unknown_facts_verification(tmp_path: Pat
 
 def test_generated_delta_schema_rejects_dispositions_and_invalid_completion_shapes(tmp_path: Path):
     complete = _materialize(tmp_path, _inputs(tmp_path))
-    schema = json.loads(Path("schemas/generated-delta.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads((PACK_ROOT / "schemas/generated-delta.schema.json").read_text(encoding="utf-8"))
     embedded_disposition = json.loads(json.dumps(complete))
     embedded_disposition["files"][0]["disposition"] = "CLEANED"
     with pytest.raises(ValidationError):

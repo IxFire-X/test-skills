@@ -7,6 +7,8 @@ import pytest
 from helpers import build_phase_two_baseline
 from tools import pilot_state
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def _attempt(project: Path, policy_profile: str, execution_requested: bool) -> tuple[Path, dict]:
     project.mkdir(parents=True, exist_ok=True)
@@ -123,7 +125,7 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
         "interpreter_path": request.executable, "working_dir": str(project.resolve()),
         "missing": None, "safe_key_labels": ["PROJECT_NATIVE_ENV"],
     }
-    assert schema_diagnostics(noop, Path("schemas/run-tests-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(noop, (PACK_ROOT / "schemas/run-tests-output.schema.json"), PACK_ROOT) == []
     prestart_receipt = publish_attempt_receipt(
         run_root, attempt_id, "execution-receipt", {"payload": noop}
     )
@@ -234,7 +236,7 @@ def test_runner_preserves_closed_request_for_admission_and_isolation_rejections(
             "missing": None, "safe_key_labels": ["PROJECT_NATIVE_ENV"],
         }
         assert any(row["code"] == code for row in result["diagnostics"])
-        assert schema_diagnostics(result, Path("schemas/run-tests-output.schema.json"), Path.cwd()) == []
+        assert schema_diagnostics(result, (PACK_ROOT / "schemas/run-tests-output.schema.json"), PACK_ROOT) == []
 
     published = publish_attempt_receipt(
         run_root, attempt_id, "execution-receipt", {"payload": rejected_authorization}

@@ -8,6 +8,8 @@ import pytest
 from tools import pilot_state
 from tools.contract_check import validate_pipeline_contract
 
+pytestmark = pytest.mark.contract
+
 
 SCHEMA_ROWS = [
     ("pipeline.schema.json", 1, "IMPLEMENTED", "4.0"), ("pilot-common.schema.json", 1, "IMPLEMENTED", "1.0.0"),
@@ -190,27 +192,34 @@ def test_checker_rejects_live_runtime_signature_drift(pack_root: Path, monkeypat
     assert any("runtime signature live mismatch" in error for error in _errors(_contract(pack_root), pack_root))
 
 
-def test_checker_rejects_projection_drift(pack_root: Path) -> None:
+def _copy_of_the_pack(pack_root: Path, destination: Path) -> Path:
+    """V0 (A6-2): the tests that damage a file damage this copy, never the repository — two tests writing into it were unsafe under ``-n``."""
+    import shutil
+
     contract = _contract(pack_root)
-    target = pack_root / contract["projections"]["contracts"]
-    original = target.read_text(encoding="utf-8")
-    try:
-        target.write_text("stale", encoding="utf-8")
-        assert any("projection drift" in error for error in validate_pipeline_contract(contract, pack_root, check_drift=True)["errors"])
-    finally:
-        target.write_text(original, encoding="utf-8", newline="\n")
+    for relative in ("contracts", "schemas", "skills", "tools", "evals", "release"):
+        shutil.copytree(pack_root / relative, destination / relative)
+    for relative in contract["projections"].values():
+        (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pack_root / relative, destination / relative)
+    return destination
+
+
+def test_checker_rejects_projection_drift(pack_root: Path, tmp_path: Path) -> None:
+    copy = _copy_of_the_pack(pack_root, tmp_path / "pack")
+    contract = _contract(copy)
+    assert validate_pipeline_contract(contract, copy, check_drift=True)["errors"] == []  # the copy is sound before the damage
+    (copy / contract["projections"]["contracts"]).write_text("stale", encoding="utf-8")
+    assert any("projection drift" in error for error in validate_pipeline_contract(contract, copy, check_drift=True)["errors"])
 
 
 def test_contract_checker_passes_complete_machine_truth(pack_root: Path) -> None:
     assert validate_pipeline_contract(_contract(pack_root), pack_root, check_drift=True) == {"status": "passed", "errors": []}
 
 
-def test_full_checker_rejects_a_stale_release_manifest(pack_root: Path) -> None:
-    contract = _contract(pack_root)
-    target = pack_root / contract["release_qualification"]["manifest_path"]
-    original = target.read_bytes()
-    try:
-        target.write_text("{}", encoding="utf-8")
-        assert any("release manifest" in error for error in validate_pipeline_contract(contract, pack_root, check_drift=True)["errors"])
-    finally:
-        target.write_bytes(original)
+def test_full_checker_rejects_a_stale_release_manifest(pack_root: Path, tmp_path: Path) -> None:
+    copy = _copy_of_the_pack(pack_root, tmp_path / "pack")
+    contract = _contract(copy)
+    assert validate_pipeline_contract(contract, copy, check_drift=True)["errors"] == []  # the copy is sound before the damage
+    (copy / contract["release_qualification"]["manifest_path"]).write_text("{}", encoding="utf-8")
+    assert any("release manifest" in error for error in validate_pipeline_contract(contract, copy, check_drift=True)["errors"])

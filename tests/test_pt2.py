@@ -13,6 +13,8 @@ import pytest
 
 from tests.test_pack_profile import copy_profile
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
 AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation", "runner-compat")
@@ -293,6 +295,7 @@ def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: 
     assert code == 2 and refused["status"] == "error", refused
 
 
+@pytest.mark.slow
 def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet() -> None:
     from tests.test_review_requested import _api as call, _complete, _reviewed, _select
     import tempfile

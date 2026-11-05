@@ -4,6 +4,10 @@ from pathlib import Path
 
 from tools.doctor import inspect_environment
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # FaT-AU6: unreachable modules inherited from 455ef01 (audit 5a) stay out of the package.

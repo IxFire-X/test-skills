@@ -13,6 +13,8 @@ from tests.test_batch_journal import _response, _run
 from tests.test_digest_traps import _generator_request
 from tests.test_review_requested import _api, _put
 
+pytestmark = pytest.mark.contract
+
 
 def _validate(run: dict, fragment: Path, *extra: str) -> tuple[int, dict]:
     return _api("validate-fragment", "--fragment", str(fragment), "--plan", str(run["plan"]), "--header", str(run["header"]),

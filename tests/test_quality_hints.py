@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
+pytestmark = pytest.mark.contract
+
 _NO = object()
 
 
@@ -154,7 +158,7 @@ def test_hints_carry_ids_only_and_fit_the_receipt_schema() -> None:
                "fragment_digests": [{"batch_id": "BATCH-a", "digest": "sha256:" + "c" * 64}], "document_digest": "sha256:" + "d" * 64,
                "pre_review_audit": {"schema": "PASS", "semantic": "PASS", "coverage": "PASS", "provenance": "PASS"},
                "warnings": capped(hints), "digest": "sha256:" + "e" * 64}
-    assert [row for row in schema_diagnostics(receipt, _ASSEMBLY_SCHEMA, Path.cwd()) if row["path"].startswith("/warnings")] == []
+    assert [row for row in schema_diagnostics(receipt, _ASSEMBLY_SCHEMA, PACK_ROOT) if row["path"].startswith("/warnings")] == []
 
 
 def test_code_hints_put_a_vague_expectation_after_a_missing_negative_case_and_before_a_boundary() -> None:
@@ -376,6 +380,7 @@ def test_the_cli_prints_json_and_never_fails_on_hints(tmp_path: Path, capsys: py
     assert json.loads(capsys.readouterr().out)["status"] == "error"
 
 
+@pytest.mark.slow
 def test_the_report_counts_weak_assertions_of_the_run_automation(tmp_path: Path) -> None:
     from tests.test_run_report import _finished_run
     from tools.run_report import write_report

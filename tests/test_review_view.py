@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 NIGHT = Path(r"D:\AI-Projects\live\petclinic-fat-night-20261027\.pilot-runs\7a71393605b2482b989c9a824cf30188\cases\TCDOC-owner-lifecycle-night-7a713936.r1.json")

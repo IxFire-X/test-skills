@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 
 def _plan(run: dict, receipt: dict | None, window: int | None = None):
     from tools.batch_assembly import plan_batches_for_project

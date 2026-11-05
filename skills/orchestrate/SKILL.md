@@ -162,7 +162,7 @@ Run остаётся связан с исходной project/module identity.
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
 для разметки одним батчем. Генератор — после `tools.api model-request` этого шага:
 `--run <run_id> --stage tc-generator:<batch>` (ревью — `tc-reviewer:canonical`); файлы входа код берёт
-по журналу прогона из `input_digests` опубликованного запроса и печатает сводку `input_files_summary` с `list_path` — файл `<run>/tmp/step-inputs-<стадия>.json` со всем списком. Делай один вызов размера на пачку; `tools.api step-inputs` — только если нужен список без замера (сводка там — `files_summary`). Вход,
+по журналу прогона из `input_digests` опубликованного запроса и печатает сводку `files_summary` с `list_path` — файл `<run>/tmp/step-inputs-<стадия>.json` со всем списком. Делай один вызов размера на пачку; `tools.api step-inputs` — только если нужен список без замера (та же сводка). Вход,
 которого нет в журнале (или два файла журнала с одним digest), — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
 одной строкой). Для `tc-generator:<batch>` там же может быть файл `existing-tests.md` (basis «карта», FaT-EC) — карта существующих
 тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`

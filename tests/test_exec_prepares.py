@@ -11,6 +11,10 @@ from tests.test_finish import _args, _module_python
 from tests.test_project_native_pytest import _reviewed_inputs
 from tests.helpers import MODULE_PYTHON
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
+pytestmark = pytest.mark.contract
+
 
 def _project(tmp_path: Path, **options) -> tuple[Path, Path, str]:
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
@@ -42,6 +46,7 @@ def _has(run_root: Path, attempt_id: str, kind: str) -> bool:
     return True
 
 
+@pytest.mark.slow
 def test_exec_after_the_static_review_prepares_its_inputs_and_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import read_terminal_result
     from tools.exec_commands import cmd_exec
@@ -58,6 +63,7 @@ def test_exec_after_the_static_review_prepares_its_inputs_and_runs(tmp_path: Pat
     assert again == code and repeated["verdict"] == "PASS" and repeated["finalization"] == "complete"
 
 
+@pytest.mark.slow
 def test_exec_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact
     from tools.exec_commands import cmd_exec
@@ -99,5 +105,5 @@ def test_exec_after_a_static_review_that_is_not_accepted_materializes_nothing(tm
 
 def test_the_skill_says_exec_right_after_the_static_review() -> None:
     # PT: the text of mode B (exec, automation) is in the development build's reference, not in the delivered SKILL.md
-    text = Path("skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
-    assert "exec сам" in text and "exec сам" not in Path("skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
+    text = (PACK_ROOT / "skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
+    assert "exec сам" in text and "exec сам" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")

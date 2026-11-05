@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = sorted((ROOT / "schemas").glob("*.json"))
 # Formats the current jsonschema FormatChecker really checks in our environment (no rfc3339-validator and the like):
@@ -33,7 +35,9 @@ def _errors(schema, instance, **kwargs):
 
 
 def test_engine_compiles_every_schema_of_the_package() -> None:
-    assert len(SCHEMAS) == 44
+    from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
+
+    assert_every_schema_is_in_the_contract_or_the_list({path.name for path in SCHEMAS})  # V0: was `== 44`
     registry = _registry()
     for contents in registry.values():
         _validator(contents, registry=registry)

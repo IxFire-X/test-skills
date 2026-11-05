@@ -10,6 +10,10 @@ import pytest
 
 from tests.test_requirement_traceability import canonical_fixture
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
+pytestmark = pytest.mark.contract
+
 GROWTH_LIMIT_PCT = 5.0
 
 
@@ -232,7 +236,7 @@ def test_reviewer_input_grows_at_most_five_percent_on_the_upper_case() -> None:
     from tools.batch_assembly import canonical_bytes
 
     document = json.loads(example.read_text(encoding="utf-8"))
-    skill = sum(path.stat().st_size for path in [Path("skills/tc-reviewer/SKILL.md"), *Path("skills/tc-reviewer/references").rglob("*")] if path.is_file())
+    skill = sum(path.stat().st_size for path in [(PACK_ROOT / "skills/tc-reviewer/SKILL.md"), *(PACK_ROOT / "skills/tc-reviewer/references").rglob("*")] if path.is_file())
     enriched = copy.deepcopy(document)
     order = {}
     for index, requirement in enumerate(enriched["requirements"]):
@@ -275,7 +279,7 @@ def test_maximum_length_ids_keep_every_hint_within_the_receipt_schema() -> None:
                "fragment_digests": [{"batch_id": "BATCH-a", "digest": "sha256:" + "c" * 64}], "document_digest": "sha256:" + "d" * 64,
                "pre_review_audit": {"schema": "PASS", "semantic": "PASS", "coverage": "PASS", "provenance": "PASS"},
                "warnings": capped(hints), "digest": "sha256:" + "e" * 64}
-    assert [row for row in schema_diagnostics(receipt, _ASSEMBLY_SCHEMA, Path.cwd()) if row["path"].startswith("/warnings")] == []
+    assert [row for row in schema_diagnostics(receipt, _ASSEMBLY_SCHEMA, PACK_ROOT) if row["path"].startswith("/warnings")] == []
 
 
 def test_many_pairs_never_push_out_a_missing_negative_case() -> None:

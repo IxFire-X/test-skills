@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+pytestmark = pytest.mark.contract
+
 
 def _copy_runtime(pack_root: Path, destination: Path) -> Path:
     for relative in ("contracts", "schemas", "skills", "tools", "evals"):

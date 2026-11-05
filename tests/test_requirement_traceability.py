@@ -8,6 +8,8 @@ from tools.build_context import build_context
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import schema_diagnostics
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def canonical_fixture() -> dict:
     source = [
@@ -61,7 +63,7 @@ def test_context_emits_distinct_source_requirement_identity_with_digest_provenan
     assert requirement["source_requirement_id"].startswith("SREQ-")
     assert "requirement_id" not in requirement
     assert any("sha256:" in row for row in requirement["provenance"])
-    assert schema_diagnostics({key: value for key, value in context.items() if key != "status"}, Path("schemas/context-marker-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics({key: value for key, value in context.items() if key != "status"}, (PACK_ROOT / "schemas/context-marker-output.schema.json"), PACK_ROOT) == []
 
 
 def test_context_assigns_source_ids_after_stable_snapshot_sorting() -> None:
@@ -72,8 +74,8 @@ def test_context_assigns_source_ids_after_stable_snapshot_sorting() -> None:
         snapshot("docs/z.md", "## Отображение товара\nКарточка доступна пользователю.\n"),
         snapshot("docs/a.md", "## Вход пользователя\nПользователь входит в систему.\n"),
     ]
-    first = build_context(Path.cwd(), docs_snapshot=entries)
-    second = build_context(Path.cwd(), docs_snapshot=list(reversed(entries)))
+    first = build_context(PACK_ROOT, docs_snapshot=entries)
+    second = build_context(PACK_ROOT, docs_snapshot=list(reversed(entries)))
     first_requirements = first["artifacts"]["analytics_documentation"]["requirements"]
     second_requirements = second["artifacts"]["analytics_documentation"]["requirements"]
     assert first_requirements == second_requirements
@@ -95,7 +97,7 @@ def test_context_keeps_plain_prose_and_multiline_requirements_with_mixed_heading
     assert extract_inventory(sections[0])[0]["text"] == sections[0]
     content = "\n\n".join(sections)
     digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-    context = build_context(Path.cwd(), docs_snapshot=[{"path": "docs/requirements.md", "content": content, "sha256": digest}])
+    context = build_context(PACK_ROOT, docs_snapshot=[{"path": "docs/requirements.md", "content": content, "sha256": digest}])
     assert {row["text"] for row in context["artifacts"]["analytics_documentation"]["requirements"]} == set(sections)
 
 
@@ -103,7 +105,7 @@ def test_context_uses_sequential_source_ids_even_when_evidence_has_req_labels() 
     def snapshot(path: str, content: str) -> dict[str, str]:
         return {"path": path, "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
 
-    context = build_context(Path.cwd(), docs_snapshot=[
+    context = build_context(PACK_ROOT, docs_snapshot=[
         snapshot("docs/z.md", "## REQ-10\nВторое требование.\n"),
         snapshot("docs/a.md", "## REQ-2\nПервое требование.\n"),
     ])
@@ -122,7 +124,7 @@ def test_canonical_document_rejects_source_requirements_out_of_physical_order() 
 def test_context_allows_more_than_two_hundred_normalized_source_requirements() -> None:
     content = "\n".join(f"## Поведение {number}\nОписание поведения {number}." for number in range(1, 202))
     digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-    context = build_context(Path.cwd(), docs_snapshot=[{"path": "docs/all.md", "content": content, "sha256": digest}])
+    context = build_context(PACK_ROOT, docs_snapshot=[{"path": "docs/all.md", "content": content, "sha256": digest}])
     requirements = context["artifacts"]["analytics_documentation"]["requirements"]
     assert len(requirements) == 201
     assert requirements[-1]["source_requirement_id"] == "SREQ-0201"
@@ -146,7 +148,7 @@ def test_openspec_composes_selected_change_and_checks_split_normalized_context()
     )
     archived = "## ADDED Requirements\n### Requirement: Archived Only\nHistorical.\n#### Scenario: Old\n- WHEN old\n- THEN old\n"
     entries = [snapshot("openspec/specs/catalog/spec.md", baseline), snapshot("openspec/changes/update/specs/catalog/spec.md", delta), snapshot("openspec/changes/archive/old/specs/catalog/spec.md", archived)]
-    context = build_context(Path.cwd(), docs_snapshot=entries)
+    context = build_context(PACK_ROOT, docs_snapshot=entries)
     rows = context["artifacts"]["analytics_documentation"]["requirements"]
     texts = "\n".join(row["text"] for row in rows)
     assert len(rows) == 4
@@ -167,7 +169,7 @@ def test_openspec_composes_selected_change_and_checks_split_normalized_context()
         extra["display_order"] = len(split_rows) + 1
         split_rows.append(extra)
     assert openspec_diagnostics(split, entries) == []
-    assert schema_diagnostics({key: value for key, value in split.items() if key != "status"}, Path("schemas/context-marker-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics({key: value for key, value in split.items() if key != "status"}, (PACK_ROOT / "schemas/context-marker-output.schema.json"), PACK_ROOT) == []
 
 
 def test_openspec_reports_missing_extra_and_wrong_source_in_normalized_context() -> None:
@@ -175,7 +177,7 @@ def test_openspec_reports_missing_extra_and_wrong_source_in_normalized_context()
 
     content = "## Requirements\n### Requirement: Search\nSearch the catalog.\n#### Scenario: Found\n- WHEN search\n- THEN results\n"
     entry = {"path": "openspec/specs/catalog/spec.md", "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
-    context = build_context(Path.cwd(), docs_snapshot=[entry])
+    context = build_context(PACK_ROOT, docs_snapshot=[entry])
     row = context["artifacts"]["analytics_documentation"]["requirements"][0]
     row["digest"] = "sha256:" + "0" * 64
     row["provenance"] = [mark.replace("#### Scenario: Found", "#### Scenario: Invented") for mark in row["provenance"]]

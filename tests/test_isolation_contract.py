@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 PREDICATE = "reviewer_isolation_verified_or_self_admitted"
 OLD = "reviewer_isolation_verified"

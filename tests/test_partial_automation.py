@@ -18,6 +18,8 @@ import pytest
 
 from tests.test_automation_revision_budget import automated_document, automation
 
+pytestmark = pytest.mark.contract
+
 
 def _renamed(value, old: str, new: str):
     text = json.dumps(value, ensure_ascii=False)
@@ -176,6 +178,7 @@ def partial_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
     return project, run_root, attempt_id
 
 
+@pytest.mark.slow
 def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                      capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_finish import _args

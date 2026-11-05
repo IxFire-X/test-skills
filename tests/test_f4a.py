@@ -180,7 +180,7 @@ def test_the_fragment_without_the_four_digest_fields_passes_validate_fragment_an
 def test_the_skill_asks_for_one_step_size_call_per_batch_and_names_the_key_of_each_command() -> None:
     text = _flat(SKILL)
     assert "один вызов размера на пачку" in text
-    assert "`files_summary`" in text and "`input_files_summary`" in text
+    assert "`files_summary`" in text and "input_files_summary" not in text  # V0: one key for both commands
     assert "`tools.api step-inputs`" in text and "`step_size`" in text
     assert "`review-select --dry-run` — только при сомнении" in text
     assert "оба" not in text.split("один вызов размера на пачку", 1)[1][:200]  # not «step-inputs and step_size»
@@ -192,7 +192,7 @@ def test_the_key_names_of_the_two_size_commands_are_those_the_skill_gives() -> N
     from tools import step_size
 
     source = inspect.getsource(step_size)
-    assert '"files_summary"' in source and "input_files_summary=" in source  # one function, two names: the unified key is a v0.4 item
+    assert '"files_summary"' in source and "files_summary=" in source and "input_files_summary" not in source
 
 
 # ---- the size ----------------------------------------------------------------------------------------------------------

@@ -8,6 +8,8 @@ import pytest
 
 from tests.test_requirement_traceability import canonical_fixture
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def _digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(
@@ -230,8 +232,8 @@ def test_rejects_self_attested_isolation_and_v5_schema_requires_bound_revision_f
     evidence = host_evidence("session-1")
     accepted = review(document, artifact, evidence, "ПРИНЯТО", session_id="session-1")
     assert "AUTOTEST_REVIEW_ISOLATION" in codes(validate_accepted_autotest_review(accepted, artifact, document))
-    assert schema_diagnostics(artifact, Path("schemas/tc-to-autotest-output.schema.json"), Path.cwd()) == []
-    assert schema_diagnostics(accepted, Path("schemas/autotest-reviewer-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(artifact, (PACK_ROOT / "schemas/tc-to-autotest-output.schema.json"), PACK_ROOT) == []
+    assert schema_diagnostics(accepted, (PACK_ROOT / "schemas/autotest-reviewer-output.schema.json"), PACK_ROOT) == []
 
 
 def test_rejects_tampered_attempt_owned_static_review_boundary(tmp_path: Path) -> None:

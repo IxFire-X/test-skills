@@ -12,6 +12,8 @@ import pytest
 
 from tests.helpers import MODULE_PYTHON
 
+pytestmark = pytest.mark.contract
+
 FIXTURE = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
 HEADER = "Name,Objective,Precondition,Priority,Test Script (Step-by-Step) - Step,Test Script (Step-by-Step) - Test Data,Test Script (Step-by-Step) - Expected Result"
 CSV = (HEADER + "\r\n"
@@ -338,6 +340,7 @@ def _automation(document: dict, bundle_digest: str) -> dict:
 
 
 
+@pytest.mark.slow
 def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """e2e of stage 1, by commands: scan --cases → cases-import → marker parts → plan → generator with the skeleton →
     assemble → publish r1 → reviewer session → accepted review → select (effective) → tc-to-autotest → accepted static

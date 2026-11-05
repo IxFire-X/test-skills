@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted([*ROOT.glob("skills/*/SKILL.md"), *ROOT.glob("skills/*/references/*.md"), ROOT / "USAGE.md", ROOT / "README.md", ROOT / "HOW-TO-USE.md"])
 NAMED = re.compile(r"python -m tools\.([a-z_]+)(?: ([a-z][a-z-]+)(?![\w/.-]))?")
@@ -309,6 +311,7 @@ def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys:
     assert "drift" not in _status(project, scan["run_id"], monkeypatch)
 
 
+@pytest.mark.slow
 def test_a_file_written_by_out_makes_no_drift_for_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_finish import _args, _project
     from tools.exec_commands import cmd_exec

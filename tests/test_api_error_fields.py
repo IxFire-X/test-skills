@@ -7,6 +7,8 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 
 @pytest.mark.parametrize(("error", "fields"), [
     (ValueError("invalid factual receipt"), {"code": "ValueError", "message": "invalid factual receipt"}),

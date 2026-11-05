@@ -2,6 +2,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 
 def test_ci_gate_runs_the_required_checks_in_order(pack_root: Path, monkeypatch) -> None:
     from tools import ci_gate

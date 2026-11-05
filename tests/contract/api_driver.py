@@ -1,0 +1,174 @@
+"""V0: drives the commands of ``tools.api`` through the helpers the other tests already have and records the shape of every answer.
+
+The helpers of ``test_review_requested`` call ``tools.api`` in a subprocess through one function, ``_cmd``; here that function runs the
+command in this process and notes the shape of its ``result`` — the sorted top-level keys of an object, or the name of the JSON type.
+Nothing is written to the repository: every run lives in a ``tmp_path``."""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+from pathlib import Path
+from typing import Any
+
+REFUSAL_KEYS = {"status", "command", "code", "message", "fix"}
+
+
+def shape(value: Any) -> Any:
+    """Sorted keys of an object, else the JSON type name — the form of an answer, never its content."""
+    if isinstance(value, dict):
+        return sorted(value)
+    return {list: "array", str: "string", bool: "boolean", int: "integer", float: "number", type(None): "null"}[type(value)]
+
+
+def call_in_process(argv: list[str]) -> tuple[int, dict]:
+    from tools import api
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = api.main(list(argv))
+    return code, json.loads(buffer.getvalue().strip().splitlines()[-1])
+
+
+class Observed:
+    """What the commands answered: ``results[command]`` — the shape of ``result``; ``envelopes`` — every top-level key set seen."""
+
+    def __init__(self) -> None:
+        self.results: dict[str, Any] = {}
+        self.envelopes: list[tuple[str, int, list[str]]] = []
+        self.refusals: list[tuple[str, dict]] = []
+
+    def note(self, argv: list[str], code: int, payload: dict) -> None:
+        command = argv[0] + (" --dry-run" if payload.get("dry_run") else "")  # a dry run answers with another object
+        self.envelopes.append((command, code, sorted(payload)))
+        if payload.get("status") == "error":
+            self.refusals.append((command, payload))
+        elif "result" in payload:
+            self.results.setdefault(command, shape(payload["result"]))
+        elif isinstance(payload.get("out"), dict):  # the commands with named parts (assemble, plan) answer {out: {part: file}}
+            self.results.setdefault(command, {part: shape(json.loads(Path(row["out"]).read_bytes())) for part, row in sorted(payload["out"].items())})
+        elif isinstance(payload.get("out"), str):  # --out: the result is in the file, the line holds {out, bytes, sha256}
+            self.results.setdefault(command, shape(json.loads(Path(payload["out"]).read_bytes())))
+
+
+@contextlib.contextmanager
+def recording(monkeypatch):
+    """Patch the one subprocess function of ``test_review_requested`` so that ``tools.api`` runs here and is noted."""
+    from tests import test_review_requested as base
+
+    original = base._cmd
+    observed = Observed()
+
+    def wrapper(*args: str) -> tuple[int, dict]:
+        if args and args[0] == "tools.api":
+            code, payload = call_in_process(list(args[1:]))
+            observed.note(list(args[1:]), code, payload)
+            return code, payload
+        return original(*args)
+
+    monkeypatch.setattr(base, "_cmd", wrapper)
+    yield observed
+
+
+def drive(tmp_path: Path, monkeypatch) -> Observed:
+    """The commands reachable by the helpers of the existing tests, in four runs."""
+    import shutil
+
+    from tests import test_review_requested as rr
+    from tests.test_batch_journal import _prior, _response, _run, _second_request
+    from tests.test_digest_traps import _generator_request
+    from tests.test_f3_scan_finish import _plan_argv
+    from tests.test_review_two_commands import _bundles, _flags, _open, _select_verdict, _verdict
+
+    with recording(monkeypatch) as observed:
+        # (1) the generator: inputs, request, answer, the capabilities of the earlier batch, the fragment checks, the plan
+        run, plan_digest, header_digest, fragments = _run(tmp_path / "generator")
+        first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
+        assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
+        code, listed = rr._api("step-inputs", "--run-root", str(run["run_root"]), "--stage", f"tc-generator:{first}")
+        assert code == 0, listed
+        code, response = _response(run, first, run["fragments"][0])
+        assert code == 0, response
+        assert rr._api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
+                       "--digest", response["result"]["content_digest"])[0] == 0
+        context = json.loads(Path(run["context"]).read_bytes())
+        assert rr._api("read-context", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--digest", context["digest"])[0] == 0
+        code, prior = _prior(run, second)
+        assert code == 0, prior
+        assert rr._api("validate-fragment", "--fragment", run["fragments"][0], "--plan", run["plan"], "--header", run["header"],
+                       "--context-receipt", run["context"], "--run-root", str(run["run_root"]))[0] == 0
+        assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
+
+        # (1b) plan and plan-batches on a run that has no plan yet
+        fresh = rr._generated_run(tmp_path / "plan", generated=False)
+        code, planned = rr._api(*_plan_argv(fresh))
+        assert code == 0, planned
+        context = json.loads(Path(fresh["context"]).read_bytes())
+        grouping = rr._put(fresh["tmp"] / "grouping-b.json", {"header_digest": context["digest"], "context_receipt_digest": context["digest"],
+                                                              "context_receipt_digests": [context["digest"]]})
+        code, batches = rr._api("plan-batches", "--requirements", str(fresh["tmp"] / "requirements.json"), "--grouping", grouping,
+                                "--project", str(fresh["project"]), "--input-file", fresh["marker"], "--context-receipt", fresh["context"])
+        assert code == 0, batches
+
+        # (2) the review in two commands, then what reads its result; the assembled candidate is checked and digested
+        run = rr._generated_run(tmp_path / "review")
+        code, assembled = rr._api("assemble", "--header", run["header"], "--plan", run["plan"], *[f for p in run["fragments"] for f in ("--fragment", p)],
+                                  "--out-candidate", str(run["tmp"] / "candidate.json"), "--out-receipt", str(run["tmp"] / "assembly-receipt.json"),
+                                  "--run-root", str(run["run_root"]))
+        assert code == 0, assembled
+        assert rr._api("validate-canonical", "--document", str(run["tmp"] / "candidate.json"))[0] in (0, 1)
+        assert rr._api("document-digest", "--document", str(run["tmp"] / "candidate.json"))[0] == 0
+        assert _open(run)[0] == 0
+        verdict = _verdict(run)
+        assert rr._api("review-publish", *_flags(run), "--output-dir", _bundles(run))[0] == 0
+        assert _select_verdict(run, verdict, "--dry-run")[0] == 0
+        assert _select_verdict(run, verdict)[0] == 0
+        assert rr._api("read-effective", *_flags(run))[0] == 0
+        assert rr._api("read-ledger", *_flags(run))[0] == 0
+        assert rr._api("read-receipt", *_flags(run), "--kind", "reviewer-session-boundary", "--event", "ARTIFACT_READ_BACK")[0] == 0
+
+        # (3) the review of the nine commands (the old way), with evidence asked for
+        reviewed, _digest = rr._reviewed(tmp_path / "legacy", evidence=("src/extra.py",), start="command")
+        assert reviewed
+
+        # (4) a review opened and abandoned
+        run = rr._generated_run(tmp_path / "abort")
+        assert _open(run)[0] == 0
+        code, aborted = rr._api("review-abort", *_flags(run), "--reason", "REVIEW_UNUSABLE")
+        print("ABORT", code, json.dumps(aborted, ensure_ascii=False)[:600])
+        shutil.rmtree(tmp_path / "abort", ignore_errors=True)
+        assert rr._complete(reviewed)[0] in (0, 2)  # the run of (3) after its selection: the old closing command
+
+        def direct(argv: list[str]) -> tuple[int, dict]:
+            code, payload = call_in_process(argv)
+            observed.note(argv, code, payload)
+            return code, payload
+
+        # (5) an import of ready cases: the requirements part answered by code
+        from tests.test_cases_import import _project as csv_project
+        from tests.test_cases_import import _scan
+
+        _code, scanned = _scan(csv_project(tmp_path / "csv"), monkeypatch)
+        code, imported = direct(["cases-import", "--run-root", scanned["run_root"], "--attempt", scanned["attempt_id"]])
+        assert code == 0, imported
+
+        # (6) mode B: the digests and validators of the automation, the runner check, the boundary of the autotest review
+        from tests.test_finish import _project as finish_project
+
+        project, run_root, attempt_id, values = finish_project(tmp_path / "finish")
+        files = {}
+        for name, value in (("document", values["canonical_document"]), ("automation", values["automation_artifact"]), ("relations", [])):
+            files[name] = rr._put(tmp_path / "finish-files" / f"{name}.json", value)
+        assert direct(["automation-digest", "--automation", files["automation"]])[0] == 0
+        assert direct(["relations-digest", "--relations", files["relations"]])[0] == 0
+        assert direct(["validate-automation", "--automation", files["automation"], "--canonical", files["document"]])[0] in (0, 1)
+        assert direct(["runner-compat", "--module-root", str(project), "--language", "python", "--canonical", files["document"],
+                       "--automation", files["automation"]])[0] in (0, 1)
+        facts = direct(["automation-boundary-facts", "--run-root", str(run_root), "--attempt", attempt_id, "--revision", "1", "--fresh-context", "yes",
+                        "--reviewer-invocation-id", "autotest-reviewer-1"])
+        assert facts[0] == 0, facts
+
+        # (7) two answers that are not a plain success: a refusal (an attempt the run does not have) and an invalid result (no document)
+        assert direct(["read-effective", "--run-root", str(run_root), "--attempt", "no-such-attempt"])[0] == 2
+        assert direct(["validate-canonical", "--document", rr._put(tmp_path / "finish-files" / "empty.json", {})])[0] == 1
+    return observed

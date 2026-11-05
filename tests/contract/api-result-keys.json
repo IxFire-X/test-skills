@@ -1,0 +1,285 @@
+{
+ "commands": {
+  "assemble": {
+   "candidate": [
+    "content_locale",
+    "document_id",
+    "metadata",
+    "operation_capabilities",
+    "parent_sha256",
+    "requirements",
+    "revision",
+    "schema_version",
+    "source_requirements",
+    "source_to_canonical_mappings",
+    "test_cases"
+   ],
+   "receipt": [
+    "digest",
+    "document_digest",
+    "fragment_digests",
+    "header_digest",
+    "plan_digest",
+    "pre_review_audit",
+    "schema_version",
+    "warnings"
+   ]
+  },
+  "automation-boundary-facts": [
+   "automation_digest",
+   "automation_revision",
+   "effective_bundle_receipt_digest",
+   "effective_canonical_digest",
+   "generator_invocation_id",
+   "host_isolation",
+   "reviewer_invocation_id",
+   "reviewer_session_id",
+   "role_policy"
+  ],
+  "automation-digest": "string",
+  "cases-import": [
+   "artifact",
+   "byte_count",
+   "content_digest",
+   "imported",
+   "output_basis",
+   "output_bytes",
+   "path",
+   "warning"
+  ],
+  "complete-review": [
+   "boundary_digest",
+   "context_budget_bytes",
+   "digest",
+   "events",
+   "generator_invocation_id",
+   "generator_role",
+   "host_isolation",
+   "package_binding",
+   "reviewer_invocation_id",
+   "reviewer_role",
+   "schema_version",
+   "session_id",
+   "status"
+  ],
+  "document-digest": "string",
+  "model-request": [
+   "attempt_id",
+   "digest",
+   "input_digests",
+   "invocation_id",
+   "model_id",
+   "nonce",
+   "nonce_note",
+   "nonce_sha256",
+   "role",
+   "role_policy",
+   "run_id",
+   "schema_version",
+   "stage",
+   "stage_instance_id"
+  ],
+  "model-response": [
+   "byte_count",
+   "content_digest",
+   "output_basis",
+   "output_bytes",
+   "path",
+   "warning"
+  ],
+  "plan": {
+   "plan": [
+    "batches",
+    "context_receipt_digest",
+    "digest",
+    "header_digest",
+    "schema_version",
+    "source_requirements"
+   ],
+   "published": [
+    "header",
+    "plan"
+   ]
+  },
+  "plan-batches": [
+   "batches",
+   "context_receipt_digest",
+   "digest",
+   "header_digest",
+   "schema_version",
+   "source_requirements"
+  ],
+  "prior-capabilities": [
+   "batch_id",
+   "body_at",
+   "capabilities",
+   "capability_ids",
+   "digest",
+   "path"
+  ],
+  "publish-generator-input": [
+   "digest",
+   "kind",
+   "path"
+  ],
+  "read-context": [
+   "batch_count",
+   "batch_index",
+   "byte_count",
+   "byte_set_digest",
+   "digest",
+   "files",
+   "inventory_digest",
+   "schema_version"
+  ],
+  "read-effective": [
+   "attempt_id",
+   "digest",
+   "document",
+   "document_digest",
+   "effective_bundle_receipt",
+   "effective_bundle_receipt_digest",
+   "kind",
+   "policy_profile",
+   "reviewer_session_digest",
+   "run_id",
+   "schema_version"
+  ],
+  "read-ledger": [
+   "boundary_digest",
+   "context_budget_bytes",
+   "digest",
+   "events",
+   "generator_invocation_id",
+   "generator_role",
+   "host_isolation",
+   "package_binding",
+   "reviewer_invocation_id",
+   "reviewer_role",
+   "schema_version",
+   "session_id",
+   "status"
+  ],
+  "read-model-artifact": [
+   "artifact",
+   "byte_count",
+   "content_digest",
+   "path"
+  ],
+  "read-receipt": [
+   "bytes",
+   "digest",
+   "path",
+   "record"
+  ],
+  "relations-digest": "string",
+  "review-abort": [
+   "boundary_digest",
+   "context_budget_bytes",
+   "digest",
+   "events",
+   "generator_invocation_id",
+   "generator_role",
+   "host_isolation",
+   "package_binding",
+   "reviewer_invocation_id",
+   "reviewer_role",
+   "schema_version",
+   "session_id",
+   "status"
+  ],
+  "review-evidence": [
+   "evidence_receipt",
+   "reviewer_session_digest"
+  ],
+  "review-open": [
+   "canaries",
+   "candidate_bundle_receipt",
+   "for_human",
+   "model_request",
+   "next_step",
+   "package_binding",
+   "questions_for_analyst",
+   "review_requested",
+   "reviewer_session_boundary",
+   "reviewer_view",
+   "warnings"
+  ],
+  "review-publish": [
+   "candidate_bundle_receipt",
+   "candidate_publication_status",
+   "idempotent",
+   "questions_for_analyst",
+   "status",
+   "warnings"
+  ],
+  "review-requested": [
+   "actor",
+   "artifact_digest",
+   "attempt_id",
+   "digest",
+   "event_type",
+   "observed_at",
+   "prev_digest",
+   "run_id",
+   "schema_version",
+   "seq",
+   "stage_instance_id"
+  ],
+  "review-select": [
+   "candidate_bundle_receipt",
+   "codeword",
+   "diagnostics",
+   "effective_bundle_receipt",
+   "effective_source",
+   "facts",
+   "review_canaries",
+   "review_warnings",
+   "status",
+   "successor_bundle_receipt"
+  ],
+  "review-select --dry-run": [
+   "candidate_bundle_receipt",
+   "codeword",
+   "diagnostics",
+   "effective_bundle_receipt",
+   "effective_source",
+   "facts",
+   "review_canaries",
+   "review_warnings",
+   "status",
+   "successor_bundle_receipt",
+   "would_publish"
+  ],
+  "runner-compat": [
+   "bindings",
+   "diagnostics",
+   "required_pairs",
+   "status",
+   "verified_file_digests"
+  ],
+  "session-start": [
+   "context_budget_bytes",
+   "generator_invocation_id",
+   "generator_role",
+   "host_isolation",
+   "reviewer_invocation_id",
+   "reviewer_role",
+   "session_id"
+  ],
+  "step-inputs": [
+   "attempt_id",
+   "bindings",
+   "files_summary",
+   "request_digest",
+   "stage",
+   "unresolved"
+  ],
+  "validate-automation": "array",
+  "validate-canonical": "array",
+  "validate-fragment": "null"
+ },
+ "not_driven": {
+  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework"
+ }
+}

@@ -12,6 +12,8 @@ import pytest
 
 from tests.test_cases_import import CSV, _generator_request, _project, _scan
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 DOC = "# Сумма\n\nR01. combine склеивает строки через двоеточие.\nR02. combine отказывает на None.\nR03. Результат — строка.\n"
 
 
@@ -272,7 +274,7 @@ def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypat
     assert code == 0, scan
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
     entry = {"path": "openspec/specs/catalog/spec.md", "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
-    rows = build_context(Path.cwd(), docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
+    rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
     assert len(rows) == 2
     links = [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]]}, {"row": 3, "source_requirement_ids": [], "reason": "нет в спеке"}]
     _request_requirements(root, attempt_id)

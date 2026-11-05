@@ -17,6 +17,8 @@ import pytest
 from tests.test_closure_deadlocks import _run
 from tests.test_finish import _automation_chain
 
+pytestmark = pytest.mark.contract
+
 
 def _command(fix: str, needle: str) -> list[str]:
     """The one command of the fix that contains ``needle``, as argv after ``-m <module>``."""
@@ -68,6 +70,7 @@ def test_a_pending_automation_is_closed_by_the_abandon_its_fix_names(tmp_path: P
     assert again["reason_code"] == code_name and again["idempotent"] is True, again
 
 
+@pytest.mark.slow
 def test_abandon_is_refused_where_finish_or_exec_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.run_pipeline import main
 
@@ -93,6 +96,7 @@ def test_abandon_is_refused_where_finish_or_exec_closes(tmp_path: Path, capsys: 
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_review_requested import _generated_run, _open_session, _review, _select
 
@@ -145,6 +149,7 @@ def test_d3_an_io_failure_of_the_preparation_says_repeat_exec(tmp_path: Path, ca
     assert finish["reason"] == "FINISH_FACT_UNDETERMINED" and _command(finish["fix"], "exec")[1] == "exec", finish
 
 
+@pytest.mark.slow
 def test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_names(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     root, _attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])

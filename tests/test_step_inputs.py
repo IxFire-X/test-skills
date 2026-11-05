@@ -171,7 +171,7 @@ def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixtu
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     code = step_size.main(["--project", str(root.parent.parent), "--run", root.name, "--stage", "tc-generator:BATCH-fixture"])
     report = json.loads(capsys.readouterr().out)
-    listed = json.loads(Path(report["input_files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"]  # PT2: the list is in the file
+    listed = json.loads(Path(report["files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"]  # PT2: the list is in the file
     assert code == 0 and report["recorded"] and any("part0.py" in row["path"] for row in listed) and "input_files" not in report, report
     lines = (root / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()
     line = lines[-1]  # P1: model-request has measured its own steps before (one line each); the last is this command's

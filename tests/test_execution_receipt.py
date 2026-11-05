@@ -20,6 +20,8 @@ from tools.pilot_state import (
 )
 from tools.schema_validation import schema_diagnostics
 
+PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
+
 
 def _execution_facts(
     tmp_path: Path, *, project: Path | None = None, failed: bool = False,
@@ -150,7 +152,7 @@ def _execution_facts(
         "evidence_authoritative": True,
         "diagnostics": [],
     }
-    assert schema_diagnostics(report, Path("schemas/run-tests-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(report, (PACK_ROOT / "schemas/run-tests-output.schema.json"), PACK_ROOT) == []
     durable["trace_inputs"] = {
         "automation_artifact": automation,
         "autotest_review": review,
@@ -230,7 +232,7 @@ def test_prestart_not_runnable_receipt_requires_zero_execution_start_events(tmp_
         "evidence_authoritative": False,
         "diagnostics": [{"path": "/execution", "code": "RUNNER_PRESTART", "message": "Execution cannot start."}],
     })
-    assert schema_diagnostics(report, Path("schemas/run-tests-output.schema.json"), Path.cwd()) == []
+    assert schema_diagnostics(report, (PACK_ROOT / "schemas/run-tests-output.schema.json"), PACK_ROOT) == []
 
     published = publish_attempt_receipt(run_root, attempt_id, "execution-receipt", {"payload": report})
 

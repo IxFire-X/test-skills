@@ -11,6 +11,8 @@ import pytest
 
 from tools import pilot_state
 
+pytestmark = pytest.mark.contract
+
 HEADER = "sha256:" + "c" * 64
 
 
