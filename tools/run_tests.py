@@ -6,6 +6,7 @@ The process launch (``run_subprocess``, the process-tree stop, ``run_tests_v5``)
 from __future__ import annotations
 
 import ast
+import bisect
 import hashlib
 import json
 import re
@@ -241,23 +242,34 @@ def _java_class(path: Path, text: str) -> tuple[str, str] | None:
                 break
     if end is None:
         return None
-    body = list(masked[declaration.end():end])
+    text = masked[declaration.end():end]
     nested = re.compile(r"\b(?:class|interface|enum|record)\s+[A-Za-z_$][\w$]*\b[^\{]*\{")
-    search_at = 0
-    while (match := nested.search("".join(body), search_at)) is not None:
-        nested_depth, nested_end = 0, None
-        for index in range(match.end() - 1, len(body)):
-            if body[index] == "{": nested_depth += 1
-            elif body[index] == "}":
-                nested_depth -= 1
-                if nested_depth == 0:
-                    nested_end = index + 1
-                    break
+    # V5 (8.D6-7): the body is searched where it is and the nested classes are blanked while it is copied out, once — joining the body into a new
+    # string for every nested class found was n squared (7 500 empty nested classes: 4 s).  The pairs of braces are found in one pass.
+    pairs = _brace_pairs(text)
+    pieces: list[str] = []
+    search_at = copied = 0
+    while (match := nested.search(text, search_at)) is not None:
+        nested_end = pairs.get(match.end() - 1)
         if nested_end is None:
             return None
-        body[match.start():nested_end] = " " * (nested_end - match.start())
-        search_at = nested_end
-    return class_fqn, "".join(body)
+        pieces.append(text[copied:match.start()])
+        pieces.append(" " * (nested_end + 1 - match.start()))
+        search_at = copied = nested_end + 1
+    pieces.append(text[copied:])
+    return class_fqn, "".join(pieces)
+
+
+def _brace_pairs(text: str) -> dict[int, int]:
+    """Position of every ``{`` of *text* with the position of the ``}`` that closes it; a brace never closed has no entry."""
+    pairs: dict[int, int] = {}
+    opened: list[int] = []
+    for match in re.finditer(r"[{}]", text):
+        if match.group() == "{":
+            opened.append(match.start())
+        elif opened:
+            pairs[opened.pop()] = match.start()
+    return pairs
 
 
 # FaT-DN: Surefire writes a class display name that differs from the simple class name as the report classname,
@@ -286,9 +298,54 @@ def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | Non
     body = parsed[1]
     # FaT-RC: the declaration `<type> <name>(…) [throws …] {` found from each occurrence of the name, not by one pattern
     # tried at every token — `[\w<>\[\]., ?]+\s+name` backtracked quadratically on a long line of words (2 h on one file).
-    count = sum(_declared_after_type(body, match.start())
-                for match in re.finditer(r"\b" + re.escape(method) + r"\s*\([^;{}]*\)\s*(?:throws[^\{]+)?\{", body))
+    count = sum(_declared_after_type(body, start) for start in _declaration_starts(body, method))
     return method if count == 1 else None
+
+
+_TAIL_OF_A_HEADER = re.compile(r"\s*")
+
+
+def _declaration_starts(body: str, method: str) -> list[int]:
+    """Where ``\\bNAME\\s*\\([^;{}]*\\)\\s*(?:throws[^\\{]+)?\\{`` matches in *body*, as ``finditer`` finds them (V5, 8.D6-7: that pattern read to the end of the
+    body from every ``foo(`` when no ``;``, ``{`` or ``}`` followed — 100 KB took 4 s).  A match is a name and its opening parenthesis, a closing parenthesis
+    before the first of ``;{}`` that the header ends on (the last such one that does: ``[^;{}]*`` is greedy), blanks, and either ``{`` or ``throws`` and the
+    first ``{`` after it.  Which parenthesis ends a header does not depend on the name, so it is worked out once per parenthesis."""
+    stops = [match.start() for match in re.finditer(r"[;{}]", body)]
+    braces = [match.start() for match in re.finditer(r"\{", body)]
+    closers = [match.start() for match in re.finditer(r"\)", body)]
+    ends: dict[int, int] = {}  # a closing parenthesis -> the end of the match it gives, or -1
+    good: list[int] = []  # closing parentheses that give a match, in order
+
+    def end_of(close: int) -> int:
+        found = ends.get(close)
+        if found is None:
+            at = _TAIL_OF_A_HEADER.match(body, close + 1).end()
+            found = -1
+            if body.startswith("{", at):
+                found = at + 1
+            elif body.startswith("throws", at):
+                brace = bisect.bisect_left(braces, at + 6)
+                if brace < len(braces) and braces[brace] > at + 6:
+                    found = braces[brace] + 1
+            ends[close] = found
+        return found
+
+    for close in closers:
+        if end_of(close) >= 0:
+            good.append(close)
+    starts: list[int] = []
+    resume = 0
+    for occurrence in re.finditer(r"\b" + re.escape(method) + r"\s*\(", body):
+        if occurrence.start() < resume:
+            continue
+        paren = occurrence.end() - 1
+        stop = bisect.bisect_right(stops, paren)
+        limit = stops[stop] if stop < len(stops) else len(body)
+        index = bisect.bisect_left(good, limit) - 1  # the last good closing parenthesis before the first stop
+        if index >= 0 and good[index] > paren:
+            starts.append(occurrence.start())
+            resume = end_of(good[index])
+    return starts
 
 
 def _declared_after_type(body: str, start: int) -> bool:
