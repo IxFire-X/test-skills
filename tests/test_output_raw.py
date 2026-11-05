@@ -63,8 +63,9 @@ def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     raw_by_digest = {result["content_digest"]: raw for result, raw in published}
     answered = [call for call in report["model_calls"] if call["response_digest"] in raw_by_digest]
-    assert answered and all(call["output_bytes"] == raw_by_digest[call["response_digest"]] for call in answered)
-    assert all(call["output_basis"] == "raw" for call in answered)
+    # V9a: the raw size is the agent's measurement (a file the journal does not bind): the report prints it apart and judges by the stored answer
+    assert answered and all(call["output_raw_bytes"] == raw_by_digest[call["response_digest"]] for call in answered)
+    assert all(call["output_basis"] == "compact" and call["output_bytes"] <= call["output_raw_bytes"] for call in answered)
 
 
 def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: Path) -> None:
