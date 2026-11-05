@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_once
 from tests.test_review_requested import _api, _complete, _generated_run, _journal, _open_session, _put, _review, _reviewer_request, _select
 
 
@@ -64,6 +65,7 @@ def test_a_wrong_decision_is_refused_before_the_write_and_the_retry_closes_the_r
     code, refused = _respond(run, _answer(run, mutate))
     assert code == 2 and refused["code"] == "REVIEW_DECISION_INVALID" and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, "REVIEW_DECISION_INVALID", "model-response")  # J1: the one event the refusal itself added
     # the one retry with a correct decision goes through to an effective document
     code, answered = _respond(run, _answer(run, name="review-2.json"), attempts=2)
     assert code == 0, answered

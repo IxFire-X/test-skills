@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tests.journal_helpers import assert_refused_once
 from tests.test_review_requested import _api, _cmd, _complete, _generated_run, _journal, _put, _review, _review_answer
 
 
@@ -111,6 +112,7 @@ def test_a_file_that_differs_from_the_journal_is_refused_by_field_and_source(tmp
     assert "context_marker_output" in refused["message"] and "context-marker:baseline" in refused["message"], refused
     assert refused["fix"] and set(refused) >= {"status", "code", "message", "fix", "next"}, refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, "REVIEW_INPUT_MISMATCH", "session-start")  # J1: the one event the refusal itself added
 
 
 def test_a_missing_step_is_unavailable_with_its_fix(tmp_path: Path) -> None:

@@ -75,7 +75,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("orchestrate_test_case_revision", "pilot_state", "_CLOSURE_CACHE"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_generator_input"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_imported_cases"): 1,
-    ("orchestrate_test_case_revision", "pilot_state", "_publish_bound_attempt_receipt"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_run_root"): 4,
     ("orchestrate_test_case_revision", "run_pipeline", "_scan_context_budget"): 1,
     ("output_guard", "pilot_state", "_run_root"): 1,

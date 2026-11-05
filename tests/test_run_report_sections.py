@@ -1,6 +1,7 @@
 """P9: the report prints by itself what the pilot report template v2 asked the agent to count by hand."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -101,9 +102,15 @@ def test_refusals_are_summed_by_command_code_and_batch(tmp_path: Path) -> None:
         {"at": "2026-11-03T10:03:00Z", "command": "assemble", "code": "BATCH_SEMANTIC_CONFLICT", "stage": None, "batch": None},
         {"at": "2026-11-03T10:04:00Z", "command": "/home/user/secret project", "code": "some text with a path C:\\x", "stage": None, "batch": None},
     ]
-    (run["run_root"] / "refusals.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows) + "not json\n", encoding="utf-8")
+    lines = [json.dumps(row).encode("utf-8") for row in rows]
+    (run["run_root"] / "refusals.jsonl").write_bytes(b"".join(line + b"\n" for line in lines) + b"not json\n")
+    from tools import pilot_state  # J1: the journal counts — each of the five lines has its COMMAND_REFUSED event; the sixth line («not json») has none
+
+    for line in lines:
+        pilot_state.append_event(run["run_root"], "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
     report, markdown = _report(run["project"], run["run_root"])
     refusals = report["refusals"]
+    assert refusals["mismatch"] == {"lines_without_event": 1, "events_without_line": 0}, refusals  # the line no event confirms is named, not counted
     assert refusals["total"] == 5
     assert refusals["by_command"]["validate-fragment"] == 3 and refusals["by_command"]["assemble"] == 1
     assert refusals["by_code"]["BATCH_FRAGMENT_INVALID"] == 3

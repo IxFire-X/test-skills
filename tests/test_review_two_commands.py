@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_review_requested import _api, _complete, _generated_run, _journal, _put, _review_answer, _reviewed, _select
+from tests.journal_helpers import assert_refused_once
 
 
 def _flags(run: dict) -> list[str]:
@@ -181,6 +182,7 @@ def test_a_second_review_open_with_another_reviewer_is_refused(tmp_path: Path) -
     code, refused = _open(run, invocation="another-reviewer")
     assert code == 2 and refused["code"] == "REVIEW_ALREADY_OPEN" and refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_review_open_without_the_fresh_context_statement_is_refused_before_it_writes(tmp_path: Path) -> None:
@@ -190,6 +192,7 @@ def test_review_open_without_the_fresh_context_statement_is_refused_before_it_wr
     assert code == 2 and refused["code"] == "FRESH_CONTEXT_REQUIRED", refused
     assert "--fresh-context yes" in refused["fix"] and "accept-self-review" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_a_run_that_admitted_self_review_takes_fresh_context_no_from_the_code(tmp_path: Path) -> None:
@@ -211,6 +214,7 @@ def test_fresh_context_no_in_an_ordinary_run_is_independence_unverified(tmp_path
     code, refused = _open(run, fresh="no")
     assert code == 2 and refused["code"] == "INDEPENDENCE_UNVERIFIED" and "accept-self-review" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_review_open_needs_the_model_and_the_invocation(tmp_path: Path) -> None:
@@ -219,6 +223,7 @@ def test_review_open_needs_the_model_and_the_invocation(tmp_path: Path) -> None:
     code, refused = _api("review-open", *_flags(run), "--output-dir", _bundles(run), "--fresh-context", "yes")
     assert code == 2 and refused["code"] == "INVALID_ARGUMENT" and "--model-id" in refused["fix"] and "--invocation-id" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 # --------------------------------------------------------------------------------------
@@ -268,6 +273,7 @@ def test_select_with_no_answer_anywhere_says_how_to_give_it(tmp_path: Path) -> N
     code, refused = _api("review-select", *_flags(run), "--output-dir", _bundles(run))
     assert code == 2 and refused["code"] == "REVIEWER_RESPONSE_MISSING" and "--verdict" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_select_after_the_attempt_is_closed_is_the_attempt_terminal_envelope(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -301,6 +307,7 @@ def test_a_bad_verdict_keeps_the_one_retry(tmp_path: Path) -> None:
     code, refused = _select_verdict(run, bad)
     assert code == 2 and "REVIEW_DECISION_INVALID" in refused["message"] and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before and _ledger(run)["status"] == "WAITING"
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, retried = _select_verdict(run, _review_answer(run), "--transport-attempts", "2")
     assert code == 0 and retried["result"]["status"] == "EFFECTIVE_SELECTED", retried
     response = next(row for row in _events(run["run_root"]) if row["event_type"] == "MODEL_RESPONSE_RECEIVED" and row["stage_instance_id"] == "tc-reviewer:canonical")
@@ -315,6 +322,7 @@ def test_another_verdict_after_the_answer_is_recorded_is_refused(tmp_path: Path)
     code, refused = _select_verdict(run, _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ"))
     assert code == 2 and refused["code"] == "MODEL_STAGE_ANSWERED", refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 # --------------------------------------------------------------------------------------

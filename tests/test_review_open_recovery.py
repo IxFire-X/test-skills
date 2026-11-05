@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_in_order, assert_refused_once, journal_minus_refusals
 from tests.test_review_requested import _api, _generated_run, _journal
 from tests.test_review_two_commands import _bundles, _flags, _open, _select_verdict, _shape, _verdict
 
@@ -121,6 +122,7 @@ def test_a_verdict_after_the_session_was_aborted_is_refused_before_it_is_recorde
         code, late = _select_verdict(run, answer, *extra)
         assert code == 2 and late["code"] == "REVIEW_CLOSED" and "scan --new-run" in late["fix"], late
     assert _journal(run["run_root"]) == before
+    assert_refused_in_order(run["run_root"], before, ("review-select", "REVIEW_CLOSED"), ("review-select", "REVIEW_CLOSED"))  # J1: the dry run leaves no event, the other two one each
 
 
 def test_the_closed_review_does_not_refuse_the_answer_it_already_has(tmp_path: Path) -> None:
@@ -143,10 +145,11 @@ def test_plan_refused_by_the_checks_of_the_plan_leaves_the_journal_as_it_was(tmp
     root, attempt_id, _b, _receipts = _paused_run(tmp_path / "a", warnings=[])
     _other_root, _other_attempt, _ob, foreign = _paused_run(tmp_path / "b", warnings=[])
     files = _files(root, foreign, None)  # the context receipt of another run
-    before = (root / "events.jsonl").read_bytes()
+    before = journal_minus_refusals(root)
     code, refused = _main(capsys, _plan_argv(root, attempt_id, files))
     assert code == 2, refused
-    assert (root / "events.jsonl").read_bytes() == before, f"refused {refused.get('code')} but the journal grew"
+    assert journal_minus_refusals(root) == before, f"refused {refused.get('code')} but the journal grew"
+    assert_refused_once(root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
 
 
 def test_plan_still_publishes_header_then_plan_when_the_checks_pass(tmp_path: Path, capsys) -> None:
@@ -173,6 +176,7 @@ def test_the_mixed_path_verdict_without_a_request_points_to_review_open(tmp_path
     assert code == 2 and refused["code"] == "MODEL_STAGE_NOT_REQUESTED", refused
     assert "review-open" in refused["fix"] and "model-request" not in refused["fix"].split("review-open")[0], refused["fix"]
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, "MODEL_STAGE_NOT_REQUESTED", "review-select")  # J1: the one event the refusal itself added
 
 
 def test_a_canary_binding_cut_short_is_finished_and_a_real_divergence_is_not(tmp_path: Path, monkeypatch, capsys) -> None:

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.journal_helpers import assert_refused_in_order, assert_refused_once
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -165,6 +167,7 @@ def test_open_session_review_requested_and_the_reviewer_request_by_commands_only
     code, refused = _reviewer_request(run, boundary)
     assert code == 2 and "must bind its prior candidate and reviewer boundary" in refused["message"], refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], "model-request")  # J1: the one event the refusal itself added
     code, recorded = _review(run, candidate)
     assert code == 0 and recorded["status"] == "ok", recorded
     event = recorded["result"]
@@ -188,6 +191,7 @@ def test_the_same_digest_again_is_a_no_op_and_another_is_refused(tmp_path: Path)
     code, other = _review(run, "sha256:" + "7" * 64)
     assert code == 2 and other["message"].startswith("REVIEW_ALREADY_REQUESTED"), other
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, other["code"], "review-requested")  # J1: the one event the refusal itself added
 
 
 @pytest.mark.parametrize("stage", ["tc-generator:BATCH-fixture", "tc-to-autotest:r1", "autotest-reviewer:r3", "tc-reviewer:other", "assembly"])
@@ -197,20 +201,26 @@ def test_only_reviewer_stages_take_a_review_request(tmp_path: Path, stage: str) 
     code, refused = _review(run, run["fragment_digests"][0], stage)
     assert code == 2 and refused["message"].startswith("REVIEW_STAGE_INVALID"), refused
     assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], "review-requested")  # J1: the one event the refusal itself added
 
 
 def test_the_digest_must_be_the_published_candidate_of_the_reviewed_stage(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     before = _journal(run["run_root"])
     # a generator fragment is a published candidate, but not the assembled one the canonical reviewer reads
+    codes = []
     for digest in (run["fragment_digests"][0], "sha256:" + "7" * 64):
         code, refused = _review(run, digest)
         assert code == 2 and refused["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED"), refused
+        codes.append(refused["code"])
     code, refused = _review(run, run["fragment_digests"][0], "autotest-reviewer:r1")
     assert code == 2 and refused["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED") and "tc-to-autotest:r1" in refused["message"], refused
+    codes.append(refused["code"])
     code, refused = _review(run, "sha256:short")
     assert code == 2 and refused["message"].startswith("REVIEW_DIGEST_INVALID"), refused
+    codes.append(refused["code"])
     assert _journal(run["run_root"]) == before
+    assert_refused_in_order(run["run_root"], before, *(("review-requested", code) for code in codes))  # J1: the four refusals of the test
 
 
 def test_the_automation_review_by_commands(tmp_path: Path) -> None:
