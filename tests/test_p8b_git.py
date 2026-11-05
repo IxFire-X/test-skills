@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[1]
 DEV_TOOLS = {"ci_gate.py", "release_manifest.py"}  # development tools, no delivery carries them
 
@@ -134,6 +135,7 @@ def _finalize(run_root: Path, attempt_id: str) -> dict:
     return finalize_durable_execution_attempt(run_root, attempt_id)
 
 
+@pytest.mark.slow
 def test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it(tmp_path: Path) -> None:
     from tools.pilot_state import read_scenario_observation
 

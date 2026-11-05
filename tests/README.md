@@ -7,7 +7,7 @@ python -m pytest -m "contract and not native and not slow" -n 4
 ```
 
 Набор `contract` — 34 файла (`tests/contract/members.py`, `pytestmark = pytest.mark.contract` в каждом) и тесты каталога `tests/contract/`:
-счётчики и реестр контракта, бюджеты ролей, форма вывода CLI, тексты. `native` — прогоны настоящего pytest/Maven проекта (режим Б), в набор не входят (пока ни один тест не помечен). `slow` — 12 тестов набора дольше 30 с (список с секундами — `SLOW` в `tests/contract/members.py`); они идут отдельно:
+счётчики и реестр контракта, бюджеты ролей, форма вывода CLI, тексты. `native` — прогоны настоящего pytest/Maven проекта (режим Б), в набор не входят (пока ни один тест не помечен). `slow` — 13 тестов набора дольше 30 с (список с секундами — `SLOW` в `tests/contract/members.py`); они идут отдельно:
 
 ```bash
 python -m pytest -m "contract and slow" -n 4

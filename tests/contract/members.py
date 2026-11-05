@@ -6,7 +6,7 @@ from __future__ import annotations
 
 GROUPS = {
     "counters, registry, manifest": ("test_schema_engine", "test_schema_engine_differential", "test_contract_registry", "test_release_manifest",
-                                     "test_pack_profile", "test_dead_modules_removed", "test_projection_drift", "test_ci_gate", "test_no_private_imports"),
+                                     "test_pack_profile", "test_dead_modules_removed", "test_projection_drift", "test_ci_gate", "test_no_private_imports", "test_p8b_git"),
     "budgets of the roles": ("test_review_view", "test_skeleton_budget", "test_p8a2_texts", "test_texts_cases_only", "test_fat3", "test_test_design",
                              "test_context_batches", "test_existing_tests"),
     "form of the CLI": ("test_api_cli", "test_api_error_fields", "test_next_step_commands", "test_output_raw", "test_pf1", "test_diagnostics_at_once"),
@@ -30,4 +30,5 @@ SLOW = (
     "test_abandon_closure::test_abandon_is_refused_where_finish_or_exec_closes",  # 40
     "test_abandon_closure::test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_names",  # 35
     "test_abandon_closure::test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names",  # 34
+    "test_p8b_git::test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it",  # 65
 )
