@@ -1,7 +1,8 @@
 """P8a-2: the registry by delivery profile, the small ``doctor``, one place for the package version, ``ci_gate --pack-only``.
 
-A pack is ``universal`` (the repository) or ``cases-only`` (no ``tools/exec_*.py``, no maintainer files, no tool of development);
-which one is told by the exact registry files on disk, and a copy that is neither is refused."""
+A pack is ``universal`` (the repository), ``mode-b`` (V4b: automated tests, no tool of development, no maintainer file) or ``cases-only``
+(no ``tools/exec_*.py``, no mode B, no maintainer files, no tool of development); which one is told by the exact registry files on disk,
+and a copy that is none of them is refused."""
 from __future__ import annotations
 
 import ast
@@ -18,7 +19,7 @@ import pytest
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
-DELIVERY_DOCS = ("release/manifest.json", "README.md", "HOW-TO-USE.md")
+DELIVERY_DOCS = ("release/manifest.json",)  # V4b: the texts and the requirements are in the registry now
 
 
 def copy_profile(destination: Path, profile: str) -> Path:
@@ -47,7 +48,7 @@ def _cli(module: str, *arguments: str) -> subprocess.CompletedProcess:
 def test_the_registry_carries_the_generated_documents_and_the_cases_only_profile_leaves_out_what_it_must(pack_root: Path) -> None:
     manifest = json.loads((ROOT / "release" / "manifest.json").read_text(encoding="utf-8"))
     paths = {row["path"] for row in manifest["registry"]}
-    assert {"CONTRACTS.md", "PIPELINE.md"} <= paths and not paths & {"README.md", "HOW-TO-USE.md", "USAGE.md", "requirements.txt"}
+    assert {"CONTRACTS.md", "PIPELINE.md", "README.md", "HOW-TO-USE.md", "requirements.txt", ".skillsrc.example"} <= paths and not paths & {"USAGE.md", "RELEASE.md"}
     from tools import pack_registry
 
     kept = set(pack_registry.profile_paths(paths, "cases-only"))
@@ -57,7 +58,7 @@ def test_the_registry_carries_the_generated_documents_and_the_cases_only_profile
             "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json",
             "schemas/compatibility-evidence.schema.json", "schemas/scenario-observation-receipt.schema.json"} <= left
     assert not [path for path in kept if path.startswith("evals/")] and {"CONTRACTS.md", "PIPELINE.md", "tools/doctor.py", "tools/pack_registry.py"} <= kept
-    assert manifest["delivery_profiles"][0]["skill_pack_digest"] == pack_registry.digest_bytes(
+    assert {row["id"]: row for row in manifest["delivery_profiles"]}["cases-only"]["skill_pack_digest"] == pack_registry.digest_bytes(
         pack_registry.canonical([row for row in manifest["registry"] if row["path"] in kept]))
 
 
@@ -250,10 +251,11 @@ def _imported_tools(path: Path) -> set[str]:
     return found
 
 
-def test_the_cases_only_files_import_and_name_only_files_of_the_profile() -> None:
+@pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
+def test_the_files_of_a_delivery_import_and_name_only_files_of_the_profile(profile: str) -> None:
     from tools import pack_registry
 
-    kept = set(pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only"))
+    kept = set(pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile))
     problems = []
     for path in sorted(kept):
         if not path.endswith(".py"):
@@ -265,17 +267,20 @@ def test_the_cases_only_files_import_and_name_only_files_of_the_profile() -> Non
         for schema in set(re.findall(r"schemas/([A-Za-z0-9_-]+\.schema\.json)", text)) if path != "tools/pack_registry.py" else ():  # it names what it leaves out
             if f"schemas/{schema}" not in kept:
                 problems.append((path, f"schemas/{schema}"))
+        if path.endswith(".py") and path != "tools/pack_registry.py" and re.search(r"evals/|import evals|from evals", text):  # V4b: no maintainer file is read by a runtime one
+            problems.append((path, "evals"))
     assert problems == []
 
 
-def test_a_cases_only_copy_imports_every_module_of_the_profile(tmp_path: Path) -> None:
+@pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
+def test_a_copy_of_a_delivery_imports_every_module_of_the_profile(tmp_path: Path, profile: str) -> None:
     from tools import pack_registry
 
-    pack = copy_profile(tmp_path / "pack", "cases-only")
-    modules = [path[:-3].replace("/", ".") for path in pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only")
+    pack = copy_profile(tmp_path / "pack", profile)
+    modules = [path[:-3].replace("/", ".") for path in pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile)
                if path.startswith("tools/") and path.endswith(".py") and path != "tools/__init__.py"]
     script = ("import importlib, sys\n"
-              "blocked = ('tools.ci_gate', 'tools.contract_check', 'tools.compatibility_contract', 'tools.release_manifest', 'tools.render_contract_docs')\n"
+              "blocked = ('evals', 'tools.ci_gate', 'tools.contract_check', 'tools.compatibility_contract', 'tools.release_manifest', 'tools.render_contract_docs')\n"
               "for name in blocked: sys.modules[name] = None\n"
               "failed = []\n"
               "for name in sys.argv[1:]:\n"
@@ -345,10 +350,15 @@ def test_the_list_of_a_delivery_is_the_index_by_profile_and_never_an_untracked_f
     cases = delivery_files(repo, "cases-only")
     assert cases == sorted(cases) and "tools/draft.py" not in cases
     assert {"README.md", "HOW-TO-USE.md", ".skillsrc.example", "requirements.txt", "release/manifest.json", "CONTRACTS.md", "PIPELINE.md"} <= set(cases)
-    assert not [path for path in cases if path.startswith(("tests/", "docs/", ".github/", "evals/")) or path in {"USAGE.md", "RELEASE.md", "tools/ci_gate.py", "tools/release_manifest.py"}]
+    assert not [path for path in cases if path.startswith(("tests/", "docs/", ".github/", "evals/")) or path in {"USAGE.md", "RELEASE.md", "requirements-dev.txt", "tools/ci_gate.py", "tools/release_manifest.py"}]
+    mode_b = delivery_files(repo, "mode-b")
+    assert {"tools/exec_commands.py", "tools/exec_runner.py", "tools/run_tests.py", "skills/orchestrate/references/mode-b.md", "requirements.txt",
+            ".skillsrc.example", "release/manifest.json"} <= set(mode_b)
+    assert not [path for path in mode_b if path.startswith(("tests/", "docs/", ".github/", "evals/")) or path in {
+        "USAGE.md", "RELEASE.md", "requirements-dev.txt", "tools/ci_gate.py", "tools/release_manifest.py", "tools/contract_check.py"}]
     universal = delivery_files(repo, "universal", "HEAD")
     assert "evals/release_eval.py" in universal and "tools/release_manifest.py" in universal and "tests/test_x.py" not in universal
-    listed = set(cases) - set(DELIVERY_DOCS) - {".skillsrc.example", "requirements.txt"}
+    listed = set(cases) - set(DELIVERY_DOCS)
     assert listed == set(pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(repo)], "cases-only")) - {"tools/draft.py"}
     with pytest.raises(ValueError, match="invalid commit"):
         delivery_files(repo, "cases-only", "--output=x")
@@ -397,3 +407,74 @@ def test_ci_gate_is_not_in_the_cases_only_pack() -> None:
     from tools import pack_registry
 
     assert pack_registry.is_cases_only_excluded("tools/ci_gate.py")
+
+
+# ---- V4b: the texts and the requirements are in the registry; the delivery of mode B ---------------------------------------------------
+
+TEXT_FILES = ("README.md", "HOW-TO-USE.md", "requirements.txt", ".skillsrc.example")
+
+
+def test_the_registry_carries_the_texts_and_the_requirements_and_the_development_requirements_are_in_no_delivery() -> None:
+    from tools import pack_registry
+
+    paths = {row["path"] for row in pack_registry.registry_rows(ROOT)}
+    assert {*TEXT_FILES, "requirements-dev.txt"} <= paths and not paths & {"USAGE.md", "RELEASE.md"}
+    for profile in ("mode-b", "cases-only"):
+        kept = set(pack_registry.profile_paths(paths, profile))
+        assert set(TEXT_FILES) <= kept and "requirements-dev.txt" not in kept, profile
+    assert "requirements-dev.txt" in pack_registry.profile_paths(paths, "universal")
+
+
+@pytest.mark.parametrize("profile", ["mode-b", "cases-only"])
+@pytest.mark.parametrize("name", TEXT_FILES)
+def test_a_changed_text_or_requirement_of_a_delivery_is_refused_by_the_doctor(tmp_path: Path, profile: str, name: str) -> None:
+    pack = copy_profile(tmp_path / "pack", profile)
+    assert _doctor(pack)["status"] == "PASS"
+    (pack / name).write_bytes((pack / name).read_bytes() + b"\n# changed\n")
+    report = _doctor(pack)
+    assert report["status"] == "NOT_RUNNABLE" and "does not match runtime bytes" in " ".join(report["messages"]), report
+
+
+def test_the_mode_b_profile_has_the_files_of_mode_b_and_no_tool_of_development() -> None:
+    from tools import pack_registry
+
+    manifest = json.loads((ROOT / "release" / "manifest.json").read_text(encoding="utf-8"))
+    paths = {row["path"] for row in manifest["registry"]}
+    kept = set(pack_registry.profile_paths(paths, "mode-b"))
+    assert {"tools/exec_commands.py", "tools/exec_runner.py", "tools/execution_gate.py", "tools/run_tests.py", "tools/execution_adapters.py",
+            "tools/pilot_state.py", "tools/doctor.py", "tools/pack_registry.py", "skills/orchestrate/references/mode-b.md", "skills/tc-to-autotest/SKILL.md",
+            "skills/autotest-reviewer/SKILL.md", "schemas/scenario-observation-receipt.schema.json", "CONTRACTS.md", "PIPELINE.md"} <= kept
+    assert not kept & {"tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
+                       "tools/render_contract_docs.py", "tools/review_legacy.py", "schemas/compatibility-evidence.schema.json",
+                       "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json", "requirements-dev.txt"}
+    assert not [path for path in kept if path.startswith("evals/")]
+    assert kept < paths and set(pack_registry.profile_paths(paths, "cases-only")) < kept  # cases-only is a part of mode B, which is a part of the repository
+    profiles = {row["id"]: row for row in manifest["delivery_profiles"]}
+    assert list(profiles) == ["mode-b", "cases-only"]
+    assert profiles["mode-b"]["skill_pack_digest"] == pack_registry.digest_bytes(pack_registry.canonical([row for row in manifest["registry"] if row["path"] in kept]))
+
+
+def test_a_mode_b_copy_is_recognised_whole_and_passes_the_three_checks(tmp_path: Path) -> None:
+    pack = copy_profile(tmp_path / "pack", "mode-b")
+    report = _doctor(pack)
+    assert report["status"] == "PASS" and report["profile"] == "mode-b" and report["integrity"] == {"valid": True, "missing": []}, report
+    assert "languages" in report  # a pack that can run projects says what it can run
+    for module, arguments in (("tools.contract_check", ("--full",)), ("tools.render_contract_docs", ("--check",)), ("tools.release_manifest", ("--check",))):
+        done = _cli(module, "--root", str(pack), *arguments)
+        assert done.returncode == 0, (module, done.stdout, done.stderr)
+
+
+@pytest.mark.parametrize("extra", ["tools/ci_gate.py", "tools/release_manifest.py", "evals/release_eval.py", "tools/contract_check.py"])
+def test_a_file_of_development_in_a_mode_b_copy_is_refused_with_its_name(tmp_path: Path, extra: str) -> None:
+    pack = copy_profile(tmp_path / "pack", "mode-b")
+    (pack / extra).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / extra, pack / extra)
+    report = _doctor(pack)
+    text = " ".join(report["messages"])
+    assert report["status"] == "NOT_RUNNABLE" and "match no delivery profile" in text and f"лишний файл {extra}: удалите его" in text, text
+
+
+def test_a_cases_only_copy_with_one_file_of_mode_b_is_refused(tmp_path: Path) -> None:
+    pack = copy_profile(tmp_path / "pack", "cases-only")
+    shutil.copyfile(ROOT / "tools" / "run_tests.py", pack / "tools" / "run_tests.py")
+    assert "match no delivery profile" in " ".join(_doctor(pack)["messages"])

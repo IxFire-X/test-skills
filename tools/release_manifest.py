@@ -96,7 +96,9 @@ def delivery_files(root: Path, profile: str, commit: str | None = None) -> list[
     tracked = _git_paths(root, commit)
     registry, stray = [], []
     for path in tracked:
-        if path in ROOT_FILES or path.split("/", 1)[0] in REGISTRY_ROOTS:
+        if path in ROOT_FILES:
+            registry.append(path)
+        elif path.split("/", 1)[0] in REGISTRY_ROOTS:
             (registry if Path(path).suffix in RUNTIME_SUFFIXES and "__pycache__" not in path else stray).append(path)
     if stray:
         raise ValueError(f"tracked files of the registry roots that no pack may carry: {stray[:5]}")

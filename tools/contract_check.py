@@ -155,14 +155,15 @@ def _known_object_boundaries_are_closed(value: Any) -> bool:
 
 
 def _left_out_by_profile(root: Path, relative: str) -> bool:
-    """True when ``root`` is a cases-only pack (its files are exactly that profile of its manifest) and the profile leaves ``relative`` out."""
+    """True when ``root`` is a delivery pack (its files are exactly one profile of its manifest) and the profile leaves ``relative`` out."""
     from tools import pack_registry
 
     try:
-        return (pack_registry.is_cases_only_excluded(relative)
-                and pack_registry.profile_of(root, pack_registry.load_manifest(root)) == "cases-only")
+        profile = pack_registry.profile_of(root, pack_registry.load_manifest(root))
     except ValueError:
         return False
+    return ((profile == "cases-only" and pack_registry.is_cases_only_excluded(relative))
+            or (profile == "mode-b" and pack_registry.is_mode_b_excluded(relative)))
 
 
 def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:

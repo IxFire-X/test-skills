@@ -1,10 +1,12 @@
 """The registry of the pack: which files it is made of, their SHA-256, and the check of a copy against ``release/manifest.json``.
 
-A pack is one of two builds, told apart by the exact set of its registry files (never by a flag):
+A pack is one of three builds, told apart by the exact set of its registry files (never by a flag):
 
 * ``universal`` — the repository: every runtime file, the maintainer registry ``evals/`` and the tools of development;
-* ``cases-only`` — the delivery for cases without a project run: no ``tools/exec_*.py`` (launch of builds and tests, the
-  stand), no maintainer files and no tool of development.
+* ``mode-b`` — the delivery with automated tests (V4b): the files of mode B (``materialize``/``ingest``, the adapters, the roles) but
+  no tool of development (``ci_gate`` and ``release_manifest`` run ``git``) and no maintainer file; no file of it starts a process;
+* ``cases-only`` — the delivery for cases without a project run: no ``tools/exec_*.py`` (the commands of mode B), no file of mode B,
+  no maintainer files and no tool of development.
 
 ``doctor`` (in every delivery) and ``release_manifest`` (development only: it builds the manifest and lists a delivery)
 share this module.  It only reads: no process, no network, no write.
@@ -27,9 +29,11 @@ from tools.schema_validation import StrictJsonError, load_json_strict, schema_di
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
 MAINTAINER_ROOTS = ("evals",)
 REGISTRY_ROOTS = RUNTIME_ROOTS + MAINTAINER_ROOTS
-ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md")  # generated from the contract; the pack carries them, so the check covers them
+# The files of the root a pack carries, so that the check covers them (V4b): the two documents generated from the contract, the texts a
+# human follows (README, HOW-TO-USE), what ``pip`` would read (``requirements*.txt``) and the example of ``.skillsrc``.
+ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "HOW-TO-USE.md", "requirements.txt", "requirements-dev.txt", ".skillsrc.example")
 RUNTIME_SUFFIXES = {".json", ".md", ".py"}
-PROFILES = ("universal", "cases-only")
+PROFILES = ("universal", "mode-b", "cases-only")
 
 # What a cases-only delivery does not carry, and why: development tools (checks of the contract, its rendering, the gate, the
 # builder of this manifest), the schemas read only by the release evaluation, and everything that starts or measures a run.
@@ -38,7 +42,7 @@ CASES_ONLY_EXCLUDED_FILES = (
     "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
     "schemas/release-eval-run.schema.json", "schemas/scenario-observation-receipt.schema.json",
-    "tools/review_legacy.py",
+    "tools/review_legacy.py", "requirements-dev.txt",
     # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b`` (F6)
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
     "tools/autotest_hints.py", "tools/trace_check.py", "tools/build_trace_document.py", "tools/quarantine.py", "tools/code_slices.py",
@@ -49,8 +53,19 @@ CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and test
 # delivery of cases does not carry (PT).
 CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/autotest-reviewer/")
 
-# Files of a delivery that are not in the registry (they are in the SHA256SUMS of the delivery folder).
-DELIVERY_FILES = ("README.md", "HOW-TO-USE.md", ".skillsrc.example", "requirements.txt", "release/manifest.json")
+# What the delivery of mode B leaves out (V4b): the tools of development and the maintainer files.  ``ci_gate`` and ``release_manifest``
+# run ``git`` and write the manifest; the others check the contract, render its documents and keep the evidence of the release
+# evaluation.  ``scenario-observation-receipt`` stays: a run of mode B writes it.
+MODE_B_EXCLUDED_FILES = (
+    "tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
+    "tools/render_contract_docs.py", "tools/review_legacy.py", "requirements-dev.txt",
+    "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json", "schemas/release-eval-run.schema.json",
+)
+MODE_B_EXCLUDED_PATTERNS: tuple[str, ...] = ()
+MODE_B_EXCLUDED_PREFIXES = ("evals/",)
+
+# The one file of a delivery that is not in the registry: it holds the digests of the others.
+DELIVERY_FILES = ("release/manifest.json",)
 ARCHIVE_SUFFIXES = (".7z", ".bz2", ".gz", ".jar", ".rar", ".tar", ".tgz", ".xz", ".zip")
 
 _PYC = re.compile(r"^(?P<module>[A-Za-z0-9_]+)\.(?P<tag>cpython-3\d+)(?:\.opt-(?P<opt>[12]))?\.pyc$")
@@ -78,10 +93,16 @@ def is_cases_only_excluded(path: str) -> bool:
             or any(fnmatch.fnmatchcase(path, pattern) for pattern in CASES_ONLY_EXCLUDED_PATTERNS))
 
 
+def is_mode_b_excluded(path: str) -> bool:
+    return (path in MODE_B_EXCLUDED_FILES or path.startswith(MODE_B_EXCLUDED_PREFIXES)
+            or any(fnmatch.fnmatchcase(path, pattern) for pattern in MODE_B_EXCLUDED_PATTERNS))
+
+
 def profile_paths(paths: Any, profile: str) -> list[str]:
     if profile not in PROFILES:
         raise ValueError(f"unknown delivery profile: {profile}")
-    return sorted(path for path in paths if profile == "universal" or not is_cases_only_excluded(path))
+    left_out = {"universal": lambda path: False, "mode-b": is_mode_b_excluded, "cases-only": is_cases_only_excluded}[profile]
+    return sorted(path for path in paths if not left_out(path))
 
 
 def _under(root: Path, path: Path) -> str:
@@ -151,16 +172,21 @@ def registry_rows(root: Path) -> list[dict[str, str]]:
 
 
 def delivery_profiles(registry: list[Mapping[str, str]]) -> list[dict[str, Any]]:
-    """The ``delivery_profiles`` section of the manifest: what ``cases-only`` leaves out of the registry and the digest of the rest."""
+    """The ``delivery_profiles`` section of the manifest: what each delivery profile leaves out of the registry and the digest of the rest."""
     paths = [row["path"] for row in registry]
-    kept = set(profile_paths(paths, "cases-only"))
-    return [{
-        "id": "cases-only",
-        "excluded_files": sorted(path for path in paths if path in CASES_ONLY_EXCLUDED_FILES),
-        "excluded_patterns": list(CASES_ONLY_EXCLUDED_PATTERNS),
-        "excluded_prefixes": list(CASES_ONLY_EXCLUDED_PREFIXES),
-        "skill_pack_digest": digest_bytes(canonical([row for row in registry if row["path"] in kept])),
-    }]
+    rules = (("mode-b", MODE_B_EXCLUDED_FILES, MODE_B_EXCLUDED_PATTERNS, MODE_B_EXCLUDED_PREFIXES),
+             ("cases-only", CASES_ONLY_EXCLUDED_FILES, CASES_ONLY_EXCLUDED_PATTERNS, CASES_ONLY_EXCLUDED_PREFIXES))
+    result = []
+    for profile, files, patterns, prefixes in rules:
+        kept = set(profile_paths(paths, profile))
+        result.append({
+            "id": profile,
+            "excluded_files": sorted(path for path in paths if path in files),
+            "excluded_patterns": list(patterns),
+            "excluded_prefixes": list(prefixes),
+            "skill_pack_digest": digest_bytes(canonical([row for row in registry if row["path"] in kept])),
+        })
+    return result
 
 
 def assemble_manifest(registry: list[dict[str, str]], contract: Mapping[str, Any], suite: Mapping[str, Any]) -> dict[str, Any]:
@@ -205,15 +231,14 @@ def profile_diff(root: Path, manifest: Mapping[str, Any]) -> tuple[str, list[str
     if not isinstance(rows, list) or not all(isinstance(row, Mapping) and isinstance(row.get("path"), str) for row in rows):
         raise ValueError("release manifest schema is invalid")
     universal = {row["path"] for row in rows}
-    cases = set(profile_paths(universal, "cases-only"))
-    name, nearest = ("cases-only", cases) if len(present ^ cases) < len(present ^ universal) else ("universal", universal)
-    if present == universal and not stray:
-        name, nearest = "universal", universal
+    sets = {"universal": universal, "mode-b": set(profile_paths(universal, "mode-b")), "cases-only": set(profile_paths(universal, "cases-only"))}
+    name = min(PROFILES, key=lambda profile: len(present ^ sets[profile]))  # a tie goes to the first of PROFILES
+    nearest = sets[name]
     return name, sorted((present - nearest) | set(stray)), sorted(nearest - present)
 
 
 def profile_of(root: Path, manifest: Mapping[str, Any]) -> str:
-    """``universal`` or ``cases-only``: the registry files on disk must be exactly one profile's registry — never the nearest."""
+    """``universal``, ``mode-b`` or ``cases-only``: the registry files on disk must be exactly one profile's registry — never the nearest."""
     name, extra, missing = profile_diff(root, manifest)
     if not extra and not missing:
         return name
