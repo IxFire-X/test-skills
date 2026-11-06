@@ -240,6 +240,15 @@ def _refuse_legacy_flags(a, *names: str) -> None:
                          "tools.api review-select --verdict <файл ответа ревьюера>")
 
 
+def _refuse_canonical_review_request(a) -> None:
+    """MB1: where mode B keeps ``review-requested`` but the old CLI of the review is not, the command is for the review of the automation
+    only (``autotest-reviewer:rN``); the review of the cases has one way in."""
+    if a.stage == orchestrate_test_case_revision.REVIEW_STAGE and not execution_gate.legacy_available():
+        raise ValueError(f"LEGACY_REVIEW_NOT_IN_PACKAGE: {a.stage} — в этой поставке review-requested только для autotest-reviewer:rN; "
+                         "fix: ревью кейсов — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → "
+                         "вызов ревьюера → tools.api review-select --verdict <файл ответа ревьюера>")
+
+
 def _cmd_review_open(a):
     """Without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
     command of the nine, as before — one package function either way."""
@@ -391,8 +400,9 @@ _AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary",
 if not execution_gate.execution_available():
     for _name in _AUTOMATION_COMMANDS:
         COMMANDS.pop(_name, None)
-# the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is
-_LEGACY_REVIEW_COMMANDS = ("session-start", "review-requested", "complete-review")
+# the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is.
+# MB1: review-requested also stays where mode B is (its text asks for it on autotest-reviewer:rN); there it refuses the canonical review
+_LEGACY_REVIEW_COMMANDS = ("session-start", "complete-review") + (() if execution_gate.execution_available() else ("review-requested",))
 if not execution_gate.legacy_available():
     for _name in _LEGACY_REVIEW_COMMANDS:
         COMMANDS.pop(_name, None)
@@ -503,6 +513,8 @@ def main(argv: list[str] | None = None) -> int:
             _refuse_legacy_flags(args, "session_start")
         elif args.command == "review-select":
             _refuse_legacy_flags(args, "reviewer_session", "review")
+        elif args.command == "review-requested":
+            _refuse_canonical_review_request(args)
         for _flag in ("artifact", "verdict"):  # the answer file is read here, so that its refusal has its code and fix and a line in refusals.jsonl
             if isinstance(getattr(args, _flag, None), str):
                 setattr(args, _flag, _load_answer(getattr(args, _flag)))

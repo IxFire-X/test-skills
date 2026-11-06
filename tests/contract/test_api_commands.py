@@ -13,6 +13,7 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE_COMMANDS = {
     "complete-review": "closing command of the review of nine commands; exists only where the old CLI is (execution_gate.legacy_available()); the texts teach review-open / review-select",
+    "session-start": "opening command of the review of nine commands; exists only where the old CLI is (execution_gate.legacy_available()); the texts teach review-open",
     "document-digest": "the sha256 of a canonical document, used by the tests and by hand to compare files; no step of the protocol needs it",
 }
 

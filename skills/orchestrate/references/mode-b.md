@@ -1,4 +1,4 @@
-# Режим Б — `local-pilot-v1` (только сборка разработки)
+# Режим Б — `local-pilot-v1` (в поставках с режимом Б)
 
 
 Этот файл — прежний текст `SKILL.md` и контракта оркестрации, который описывает автотесты и запуск: роли `tc-to-autotest` и
@@ -87,7 +87,7 @@ Exact transport input/output bytes сохраняются отдельно; их
 2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
    код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
    `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no
-   --out <run>/tmp/auto-facts-rN.json` (заявления — как для `session-start` в §4). Затем запиши
+   --out <run>/tmp/auto-facts-rN.json` (заявления — как для `review-open` в §4). Затем запиши
    `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
    вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
 3. После accepted static review сразу вызывай `materialize` (ниже). Он сам публикует

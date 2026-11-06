@@ -349,7 +349,7 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
     if type(budget) is not int or budget < package["base_package_byte_count"]:  # refuse now, not after the review
         raise ValueError(
             f"REVIEW_CONTEXT_LIMIT: context_budget_bytes {budget} is smaller than the review package "
-            f"({package['base_package_byte_count']} bytes); build the session start with tools.api session-start"
+            f"({package['base_package_byte_count']} bytes); open the review with tools.api review-open (budget = the package + .skillsrc limits.context_batch_bytes)"
         )
     facts = {
         **start,

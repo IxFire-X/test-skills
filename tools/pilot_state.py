@@ -1408,6 +1408,9 @@ def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, cand
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
     if attempt is None or attempt["state"] == "TERMINAL":
         raise ValueError("REVIEW_ATTEMPT_INVALID: no open attempt " + str(attempt_id))
+    if attempt["policy_profile"] == "cases-only-v1" and stage_instance_id.startswith("autotest-reviewer:"):
+        raise ValueError(f"MODEL_STAGE_NOT_IN_PROFILE: {stage_instance_id} is a stage of the automation, and this run is cases-only-v1; fix: прогон только кейсов — "
+                         "автотесты строит новый прогон local-pilot-v1 (scan без --profile cases-only-v1) в поставке с режимом Б")
     events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
     recorded = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
     if recorded:
@@ -2125,6 +2128,9 @@ def publish_model_request(
         (item for item in state["attempts"] if item["attempt_id"] == attempt_id), None,
     )
     stage = stage_instance_id.split(":", 1)[0]
+    if attempt is not None and attempt["policy_profile"] == "cases-only-v1" and stage in {"tc-to-autotest", "autotest-reviewer"}:
+        raise ValueError(f"MODEL_STAGE_NOT_IN_PROFILE: {stage_instance_id} is a stage of the automation, and this run is cases-only-v1; fix: прогон только кейсов — "
+                         "автотесты строит новый прогон local-pilot-v1 (scan без --profile cases-only-v1) в поставке с режимом Б")
     declaration = _MODEL_STAGE_REGISTRY.get(stage)
     inputs = list(input_digests) if not isinstance(input_digests, (str, bytes)) else []
     journal_inputs = (not inputs and attempt is not None and attempt["state"] != "TERMINAL" and declaration is not None
@@ -5688,10 +5694,6 @@ def _response_bindings(
     fragment self-digest is None — it is the digest of the answer itself, taken last.
 
     A shape the schema refuses yields what it could read; the schema and the later checks stay the backstop."""
-    automation_sha256, autotest_review_sha256, implementation_relations_sha256 = execution_gate.from_mode_b(
-        "automation_validation", "automation_sha256", "autotest_review_sha256", "implementation_relations_sha256",
-    )
-
     stage, _, instance = stage_instance_id.partition(":")
     rows: list[tuple[str, str | None, str]] = []
 
@@ -5730,11 +5732,14 @@ def _response_bindings(
                 add(f"/artifacts/generated_files/{index}/content_digest", "sha256:" + hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest(),
                     "sha256 поля content этого файла (UTF-8)")
             if instance == "r2":
+                automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
                 add("/artifacts/predecessor_automation_sha256", automation_sha256(answer("tc-to-autotest:r1", "CANDIDATE_PUBLISHED")),
                     "tools.api automation-digest ответа tc-to-autotest:r1")
                 add("/artifacts/correction_review_sha256", autotest_review_sha256(answer("autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")),
                     "digest ответа autotest-reviewer:r1")
         elif stage == "autotest-reviewer":
+            automation_sha256, implementation_relations_sha256 = execution_gate.from_mode_b(
+                "automation_validation", "automation_sha256", "implementation_relations_sha256")
             review = value["artifacts"]["autotest_review"]
             automation = answer(f"tc-to-autotest:{instance}", "CANDIDATE_PUBLISHED")
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]

@@ -29,10 +29,10 @@ REVIEW_CHAIN = ("ревью — две команды: `tools.api review-open --
 FIXES: dict[str, str] = {
     # --- the review layer (moved from orchestrate_test_case_revision._FIXES) ---
     "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
-                            "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови select без --review; вердикт уже записан — "
-                            "начни новый прогон (scan --new-run) и строй session-start командой `tools.api session-start`",
+                            "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови review-select без --verdict; вердикт уже записан — "
+                            "начни новый прогон (scan --new-run) и открой ревью заново командой `tools.api review-open`",
     "ORCHESTRATION_RECEIPT_SHAPE": "--candidate-receipt — файл candidate_bundle_receipt из вывода publish (его поля как есть)",
-    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: передай те же файлы, что open-session, и сессию из `tools.api complete-review`",
+    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: повтори `tools.api review-open` / `review-select` без файлов пакета — код берёт входы из журнала",
     "ORCHESTRATION_INPUT": "входы ревью не прошли проверку: передай файлы, которые отдали publish и open-session, без правок; "
                            "их перечень называет diagnostics",
     "ORCHESTRATION_PUBLICATION": "публикация не прочиталась обратно: ничего не правь руками, повтори команду; повторный отказ — "

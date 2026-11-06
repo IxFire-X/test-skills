@@ -53,7 +53,7 @@ def test_finish_after_the_review_answer_but_before_select_names_select(tmp_path:
     fix = stop.value.fix
     # FaT-O12b: tools.api review-select takes the package inputs and the reviewer answer from the journal
     assert "tools.api review-select" in fix and f"--attempt {attempt_id}" in fix and "orchestrate_test_case_revision" not in fix
-    assert str(run_root) in fix and "complete-review" in fix and "--generator-fragment" not in fix
+    assert str(run_root) in fix and "complete-review" not in fix and "--reviewer-session" not in fix and "--generator-fragment" not in fix  # CO1: commands of the delivery
 
 
 def test_select_with_another_output_dir_names_the_directory_of_publish(tmp_path: Path) -> None:

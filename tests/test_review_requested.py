@@ -213,8 +213,8 @@ def test_the_digest_must_be_the_published_candidate_of_the_reviewed_stage(tmp_pa
         code, refused = _review(run, digest)
         assert code == 2 and refused["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED"), refused
         codes.append(refused["code"])
-    code, refused = _review(run, run["fragment_digests"][0], "autotest-reviewer:r1")
-    assert code == 2 and refused["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED") and "tc-to-autotest:r1" in refused["message"], refused
+    code, refused = _review(run, run["fragment_digests"][0], "autotest-reviewer:r1")  # a cases-only-v1 run: the automation is not its stage
+    assert code == 2 and refused["message"].startswith("MODEL_STAGE_NOT_IN_PROFILE"), refused
     codes.append(refused["code"])
     code, refused = _review(run, "sha256:short")
     assert code == 2 and refused["message"].startswith("REVIEW_DIGEST_INVALID"), refused
@@ -441,7 +441,7 @@ def test_a_budget_below_the_package_is_refused_at_open_session(tmp_path: Path) -
     run = _generated_run(tmp_path)
     _candidate, opened = _open_session(run, "command", -_RESERVE - 1)
     assert opened["status"] == "error" and opened["reason_code"] == "REVIEW_CONTEXT_LIMIT", opened
-    assert "smaller than the review package" in opened["message"] and "tools.api session-start" in opened["fix"], opened
+    assert "smaller than the review package" in opened["message"] and "tools.api review-open" in opened["fix"], opened
 
 
 def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
@@ -465,7 +465,7 @@ def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPa
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     # FaT-U5: the envelope's code is the refusal's own code, not ORCHESTRATION_INPUT over it
     assert printed["code"] == "REVIEW_CONTEXT_LIMIT" and printed["reason_code"] == "REVIEW_CONTEXT_LIMIT", printed
-    assert "review-abort" in printed["fix"] and "session-start" in printed["fix"], printed
+    assert "review-abort" in printed["fix"] and "review-open" in printed["fix"], printed
 
 
 def test_automation_boundary_facts_from_the_journal_by_commands_only(tmp_path: Path) -> None:

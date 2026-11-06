@@ -1259,7 +1259,7 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
 
 # the ways out of an attempt finish cannot close yet; each names its exact abort code
 _REVIEW_ABORT = ("python -m tools.api review-abort --run-root <run> --attempt <attempt_id> --reason {code} "
-                 "--out <run>/tmp/session.json, затем select с этим --reviewer-session без --review")
+                 "--out <run>/tmp/session.json, затем python -m tools.api review-select без --verdict (сессию он берёт из журнала)")
 _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (next_step); "
                     "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
                     + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
@@ -1267,7 +1267,7 @@ _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрываю
 # select checks the decision before it closes the ledger, so a closed session without an effective document is
 # an interrupted select — the same session and answer again is safe
 _UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api review-select "
-                   "--run-root <run> --attempt <attempt_id> --output-dir <dir> --reviewer-session <run>/tmp/session.json — "
+                   "--run-root <run> --attempt <attempt_id> --output-dir <dir> (без --verdict) — "
                    "сессия закрыта с тем же ответом, повтор безопасен (проверка — python -m tools.api read-effective), затем finish; "
                    "review-select отказывает и после повтора — прогон оставь, scan с --new-run начнёт новый")
 
@@ -1296,9 +1296,8 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: s
     return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
 
 
-_SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api complete-review --run-root <run> --attempt <attempt_id> "
-               "--out <run>/tmp/session.json, затем python -m tools.api review-select --run-root <run> --attempt <attempt_id> "
-               "--output-dir <dir> --reviewer-session <run>/tmp/session.json (входы пакета и ответ ревьюера — из журнала); "
+_SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api review-select --run-root <run> --attempt <attempt_id> "
+               "--output-dir <dir> без --verdict (запись ответа ревьюера, сессию и входы пакета он берёт из журнала); "
                "затем снова finish")
 
 

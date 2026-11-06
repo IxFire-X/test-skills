@@ -14,7 +14,7 @@ def _selected(tmp_path: Path) -> tuple[Path, str, list[str]]:
     from tests.test_self_review import _reviewed
     from tools.pilot_state import read_effective_canonical
 
-    run_root, attempt_id, _document, _selected = _reviewed(tmp_path, "cases-only-v1", flag=False, fresh_context=True)
+    run_root, attempt_id, _document, _selected = _reviewed(tmp_path, "local-pilot-v1", flag=False, fresh_context=True)
     effective = read_effective_canonical(run_root, attempt_id)
     return run_root, attempt_id, [effective["document_digest"], effective["effective_bundle_receipt_digest"]]
 
