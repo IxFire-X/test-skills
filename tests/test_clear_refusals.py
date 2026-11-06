@@ -72,7 +72,9 @@ def test_select_with_another_output_dir_names_the_directory_of_publish(tmp_path:
     assert refused.value.code == "ORCHESTRATION_RECEIPT"
     [row] = refused.value.diagnostics
     assert row["code"] == "ORCHESTRATION_OUTPUT_DIR" and str(other.resolve()) in row["message"]
-    assert f"--output-dir {published.resolve()}" in row["message"]
+    from tools.run_pipeline import command_token
+
+    assert f"--output-dir {command_token(str(published.resolve()))}" in row["message"]
 
 
 def test_the_same_directory_with_other_files_stays_a_receipt_refusal(tmp_path: Path) -> None:

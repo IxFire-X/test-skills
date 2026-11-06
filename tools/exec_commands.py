@@ -286,8 +286,10 @@ def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> s
         return _not_prepared_fix(root, attempt_id)
     if isinstance(error, OSError) or isinstance(error.__cause__, OSError) or not _accepted_unprepared(root, attempt_id):
         return _PREPARE_IO_FIX
-    return (_PREPARE_FINAL_FIX.replace("finish --abandon", f'"{sys.executable}" -m tools.run_pipeline finish --project '
-                                       f'"{read_run(root)["manifest"]["project"]}" --run {root.name} --abandon'))
+    try:  # the project of the manifest comes from the disk: it is checked again when it is printed
+        return _PREPARE_FINAL_FIX.replace("finish --abandon", _pipeline_line("finish", read_run(root)["manifest"]["project"], root.name, "--abandon"))
+    except HostStop:
+        return _PREPARE_FINAL_FIX
 
 
 # ---- the build is run by a human ----------------------------------------------------------------------------------
@@ -475,6 +477,12 @@ def printed_forms(project: Path, working: str, command: Sequence[str]) -> tuple[
     wrapper = os.path.normpath(os.path.join(project, working, first))
     printed = [wrapper, *command[1:]] if not os.path.isabs(first) and os.path.isfile(wrapper) else list(command)
     return command_text(printed), command_text_powershell(printed)
+
+
+def _pipeline_line(subcommand: str, project: Any, run_id: str, *tail: str) -> str:
+    """``python -m tools.run_pipeline <subcommand> --project <project> --run <run>`` for a person, every value checked when it is printed
+    (the project may come from the manifest on the disk): ``COMMAND_NOT_PRINTABLE`` where no shell takes one as it is."""
+    return command_text([sys.executable, "-m", "tools.run_pipeline", subcommand, "--project", str(project), "--run", run_id, *tail])
 
 
 def _command_line(tokens: Sequence[str]) -> str:
@@ -908,7 +916,7 @@ def cmd_ingest(args: Any) -> int:
     if printed is None:
         return _ingest_refusal(
             attempt_id, "INGEST_WITHOUT_MATERIALIZE", "команда запуска не напечатана: тесты ещё не положены в проект",
-            f'"{sys.executable}" -m tools.run_pipeline materialize --project "{project}" --run {root.name}')
+            _pipeline_line("materialize", project, root.name))
     existing = None
     try:
         existing = read_attempt_receipt(root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]
@@ -923,8 +931,8 @@ def cmd_ingest(args: Any) -> int:
     except _NotBuilt as error:
         if error.code == "RUNNER_COMPATIBILITY":
             changed = _changed_files(coordinates, printed)
-            restore = f'"{sys.executable}" -m tools.run_pipeline materialize --project "{project}" --run {root.name} --restore'
-            statement = f'"{sys.executable}" -m tools.run_pipeline ingest --project "{project}" --run {root.name} --no-reports --reason RESULT_UNAVAILABLE'
+            restore = _pipeline_line("materialize", project, root.name, "--restore")
+            statement = _pipeline_line("ingest", project, root.name, "--no-reports", "--reason", "RESULT_UNAVAILABLE")
             return _ingest_refusal(
                 attempt_id, "INGEST_TESTS_CHANGED", "файлы тестов не такие, как были при materialize: отчёт нельзя отнести к рецензированному коду; "
                 + "; ".join(f"{path} (ожидался {digest})" for path, digest in changed),

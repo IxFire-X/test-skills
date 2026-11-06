@@ -2630,10 +2630,12 @@ def _publish_model_stage_artifact(
     )
     reuse = request.get("reuse")
     if isinstance(reuse, Mapping) and content_digest != reuse["response_digest"]:  # a reused answer is not changed
+        from tools.run_pipeline import printed_or
+
         source = _model_stage_artifact_target(_run_root(Path(root).parent / str(reuse["run_id"]))[1], str(reuse["attempt_id"]), str(reuse["response_digest"]))
         raise ModelReuseMismatch(
             f"MODEL_REUSE_MISMATCH: {stage_instance_id}: ответ {content_digest}, а запрос переиспользует ответ {reuse['response_digest']} "
-            f"прогона {reuse['run_id']}; fix: передай файл ответа источника как есть — --artifact {source}, ничего не записано")
+            f"прогона {reuse['run_id']}; fix: передай файл ответа источника как есть — --artifact {printed_or(source, '<файл ответа источника>')}, ничего не записано")
     # digest fields of the answer against the journal before anything is written; the stage keeps its one retry
     mismatches = _response_digest_rows(project, root, state, attempt_id, stage_instance_id, request, value)
     if mismatches:
@@ -5353,25 +5355,29 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
                                               **({"differences": differences} if refusal == "входы иные" else {})}
             continue
         source_attempt = str(source["attempt"]["attempt_id"])
-        from tools.run_pipeline import printed
+        from tools.run_pipeline import HostStop, printed
 
-        rows = []
-        made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
-        if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
-            rows.append({"stage": "context-marker:requirements", "by": "cases-import",
-                         "commands": [f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"]})
-        for stage in model_stages:
-            request, response = source["stages"][stage]
-            artifact = _model_stage_artifact_target(source["root"], source_attempt, response)
-            head = f"python -m tools.api model-{{kind}} --run-root {printed(root)} --attempt {attempt_id} --stage {stage}"
-            rows.append({"stage": stage, "response_digest": response, "artifact": str(artifact), "commands": [
-                head.format(kind="request") + f" --model-id reuse --invocation-id reuse-{path.name[:8]}-{stage.replace(':', '-')} "
-                + " ".join(f"--input-digest {digest}" for digest in request["input_digests"]) + f" --reuse-from {path.name}",
-                head.format(kind="response") + f" --artifact {artifact}"]})
-        merged = made_by.get("context-marker:baseline") == "controller:context-marker-merge"
-        return {"run_id": path.name, "stages": rows,
-                **({"then": "слияние частей кодом, не вызов модели: python -m tools.context_marker_parts merge "
-                            f"--run-root {root}"} if merged else {})}
+        try:  # a source whose answer file lies where no shell takes the path is not offered: the commands would not be run as they are
+            rows = []
+            made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
+            if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
+                rows.append({"stage": "context-marker:requirements", "by": "cases-import",
+                             "commands": [f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"]})
+            for stage in model_stages:
+                request, response = source["stages"][stage]
+                artifact = _model_stage_artifact_target(source["root"], source_attempt, response)
+                head = f"python -m tools.api model-{{kind}} --run-root {printed(root)} --attempt {attempt_id} --stage {stage}"
+                rows.append({"stage": stage, "response_digest": response, "artifact": str(artifact), "commands": [
+                    head.format(kind="request") + f" --model-id reuse --invocation-id reuse-{path.name[:8]}-{stage.replace(':', '-')} "
+                    + " ".join(f"--input-digest {digest}" for digest in request["input_digests"]) + f" --reuse-from {path.name}",
+                    head.format(kind="response") + f" --artifact {printed(artifact)}"]})
+            merged = made_by.get("context-marker:baseline") == "controller:context-marker-merge"
+            return {"run_id": path.name, "stages": rows,
+                    **({"then": "слияние частей кодом, не вызов модели: python -m tools.context_marker_parts merge "
+                                f"--run-root {printed(root)}"} if merged else {})}
+        except HostStop:
+            first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": "путь файла ответа источника нельзя записать в команде"}
+            continue
     return first_refusal or {"run_id": None, "reason": _REUSE_FREE}
 
 

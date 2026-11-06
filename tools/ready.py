@@ -402,6 +402,8 @@ def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequen
 
 def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     """Whether the module can be built and tested by the package: ``{"ready", "reason", "fix"}`` (only reads)."""
+    from tools.run_pipeline import printed_or
+
     root = Path(project).resolve()
     module_root = root / str(module.get("root") or ".")
     test = module.get("test") if isinstance(module.get("test"), Mapping) else None
@@ -439,7 +441,7 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
             interpreter = module_root / str(test.get("interpreter") or "")
             if not interpreter.is_file():
                 problems.append((f"интерпретатор модуля {test.get('interpreter')} не найден",
-                                 f'создайте окружение модуля: python -m venv "{module_root / ".venv"}" и установите его тестовые зависимости'))
+                                 f"создайте окружение модуля: python -m venv {printed_or(module_root / '.venv', '<папка модуля>/.venv')} и установите его тестовые зависимости"))
     if language == "java" and not (os.environ.get("JAVA_HOME") or shutil.which("java")):
         problems.append(("JDK не найден (нет JAVA_HOME и java в PATH)", "установите JDK и задайте JAVA_HOME"))
     if not problems:

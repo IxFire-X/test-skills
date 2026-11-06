@@ -243,7 +243,7 @@ def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts
     reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     assert reuse["run_id"] == source_id
     assert [row["stage"] for row in reuse["stages"]] == ["context-marker:requirements", *(f"context-marker:batch-{n:03d}" for n in range(1, parts + 1))]
-    assert reuse["then"].endswith(f"context_marker_parts merge --run-root {run_root}")
+    assert reuse["then"].endswith(f'context_marker_parts merge --run-root "{run_root}"')
 
 
 def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

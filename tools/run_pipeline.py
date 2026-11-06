@@ -69,6 +69,14 @@ def printed(value: object) -> str:
     return '"' + str(value) + '"'
 
 
+def printed_or(value: object, template: str) -> str:
+    """``command_token`` for a value in a text that is only advice: the template when no shell takes the value as it is (the advice is not worth a refusal)."""
+    try:
+        return command_token(str(value))
+    except HostStop:
+        return template
+
+
 _PRINTED: list[dict[str, Any]] = []
 
 
@@ -691,7 +699,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
     for rel, data in files:
         if _is_zephyr_csv(data):  # an export of cases is not a requirements document
             raise HostStop("DOCS_ZEPHYR_CSV", f"{rel} — выгрузка тест-кейсов Zephyr, а не документ требований",
-                           fix=f"подайте её через scan --reference {rel} (эталон для сравнения), а в --docs — документ требований")
+                           fix=f"подайте её через scan --reference {printed_or(rel, '<файл>')} (эталон для сравнения), а в --docs — документ требований")
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -863,7 +871,7 @@ def _resolve_scan_module(project: Path, module_id: str | None, skillsrc_document
         known = ", ".join(f"{row['id']} (root {row.get('root')})" for row in normalized["modules"])
         ids = [str(row["id"]) for row in normalized["modules"]]
         raise HostStop("MODULE_UNKNOWN", f"модуля {module_id} нет в .skillsrc: --module — id модуля или путь его папки; модули: {known}",
-                       f"--module {ids[0]}" if len(ids) == 1 else "--module <id>: " + " | ".join(ids)) from error
+                       f"--module {printed_or(ids[0], '<id>')}" if len(ids) == 1 else "--module <id>: " + " | ".join(ids)) from error
     return resolve_module_root(project, module), module
 
 
@@ -1186,13 +1194,13 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
     parts += [f"--docs {printed(doc)}" for doc in request.get("docs") or []]
     if request.get("target"):
         parts.append(f"--target {printed(request['target'])}")
-    parts.append(f"--profile {request.get('profile') or 'local-pilot-v1'}")
+    parts.append(f"--profile {printed(request.get('profile') or 'local-pilot-v1')}")
     if request.get("accept_self_review"):
         parts.append("--accept-self-review")
     if request.get("no_pause"):
         parts.append("--no-pause")
     if request.get("disposition_policy"):
-        parts.append(f"--disposition-policy {request['disposition_policy']}")
+        parts.append(f"--disposition-policy {printed(request['disposition_policy'])}")
     if request.get("reference"):
         parts.append(f"--reference {printed(request['reference'])}")
     if request.get("cases"):  # the import of the same CSV, never a run of cases from code
@@ -1851,7 +1859,7 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
         "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
         "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
         "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — "
-               f"{printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project)} --run {manifest['run_id']} --abandon "
+               f"{printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project)} --run {printed(manifest['run_id'])} --abandon "
                "LEFT_BEFORE_REVIEW оставит прогон, и простой scan начнёт новый; следующий заход: " + command,
         "next_run": {"why": "попытка остановилась до ревью кейсов: следующий заход — новый прогон того же запроса", "command": command},
     }

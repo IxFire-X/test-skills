@@ -111,6 +111,8 @@ def _expected_paths(document: Mapping[str, Any], output_dir: str | os.PathLike[s
 
 
 def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | os.PathLike[str] | None, profile: str) -> list[dict[str, str]]:
+    from tools.run_pipeline import printed_or
+
     if type(receipt) is not Receipt:
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     expected_paths = _expected_paths(document, output_dir, profile) if output_dir is not None else None
@@ -131,8 +133,8 @@ def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | o
         if Path(output_dir).resolve() == published:
             return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
         return [_diag("/receipt", "ORCHESTRATION_OUTPUT_DIR",
-                      f"--output-dir {Path(output_dir).resolve()} не совпадает с каталогом publish {published}; "
-                      f"fix: повтори с --output-dir {published}")]
+                      f"--output-dir {printed_or(Path(output_dir).resolve(), '<каталог select>')} не совпадает с каталогом publish {published}; "
+                      f"fix: повтори с --output-dir {printed_or(published, '<каталог publish>')}")]
     if expected_paths is None and any(not isinstance(getattr(receipt, field), str) or not getattr(receipt, field) for field in ("json_path", "preview_path", "csv_path")):
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     return []
@@ -1005,6 +1007,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
     from tools.pilot_state import (closure_cache, derive_state, publish_model_request, read_attempt_receipt, read_model_request,
                                    read_reviewer_session_ledger, request_review)
     from tools.project_inventory import inventory_cache
+    from tools.run_pipeline import printed
 
     if session_start is not None:  # the open-session of the nine: the session start is the agent's file
         return review_step("open", run_root, attempt_id, files=files, output_dir=output_dir, csv_profile=csv_profile, session_start=session_start)
@@ -1012,6 +1015,9 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
     if missing:
         raise ReviewRefused("INVALID_ARGUMENT", f"review-open без {' и '.join(missing)}; fix: review-open --model-id <метка модели ревьюера> "
                             "--invocation-id <id вызова ревьюера> --fresh-context yes|no — id тот же, что у вызова ревьюера")
+    # the line the agent runs next is made first: a path no shell takes as it is stops the opening before anything is written (COMMAND_NOT_PRINTABLE)
+    select_command = (f"tools.api review-select --run-root {printed(run_root)} --attempt {attempt_id} --output-dir {printed(output_dir)} "
+                      "--verdict <файл ответа ревьюера>")
     with closure_cache(), inventory_cache():
         _require_open_attempt(run_root, attempt_id)
         fresh = _resolve_fresh_context(run_root, fresh_context)
@@ -1059,8 +1065,6 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
             if request.get("invocation_id") != invocation_id or request.get("model_id") != model_id:
                 raise ReviewRefused("REVIEW_ALREADY_OPEN", f"запрос ревьюера уже записан (модель {request.get('model_id')}, вызов "
                                     f"{request.get('invocation_id')}); fix: повтори review-open с теми же --model-id и --invocation-id")
-        select_command = (f"tools.api review-select --run-root {run_root} --attempt {attempt_id} --output-dir {output_dir} "
-                          "--verdict <файл ответа ревьюера>")
         result: dict[str, Any] = {
             "package_binding": package, "reviewer_session_boundary": boundary, "review_requested": dict(requested),
             "model_request": dict(request), "reviewer_view": str(view["path"]),
@@ -1075,6 +1079,8 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
 
 def human_instruction(run_root: Path, view: Path | str, select_command: str) -> str:
     """What a person does to have the review made in a fresh session.  Printed text only — the model is not started here."""
+    from tools.run_pipeline import printed_or
+
     run_id = Path(run_root).name
     answer = Path(run_root) / "tmp" / "reviewer-answer.json"
     return ("Ревью кейсов в свежей сессии (руками):\n"
@@ -1082,7 +1088,7 @@ def human_instruction(run_root: Path, view: Path | str, select_command: str) -> 
             f"2. Вставь в неё: «проведи ревью test-skills {run_id}». Модель прочтёт вид кейсов {view}, проверит кейсы по требованиям "
             f"и запишет ответ в {answer}. В ответе поле codeword_seen: контрольное слово из задачи генератора, если оно есть в контексте "
             "сессии, иначе null (слово не названо — признак свежего контекста, не доказательство).\n"
-            f"3. Вернись в рабочую сессию и выполни: {select_command.replace('<файл ответа ревьюера>', str(answer))}")
+            f"3. Вернись в рабочую сессию и выполни: {select_command.replace('<файл ответа ревьюера>', printed_or(answer, '<файл ответа ревьюера>'))}")
 
 
 def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str, Any] | None) -> dict[str, Any]:
