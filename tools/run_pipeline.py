@@ -1195,13 +1195,13 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
     parts += [f"--docs {printed(doc)}" for doc in request.get("docs") or []]
     if request.get("target"):
         parts.append(f"--target {printed(request['target'])}")
-    parts.append(f"--profile {printed(request.get('profile') or 'local-pilot-v1')}")
+    parts.append(f"--profile {command_token(request.get('profile') or 'local-pilot-v1')}")
     if request.get("accept_self_review"):
         parts.append("--accept-self-review")
     if request.get("no_pause"):
         parts.append("--no-pause")
     if request.get("disposition_policy"):
-        parts.append(f"--disposition-policy {printed(request['disposition_policy'])}")
+        parts.append(f"--disposition-policy {command_token(request['disposition_policy'])}")
     if request.get("reference"):
         parts.append(f"--reference {printed(request['reference'])}")
     if request.get("cases"):  # the import of the same CSV, never a run of cases from code
