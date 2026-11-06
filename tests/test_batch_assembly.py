@@ -45,12 +45,13 @@ def _requirements():
     ]
 
 
-def _plan(header, context):
+def _plan(header, context, requirements=None):
     from tools.batch_assembly import canonical_bytes, plan_batches
 
+    requirements = _requirements() if requirements is None else requirements
     # FaT-BO: a window that leaves room for one requirement's expected answer splits the two into two batches
-    input_bytes = int(10_000 * 0.85) - len(canonical_bytes(_requirements())) - 600
-    return plan_batches(_requirements(), {"header_digest": _header_digest(header), "context_receipt_digest": context["digest"]},
+    input_bytes = int(10_000 * 0.85) - len(canonical_bytes(requirements)) - 600
+    return plan_batches(requirements, {"header_digest": _header_digest(header), "context_receipt_digest": context["digest"]},
                         window_bytes=10_000, input_bytes=input_bytes)
 
 

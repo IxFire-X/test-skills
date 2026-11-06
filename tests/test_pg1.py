@@ -6,17 +6,21 @@ A group lives in one batch: its cases share requirement_ids (the group shape kee
 to the batch whose namespace it carries. So the rules on the cases of one batch say what the audit says of the whole
 document, and a group name an earlier batch took is refused at the later batch, whose answer can still be replaced. Before:
 three such errors passed validate-fragment and model-response, assemble refused, the recorded answer could not be replaced
-(MODEL_STAGE_ANSWERED) — the one way out was a new run."""
+(MODEL_STAGE_ANSWERED) — the one way out was a new run.
+
+The rules that need the whole document (Russian prose anywhere in it) run at the last batch of the plan, on the document
+assemble builds from the recorded answers and this one: assemble refuses nothing the last model-response accepted."""
 from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from tests.journal_helpers import assert_refused_once
-from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _requirements
 from tests.test_batch_journal import _prior, _response, _second_request
 from tests.test_digest_traps import _generator_request, _publish_inputs
 from tests.test_review_requested import _api, _generated_run, _journal, _put
@@ -178,3 +182,69 @@ def test_a_group_error_is_refused_by_validate_fragment_and_model_response_before
     assert code == 0, assembled
     candidate = json.loads((run["tmp"] / "c.json").read_bytes())
     assert [case.get("param_group") for case in candidate["test_cases"]] == ["PG-amount", "PG-amount", None]
+
+
+# --- the rules of the whole document at the last batch -------------------------------------------
+
+def _without_russian(value):
+    if isinstance(value, dict):
+        return {key: _without_russian(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_without_russian(item) for item in value]
+    return "Plain prose" if isinstance(value, str) and re.search(r"[А-Яа-яЁё]", value) else value
+
+
+def _plain(fragment: dict) -> dict:
+    from tools.batch_assembly import with_digest
+
+    return with_digest(_without_russian({key: value for key, value in fragment.items() if key != "digest"}))
+
+
+def _plain_split() -> tuple[dict, dict, dict, list[dict]]:
+    """A ru-RU plan of two batches with no Russian in the header, the source requirements and the answers."""
+    context = _context_receipt()
+    header = _without_russian(_header())
+    plan = _plan(header, context, _without_russian(_requirements()))
+    return plan, header, context, [_plain(_fragment(plan, context, index)) for index in range(len(plan["batches"]))]
+
+
+def test_the_last_batch_is_refused_a_rule_of_the_whole_document_and_one_russian_batch_is_enough() -> None:
+    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+
+    plan, header, context, fragments = _plain_split()
+    assert len(plan["batches"]) == 2
+    assert validate_fragment(copy.deepcopy(fragments[0]), plan, header, context) is None  # batch 1: another batch may have it
+    with pytest.raises(BatchAssemblyError) as refused:
+        validate_fragment(copy.deepcopy(fragments[1]), plan, header, context, fragments[:1])
+    rows = refused.value.diagnostics
+    assert [(row["path"], row["code"]) for row in rows] == [("/content_locale", "SEMANTIC_RU_RU_HUMAN_FIELDS")] and rows[0]["fix"], rows
+
+    russian = _fragment(plan, context, 1)  # the same last batch with its human fields in Russian
+    assert validate_fragment(copy.deepcopy(russian), plan, header, context, fragments[:1]) is None
+    candidate, _receipt = assemble_candidate(header, plan, [fragments[0], russian])
+    assert len(candidate["test_cases"]) == 2
+
+
+def test_the_last_batch_without_russian_is_refused_by_model_response_before_the_write_and_the_retry_assembles(tmp_path: Path) -> None:
+    run = _generated_run(tmp_path, generated=False, header=_without_russian(_header()), requirements=_without_russian(_requirements()))
+    plan_digest, header_digest = _publish_inputs(run)
+    fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
+    first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
+    plain = [_put(run["tmp"] / f"plain-{index}.json", _plain(fragment)) for index, fragment in enumerate(fragments)]
+
+    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
+    assert _response(run, first, plain[0])[0] == 0
+    code, prior = _prior(run, second)
+    assert code == 0, prior
+    assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
+    before = _journal(run["run_root"])
+    code, refused = _response(run, second, plain[1])
+    assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT" and "--transport-attempts 2" in refused["message"], refused
+    assert [row["code"] for row in refused["diagnostics"]] == ["SEMANTIC_RU_RU_HUMAN_FIELDS"], refused
+    assert _journal(run["run_root"]) == before
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))
+    code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
+    assert code == 0, answered
+    code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], "--fragment", plain[0], "--fragment", run["fragments"][1],
+                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
+    assert code == 0, assembled

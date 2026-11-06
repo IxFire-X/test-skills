@@ -39,9 +39,10 @@ def _journal(run_root: Path) -> bytes:
     return journal_minus_refusals(run_root)
 
 
-def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None) -> dict:
+def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
+                   requirements: list | None = None) -> dict:
     """A run with the context, the marker and two generator answers published (as test_reviewer_protocol does);
-    *header* — another canonical header (PG1: 1.1.0 for param_group)."""
+    *header*, *requirements* — another canonical header and source requirements (PG1: 1.1.0 for param_group, no Russian)."""
     from tests.test_batch_assembly import _fragment, _header, _plan
     from tests.test_reviewer_protocol import _new_run, _session
     from tools.pilot_state import derive_state, publish_context_selection, publish_model_request, publish_model_stage_artifact
@@ -68,7 +69,7 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     selected = select_context_batches(inventory, project, [next(item["opaque_id"] for item in inventory["files"] if item["project_path"] == "src/evidence.py")], byte_budget=4096)[0]["receipt"]
     context = publish_context_selection(run_root, attempt_id, selected)
     header = _header() if header is None else header
-    plan = _plan(header, context)
+    plan = _plan(header, context, requirements)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
     marker = {
         "schema_version": "5.0.0", "stage": "context-marker",

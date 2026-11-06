@@ -431,29 +431,14 @@ def test_assemble_does_not_change_the_files_it_was_given() -> None:
     assert mixed == before
 
 
-def _without_russian(value):
-    if isinstance(value, dict):
-        return {key: _without_russian(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_without_russian(item) for item in value]
-    return "Plain prose" if isinstance(value, str) and re.search(r"[А-Яа-яЁё]", value) else value
-
-
 def test_a_refusal_of_the_canonical_audit_in_assemble_gives_all_rows_and_its_own_fix() -> None:
-    from tests.test_batch_assembly import _header_digest, _requirements
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, canonical_bytes, plan_batches, validate_fragment, with_digest
+    from tests.test_pg1 import _plain_split
+    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
     from tools.json_cli import error_fields
 
-    # Russian prose anywhere in the document is the rule of the whole document (PG1: param_group is of one batch, test_pg1)
-    context = _context_receipt()
-    header = _without_russian(_header())
-    requirements = _without_russian(_requirements())
-    plan = plan_batches(requirements, {"header_digest": _header_digest(header), "context_receipt_digest": context["digest"]},
-                        window_bytes=10_000, input_bytes=int(10_000 * 0.85) - len(canonical_bytes(requirements)) - 600)
-    fragments = [with_digest(_without_russian({key: item for key, item in _fragment(plan, context, index).items() if key != "digest"}))
-                 for index in range(len(plan["batches"]))]
-    for index, fragment in enumerate(fragments):  # one batch without Russian is no refusal: another one may have it
-        assert validate_fragment(copy.deepcopy(fragment), plan, header, context, fragments[:index]) is None
+    # Russian prose anywhere in the document is the rule of the whole document (PG1: checked at the last batch, test_pg1)
+    plan, header, context, fragments = _plain_split()
+    assert validate_fragment(copy.deepcopy(fragments[0]), plan, header, context) is None  # batch 1: another batch may have it
     with pytest.raises(BatchAssemblyError) as refused:
         assemble_candidate(header, plan, fragments)
     assert refused.value.code == "BATCH_SEMANTIC_CONFLICT"

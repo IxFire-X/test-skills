@@ -1024,15 +1024,27 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     for path, message in _taken_groups(fragment, earlier):
         add("BATCH_SEMANTIC_CONFLICT", "SEMANTIC_PARAM_GROUP_MISMATCH", path, message,
             "дай группе этой пачки своё имя PG-…, которого нет в прошлых пачках: группа живёт в одной пачке")
+    if batch["ordinal"] == max(item["ordinal"] for item in batches.values()) and all(part["status"] == "COMPLETE" for part in earlier):
+        # the last batch: the rules of the whole document on the document assemble builds, so assemble refuses none of them
+        try:
+            document = _document(header, plan, [*earlier, fragment])
+        except BatchAssemblyError as error:
+            if not rows:
+                add(error.code, error.code, "", error.detail)
+        else:
+            for row in validate_canonical_document_all(document):
+                if row["code"] in DOCUMENT_WIDE_CODES:
+                    add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"], f"canonical pre-review audit of the whole document failed: {row['code']} — {row['message']}")
     if rows:
         refuse()
     result = {key: names for key, names in (("normalized", normalized), ("filled", filled)) if names}
     return result or None
 
 
-# the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
-# decided by one batch and runs on the fragment before the answer is written. The param_group rules are of one batch — the
-# cases of a group share requirement_ids and a requirement belongs to its batch; a name of an earlier batch is _taken_groups
+# the pre-review audit rules that need the whole document — they run at the last batch, on the document of all batches; every
+# other rule of validate_canonical_document is decided by one batch and runs on the fragment before the answer is written. The
+# param_group rules are of one batch — the cases of a group share requirement_ids and a requirement belongs to its batch; a
+# name of an earlier batch is _taken_groups
 DOCUMENT_WIDE_CODES = frozenset({
     "SEMANTIC_RU_RU_HUMAN_FIELDS",  # Russian prose anywhere in the document
 })
@@ -1144,28 +1156,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     ordered = [by_batch[item["batch_id"]] for item in sorted(batches.values(), key=lambda item: item["ordinal"])]
     if any(fragment["status"] == "FAILED" for fragment in ordered):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "failed fragment cannot assemble a canonical candidate")
-    capabilities = _unique_by_id([item for fragment in ordered for item in fragment["operation_capabilities"]], "capability_id", "BATCH_ID_CONFLICT", permit_equal=True)
-    requirements = _unique_by_id([item for fragment in ordered for item in fragment["requirements"]], "requirement_id", "BATCH_ID_CONFLICT")
-    cases = _unique_by_id([item for fragment in ordered for item in fragment["test_cases"]], "case_id", "BATCH_ID_CONFLICT")
-    canonical_owners: dict[str, str] = {}
-    for fragment in ordered:
-        for mapping in fragment["source_to_canonical_mappings"]:
-            for canonical_id in mapping["canonical_requirement_ids"]:
-                owner = canonical_owners.setdefault(canonical_id, fragment["batch_id"])
-                if owner != fragment["batch_id"]:
-                    raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "one canonical requirement cannot span batches")
-    mappings = [deepcopy(item) for fragment in ordered for item in fragment["source_to_canonical_mappings"]]
-    document = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
-    document.update({
-        "source_requirements": deepcopy(plan["source_requirements"]),
-        "source_to_canonical_mappings": mappings,
-        "operation_capabilities": list(capabilities.values()),
-        "requirements": list(requirements.values()),
-        "test_cases": list(cases.values()),
-    })
-    for name in ("requirements", "test_cases"):
-        for index, item in enumerate(document[name], start=1):
-            item["display_order"] = index
+    document = _document(header, plan, ordered)
     audit = validate_canonical_document_all(document)
     if audit:
         rows = [_row(row["code"], row["path"], row["message"]) for row in audit]
@@ -1188,3 +1179,30 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     _schema_valid(receipt, _ASSEMBLY_SCHEMA, "assembly receipt")
     _self_digest_valid(receipt, "assembly receipt")
     return document, receipt
+
+
+def _document(header: dict[str, Any], plan: dict[str, Any], ordered: list[dict[str, Any]]) -> dict[str, Any]:
+    """The canonical document of the complete fragments in plan order — what assemble audits and the last batch checks."""
+    capabilities = _unique_by_id([item for fragment in ordered for item in fragment["operation_capabilities"]], "capability_id", "BATCH_ID_CONFLICT", permit_equal=True)
+    requirements = _unique_by_id([item for fragment in ordered for item in fragment["requirements"]], "requirement_id", "BATCH_ID_CONFLICT")
+    cases = _unique_by_id([item for fragment in ordered for item in fragment["test_cases"]], "case_id", "BATCH_ID_CONFLICT")
+    canonical_owners: dict[str, str] = {}
+    for fragment in ordered:
+        for mapping in fragment["source_to_canonical_mappings"]:
+            for canonical_id in mapping["canonical_requirement_ids"]:
+                owner = canonical_owners.setdefault(canonical_id, fragment["batch_id"])
+                if owner != fragment["batch_id"]:
+                    raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "one canonical requirement cannot span batches")
+    mappings = [deepcopy(item) for fragment in ordered for item in fragment["source_to_canonical_mappings"]]
+    document = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
+    document.update({
+        "source_requirements": deepcopy(plan["source_requirements"]),
+        "source_to_canonical_mappings": mappings,
+        "operation_capabilities": list(capabilities.values()),
+        "requirements": list(requirements.values()),
+        "test_cases": list(cases.values()),
+    })
+    for name in ("requirements", "test_cases"):
+        for index, item in enumerate(document[name], start=1):
+            item["display_order"] = index
+    return document
