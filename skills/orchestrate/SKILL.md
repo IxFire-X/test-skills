@@ -100,20 +100,18 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f> --run-root <run> --attempt <id> --out-plan
    <run>/tmp/plan.json --out-published <run>/tmp/published.json` строит и публикует план (формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan)).
    Пачки делит код по оценке ответа и окну `limits.step_window_bytes`; `notes` и `context` вывода покажи человеку как есть.
-4. **Генератор.** Пачки строго по очереди (`ordinal`), пачка k после принятого ответа k−1. `model-request --stage tc-generator:<batch>`
-   берёт входы из журнала; с пачки 2 — capabilities прошлых пачек: сначала отдельной командой `prior-capabilities --batch-id <id>` (без неё `MODEL_INPUTS_MISMATCH`); её `result.digest` — последний входной digest. В начало задачи генератору вставь
+4. **Генератор.** Пачки строго по очереди (`ordinal`): k — после принятого ответа k−1. `model-request --stage tc-generator:<batch>`
+   берёт входы из журнала; с пачки 2 сначала отдельно `prior-capabilities --batch-id <id>` (иначе `MODEL_INPUTS_MISMATCH`); её `result.digest` — последний вход. В начало задачи генератору вставь
    «Контрольное слово: <nonce>» из вывода `model-request` (в ответ и файлы слово не копируй); `existing-tests.md` из `step-inputs` дай
    генератору вместе со входами. **Фрагмент** — голый объект без конверта `artifacts`, образец — [fragment-sample.md](references/fragment-sample.md),
-   схема — `schemas/candidate-fragment.schema.json`; `context_receipt` и digest-поля
-   ставит код — не пиши их (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
-   До `model-response` пачки — только `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (`--plan` — файл `--out-plan` команды `plan`, `--header` — тот header-файл, что подан в `plan`, не копии из журнала) (с пачки 2 — `--prior-fragment <f>`
-   на каждую прошлую пачку: **записанный ответ**, `path` из вывода её `model-response`); `assemble` на части пачек всегда отказывает
-   (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет). Отказ `validate-fragment` — ошибка ответа: единственный повтор с `retry_prompt`; лимит повторов
+   схема — `schemas/candidate-fragment.schema.json`; `context_receipt` и digest-поля ставит код, не пиши их (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
+   До `model-response` пачки — только `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (`--plan` — файл `--out-plan`, `--header` — header, поданный в `plan`; не копии из журнала) (с пачки 2 — `--prior-fragment <f>`
+   на каждую прошлую пачку: **записанный ответ**, `path` из вывода её `model-response`); `assemble` на части пачек отказывает (`BATCH_PARTITION_CONFLICT`). Отказ `validate-fragment` — ошибка ответа: единственный повтор с `retry_prompt`; лимит повторов
    (`--transport-attempts` ≤ 2) держишь ты, записанный ответ не заменить.
 5. **Сборка.** `assemble` и `validate-canonical` — после ответа последней пачки, на всех фрагментах: `tools.api assemble --header <f> --plan <f> --fragment <f> … --run-root <run> --out-candidate
    <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем `validate-canonical --document <run>/tmp/candidate.json` —
-   bare canonical JSON `1.1.0` (`schema_version` в header). `--fragment` — файл ответа пачки как есть или записанный ответ (`read-model-artifact`). Проверь полноту относительно исходного документа; недоказанную полноту оставь
-   gap, не `FULL`-обещание. Human-facing поля — на русском, technical tokens exact; условия работы над тестами (заглушки, режим запуска)
+   bare canonical JSON `1.1.0` (`schema_version` в header). `--fragment` — файл ответа пачки как есть или записанный ответ (`read-model-artifact`). Проверь полноту по исходному документу; недоказанное — gap,
+   не `FULL`-обещание. Human-facing поля — на русском, technical tokens exact; условия работы над тестами (заглушки, режим запуска)
    в предусловия, шаги и ожидания не пишутся — ревьюер вернёт весь набор. Потолка на число требований и кейсов нет.
 6. Revision 1 (`UNREVIEWED`, V4 derived bundle) публикует `review-open` из §4 сам. HTML/CSV никогда не входят в model input.
 
