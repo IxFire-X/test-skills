@@ -126,8 +126,15 @@ def test_a_path_field_of_a_file_is_read_only_where_the_registry_says() -> None:
 
 # --- K-a: hostile values, recorded I/O --------------------------------------------------------------------------------------
 
-HOSTILE = [r"\\host\x", "//host/x", r"\\?\UNC\h\x", r"\??\UNC\h\x", "/??/UNC/h/x", r"..\..\вне\x", r"C:\вне\x"]
-_MARKERS = ("host", "UNC", "??", "вне", "..")
+# The host name is unique: ``host`` alone is in ``/opt/hostedtoolcache`` of a CI runner, and argparse looks there for its messages.  The
+# text rules (share, device, NUL, ``..``) are the same on every OS; "a place outside the project" is not: ``C:\вне\x`` is a drive path
+# on Windows and a plain relative name inside the project on POSIX, so there it is ``/вне/x``.  ``..`` is no marker: a path of the runner has it.
+OUTSIDE = r"C:\вне\x" if os.name == "nt" else "/вне/x"
+HOSTILE = [r"\\evil-host-c2\x", "//evil-host-c2/x", r"\\?\UNC\h\x", r"\??\UNC\h\x", "/??/UNC/h/x", r"..\..\вне\x", OUTSIDE]
+_MARKERS = ("evil-host-c2", "UNC", "??", "вне")
+# a run given as a path into another project: the way out differs by OS; as a name it is no run on any
+FOREIGN_RUN = os.sep.join(["..", "..", "other", ".pilot-runs", "{hex}"])
+RUN_AS_ABSOLUTE = (r"C:\x\.pilot-runs" + "\\" if os.name == "nt" else "/x/.pilot-runs/") + "0" * 32
 
 
 @contextlib.contextmanager
@@ -204,7 +211,7 @@ def test_h3_an_input_file_of_a_planning_command_is_judged_before_it_is_looked_at
     assert calls == []
 
 
-@pytest.mark.parametrize("value", [*HOSTILE, "x", r"C:\x\.pilot-runs\00000000000000000000000000000000"])
+@pytest.mark.parametrize("value", [*HOSTILE, "x", RUN_AS_ABSOLUTE])
 def test_h4_a_run_of_step_size_is_a_run_name_not_a_path(tmp_path, monkeypatch, capsys, value) -> None:
     from tools import step_size
 
@@ -287,7 +294,7 @@ def test_h12_the_immutable_evidence_directory_is_judged_before_it_is_touched(tmp
     assert calls == []
 
 
-@pytest.mark.parametrize("value", [r"\??\UNC\h\x", "/??/UNC/h/x", r"\\?\UNC\h\x", r"\\host\x", "//host/x"])
+@pytest.mark.parametrize("value", [r"\??\UNC\h\x", "/??/UNC/h/x", r"\\?\UNC\h\x", r"\\evil-host-c2\x", "//evil-host-c2/x"])
 def test_the_confined_output_refuses_a_device_or_a_share_by_its_text(tmp_path, value) -> None:
     from tools.confined_output import OutputConfinementError, _relative_output
 
@@ -363,7 +370,7 @@ def _tree(root: Path) -> dict[str, int]:
     return {str(path.relative_to(root)): path.stat().st_size for path in root.rglob("*") if path.is_file()}
 
 
-@pytest.mark.parametrize("name", [r"..\..\other\.pilot-runs\{hex}", "..", "other", "{abs}"])
+@pytest.mark.parametrize("name", [FOREIGN_RUN, "..", "other", "{abs}"])
 @pytest.mark.parametrize("command", ["status", "finish", "report"])
 def test_h5_a_refused_run_coordinate_writes_nothing_into_another_run(tmp_path, capsys, command, name) -> None:
     from tests.test_self_review import _run
@@ -383,7 +390,7 @@ def test_h5_a_refused_run_coordinate_writes_nothing_into_another_run(tmp_path, c
     assert _tree(other) == before and not (victim / "refusals.jsonl").exists()
 
 
-@pytest.mark.parametrize("name", [r"..\..\other\.pilot-runs\{hex}", "{abs}"])
+@pytest.mark.parametrize("name", [FOREIGN_RUN, "{abs}"])
 def test_h4_h5_step_size_with_a_foreign_run_reads_and_writes_nothing_there(tmp_path, capsys, name) -> None:
     from tests.test_self_review import _run
     from tools import step_size
