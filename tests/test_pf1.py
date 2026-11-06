@@ -107,11 +107,11 @@ def test_model_response_prints_the_receipt_of_the_record_and_not_the_answers_bod
     assert code == 0 and stored["result"]["artifact"]["test_cases"][0]["objective"] == big["test_cases"][0]["objective"]  # the body is read apart
 
 
-def test_a_run_root_that_is_no_run_leaves_the_refusal_as_it_was_and_writes_nothing(tmp_path: Path) -> None:
+def test_a_run_root_that_is_no_run_is_refused_as_such_and_nothing_is_written(tmp_path: Path) -> None:
+    """SEC-A (R): --run-root is the boundary of the input files; a directory that is no run is refused for what it is."""
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     nowhere = tmp_path / "nowhere"
     nowhere.mkdir()
-    code, refused = _validate(run, Path(_put(run["tmp"] / "bare.json", bare)), "--run-root", str(nowhere))
-    assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT", refused  # the refusal of the check, not of the run
-    assert not list(nowhere.rglob("refusals.jsonl")) and not (Path(run["run_root"]) / "refusals.jsonl").exists()
+    code, refused = _validate(run, Path(_put(run["tmp"] / "fragment.json", fragments[0])), "--run-root", str(nowhere))
+    assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
+    assert not any(nowhere.rglob("*")) and not (Path(run["run_root"]) / "refusals.jsonl").exists()
