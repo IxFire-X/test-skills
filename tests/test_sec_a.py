@@ -109,6 +109,22 @@ def test_an_api_json_input_without_a_run_is_read_only_inside_a_run(tmp_path: Pat
 
 # ---- А3: the values in the commands the agent runs as they are --------------------------------------------------
 
+@pytest.mark.parametrize("token", ["docs/ТЗ.md#Раздел 3 — Требования", "#Шаг 1 – вход", "#Модуль «Оплата»", "ТЗ №5.md", "#Что нового?"])
+def test_russian_typography_of_a_heading_prints_in_double_quotes(token: str) -> None:
+    from tools.run_pipeline import command_token
+
+    assert command_token(token) == f'"{token}"'
+
+
+@pytest.mark.parametrize("token", ["#Модуль “Оплата”", "#Важно!"])
+def test_a_typographic_quote_or_an_exclamation_mark_is_not_printed(token: str) -> None:
+    from tools.run_pipeline import command_token
+
+    with pytest.raises(HostStop) as refused:
+        command_token(token)
+    assert refused.value.code == "COMMAND_NOT_PRINTABLE" and "#Раздел" in refused.value.fix
+
+
 def _builders():
     from tools import ready, run_pipeline, scope_pause
 

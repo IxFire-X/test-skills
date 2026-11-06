@@ -42,9 +42,10 @@ class HostStop(RuntimeError):
 # the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
 # or a backslash in double quotes (the same in all three); any other token is not printed.  What quotes cannot hold: ``"`` closes them, ``%``
 # and ``!`` are expanded by cmd.exe inside them, ``^`` escapes there, ``$`` and the back quote are expanded by sh and PowerShell inside them, and
-# ``& | < > ; ' * ?`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.
+# ``& | < > ; ' *`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.  The
+# dashes, « », № and ``?`` of a Russian heading are plain text inside double quotes to all three (“ ” „ ‘ ’ are quotes to PowerShell).
 _BARE_TOKEN = re.compile(r"[A-Za-z0-9_./:=,#+\-]+")
-_QUOTABLE_MARKS = " _./:=,#@+-\\()[]{}~"
+_QUOTABLE_MARKS = " _./:=,#@+-\\()[]{}~—–«»№?"
 
 
 def command_token(token: str) -> str:
@@ -58,7 +59,8 @@ def command_token(token: str) -> str:
     raise HostStop("COMMAND_NOT_PRINTABLE", f"в команде для человека есть символ(ы) {shown}: cmd.exe, PowerShell или sh прочтут их как подстановку, экранирование или кавычку "
                    f"(в «{token[:80]}»)",
                    f"переименуйте или переместите проект (или интерпретатор, модуль, документ) в каталог, в имени которого нет {shown}, и начните прогон заново "
-                   "(scan --new-run): путь входит в напечатанную команду")
+                   "(scan --new-run): путь входит в напечатанную команду; для --docs файл#Раздел — раздел без этих символов в заголовке "
+                   "или документ целиком")
 
 
 def printed(value: object) -> str:

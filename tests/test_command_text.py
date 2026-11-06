@@ -28,9 +28,11 @@ QUOTED = [
     ("[1-b]", '"[1-b]"'),
     ("{x}~", '"{x}~"'),
     ("", '""'),
+    ("a?b", '"a?b"'),  # SEC-A D1: plain text inside double quotes, the heading of a document may end with it
+    ("docs/ТЗ №5.md#Раздел 3 — «Оплата» – шаг", '"docs/ТЗ №5.md#Раздел 3 — «Оплата» – шаг"'),
 ]
-REFUSED = ["a%b", "%PATH%", "a^b", 'a"b', "a!b", "$HOME", "a`b", "a&b", "a|b", "a<b", "a>b", "a;b", "a'b", "a*b", "a?b", "a\nb", "a\rb", "a\x00b",
-           "C:\\dir\\", "\\\\server\\share", "a\\\\b"]
+REFUSED = ["a%b", "%PATH%", "a^b", 'a"b', "a!b", "$HOME", "a`b", "a&b", "a|b", "a<b", "a>b", "a;b", "a'b", "a*b", "a\nb", "a\rb", "a\x00b",
+           "C:\\dir\\", "\\\\server\\share", "a\\\\b", "a“b", "a’b"]
 
 
 @pytest.mark.parametrize("token", PLAIN)
