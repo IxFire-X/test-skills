@@ -892,11 +892,11 @@ def _testcase_status(item: ET.Element) -> str:
 def masked_failure_text(text: str) -> str:
     """A line of framework output that looks like a secret (the check the runner output gets) is ``<redacted>``: the text of a failure goes
     into the receipt, the report and the annotation of a quarantined method."""
-    from tools.pilot_state import _canonical_runner_output
+    from tools.pilot_state import canonical_runner_output
 
     lead = re.match(r"ASSERT-[A-Za-z0-9_.:-]+", text)  # the label of the assertion is the reference of the quarantine mark, not free text
     head, rest = (lead.group(0), text[lead.end():]) if lead else ("", text)
-    masked = _canonical_runner_output(rest, limit=500).decode("utf-8", errors="replace") if rest.strip() else rest
+    masked = canonical_runner_output(rest, limit=500).decode("utf-8", errors="replace") if rest.strip() else rest
     return head + (" " + masked.strip() if head and masked.strip() == "<redacted>" else masked)
 
 

@@ -66,3 +66,10 @@ def test_a_secret_in_a_failure_does_not_reach_the_annotation_of_the_quarantined_
     ref, note = failure_note(f"ASSERT-a-001 password was {SECRET}")
     assert ref == "ASSERT-a-001" and SECRET not in note and "password" not in note.lower()
     assert failure_note("ASSERT-a-001 expected: _2_ but was: _3_") == ("ASSERT-a-001", "expected: _2_ but was: _3_")
+
+
+def test_what_the_human_is_told_before_the_run_names_what_to_check() -> None:
+    from tools.exec_commands import _REVIEW_NOTICE
+
+    for word in ("файлы тестов", "первый токен команды", "учётные данные", "сборки вашего проекта"):
+        assert word in _REVIEW_NOTICE

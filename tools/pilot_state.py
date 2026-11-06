@@ -288,6 +288,9 @@ def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
     return encoded[-limit:].decode("utf-8", errors="ignore").encode("utf-8")
 
 
+canonical_runner_output = _canonical_runner_output  # the public name for the other modules of the package
+
+
 def _safe_model_label(value: Any) -> bool:
     if not isinstance(value, str) or _MODEL_LABEL.fullmatch(value) is None:
         return False

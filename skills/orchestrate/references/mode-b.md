@@ -104,6 +104,8 @@ Exact transport input/output bytes сохраняются отдельно; их
    Maven `test` читает Surefire: если проект требует Failsafe/integration-test lifecycle,
    этот маршрут недостаточен — сохрани блокер. Не исправляй тест после runtime `FAIL`.
 
+Команду из `materialize` сам не выполняй ни в какой форме (`command`, `command_text`, `command_text_powershell`). Покажи человеку `files_to_review`, `note`,
+`service_note` и обе формы команды как есть; дождись, пока он скажет, что просмотрел файлы, запустил команду и где отчёты, и только тогда вызывай `ingest`.
 Сборку запускает человек: `materialize` кладёт тесты в проект и печатает команду для **человека** (со словом запуска) и файлы на просмотр;
 тесты потом не правь (`INGEST_TESTS_CHANGED`, вернуть — `materialize --restore`), стенд поднимает человек. `ingest --reports <каталог в модуле или <run>/incoming/>`
 сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`.
@@ -146,6 +148,14 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 `scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
 Строки `style_checks_skipped` и `format_hint` из вывода `ingest`/`finish` передай человеку как есть; файлы сам не форматируй.
 
+## Что пишет режим Б и как это откатить
+
+Сверх `<project>/.pilot-runs/` режим Б пишет: сгенерированные тесты в тестовый корень модуля (`materialize`), строки карантина (`@Disabled`/`xfail`) в этих файлах
+после `FAIL` и `.skillsrc` — только переключением на системный `mvn` (`execution:skillsrc-switch`) с подтверждения человека. Откат: `finish`/`ingest` по квитанциям
+убирают материализованные тесты и аннотации (`NOT_RUNNABLE` — очистка byte-identical файлов пакета; `scan --disposition-policy cleanup` — очистка и после `FAIL`); файлы,
+изменённые после `materialize`, возвращает `materialize --restore`; каталог `<run>` удаляется целиком. Для режима Б это заменяет «Project boundary» контракта
+оркестрации («код проекта не запускается», запись только в `.pilot-runs/`, `.skillsrc` и `--output-dir`): тесты и сборку запускает человек.
+
 ## Контракт оркестрации — места режима Б
 
 | Автоматизация | `model-request`/`model-response`; `tools.api automation-boundary-facts`, `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
@@ -158,9 +168,9 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 
 10. Для `local-pilot-v1`: automation -> static review -> optional one complete
     correction/review -> generated delta -> per-file materialization -> one exact
-    project-native execution.
+    project-native execution (запускает человек).
 
-Project code запускается только при `local-pilot-v1`, explicit run authorization,
+Project code запускает человек, и только при `local-pilot-v1`, explicit run authorization,
 complete materialization и accepted static review. Closed adapter получает:
 
 ```text

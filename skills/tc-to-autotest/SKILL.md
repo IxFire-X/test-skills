@@ -38,7 +38,7 @@ and runs as a stand. Test it through its external API at the address from the en
 Generate functional application tests for the accepted cases. Use the declared application
 boundary: prefer the external API when both routes are available; MockMvc with real
 application components is also allowed unless this run explicitly requires the external
-API. Reuse the project's client, authentication, configuration and setup/cleanup. An
+API. Reuse the project's client, configuration and setup/cleanup; credentials only as runtime secret handles. An
 isolated class or method test cannot substitute for an application case. One request is
 enough when it exercises that case and observes its required outcome.
 

@@ -301,7 +301,9 @@ def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> s
 _INGEST_REASONS = {"BUILD_FAILED": "NOT_RUNNABLE", "TESTS_NOT_STARTED": "NOT_RUNNABLE", "RESULT_UNAVAILABLE": "UNKNOWN"}
 HUMAN_RESULT_NOTE = "результат запуска предоставлен человеком, пакет его не воспроизводил"
 _REVIEW_NOTICE = ("код этих тестов написала модель и ещё не запускала: просмотрите перечисленные файлы до запуска; не правьте и не "
-                  "форматируйте их после materialize — напечатанная команда уже отключает проверки стиля, а правка файла даст SOURCE_CHANGED")
+                  "форматируйте их после materialize — напечатанная команда уже отключает проверки стиля, а правка файла даст SOURCE_CHANGED. "
+                  "Запуск — это выполнение сгенерированного кода и сборки вашего проекта с её плагинами (wrapper может скачать сборщик). До запуска "
+                  "проверьте: файлы тестов; что первый токен команды — лаунчер или интерпретатор вашего модуля; какие учётные данные тесты возьмут из окружения")
 
 
 class _NotBuilt(Exception):
@@ -651,7 +653,8 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
         **({"files_restored": list(restored)} if restored else {}),
         **({"files_not_restorable": list(stuck)} if stuck else {}),
         "review_required": True, "note": _REVIEW_NOTICE,
-        "service_note": "если у модуля есть стенд (service_url_env), поднимите его до запуска; пакет к нему не обращается",
+        "service_note": "если у модуля есть стенд (service_url_env), поднимите его до запуска и проверьте, что адрес из service_url_env — тестовый стенд, "
+                        "а не продуктивный; пакет к нему не обращается",
         "next": ingest, "next_powershell": ingest_powershell,
     })
     return 0
