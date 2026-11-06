@@ -125,8 +125,6 @@ def test_a_path_field_of_a_file_is_read_only_where_the_registry_says() -> None:
 # --- K-a: hostile values, recorded I/O --------------------------------------------------------------------------------------
 
 HOSTILE = [r"\\host\x", "//host/x", r"\\?\UNC\h\x", r"\??\UNC\h\x", "/??/UNC/h/x", r"..\..\вне\x", r"C:\вне\x"]
-# a command without a project or a run has no place to judge an absolute path by: it gets the text rules only (no share, device, NUL, ..)
-HOSTILE_TEXT = HOSTILE[:6]
 _MARKERS = ("host", "UNC", "??", "вне", "..")
 
 
@@ -228,7 +226,7 @@ def test_h12_the_candidate_of_review_view_is_judged_before_it_is_read(tmp_path, 
     assert calls == []
 
 
-@pytest.mark.parametrize("value", HOSTILE_TEXT)
+@pytest.mark.parametrize("value", HOSTILE)
 def test_h12_the_candidate_and_the_edits_of_review_edits_are_judged_before_they_are_read(monkeypatch, capsys, value) -> None:
     from tools import review_edits
 
@@ -241,7 +239,7 @@ def test_h12_the_candidate_and_the_edits_of_review_edits_are_judged_before_they_
         assert calls == [], argv
 
 
-@pytest.mark.parametrize("value", HOSTILE_TEXT)
+@pytest.mark.parametrize("value", HOSTILE)
 def test_h12_the_automation_of_autotest_hints_is_judged_before_it_is_read(monkeypatch, capsys, value) -> None:
     from tools import autotest_hints
 
@@ -253,7 +251,7 @@ def test_h12_the_automation_of_autotest_hints_is_judged_before_it_is_read(monkey
     assert calls == []
 
 
-@pytest.mark.parametrize("value", HOSTILE_TEXT)
+@pytest.mark.parametrize("value", HOSTILE)
 def test_h12_validate_artifact_judges_both_paths_before_it_opens_them(tmp_path, monkeypatch, value) -> None:
     from tools import validate_artifact
 
@@ -265,7 +263,7 @@ def test_h12_validate_artifact_judges_both_paths_before_it_opens_them(tmp_path, 
 
 
 @pytest.mark.parametrize("flag", ["--answers", "--replacement-approval"])
-@pytest.mark.parametrize("value", HOSTILE_TEXT)
+@pytest.mark.parametrize("value", HOSTILE)
 def test_h12_init_skillsrc_judges_the_answers_files_before_it_reads_them(tmp_path, monkeypatch, capsys, flag, value) -> None:
     from tools import init_skillsrc
 

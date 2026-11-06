@@ -20,6 +20,8 @@ DIR_CODE = "OUTPUT_DIR_OUTSIDE_RUN"
 IN_CODE = "INPUT_OUTSIDE_PROJECT"
 OUT_FIX = "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json"
 DIR_FIX = "каталог публикации — <run>/published (или ниже) прогона из --run-root; повтори с таким --output-dir"
+PACK_ROOT = Path(__file__).resolve().parents[1]
+PACK_FIX = "схема — файл пакета (schemas/…), путь от каталога пакета, обычный файл без ссылок и «..»"
 RUN_FIX = "--run — id прогона (32 символа 0-9a-f из вывода scan), не путь; путь к проекту — в --project"
 IN_FIX = ("передай --run-root <run> (или --project <проект>) и файл внутри этого проекта; без них — файл внутри прогона "
           "<project>/.pilot-runs/<run_id>/ (свои файлы агент кладёт в <run>/tmp/); путь — обычный файл без ссылок и junction, без «..», не UNC")
@@ -73,6 +75,14 @@ def plain_path(value: str | Path) -> Path:
     if not _plain(str(value)):
         raise OutputRefused(IN_CODE, f"{value}: not a local path (UNC, device, NUL or ..)", IN_FIX)
     return Path(value)
+
+
+def package_file(value: str | Path) -> Path:
+    """A file of the package itself (a schema): by its text, then below the root of the package, no link on the way, a regular file."""
+    raw = str(value)
+    if not _plain(raw):
+        raise OutputRefused(IN_CODE, f"{raw}: not a local path (UNC, device, NUL or ..)", PACK_FIX)
+    return _inside(PACK_ROOT, Path(os.path.abspath(raw)))
 
 
 def run_name(value: object) -> str:

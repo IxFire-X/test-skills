@@ -61,10 +61,11 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
     if _SCHEMA_VALIDATION_IMPORT_ERROR is not None:
         return _report_error(f"schema validation unavailable: {_SCHEMA_VALIDATION_IMPORT_ERROR}")
     try:
-        from tools.output_guard import plain_path
+        from tools.output_guard import input_file, package_file
 
-        schema_file, artifact_file = plain_path(schema_path), plain_path(artifact_path)  # the text of both paths before either is opened
-    except ValueError as error:
+        # the schema is a file of the package, the artifact a file of a run (<run>/tmp/): the place of both before either is opened
+        schema_file, artifact_file = package_file(schema_path), input_file(artifact_path, None)
+    except (ValueError, OSError) as error:  # OutputRefused is a ValueError
         return _report_error(f"path refused: {error}")
     root = _root_for_schema(schema_file)
     try:

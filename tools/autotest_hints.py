@@ -761,9 +761,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--automation", required=True, type=Path, help="tc-to-autotest artifact JSON")
     args = parser.parse_args(argv)
     try:
-        from tools.output_guard import plain_path
+        from tools.output_guard import input_file
 
-        automation = load_json_strict(plain_path(args.automation))  # no project here: the text of the path first
+        automation = load_json_strict(input_file(args.automation, None))  # a file of a run (model-stage-artifacts, tmp), judged first
         if not isinstance(automation, Mapping):
             raise ValueError("not an object")
         hints = autotest_hints(automation)

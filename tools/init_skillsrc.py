@@ -865,11 +865,11 @@ def main() -> int:
     args = parser.parse_args(); root = Path(args.project)
     output_target: ConfinedOutputTarget | None = None
     try:
-        from tools.output_guard import plain_path
+        from tools.output_guard import input_file
 
-        answers = {} if not args.answers else load_json_strict(plain_path(args.answers))  # the text of the path before it is opened
+        answers = {} if not args.answers else load_json_strict(input_file(args.answers, root))  # inside --project, judged before it is opened
         if not isinstance(answers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in answers.items()): raise ValueError("answers must be a string mapping")
-        approval = None if not args.replacement_approval else load_json_strict(plain_path(args.replacement_approval))
+        approval = None if not args.replacement_approval else load_json_strict(input_file(args.replacement_approval, root))
         if approval is not None and not isinstance(approval, dict): raise ValueError("replacement approval must be an object")
         if not root.is_dir(): raise ValueError("--project does not exist")
         if args.output:

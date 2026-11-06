@@ -147,10 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from tools.canonical_document import CanonicalDocumentError, document_sha256, require_valid_canonical_document
 
-        from tools.output_guard import plain_path
+        from tools.output_guard import input_file
 
-        candidate = json.loads(plain_path(args.candidate).read_text(encoding="utf-8"))  # no project here: the text of the path first
-        value = json.loads(plain_path(args.edits).read_text(encoding="utf-8"))
+        candidate = json.loads(input_file(args.candidate, None).read_text(encoding="utf-8"))  # a file of a run (<run>/tmp/), judged first
+        value = json.loads(input_file(args.edits, None).read_text(encoding="utf-8"))
         edits = value["artifacts"]["successor_edits"] if isinstance(value, Mapping) else value
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps(cli_error(error, fix="--candidate — файл кандидата r1, --edits — JSON-список правок или ответ ревьюера с "
