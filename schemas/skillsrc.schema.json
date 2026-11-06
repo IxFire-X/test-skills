@@ -264,7 +264,7 @@
       "properties": {
         "framework": {"const": "junit5"},
         "adapter_id": {"const": "maven:selected-symbols-v1"},
-        "executable": {"type": "string", "minLength": 1},
+        "executable": {"type": "string", "minLength": 1, "pattern": "^(?![\\\\/]{2})"},
         "build_profile": {"type": "string", "minLength": 1},
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
         "level": {"$ref": "#/$defs/test_level"}

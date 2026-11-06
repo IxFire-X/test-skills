@@ -889,6 +889,17 @@ def _testcase_status(item: ET.Element) -> str:
     return "PASSED"
 
 
+def masked_failure_text(text: str) -> str:
+    """A line of framework output that looks like a secret (the check the runner output gets) is ``<redacted>``: the text of a failure goes
+    into the receipt, the report and the annotation of a quarantined method."""
+    from tools.pilot_state import _canonical_runner_output
+
+    lead = re.match(r"ASSERT-[A-Za-z0-9_.:-]+", text)  # the label of the assertion is the reference of the quarantine mark, not free text
+    head, rest = (lead.group(0), text[lead.end():]) if lead else ("", text)
+    masked = _canonical_runner_output(rest, limit=500).decode("utf-8", errors="replace") if rest.strip() else rest
+    return head + (" " + masked.strip() if head and masked.strip() == "<redacted>" else masked)
+
+
 def _failure_message(item: ET.Element) -> str:
     """The first line of a failure or error, kept for the quarantine note (500 characters at most)."""
     found = item.find("failure")
@@ -897,7 +908,7 @@ def _failure_message(item: ET.Element) -> str:
     if found is None:
         return ""
     text = (found.attrib.get("message") or found.text or "").strip()
-    return text.splitlines()[0][:500] if text else ""
+    return masked_failure_text(text.splitlines()[0][:500]) if text else ""
 
 
 def parse_junit_element(root: ET.Element) -> JUnitParseResult:

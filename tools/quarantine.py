@@ -30,7 +30,9 @@ NOTE_LIMIT = 120
 
 def failure_note(message: str) -> tuple[str, str]:
     """``(ref, message)`` of a framework failure — the ``ASSERT-…`` label or ``FAIL``, and its first line made safe."""
-    first = (message or "").strip().splitlines()[0].strip() if (message or "").strip() else ""
+    from tools.run_tests import masked_failure_text  # the same check as the receipt: a secret is not written into the source file
+
+    first = masked_failure_text((message or "").strip().splitlines()[0].strip()) if (message or "").strip() else ""
     match = _ASSERT_REF.search(first)
     if match and match.start() == 0:
         # The mark already shows the ref, so the note does not repeat it.
