@@ -114,9 +114,10 @@ def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_an
 
 
 def test_validate_artifact_names_a_cut_answer_and_gives_a_retry_prompt(tmp_path: Path) -> None:
+    from tests.helpers import run_tmp
     from tools.validate_artifact import validate
 
-    path, size = _cut_answer(tmp_path)
+    path, size = _cut_answer(run_tmp(tmp_path))
     code, report = validate(str(ROOT / "schemas" / "canonical-test-document.schema.json"), str(path))
     assert code == 2 and report["status"] == "error"
     assert report["errors"][0]["code"] == "MODEL_OUTPUT_TRUNCATED" and f"{size} Б" in report["errors"][0]["message"]

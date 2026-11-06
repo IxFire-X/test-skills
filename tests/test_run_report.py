@@ -44,9 +44,10 @@ def test_no_gaps_gives_a_single_line() -> None:
 # --- schema retry hint and the retry itself ---------------------------------------------------
 
 def test_a_schema_error_prints_the_path_the_expectation_and_a_retry_prompt(tmp_path: Path) -> None:
+    from tests.helpers import run_tmp
     from tools.validate_artifact import validate
 
-    artifact = tmp_path / "answer.json"
+    artifact = run_tmp(tmp_path) / "answer.json"
     artifact.write_text(json.dumps({"schema_version": "5.0.0", "stage": "context-marker", "artifacts": {}, "warnings": ["x" * 400]}), encoding="utf-8")
     code, report = validate("schemas/context-marker-output.schema.json", str(artifact))
     assert code == 1 and report["errors"]

@@ -240,8 +240,11 @@ def test_the_edits_command_prints_the_effective_reference_for_the_report(tmp_pat
     from tools.canonical_document import document_sha256
     from tools.review_edits import apply_edits
 
+    from tests.helpers import run_tmp
+
     document = automated_document()
-    candidate, edits_path = tmp_path / "r1.json", tmp_path / "edits.json"
+    tmp = run_tmp(tmp_path)
+    candidate, edits_path = tmp / "r1.json", tmp / "edits.json"
     candidate.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     edits = [_edit(document)]
     edits_path.write_text(json.dumps(edits, ensure_ascii=False), encoding="utf-8")

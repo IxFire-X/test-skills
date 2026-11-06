@@ -139,3 +139,13 @@ def publish_fixture_generator_inputs(run_root, attempt_id: str, batch_ids, conte
         "batches": [{"batch_id": batch_id, "context_receipt_digest": context_digest, "header_digest": header} for batch_id in batch_ids],
     })["digest"]
     return plan, header
+
+
+def run_tmp(tmp_path: Path) -> Path:
+    """``<run>/tmp`` of a real run under *tmp_path*: where an agent puts the files a standalone checker reads (output_guard rule R)."""
+    from tests.test_self_review import _run
+
+    run_root, _attempt = _run(tmp_path, "cases-only-v1", flag=False)
+    directory = run_root / "tmp"
+    directory.mkdir(exist_ok=True)
+    return directory

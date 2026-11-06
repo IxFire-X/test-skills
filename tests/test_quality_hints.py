@@ -369,8 +369,10 @@ def test_autotest_hints_are_capped() -> None:
 
 
 def test_the_cli_prints_json_and_never_fails_on_hints(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.helpers import run_tmp
     from tools.autotest_hints import main
 
+    tmp_path = run_tmp(tmp_path)
     artifact = tmp_path / "automation.json"
     artifact.write_text(json.dumps({"artifacts": {"generated_files": [{"file_id": "FILE-a", "language": "java", "content": JAVA}]}}), encoding="utf-8")
     assert main(["--automation", str(artifact)]) == 0
