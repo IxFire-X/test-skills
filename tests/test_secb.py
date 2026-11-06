@@ -42,7 +42,7 @@ def test_the_schema_takes_the_launcher_by_name_or_by_a_local_path_and_not_a_shar
 
     for fine in ("mvn", r"C:\tools\maven\mvn.cmd", "/opt/maven/bin/mvn"):
         parse_skillsrc_bytes(_skillsrc(fine))
-    for bad in UNC:
+    for bad in [*UNC, *NT]:  # SEC-A D4: the schema says what system_maven_path refuses
         with pytest.raises(SkillsrcError):
             parse_skillsrc_bytes(_skillsrc(bad))
 
