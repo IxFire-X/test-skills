@@ -165,7 +165,7 @@ def _template_in(project: Path) -> None:
 
 
 def _cases_only_run(tmp_path: Path, capsys: pytest.CaptureFixture[str], *, close: bool = True) -> tuple[Path, Path, Path]:
-    """A real cases-only run whose effective set is published to ``cases``; closed by ``finish`` when asked."""
+    """A real cases-only run whose effective set is published to ``<run>/published``; closed by ``finish`` when asked."""
     from tests.test_finish import _cases_only_effective, _finish
     from tools import pilot_state
     from tools.publish_test_case_bundle import publish_bundle
@@ -173,7 +173,7 @@ def _cases_only_run(tmp_path: Path, capsys: pytest.CaptureFixture[str], *, close
     run_root, attempt_id = _cases_only_effective(tmp_path)
     project = run_root.parents[1]
     document = pilot_state.read_effective_canonical(run_root, attempt_id)["document"]
-    bundle_csv = Path(publish_bundle(document, project / "cases").csv_path)
+    bundle_csv = Path(publish_bundle(document, run_root / "published").csv_path)
     if close:
         _finish(project, run_root, capsys)
     _template_in(project)
@@ -256,7 +256,7 @@ def test_a_set_from_another_run_is_refused(tmp_path: Path, capsys: pytest.Captur
     from tools.zephyr_template_export import ZephyrTemplateError, export_import_csv
 
     project, run_root, _bundle_csv = _cases_only_run(tmp_path, capsys)
-    other = Path(publish_bundle(canonical_fixture(), project / "other-run-cases").csv_path)
+    other = Path(publish_bundle(canonical_fixture(), run_root / "published" / "other-run-cases").csv_path)
     with pytest.raises(ZephyrTemplateError) as caught:
         export_import_csv(project, run_root.name, other)
     assert caught.value.code == "ZEPHYR_EXPORT_RUN_MISMATCH" and caught.value.hint

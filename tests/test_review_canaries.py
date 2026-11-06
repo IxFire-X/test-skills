@@ -241,7 +241,7 @@ def test_the_view_command_writes_the_view_with_canaries_for_the_assembled_candid
 
     root = Path(__file__).resolve().parents[1]
     run = _generated_run(tmp_path)
-    candidate = tmp_path / "r1.json"
+    candidate = Path(run["project"]) / "r1.json"
     candidate.write_text(json.dumps(_candidate(run), ensure_ascii=False), encoding="utf-8")
     code, _published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(candidate), "--output-dir",
                             str(run["run_root"] / "published"), "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"])
