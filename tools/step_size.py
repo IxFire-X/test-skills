@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from tools.json_cli import JsonArgumentParser, cli_error
-from tools.output_guard import input_file, project_path
+from tools.output_guard import OutputRefused, input_file, project_path, run_name
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -643,8 +643,11 @@ def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     project = Path(project).resolve()
-    root = project / ".pilot-runs" / run_id
-    if not run_id or Path(run_id).name != run_id or run_id in {".", ".."} or not (root / "run-manifest.json").is_file():
+    try:
+        root = project / ".pilot-runs" / run_name(run_id)
+    except OutputRefused as error:
+        raise ValueError(f"unknown run: {run_id}") from error
+    if not (root / "run-manifest.json").is_file():
         raise ValueError(f"unknown run: {run_id}")
     row = {key: report[key] for key in ("bytes", "input_bytes", "role_bytes", "role", "files", "tokens_est", "budget_bytes",
                                         "fits", "warning")}
@@ -680,6 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.stage and stage_role not in _STAGE_ROLES and stage_role not in _REQUEST_STAGES:
             raise ValueError(f"unknown --stage: {args.stage}")
         if args.run:
+            run_name(args.run)  # a run id, not a path: before a path is built from it, to read a journal or to write a measurement
             if not args.stage and not files:
                 raise ValueError("--run needs --stage or --files")
             if stage_role in _REQUEST_STAGES:

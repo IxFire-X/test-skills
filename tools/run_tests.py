@@ -600,6 +600,8 @@ RUNNER_INPUT_MAX_BYTES = 1024 * 1024
 
 def _runner_input_size(project: Path, automation_artifact: Mapping[str, Any], materialized: bool) -> dict[str, str] | None:
     """RUNNER_INPUT_TOO_LARGE when the generated files hold more than RUNNER_INPUT_MAX_BYTES; checked before anything is parsed."""
+    from tools import output_guard
+
     files = (automation_artifact.get("artifacts") or {}).get("generated_files") if isinstance(automation_artifact, Mapping) else None
     if not isinstance(files, list):
         return None  # the shape is the automation validation's own refusal
@@ -609,7 +611,7 @@ def _runner_input_size(project: Path, automation_artifact: Mapping[str, Any], ma
             continue
         if materialized:
             try:
-                total += (Path(project) / str(row.get("path"))).stat().st_size
+                total += output_guard.project_file(Path(project), str(row.get("path"))).stat().st_size  # judged by its text first
             except (OSError, ValueError):
                 continue
         elif isinstance(row.get("content"), str):

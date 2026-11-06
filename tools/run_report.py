@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from tools import execution_gate
+from tools import execution_gate, output_guard
 
 GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
              "и ID требований, кейсов, параметров и классов")
@@ -697,8 +697,7 @@ def _zephyr_import(root: Path) -> Any:
     try:
         record = json.loads((root / "zephyr-import.json").read_text(encoding="utf-8"))
         shown = {key: record[key] for key in ("template_path", "template_digest", "columns_added", "rows")}
-        template = (Path(root).parent.parent / str(shown["template_path"])).resolve()
-        template.relative_to(Path(root).parent.parent.resolve())
+        template = output_guard.project_file(Path(root).parent.parent, str(shown["template_path"]))  # its text and place first, then the bytes
         if "sha256:" + hashlib.sha256(template.read_bytes()).hexdigest() != shown["template_digest"]:
             return None
         return {**shown, "basis": ZEPHYR_BASIS}

@@ -11,6 +11,7 @@ and fails for one that does not.
 from __future__ import annotations
 
 import os
+import re
 import stat
 from pathlib import Path, PureWindowsPath
 
@@ -19,6 +20,7 @@ DIR_CODE = "OUTPUT_DIR_OUTSIDE_RUN"
 IN_CODE = "INPUT_OUTSIDE_PROJECT"
 OUT_FIX = "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json"
 DIR_FIX = "каталог публикации — <run>/published (или ниже) прогона из --run-root; повтори с таким --output-dir"
+RUN_FIX = "--run — id прогона (32 символа 0-9a-f из вывода scan), не путь; путь к проекту — в --project"
 IN_FIX = ("передай --run-root <run> (или --project <проект>) и файл внутри этого проекта; без них — файл внутри прогона "
           "<project>/.pilot-runs/<run_id>/ (свои файлы агент кладёт в <run>/tmp/); путь — обычный файл без ссылок и junction, без «..», не UNC")
 
@@ -63,6 +65,21 @@ def _inside(root: Path, candidate: Path) -> Path:
     if details is None or not stat.S_ISREG(details.st_mode):
         raise OutputRefused(IN_CODE, f"{candidate}: not a regular file", IN_FIX)
     return current
+
+
+def plain_path(value: str | Path) -> Path:
+    """A path of a command that has no project and no run to judge it by (a standalone checker): the text only — no NUL, no UNC or device
+    prefix, no ``..`` — before anything opens it.  Nothing is opened here."""
+    if not _plain(str(value)):
+        raise OutputRefused(IN_CODE, f"{value}: not a local path (UNC, device, NUL or ..)", IN_FIX)
+    return Path(value)
+
+
+def run_name(value: object) -> str:
+    """The id of a run as a name: ``[0-9a-f]{32}``, judged by its text before a path is built from it (never a path itself)."""
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{32}", value) is None:
+        raise OutputRefused(OUT_CODE, f"--run must be the id of a run: 32 hexadecimal characters, not a path", RUN_FIX)
+    return value
 
 
 def project_path(project: Path, value: str) -> Path:

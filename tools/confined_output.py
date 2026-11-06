@@ -47,8 +47,10 @@ def _identity(path: Path) -> tuple[int, int, int | None]:
 
 
 def _relative_output(root: Path, value: str | Path) -> tuple[Path, tuple[str, ...]]:
+    from tools.output_guard import local_path_text
+
     raw = str(value)
-    if raw.startswith(("\\\\", "//", "\\\\?\\")):
+    if not local_path_text(raw):  # a share, a device or an NT path by its text (also the \??\ and /??/ forms), before anything resolves it
         raise OutputConfinementError("--output must be below exact docs/to_do")
     project = root.resolve(strict=True)
     candidate = Path(raw)

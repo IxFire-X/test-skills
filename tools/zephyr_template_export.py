@@ -14,11 +14,11 @@ import io
 import json
 import os
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools import output_guard
 from tools.json_cli import JsonArgumentParser
 from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _formula_safe
 from tools.zephyr_csv import detect_delimiter
@@ -194,24 +194,15 @@ def _template_setting(project: Path) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _install(target: Path, data: bytes) -> None:
-    """Hard-link a complete temporary file, as the bundle is installed: no link is followed, no file replaced."""
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("wb", delete=False, dir=target.parent) as handle:
-            temporary = Path(handle.name)
-            handle.write(data)
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
-                raise ZephyrTemplateError("ZEPHYR_EXPORT_CONFLICT", str(target)) from None
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
+def _install(project: Path, root: Path, target: Path, data: bytes) -> None:
+    """Write the import CSV below the run through ``confined_output``: no link is followed; another file of that name is a conflict."""
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+
+    if target.is_symlink() or target.exists():
+        if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
+            raise ZephyrTemplateError("ZEPHYR_EXPORT_CONFLICT", str(target))
+        return
+    atomic_write_confined_bytes_at_root(project, root, target, data)
 
 
 def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str, Any]:
@@ -226,15 +217,16 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     from tools.run_pipeline import _read_run_coordinate
 
     root, _run, state = _read_run_coordinate(project, run_id)
-    bundle_csv = Path(bundle_csv).resolve()
-    base = bundle_csv.name.removesuffix(".zephyr-scale.csv")
-    try:
-        bundle_csv.relative_to(Path(project).resolve())  # the import file is written only inside the project
+    try:  # the cases are a file of the bundle this run published: <run>/published, judged by its text and place before it is opened
+        bundle_csv = output_guard.input_file(bundle_csv, root)
+        if (root / "published") not in bundle_csv.parents:
+            raise ValueError
+        base = bundle_csv.name.removesuffix(".zephyr-scale.csv")
         if base == bundle_csv.name:
             raise ValueError
-        document = json.loads(bundle_csv.with_name(base + ".json").read_text(encoding="utf-8"))
+        document = json.loads(output_guard.input_file(bundle_csv.with_name(base + ".json"), root).read_text(encoding="utf-8"))
         cases_bytes = bundle_csv.read_bytes()
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # OutputRefused is a ValueError
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
     # case IDs repeat between runs, so the set must be one this run published.
     if document_sha256(document) not in _published_digests(root, state):
@@ -252,7 +244,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", f"{bundle_csv}: файл не соответствует документу рядом (.json); пересоберите bundle: review-select --verdict")
     data = build_import_csv(cases_bytes, document, template, automated_case_ids=automated)
     target = bundle_csv.with_name(base + ".zephyr-import.csv")
-    _install(target, data)
+    _install(project, root, target, data)
     result = {
         "status": "ok", "output": str(target), "template_path": template.path, "template_digest": template.digest,
         "delimiter": template.delimiter, "columns_added": [column for column in template.header if column not in _HEADERS],

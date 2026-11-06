@@ -60,16 +60,21 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
         return _report_error(f"missing dependency: {_IMPORT_ERROR}")
     if _SCHEMA_VALIDATION_IMPORT_ERROR is not None:
         return _report_error(f"schema validation unavailable: {_SCHEMA_VALIDATION_IMPORT_ERROR}")
-    schema_file = Path(schema_path)
+    try:
+        from tools.output_guard import plain_path
+
+        schema_file, artifact_file = plain_path(schema_path), plain_path(artifact_path)  # the text of both paths before either is opened
+    except ValueError as error:
+        return _report_error(f"path refused: {error}")
     root = _root_for_schema(schema_file)
     try:
         validator_for(schema_file, root)
     except (SchemaRegistryError, StrictJsonError, SchemaError) as error:
         return _report_error(f"schema unreadable: {error}")
     try:
-        artifact = load_json_strict(Path(artifact_path))
+        artifact = load_json_strict(artifact_file)
     except StrictJsonError as error:
-        truncated = _truncated(Path(artifact_path))
+        truncated = _truncated(artifact_file)
         return truncated if truncated is not None else _report_error(f"artifact unreadable: {error}")
     try:
         schema = load_json_strict(schema_file)

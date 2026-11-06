@@ -78,6 +78,10 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
     if run_root is None:
         return
     try:
+        from tools.output_guard import local_path_text
+
+        if not local_path_text(str(run_root)) or re.fullmatch(r"[0-9a-f]{32}", Path(str(run_root)).name) is None:  # a run id, judged by its text first
+            return
         root = Path(str(run_root)).resolve()
         if root.parent.name != ".pilot-runs" or not (root / "run-manifest.json").is_file():
             return

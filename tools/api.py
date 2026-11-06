@@ -89,6 +89,8 @@ def _read_inputs(args: argparse.Namespace) -> None:
             setattr(args, name, read(flag, value))
         elif isinstance(value, list) and any(isinstance(item, _JsonFile) for item in value):
             setattr(args, name, [read(flag, item) if isinstance(item, _JsonFile) else item for item in value])
+    if isinstance(getattr(args, "input_file", None), list):  # the files a planning command measures: judged before it looks at them
+        args.input_file = [output_guard.input_file(item, project()) for item in args.input_file]
     for name in ("artifact", "verdict"):  # the answer file: its refusal has its code and fix and a line in refusals.jsonl
         if isinstance(getattr(args, name, None), str):
             setattr(args, name, _load_answer(getattr(args, name), project()))

@@ -86,11 +86,12 @@ _ARGS: list[Any] = []  # the arguments of the running command: the refusal journ
 def _journal_refusal(payload: Mapping[str, Any]) -> None:
     """A refusal of a command that names its run goes to ``<run>/refusals.jsonl`` (code, command, stage — nothing else)."""
     from tools.json_cli import record_refusal
+    from tools.output_guard import local_path_text
 
     args = _ARGS[0] if _ARGS else None
     run, project = getattr(args, "run", None), getattr(args, "project", None)
     run = run if isinstance(run, str) and run else payload.get("run_id")
-    if isinstance(run, str) and run and project:
+    if isinstance(run, str) and re.fullmatch(r"[0-9a-f]{32}", run) and project and local_path_text(str(project)):  # a run id, never a path
         record_refusal(Path(str(project)).resolve() / ".pilot-runs" / run, args.command, payload.get("code") or payload.get("reason"), payload.get("stage"))
 
 

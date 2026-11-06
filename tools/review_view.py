@@ -727,7 +727,9 @@ def main(argv: list[str] | None = None) -> int:
             data, grouping, reference = _run_render(root, state, document, "autotest")
             atomic_write_confined_bytes_at_root(project, root, target, data)
         else:
-            document, profile = json.loads(Path(args.candidate).read_text(encoding="utf-8")), "review"
+            from tools.output_guard import input_file
+
+            document, profile = json.loads(input_file(args.candidate, project).read_text(encoding="utf-8")), "review"  # inside the project
             made = ensure_reviewer_view(project, root, document)
             target, digest = made["path"], made["candidate_sha256"]
             data = Path(target).read_bytes()

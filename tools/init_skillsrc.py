@@ -427,6 +427,12 @@ def _replacement_is_bound(approval: Mapping[str, Any] | None, proposal: Mapping[
 def _preserve_immutable_evidence(project_root: Path, directory: Path | None, original: bytes) -> None:
     if directory is None:
         raise InitError("replacement_unbound", "immutable evidence directory is required")
+    from tools.output_guard import plain_path
+
+    try:
+        plain_path(directory)  # the text first: a share, a device, NUL or .. is no directory inside the project
+    except ValueError as error:
+        raise InitError("evidence_write_error", "immutable evidence directory is not a plain local path: name a directory inside the project") from error
     project = Path(project_root).resolve(strict=True)
     candidate = Path(directory)
     directory = candidate if candidate.is_absolute() else project / candidate
@@ -859,9 +865,11 @@ def main() -> int:
     args = parser.parse_args(); root = Path(args.project)
     output_target: ConfinedOutputTarget | None = None
     try:
-        answers = {} if not args.answers else load_json_strict(Path(args.answers))
+        from tools.output_guard import plain_path
+
+        answers = {} if not args.answers else load_json_strict(plain_path(args.answers))  # the text of the path before it is opened
         if not isinstance(answers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in answers.items()): raise ValueError("answers must be a string mapping")
-        approval = None if not args.replacement_approval else load_json_strict(Path(args.replacement_approval))
+        approval = None if not args.replacement_approval else load_json_strict(plain_path(args.replacement_approval))
         if approval is not None and not isinstance(approval, dict): raise ValueError("replacement approval must be an object")
         if not root.is_dir(): raise ValueError("--project does not exist")
         if args.output:
