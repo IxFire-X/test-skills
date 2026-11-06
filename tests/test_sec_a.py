@@ -168,7 +168,7 @@ def _share_touches(monkeypatch: pytest.MonkeyPatch, call) -> list[str]:
 
     def watch(real):
         def method(self, *args, **kwargs):
-            if str(self).startswith(("\\\\", "//")):
+            if str(self).replace("/", "\\").startswith(("\\\\", "\\??\\")):
                 touched.append(str(self))
                 raise OSError("a share path was touched")
             return real(self, *args, **kwargs)
@@ -240,15 +240,20 @@ UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required one
 CLI_OF = {"exec_commands": "run_pipeline"}  # a module that adds its commands to another CLI
 
 
+NT_SHARES = [r"\??\UNC\pg1-no-such-host.invalid\share", "/??/UNC/pg1-no-such-host.invalid/share"]  # D3: the prefix of an NT path
+
+
+@pytest.mark.parametrize("share", [None, *NT_SHARES])
 @pytest.mark.parametrize("name", sorted(UNC_ARGV))
-def test_a_share_path_in_any_flag_of_any_cli_is_refused_when_the_arguments_are_read(name: str, capsys: pytest.CaptureFixture[str],
+def test_a_share_path_in_any_flag_of_any_cli_is_refused_when_the_arguments_are_read(name: str, share: str | None, capsys: pytest.CaptureFixture[str],
                                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
     import inspect
     import sys
 
     module = importlib.import_module(f"tools.{CLI_OF.get(name, name)}")
-    argv = UNC_ARGV[name]
+    argv = [item.replace(SHARE, share).replace("//pg1-no-such-host.invalid/share", share) if share else item for item in UNC_ARGV[name]]
+    assert share is None or any(item.startswith(share) for item in argv), argv
     stopped: list = []
 
     def call() -> None:

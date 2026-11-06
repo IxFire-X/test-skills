@@ -200,7 +200,9 @@ def system_maven_path(executable: str) -> Path:
     """Resolve the one closed host tool; its launcher is the identity boundary."""
     if not isinstance(executable, str) or not executable or "\0" in executable:
         raise InventoryError("system Maven executable is missing")
-    if executable.replace("/", "\\").startswith("\\\\"):  # before any I/O: a share or a device (\\host\x, //host/x, \\?\, \\.\) is not a local launcher
+    from tools.output_guard import local_path_text
+
+    if not local_path_text(executable):  # before any I/O: a share or a device (\\host\x, //host/x, \\?\, \\.\, \??\) is not a local launcher
         raise InventoryError("system Maven path must be a local path: a network share or a device path is not accepted")
     raw = Path(executable)
     if executable != "mvn" and not raw.is_absolute():

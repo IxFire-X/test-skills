@@ -10,9 +10,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UNC = [r"\\host\share\mvn.cmd", "//host/share/mvn.cmd", r"\\?\C:\tools\mvn.cmd", r"\\.\pipe\mvn.cmd"]
+NT = [r"\??\UNC\host\share\mvn.cmd", "/??/UNC/host/share/mvn.cmd"]  # SEC-A D3: the prefix of an NT path, Win32 passes it as it is
 
 
-@pytest.mark.parametrize("executable", UNC)
+@pytest.mark.parametrize("executable", [*UNC, *NT])
 def test_the_system_maven_path_refuses_a_share_or_a_device_before_any_io(executable: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools.project_inventory import InventoryError, system_maven_path
 

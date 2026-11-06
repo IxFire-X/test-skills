@@ -31,8 +31,8 @@ class OutputRefused(ValueError):
 
 def local_path_text(raw: str) -> bool:
     """A path that names a place on this machine by its text alone — no NUL, no UNC or device prefix: nothing that would reach the
-    network.  Judged before anything opens, resolves or stats the path."""
-    return "\x00" not in raw and not raw.replace("/", "\\").startswith("\\\\")
+    network.  Judged before anything opens, resolves or stats the path; ``\\??\\`` too — the prefix of an NT path, Win32 passes it as it is."""
+    return "\x00" not in raw and not raw.replace("/", "\\").startswith(("\\\\", "\\??\\"))
 
 
 def _plain(raw: str, *, relative: bool = False) -> bool:
