@@ -170,7 +170,8 @@ def test_story_materialize_refusals_then_a_real_run_cut_planted_and_repeated(tmp
         pass
     else:
         assert _reason(_ingest(project, run_root, capsys, reports=str(project / "linked-reports"))) == "INGEST_REPORT_OUTSIDE_MODULE"
-        os.rmdir(project / "linked-reports")
+        link = project / "linked-reports"
+        os.rmdir(link) if os.name == "nt" else link.unlink()  # a directory link: rmdir on Windows, unlink elsewhere
     # row: a run of the command without its word, and with the word of another run
     monkeypatch.setattr(subprocess, "Popen", real_popen)
     assert _human_run(project, printed, drop_challenge=True).returncode == 0
