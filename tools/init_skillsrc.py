@@ -854,7 +854,11 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--replacement-approval"); parser.add_argument("--immutable-evidence-dir"); parser.add_argument("--output")
+    try:  # the parser of the package refuses a --project on a share while it reads it; a run as a file keeps the plain one
+        from tools.json_cli import JsonArgumentParser as Parser
+    except ImportError:
+        Parser = argparse.ArgumentParser
+    parser = Parser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--replacement-approval"); parser.add_argument("--immutable-evidence-dir"); parser.add_argument("--output")
     args = parser.parse_args(); root = Path(args.project)
     output_target: ConfinedOutputTarget | None = None
     try:

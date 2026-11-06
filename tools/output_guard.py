@@ -29,11 +29,16 @@ class OutputRefused(ValueError):
         super().__init__(message)
 
 
-def _local(raw: str, *, relative: bool = False) -> bool:
-    """A path that names a place on this machine by its text alone: no NUL, no UNC or device prefix, no ``..``; a *relative* one also
-    no root and no drive."""
+def local_path_text(raw: str) -> bool:
+    """A path that names a place on this machine by its text alone — no NUL, no UNC or device prefix: nothing that would reach the
+    network.  Judged before anything opens, resolves or stats the path."""
+    return not ("\x00" in raw or raw.startswith(("\\\\", "//")) or PureWindowsPath(raw).drive.startswith("\\\\"))
+
+
+def _plain(raw: str, *, relative: bool = False) -> bool:
+    """``local_path_text`` and no ``..``; a *relative* one also no root and no drive."""
     windows = PureWindowsPath(raw)
-    if "\x00" in raw or raw.startswith(("\\\\", "//")) or windows.drive.startswith("\\\\") or ".." in windows.parts:
+    if not local_path_text(raw) or ".." in windows.parts:
         return False
     return not relative or not (windows.drive or windows.root or raw.startswith("/"))
 
@@ -62,7 +67,7 @@ def _inside(root: Path, candidate: Path) -> Path:
 
 def project_path(project: Path, value: str) -> Path:
     """A ``project_path`` (relative to the project) judged by its text alone — nothing is opened."""
-    if not _local(str(value), relative=True):
+    if not _plain(str(value), relative=True):
         raise OutputRefused(IN_CODE, f"{value!r}: a project path is relative, inside the project, without .., a drive or UNC", IN_FIX)
     return Path(project) / value
 
@@ -76,7 +81,7 @@ def input_file(value: str | Path, project: Path | None, *, base: Path | None = N
     """The file a path of the command line names (relative to *base*, else the working directory): by its text, then inside
     *project* — or, without one, inside the run of a project it lies in (``<project>/.pilot-runs/<run_id>/``)."""
     raw = str(value)
-    if not _local(raw):
+    if not _plain(raw):
         raise OutputRefused(IN_CODE, f"{raw}: not a local path (UNC, device, NUL or ..)", IN_FIX)
     candidate = Path(os.path.abspath(Path(base) / raw if base is not None else raw))
     if project is not None:
@@ -96,7 +101,7 @@ def existing_run(run_root: object) -> tuple[Path, Path]:
     """``(project, run)`` of a run that exists: ``<project>/.pilot-runs/<id>`` with its ``run-manifest.json``."""
     from tools import pilot_state
 
-    if not _local(str(run_root)):
+    if not local_path_text(str(run_root)):
         raise OutputRefused(OUT_CODE, "--run-root must name an existing run: <project>/.pilot-runs/<run_id>/", OUT_FIX)
     try:
         project, run = pilot_state._run_root(Path(str(run_root)))
@@ -112,7 +117,7 @@ def out_file(path: str | Path, run_root: object) -> Path:
     if run_root is None:
         raise OutputRefused(OUT_CODE, "--out must name a file under <run>/tmp/: --run-root is missing", OUT_FIX)
     _project, run = existing_run(run_root)
-    if not _local(str(path)):
+    if not local_path_text(str(path)):
         raise OutputRefused(OUT_CODE, "--out must name a file under <run>/tmp/ of the --run-root run", OUT_FIX)
     target = Path(path).resolve()
     if target.parent != run / "tmp" or not target.name:
@@ -124,7 +129,7 @@ def run_output_directory(path: str | Path, run_root: object) -> Path:
     """The directory ``--output-dir`` names: ``<run>/published`` of the run ``run_root`` names, or below it, links resolved."""
     _project, run = existing_run(run_root)
     published = run / "published"
-    directory = Path(path).resolve() if _local(str(path)) else None
+    directory = Path(path).resolve() if local_path_text(str(path)) else None
     if directory is None or (directory != published and published not in directory.parents):
         raise OutputRefused(DIR_CODE, f"--output-dir must be {published} or below it", DIR_FIX)
     return directory

@@ -154,6 +154,65 @@ def test_scan_refuses_a_document_whose_path_cannot_be_printed_before_the_run_is_
     assert not (project / ".pilot-runs").exists() and not (project / ".skillsrc").exists()
 
 
+# ---- D2: a share path is refused before anything touches it -----------------------------------------------------
+
+SHARE = r"\\pg1-no-such-host.invalid\share"
+
+
+def _share_touches(monkeypatch: pytest.MonkeyPatch, call) -> list[str]:
+    """Run *call* with Path.resolve and Path.stat watching for a share path: the paths they were asked about (none must reach the network)."""
+    import pathlib
+
+    touched: list[str] = []
+    real_resolve, real_stat = pathlib.Path.resolve, pathlib.Path.stat
+
+    def watch(real):
+        def method(self, *args, **kwargs):
+            if str(self).startswith(("\\\\", "//")):
+                touched.append(str(self))
+                raise OSError("a share path was touched")
+            return real(self, *args, **kwargs)
+        return method
+
+    with monkeypatch.context() as patched:
+        patched.setattr(pathlib.Path, "resolve", watch(real_resolve))
+        patched.setattr(pathlib.Path, "stat", watch(real_stat))
+        call()
+    return touched
+
+
+def test_scan_refuses_a_document_on_a_share_before_it_touches_it(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_documents_only import _documents_project, _run as _main
+    from tools import run_pipeline
+
+    project = _documents_project(tmp_path)
+    result: list = []
+    touched = _share_touches(monkeypatch, lambda: result.append(
+        _main(run_pipeline, capsys, "scan", "--project", str(project), "--profile", "cases-only-v1", "--docs", SHARE + r"\x.md")))
+    (code, refused), = result
+    assert touched == [] and code == 2 and refused["reason"] == "SNAPSHOT_DOCS" and "UNC" in refused["fix"], (touched, refused)
+
+
+@pytest.mark.parametrize("argv", [["tools.run_pipeline", "scan", "--profile", "cases-only-v1", "--docs", "x.md", "--project", SHARE + r"\p"],
+                                  ["tools.api", "plan-batches", "--requirements", "r.json", "--grouping", "g.json", "--input-file", "r.json",
+                                   "--context-receipt", "c.json", "--project", "//pg1-no-such-host.invalid/share"]])
+def test_a_project_on_a_share_is_refused_when_the_arguments_are_read(argv: list[str], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    module = importlib.import_module(argv[0])
+    stopped: list = []
+
+    def call() -> None:
+        try:
+            module.main(argv[1:])
+        except SystemExit as stop:
+            stopped.append(stop.code)
+
+    touched = _share_touches(monkeypatch, call)
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert touched == [] and stopped == [2] and printed["code"] == "INVALID_ARGUMENT" and "UNC" in printed["message"], (touched, printed)
+
+
 # ---- А4: --out ---------------------------------------------------------------------------------------------------
 
 def test_out_is_not_written_through_a_planted_link_of_its_temporary_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

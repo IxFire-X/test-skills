@@ -108,6 +108,10 @@ def _source_requirement_id(index: int) -> str:
 
 
 def _confined(project: Path, candidate: Path) -> Path | None:
+    from tools.output_guard import local_path_text
+
+    if not local_path_text(str(candidate)):  # a share or a device: refused by its text, never resolved
+        return None
     try:
         resolved = candidate.resolve()
         resolved.relative_to(project.resolve())

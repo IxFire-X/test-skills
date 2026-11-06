@@ -628,12 +628,22 @@ def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
     return parse_skillsrc_bytes(data, project=path.parent), _digest_bytes(data)
 
 
+def _local_input(raw: str, flag: str) -> None:
+    """A path of a scan flag on a share or a device is refused by its text, before anything resolves or opens it."""
+    from tools.output_guard import local_path_text
+
+    if not local_path_text(str(raw)):
+        raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is not a local path: {raw}",
+                       fix=f"укажите {flag} путём внутри проекта, не UNC и не путём устройства")
+
+
 def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outside_fix: str | None = None) -> list[tuple[str, bytes]]:
     """The files a scan flag names (``--docs``, ``--reference``, ``--cases``): inside the project, no reparse point, each
     path once. A path outside the project is the refusal ``SNAPSHOT_DOCS`` with *outside_fix*."""
     files: list[tuple[str, bytes]] = []
     seen: set[str] = set()
     for raw in paths or []:
+        _local_input(raw, flag)
         candidate = Path(raw)
         try:
             confined = _confined(project, candidate if candidate.is_absolute() else project / candidate)
@@ -668,6 +678,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
     sections: dict[str, str | None] = {}  # --docs path#Section — one section of the file, its heading by path
     files: list[tuple[str, bytes]] = []
     for raw in docs or []:
+        _local_input(raw, "--docs")  # before resolve_spec looks for a file named with its #
         path, heading = resolve_spec(project, raw)
         for rel, data in _input_files(project, [path], "--docs"):
             if rel in sections:

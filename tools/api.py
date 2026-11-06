@@ -57,6 +57,8 @@ def _input_project(args: argparse.Namespace) -> Path | None:
     if run_root is not None:
         return output_guard.existing_run(run_root)[0]
     project = getattr(args, "project", None)
+    if project is not None and not output_guard.local_path_text(str(project)):  # by its text, before _inside resolves it
+        raise output_guard.OutputRefused(output_guard.IN_CODE, f"--project {project}: not a local directory (UNC or device)", output_guard.IN_FIX)
     return Path(project) if project is not None else None
 
 

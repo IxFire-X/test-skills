@@ -86,8 +86,12 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
     if not docs:
         return [_row("docs", CASES, "STOP", "не указан ни один документ требований", "добавьте --docs <путь внутри проекта>")]
     from tools.doc_sections import resolve_spec
+    from tools.output_guard import local_path_text
 
     for raw in docs:
+        if not local_path_text(raw):  # a share or a device: by its text, never resolved
+            rows.append(_row(f"docs:{raw}", CASES, "STOP", f"{raw}: не локальный путь (UNC или устройство)", "положите документ внутрь проекта и укажите путь от его корня"))
+            continue
         spec, heading = resolve_spec(root, raw)  # path#Section
         candidate = Path(spec)
         path = (candidate if candidate.is_absolute() else root / candidate).resolve()
@@ -308,9 +312,12 @@ def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
     """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business).
     ``путь#Раздел`` is the file ``путь``; the heading is the docs row's business."""
     from tools.doc_sections import resolve_spec
+    from tools.output_guard import local_path_text
 
     rels = []
     for raw in docs:
+        if not local_path_text(raw):  # the docs row has refused it
+            continue
         candidate = Path(resolve_spec(root, raw)[0])
         path = (candidate if candidate.is_absolute() else root / candidate).resolve()
         if path.is_file() and path.is_relative_to(root):

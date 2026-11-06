@@ -97,8 +97,10 @@ def resolve_spec(project, raw: str) -> tuple[str, str | None]:
     """The path and the heading of a ``--docs`` value: a file that really has ``#`` in its name stays a whole file."""
     from pathlib import Path
 
+    from tools.output_guard import local_path_text
+
     candidate = Path(raw)
-    if "#" not in raw or (candidate if candidate.is_absolute() else Path(project) / candidate).is_file():
+    if "#" not in raw or (local_path_text(raw) and (candidate if candidate.is_absolute() else Path(project) / candidate).is_file()):
         return str(raw), None
     return split_spec(raw)
 

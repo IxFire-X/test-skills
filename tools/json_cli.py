@@ -127,3 +127,15 @@ class JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         emit_error(f"argument error: {message}", self.prog)
         raise SystemExit(2)
+
+    def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
+        """The arguments as argparse reads them; a ``--project`` or ``--run-root`` on a share or a device is refused here, before any
+        command resolves it (the subparsers are of this class too)."""
+        from tools.output_guard import local_path_text
+
+        namespace, extras = super().parse_known_args(args, namespace)
+        for name in ("project", "run_root"):
+            value = getattr(namespace, name, None)
+            if value is not None and not local_path_text(str(value)):
+                self.error(f"--{name.replace('_', '-')}: локальный каталог, не UNC и не путь устройства")
+        return namespace, extras
