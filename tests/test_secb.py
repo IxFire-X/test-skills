@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import pathlib
 import shutil
+from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
 UNC = [r"\\host\share\mvn.cmd", "//host/share/mvn.cmd", r"\\?\C:\tools\mvn.cmd", r"\\.\pipe\mvn.cmd"]
 
 
@@ -68,8 +70,14 @@ def test_a_secret_in_a_failure_does_not_reach_the_annotation_of_the_quarantined_
     assert failure_note("ASSERT-a-001 expected: _2_ but was: _3_") == ("ASSERT-a-001", "expected: _2_ but was: _3_")
 
 
-def test_what_the_human_is_told_before_the_run_names_what_to_check() -> None:
+def test_the_human_text_of_mode_b_is_in_the_delivery_of_mode_b_only_and_the_notice_points_to_it() -> None:
+    from tools import pack_registry
     from tools.exec_commands import _REVIEW_NOTICE
 
-    for word in ("файлы тестов", "первый токен команды", "учётные данные", "сборки вашего проекта"):
-        assert word in _REVIEW_NOTICE
+    name = "HOW-TO-USE-MODE-B.md"
+    paths = [row["path"] for row in pack_registry.registry_rows(ROOT)]
+    assert name in pack_registry.profile_paths(paths, "mode-b") and name not in pack_registry.profile_paths(paths, "cases-only")
+    assert name in _REVIEW_NOTICE
+    text = (ROOT / name).read_text(encoding="utf-8")
+    for word in ("files_to_review", "Первый токен", "Учётные данные", "service_url_env", "--restore"):
+        assert word in text
