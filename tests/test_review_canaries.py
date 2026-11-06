@@ -244,7 +244,7 @@ def test_the_view_command_writes_the_view_with_canaries_for_the_assembled_candid
     candidate = tmp_path / "r1.json"
     candidate.write_text(json.dumps(_candidate(run), ensure_ascii=False), encoding="utf-8")
     code, _published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(candidate), "--output-dir",
-                            str(run["project"] / "bundles"), "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"])
+                            str(run["run_root"] / "published"), "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"])
     assert code == 0
     command = [sys.executable, "-m", "tools.review_view", "--project", str(run["project"]), "--run", run["run_root"].name, "--candidate", str(candidate)]
     out = json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8").stdout)

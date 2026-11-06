@@ -118,9 +118,11 @@ def test_model_response_prints_a_receipt_without_the_body_and_the_text_says_so()
 
 
 def test_the_out_text_matches_what_main_prints_with_out(tmp_path: Path) -> None:
+    from tests.test_output_guard import _run
     from tools import api
 
-    assert set(api._write(tmp_path / "x.json", {"result": 1})) == {"out", "bytes", "sha256"}
+    _project, run_root, _attempt = _run(tmp_path)  # SEC-A: --out is written through confined_output, in <run>/tmp/
+    assert set(api._write(run_root / "tmp" / "x.json", {"result": 1}, run_root)) == {"out", "bytes", "sha256"}
 
 
 # ---- A5-2 + A5-4: the review is two commands everywhere -------------------------------------------------------------------

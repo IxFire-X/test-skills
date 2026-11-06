@@ -81,6 +81,17 @@ def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: 
     assert calls and all(call["output_basis"] == "compact" for call in calls)
 
 
+def _in_run(tmp_path: Path, path: Path) -> tuple[Path, Path]:
+    """SEC-A: the answer file of a command lies in the run — the run root and the copy of *path* in its tmp/."""
+    from tests.test_output_guard import _run
+
+    _project, run_root, _attempt = _run(tmp_path)
+    (run_root / "tmp").mkdir(exist_ok=True)
+    answer = run_root / "tmp" / path.name
+    answer.write_bytes(path.read_bytes())
+    return run_root, answer
+
+
 def _cut_answer(tmp_path: Path) -> tuple[Path, int]:
     text = json.dumps(json.loads(EXAMPLE.read_text(encoding="utf-8")), ensure_ascii=False, indent=2)
     data = text[: len(text) * 2 // 3].encode("utf-8")
@@ -94,8 +105,9 @@ def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_an
     from tools.step_size import OUTPUT_TRUNCATED
 
     path, size = _cut_answer(tmp_path)
-    code, output = _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-                         "--artifact", str(path)], capsys)  # F4b: refused in main with its code and fix, before the function
+    run_root, answer = _in_run(tmp_path, path)
+    code, output = _api(["model-response", "--run-root", str(run_root), "--attempt", "a", "--stage", "tc-reviewer:canonical",
+                         "--artifact", str(answer)], capsys)  # F4b: refused in main with its code and fix, before the function
     message = output["message"]
     assert code == 2 and output["status"] == "error" and OUTPUT_TRUNCATED == "MODEL_OUTPUT_TRUNCATED" and output["code"] == OUTPUT_TRUNCATED
     assert f"{OUTPUT_TRUNCATED}: ответ модели оборван на {size} Б" in message and "без отступов" in message and output["fix"]
@@ -121,8 +133,9 @@ def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: 
     path.write_text(text, encoding="utf-8")
     code, report = validate(str(ROOT / "schemas" / "canonical-test-document.schema.json"), str(path))
     assert code == 2 and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(report, ensure_ascii=False)
-    code, output = _api(["model-response", "--run-root", str(tmp_path / "no-run"), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-                         "--artifact", str(path)], capsys)
+    run_root, answer = _in_run(tmp_path, path)
+    code, output = _api(["model-response", "--run-root", str(run_root), "--attempt", "a", "--stage", "tc-reviewer:canonical",
+                         "--artifact", str(answer)], capsys)
     assert code == 2 and output["code"] == "ANSWER_JSON_INVALID" and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(output, ensure_ascii=False)
 
 

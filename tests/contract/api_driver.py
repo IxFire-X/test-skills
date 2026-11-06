@@ -158,7 +158,7 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         project, run_root, attempt_id, values = finish_project(tmp_path / "finish")
         files = {}
         for name, value in (("document", values["canonical_document"]), ("automation", values["automation_artifact"]), ("relations", [])):
-            files[name] = rr._put(tmp_path / "finish-files" / f"{name}.json", value)
+            files[name] = rr._put(run_root / "tmp" / f"{name}.json", value)  # SEC-A: the files of a command lie in a run
         assert direct(["automation-digest", "--automation", files["automation"]])[0] == 0
         assert direct(["relations-digest", "--relations", files["relations"]])[0] == 0
         assert direct(["validate-automation", "--automation", files["automation"], "--canonical", files["document"]])[0] in (0, 1)
@@ -170,5 +170,5 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
 
         # (7) two answers that are not a plain success: a refusal (an attempt the run does not have) and an invalid result (no document)
         assert direct(["read-effective", "--run-root", str(run_root), "--attempt", "no-such-attempt"])[0] == 2
-        assert direct(["validate-canonical", "--document", rr._put(tmp_path / "finish-files" / "empty.json", {})])[0] == 1
+        assert direct(["validate-canonical", "--document", rr._put(run_root / "tmp" / "empty.json", {})])[0] == 1
     return observed

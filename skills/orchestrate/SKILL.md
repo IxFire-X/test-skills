@@ -3,7 +3,7 @@ name: orchestrate
 description: Использовать, когда пользователь просит тест-кейсы приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
 permissions:
   read: "файлы проекта по inventory с исключениями; --docs, --reference и --cases только внутри проекта"
-  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir внутри проекта (не внутри .git)"
+  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir: <run>/published"
   network: "нет"
   external_delivery: "нет"
   dependencies: "пакет ничего не устанавливает; pip агент не запускает"
@@ -128,8 +128,8 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    выбирает ревизию. Отказ называет ошибку и ничего не пишет: единственный повтор стадии (`--transport-attempts 2`). Без `--verdict`
    берётся последняя ревизия журнала. `review-select --dry-run` — только при сомнении в ответе.
 
-**`--output-dir`** — один каталог на всё ревью, внутри проекта и вне `.git`: `<run>/published` (там кандидат и HTML/Markdown/CSV для человека). Тот же
-путь — в `review-open`, `review-select --run-root <run> --attempt <id> --output-dir <dir>` и `review-publish --run-root <run> --attempt <id> --output-dir <dir>`; вне проекта — `OUTPUT_DIR_OUTSIDE_PROJECT`. `--fresh-context yes` — честное
+**`--output-dir`** — один каталог на всё ревью: `<run>/published` или ниже (там кандидат и HTML/Markdown/CSV для человека). Тот же
+путь — в `review-open`, `review-select --run-root <run> --attempt <id> --output-dir <dir>` и `review-publish --run-root <run> --attempt <id> --output-dir <dir>`; иначе — `OUTPUT_DIR_OUTSIDE_RUN`. `--fresh-context yes` — честное
 заявление: ревьюер отдельный субагент или вызов без истории генерации; `no` допустим только в прогоне, принявшем SELF (§1) — там флаг можно
 опустить; иначе `FRESH_CONTEXT_REQUIRED` или `INDEPENDENCE_UNVERIFIED`. Бюджет сессии, `distinct_invocations` и `evidence_digest` считает
 код; бюджет меньше пакета — `REVIEW_CONTEXT_LIMIT` сразу.

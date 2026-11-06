@@ -503,11 +503,14 @@ def _grouping_pattern(project: Path) -> re.Pattern[str] | None:
 
 
 def _context_documents(project: Path, context_receipt: dict[str, Any]) -> tuple[list[Path], dict[str, str]]:
-    """The context files of a receipt and the text of its documents (the ``#``/``##`` sections groups come from)."""
+    """The context files of a receipt and the text of its documents (the ``#``/``##`` sections groups come from); each path inside the
+    project, checked before it is opened (tools.output_guard)."""
+    from tools.output_guard import project_file
+
     context_files: list[Path] = []
     documents: dict[str, str] = {}
     for item in context_receipt["files"]:
-        path = project / item["project_path"]
+        path = project_file(project, item["project_path"])
         context_files.append(path)
         if path.suffix.lower() in _DOCUMENT_SUFFIXES:
             data = path.read_bytes()

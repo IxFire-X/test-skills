@@ -13,13 +13,12 @@ import argparse
 import dataclasses
 import hashlib
 import json
-import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import batch_assembly, canonical_document, cases_import, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, step_size
+from tools import batch_assembly, canonical_document, cases_import, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -41,11 +40,53 @@ def plain(value: Any) -> Any:
     return value
 
 
-def _json(path: str) -> Any:
-    try:
-        return load_json_strict(Path(path))
-    except Exception as error:
-        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
+@dataclasses.dataclass(frozen=True)
+class _JsonFile:
+    path: str
+
+
+def _json(path: str) -> _JsonFile:
+    """A JSON input: read in ``main``, once its path is known to be inside the project (``_read_inputs``)."""
+    return _JsonFile(path)
+
+
+def _input_project(args: argparse.Namespace) -> Path | None:
+    """The project an input file must be in — strictly the anchor: the project of ``--run-root`` (a path that is no run is refused),
+    else ``--project``; None — no anchor at all, the file lies in a run (``output_guard.input_file``)."""
+    run_root = getattr(args, "run_root", None)
+    if run_root is not None:
+        return output_guard.existing_run(run_root)[0]
+    project = getattr(args, "project", None)
+    return Path(project) if project is not None else None
+
+
+def _read_inputs(args: argparse.Namespace) -> None:
+    """Every JSON input and answer file of the command, each read only after ``output_guard.input_file`` took its path."""
+    anchor: list[Path | None] = []
+
+    def project() -> Path | None:
+        if not anchor:
+            anchor.append(_input_project(args))
+        return anchor[0]
+
+    def read(flag: str, value: _JsonFile) -> Any:
+        root = project()  # a --run-root that is no run is refused as it is
+        try:
+            return load_json_strict(output_guard.input_file(value.path, root))
+        except output_guard.OutputRefused:
+            raise
+        except Exception as error:
+            raise ValueError(f"INVALID_ARGUMENT: argument {flag}: {value.path}: {error}; fix: {flag} — путь к JSON-файлу на диске") from error
+
+    for name, value in list(vars(args).items()):
+        flag = "--" + name.replace("_", "-")
+        if isinstance(value, _JsonFile):
+            setattr(args, name, read(flag, value))
+        elif isinstance(value, list) and any(isinstance(item, _JsonFile) for item in value):
+            setattr(args, name, [read(flag, item) if isinstance(item, _JsonFile) else item for item in value])
+    for name in ("artifact", "verdict"):  # the answer file: its refusal has its code and fix and a line in refusals.jsonl
+        if isinstance(getattr(args, name, None), str):
+            setattr(args, name, _load_answer(getattr(args, name), project()))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,11 +95,12 @@ class _Answer:
     raw_bytes: int
 
 
-def _load_answer(path: str) -> _Answer:
+def _load_answer(path: str, project: Path | None = None) -> _Answer:
     """A model answer file — its strict JSON and its raw size. Read in ``main`` and refused with the code of the
-    refusal and its fix (a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED), not by argparse as «check the flags»."""
+    refusal and its fix (a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED), not by argparse as «check the flags»; the
+    path inside the project first (``output_guard.input_file``)."""
     try:
-        raw = Path(path).read_bytes()
+        raw = output_guard.input_file(path, project).read_bytes()
     except OSError as error:
         raise ValueError(f"ANSWER_FILE_UNREADABLE: {path}: {error.strerror or error}; fix: --artifact/--verdict — путь к файлу ответа модели, "
                          "который лежит на диске; запиши ответ в файл и подай его путь") from error
@@ -458,12 +500,11 @@ def _out_target(path: str, run_root: object = None) -> Path:
     return output_guard.out_file(path, run_root)
 
 
-def _write(target: Path, value: Any) -> dict[str, Any]:
+def _write(target: Path, value: Any, run_root: object) -> dict[str, Any]:
+    """``--out``: the file in ``<run>/tmp/`` written through confined_output (a temporary of its own, no link followed)."""
     data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(target.name + ".tmp")
-    temporary.write_bytes(data)
-    os.replace(temporary, target)
+    project, run = output_guard.existing_run(run_root)
+    confined_output.atomic_write_confined_bytes_at_root(project, run, target, data)
     return {"out": str(target), "bytes": len(data), "sha256": "sha256:" + hashlib.sha256(data).hexdigest()}
 
 
@@ -515,9 +556,7 @@ def main(argv: list[str] | None = None) -> int:
             _refuse_legacy_flags(args, "reviewer_session", "review")
         elif args.command == "review-requested":
             _refuse_canonical_review_request(args)
-        for _flag in ("artifact", "verdict"):  # the answer file is read here, so that its refusal has its code and fix and a line in refusals.jsonl
-            if isinstance(getattr(args, _flag, None), str):
-                setattr(args, _flag, _load_answer(getattr(args, _flag)))
+        _read_inputs(args)
         run_root = getattr(args, "run_root", None)
         targets = {part: _out_target(getattr(args, f"out_{part}"), run_root) for part in parts}
         out = _out_target(args.out, run_root) if not parts and args.out is not None else None
@@ -542,9 +581,9 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(result, "notes", None):  # plan-batches says how and why it split
         payload["notes"] = list(result.notes)
     if parts:
-        payload["out"] = {part: _write(targets[part], plain(value)) for part, value in zip(parts, result, strict=True)}
+        payload["out"] = {part: _write(targets[part], plain(value), run_root) for part, value in zip(parts, result, strict=True)}
     elif out is not None:
-        payload.update(_write(out, plain(result)))
+        payload.update(_write(out, plain(result), run_root))
     else:
         payload["result"] = plain(result)
     _print(payload)

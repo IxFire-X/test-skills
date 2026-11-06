@@ -20,8 +20,8 @@ def _published(tmp_path: Path) -> tuple[Path, str, dict, Path]:
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()
-    _reviewer_protocol_inputs(document, run_root, attempt_id, bundle_root=run_root / "bundle")
-    return run_root, attempt_id, document, run_root / "bundle"
+    _reviewer_protocol_inputs(document, run_root, attempt_id, bundle_root=run_root / "published")  # SEC-A: --output-dir is <run>/published
+    return run_root, attempt_id, document, run_root / "published"
 
 
 def _publish(run_root: Path, attempt_id: str, document: dict, output_dir: Path, capsys: pytest.CaptureFixture[str],
@@ -64,10 +64,10 @@ def test_another_candidate_is_refused_as_before_and_nothing_is_written(tmp_path:
     before = sorted(path.name for path in bundle.iterdir())
     other = copy.deepcopy(document)
     other["test_cases"][0]["title"] += " (иначе)"
-    code, printed = _publish(run_root, attempt_id, other, run_root / "bundle-other", capsys)
+    code, printed = _publish(run_root, attempt_id, other, bundle / "other", capsys)
     assert code == 2 and printed["status"] == "error" and "already published" in printed["message"]
     assert _assembly_events(run_root) == events and sorted(path.name for path in bundle.iterdir()) == before
-    assert not (run_root / "bundle-other").exists(), "refused before any bundle file is written"
+    assert not (bundle / "other").exists(), "refused before any bundle file is written"
 
 
 def test_out_outside_the_run_tmp_is_refused_before_publishing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

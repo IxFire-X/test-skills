@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             published = core.publish_command(candidate, args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
             published["warnings"] = [*published["warnings"], _RENAMED["publish"]]
             if out is not None:
-                published["out"] = _write(out, published["candidate_bundle_receipt"])
+                published["out"] = _write(out, published["candidate_bundle_receipt"], args.run_root)
             print(json.dumps(published, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
         if args.command == "select":

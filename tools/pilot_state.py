@@ -5353,15 +5353,17 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
                                               **({"differences": differences} if refusal == "входы иные" else {})}
             continue
         source_attempt = str(source["attempt"]["attempt_id"])
+        from tools.run_pipeline import printed
+
         rows = []
         made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
         if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
             rows.append({"stage": "context-marker:requirements", "by": "cases-import",
-                         "commands": [f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}"]})
+                         "commands": [f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"]})
         for stage in model_stages:
             request, response = source["stages"][stage]
             artifact = _model_stage_artifact_target(source["root"], source_attempt, response)
-            head = f"python -m tools.api model-{{kind}} --run-root {root} --attempt {attempt_id} --stage {stage}"
+            head = f"python -m tools.api model-{{kind}} --run-root {printed(root)} --attempt {attempt_id} --stage {stage}"
             rows.append({"stage": stage, "response_digest": response, "artifact": str(artifact), "commands": [
                 head.format(kind="request") + f" --model-id reuse --invocation-id reuse-{path.name[:8]}-{stage.replace(':', '-')} "
                 + " ".join(f"--input-digest {digest}" for digest in request["input_digests"]) + f" --reuse-from {path.name}",

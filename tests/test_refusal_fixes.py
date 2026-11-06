@@ -97,7 +97,7 @@ def test_a_bad_candidate_receipt_has_a_reason_code_and_a_fix(tmp_path: Path, cap
     flags = ["--candidate", str(candidate), "--candidate-receipt", str(receipt), "--assembly-receipt", str(candidate),
              "--inventory-receipt", str(candidate), "--context-receipt", str(candidate), "--context-marker-output", str(candidate),
              "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root),
-             "--attempt-id", "a" * 32, "--output-dir", str(tmp_path / "project" / "out")]
+             "--attempt-id", "a" * 32, "--output-dir", str(run_root / "published")]
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert printed["reason_code"] == "ORCHESTRATION_RECEIPT_SHAPE" and "missing" in printed["message"] and "publish" in printed["fix"], printed

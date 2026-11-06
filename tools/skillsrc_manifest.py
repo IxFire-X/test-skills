@@ -172,9 +172,14 @@ def _fix_text(cause: str, project: Path | None) -> str:
     """Every refusal of a foreign ``.skillsrc`` says what is wrong (the key or the line) and how to get a valid one."""
     import sys
 
-    where = f'"{project}"' if project is not None else "<проект>"
+    from tools.run_pipeline import HostStop, printed
+
+    try:
+        python, where = printed(sys.executable), (printed(project) if project is not None else "<проект>")
+    except HostStop:  # a value no shell takes as it is: the template, not the value
+        python, where = "python", "<проект>"
     return (f"причина: {cause}. Исправьте этот файл по схеме или переименуйте его в .skillsrc.bak и создайте новый: "
-            f'"{sys.executable}" -m tools.init_skillsrc --project {where} --write (значения limits, review и другие перенесите из .bak)')
+            f"{python} -m tools.init_skillsrc --project {where} --write (значения limits, review и другие перенесите из .bak)")
 
 
 def _schema_cause(details: Sequence[Mapping[str, Any]]) -> str:

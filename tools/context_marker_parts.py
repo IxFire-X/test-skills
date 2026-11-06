@@ -46,6 +46,7 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     from tools.project_inventory import read_execution_baseline
+    from tools.run_pipeline import printed
     from tools.step_size import role_files, step_budget
 
     root = Path(root).resolve()
@@ -81,7 +82,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
         if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (with --docs the model)
-            parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}")
+            parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}")
         for receipt in receipts:
             part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},

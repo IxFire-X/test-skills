@@ -24,7 +24,7 @@ def _flags(run: dict) -> list[str]:
 
 
 def _bundles(run: dict) -> str:
-    return str(run["project"] / "bundles")
+    return str(run["run_root"] / "published")
 
 
 def _open(run: dict, *extra: str, fresh: str | None = "yes", invocation: str = "reviewer-subagent-1") -> tuple[int, dict]:

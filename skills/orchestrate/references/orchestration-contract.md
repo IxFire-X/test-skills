@@ -80,7 +80,7 @@ Inventory учитывает файлы выбранного модуля, paren
 
 Pipeline работает в обычном рабочем проекте и не создаёт isolated copy. Разрешены
 read-only inventory и запись только в `<project>/.pilot-runs/`, `<project>/.skillsrc` и каталог
-публикации `--output-dir` внутри проекта. Запрещено менять application source, existing tests, config,
+публикации `--output-dir` — `<run>/published`. Запрещено менять application source, existing tests, config,
 lock files, dependencies, permissions. Код проекта не запускается.
 
 ## Reviewer cardinality

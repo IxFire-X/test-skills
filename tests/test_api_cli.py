@@ -129,7 +129,8 @@ def test_model_request_and_response_match_the_direct_calls(tmp_path: Path, capsy
                           "--model-id", "m", "--invocation-id", "inv", *sum((["--input-digest", item] for item in digests), [])], capsys)
     assert code == 0 and request["status"] == "ok" and request["command"] == "model-request", request
     assert request["result"] == _plain(seen[0])
-    answer = tmp_path / "answer.json"
+    answer = root / "tmp" / "answer.json"  # SEC-A: the answer lies in the run
+    answer.parent.mkdir(exist_ok=True)
     answer.write_text(json.dumps(_reversed(_marker_value()), ensure_ascii=False, indent=3), encoding="utf-8")
     code, response = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
                            "--artifact", str(answer)], capsys)
@@ -174,7 +175,8 @@ def test_a_refused_request_and_a_second_response_fail_like_the_function(tmp_path
 
     other = _marker(["src/part0.py — другой ответ"])
     expected = _error_of(lambda: pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", other))
-    answer = tmp_path / "answer.json"
+    answer = root / "tmp" / "answer.json"
+    answer.parent.mkdir(exist_ok=True)
     answer.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
     code, repeated = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
                            "--artifact", str(answer)], capsys)
@@ -229,7 +231,8 @@ def test_the_automation_readers_match_the_direct_calls(tmp_path: Path, capsys: p
     code, boundary = _api(["read-receipt", "--run-root", str(run_root), "--attempt", attempt_id, "--kind", "automation-review-boundary-r1",
                            "--event", "ARTIFACT_READ_BACK"], capsys)
     assert code == 0 and boundary["result"] == _plain(pilot_state.read_attempt_receipt(run_root, attempt_id, "automation-review-boundary-r1", "ARTIFACT_READ_BACK"))
-    facts = tmp_path / "facts.json"
+    (run_root / "tmp").mkdir(exist_ok=True)  # SEC-A: the files of the commands lie in the run
+    facts = run_root / "tmp" / "facts.json"
     facts.write_text(json.dumps({"automation_revision": 3}), encoding="utf-8")
     expected = _error_of(lambda: pilot_state.open_automation_review_boundary(run_root, attempt_id, {"automation_revision": 3}))
     code, refused = _api(["open-automation-boundary", "--run-root", str(run_root), "--attempt", attempt_id, "--facts", str(facts)], capsys)
@@ -238,9 +241,9 @@ def test_the_automation_readers_match_the_direct_calls(tmp_path: Path, capsys: p
     from tools.automation_validation import automation_sha256
     from tools.canonical_document import document_sha256
 
-    document = tmp_path / "document.json"
+    document = run_root / "tmp" / "document.json"
     document.write_text(json.dumps(values["canonical_document"], ensure_ascii=False), encoding="utf-8")
-    automation = tmp_path / "automation.json"
+    automation = run_root / "tmp" / "automation.json"
     automation.write_text(json.dumps(values["automation_artifact"], ensure_ascii=False), encoding="utf-8")
     assert _api(["document-digest", "--document", str(document)], capsys)[1]["result"] == document_sha256(values["canonical_document"])
     assert _api(["automation-digest", "--automation", str(automation)], capsys)[1]["result"] == automation_sha256(values["automation_artifact"])
@@ -254,8 +257,11 @@ def test_a_validator_with_diagnostics_is_invalid_with_the_same_list(tmp_path: Pa
     from tests.test_automation_revision_budget import automated_document
     from tools.canonical_document import validate_canonical_document
 
+    from tests.test_output_guard import _run
+
     document = automated_document()
-    path = tmp_path / "document.json"
+    path = _run(tmp_path)[1] / "tmp" / "document.json"  # SEC-A: a command without a run reads a file in a run
+    path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     code, valid = _api(["validate-canonical", "--document", str(path)], capsys)
     assert code == 0 and valid["status"] == "ok" and valid["result"] == [], valid

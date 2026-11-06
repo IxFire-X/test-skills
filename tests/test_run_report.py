@@ -258,7 +258,7 @@ def test_publication_puts_the_questions_beside_the_case_set(tmp_path: Path, monk
     import tools.orchestrate_test_case_revision as revision
 
     run_root = _finished_run(tmp_path)
-    cases = tmp_path / "cases"
+    cases = run_root / "published"  # SEC-A: --output-dir is <run>/published
     cases.mkdir()
     candidate = tmp_path / "candidate.json"
     candidate.write_text("{}", encoding="utf-8")

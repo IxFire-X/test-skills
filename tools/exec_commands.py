@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import stat
 import sys
 import time
@@ -15,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.run_pipeline import HostStop
+from tools.run_pipeline import HostStop, command_token
 from tools.execution_core import (
     automation_split_fields as _automation_split,
     baseline_check as _baseline_check,
@@ -453,28 +452,6 @@ def _human_command(project: Path, module_root: Path, module_relative: str, reque
         return module_relative, [_relative_executable(request.executable, module_root), *argv[1:index], "-o", f"junit_suite_name={challenge['value']}", *argv[index:]]
     assert request.adapter_id == GRADLE
     return module_relative, [_relative_executable(request.executable, module_root), *argv[1:]]
-
-
-# the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
-# or a backslash in double quotes (the same in all three); any other token is not printed.  What quotes cannot hold: ``"`` closes them, ``%``
-# and ``!`` are expanded by cmd.exe inside them, ``^`` escapes there, ``$`` and the back quote are expanded by sh and PowerShell inside them, and
-# ``& | < > ; ' * ?`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.
-_BARE_TOKEN = re.compile(r"[A-Za-z0-9_./:=,#+\-]+")
-_QUOTABLE_MARKS = " _./:=,#@+-\\()[]{}~"
-
-
-def command_token(token: str) -> str:
-    """The token as it is printed - plain, or in double quotes - or ``HostStop COMMAND_NOT_PRINTABLE`` naming what cannot be printed."""
-    if _BARE_TOKEN.fullmatch(token):
-        return token
-    if all(char.isalnum() or char in _QUOTABLE_MARKS for char in token) and not token.endswith("\\") and "\\\\" not in token:
-        return '"' + token + '"'
-    bad = sorted({char for char in token if not (char.isalnum() or char in _QUOTABLE_MARKS)} | ({"\\"} if token.endswith("\\") or "\\\\" in token else set()))
-    shown = " ".join(repr(char)[1:-1] if not char.isprintable() else char for char in bad)
-    raise HostStop("COMMAND_NOT_PRINTABLE", f"в команде для человека есть символ(ы) {shown}: cmd.exe, PowerShell или sh прочтут их как подстановку, экранирование или кавычку "
-                   f"(в «{token[:80]}»)",
-                   f"переименуйте или переместите проект (или интерпретатор/модуль) в каталог, в имени которого нет {shown}, и начните прогон заново "
-                   "(scan --new-run): путь входит в напечатанную команду")
 
 
 def command_text(tokens: Sequence[str]) -> str:

@@ -230,8 +230,8 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
     # --- the paths the agent names (tools.output_guard) ---
     "API_OUT_OUTSIDE_RUN": "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json",
-    "OUTPUT_DIR_OUTSIDE_PROJECT": "каталог публикации — внутри проекта (например <project>/test-cases/) и не внутри .git; "
-                                  "повтори с таким --output-dir",
+    "OUTPUT_DIR_OUTSIDE_RUN": "каталог публикации — <run>/published (или ниже) прогона из --run-root; повтори с таким --output-dir",
+    "INPUT_OUTSIDE_PROJECT": "передай --run-root <run> (или --project) и файл внутри этого проекта; без них — файл внутри прогона <project>/.pilot-runs/<run_id>/",
     # --- the pause after the marker (tools.scope_pause) ---
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
     "SCAN_INCOMPLETE": "повтори тот же scan (те же --module, --docs, --profile): он достроит недостающие пачки контекста в этом прогоне",

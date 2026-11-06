@@ -288,8 +288,10 @@ def test_api_validate_fragment_with_prior_fragments(tmp_path, capsys):
     from tools import api
 
     header, context, plan, fragments = _three_batch_fragments()
-    run_tmp = tmp_path / ".pilot-runs" / "run1" / "tmp"
-    run_tmp.mkdir(parents=True)
+    from tests.test_output_guard import _run
+
+    run_tmp = _run(tmp_path)[1] / "tmp"  # SEC-A: a command without a run reads files in a run
+    run_tmp.mkdir(exist_ok=True)
     files = {"plan": plan, "header": header, "context": context, "f1": fragments[0], "f2": fragments[1]}
     for name, value in files.items():
         (run_tmp / f"{name}.json").write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")

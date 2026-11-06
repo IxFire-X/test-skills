@@ -26,7 +26,7 @@ def test_a_new_event_inside_a_closure_is_seen(tmp_path: Path) -> None:
     from tools import pilot_state
 
     run = _generated_run(tmp_path)
-    flags = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["project"] / "bundles")]
+    flags = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["run_root"] / "published")]
     with pilot_state.closure_cache():
         before = pilot_state.derive_state(run["run_root"])
         code, published = _api("review-publish", *flags)  # another process appends events to the journal

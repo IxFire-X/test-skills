@@ -39,6 +39,34 @@ class HostStop(RuntimeError):
         self.fix = fix or fix_for(code)  # the table has a way out for the codes without a fix at their raise site
 
 
+# the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
+# or a backslash in double quotes (the same in all three); any other token is not printed.  What quotes cannot hold: ``"`` closes them, ``%``
+# and ``!`` are expanded by cmd.exe inside them, ``^`` escapes there, ``$`` and the back quote are expanded by sh and PowerShell inside them, and
+# ``& | < > ; ' * ?`` and the line breaks are not worth the doubt for a path; a backslash at the end of a token escapes the closing quote.
+_BARE_TOKEN = re.compile(r"[A-Za-z0-9_./:=,#+\-]+")
+_QUOTABLE_MARKS = " _./:=,#@+-\\()[]{}~"
+
+
+def command_token(token: str) -> str:
+    """The token as it is printed - plain, or in double quotes - or ``HostStop COMMAND_NOT_PRINTABLE`` naming what cannot be printed."""
+    if _BARE_TOKEN.fullmatch(token):
+        return token
+    if all(char.isalnum() or char in _QUOTABLE_MARKS for char in token) and not token.endswith("\\") and "\\\\" not in token:
+        return '"' + token + '"'
+    bad = sorted({char for char in token if not (char.isalnum() or char in _QUOTABLE_MARKS)} | ({"\\"} if token.endswith("\\") or "\\\\" in token else set()))
+    shown = " ".join(repr(char)[1:-1] if not char.isprintable() else char for char in bad)
+    raise HostStop("COMMAND_NOT_PRINTABLE", f"в команде для человека есть символ(ы) {shown}: cmd.exe, PowerShell или sh прочтут их как подстановку, экранирование или кавычку "
+                   f"(в «{token[:80]}»)",
+                   f"переименуйте или переместите проект (или интерпретатор, модуль, документ) в каталог, в имени которого нет {shown}, и начните прогон заново "
+                   "(scan --new-run): путь входит в напечатанную команду")
+
+
+def printed(value: object) -> str:
+    """A value the code puts into a command the agent runs as it is: in double quotes, once ``command_token`` said it prints."""
+    command_token(str(value))
+    return '"' + str(value) + '"'
+
+
 _PRINTED: list[dict[str, Any]] = []
 
 
@@ -1115,7 +1143,7 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
     from tools.finalize_attempt import finish_closes
     from tools.pilot_state import derive_state
 
-    python = f'"{sys.executable}" -m tools.run_pipeline'
+    python = f"{printed(sys.executable)} -m tools.run_pipeline"
     try:
         next_step = _durable_status(project, root, stage="status").get("next_step")
     except (HostStop, OSError, KeyError, TypeError, ValueError):
@@ -1125,25 +1153,26 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
     except (OSError, KeyError, IndexError, TypeError, ValueError):
         closes = False
     # finish only where it closes the attempt (rework, a refused automation), never as a dead end
-    finish = f'закрыть его без продолжения: {python} finish --project "{project}" --run {root.name}; ' if closes else ""
+    finish = f"закрыть его без продолжения: {python} finish --project {printed(project)} --run {root.name}; " if closes else ""
     return {
         "status": "error", "stage": "scan", "reason": "SCAN_RUN_IN_PROGRESS", "run_id": root.name, "run_root": str(root),
         "next_step": next_step,
         "message": "для этого проекта, документа и профиля уже есть незавершённый прогон; новый не создан",
-        "fix": (f'продолжите его: {python} status --project "{project}" --run {root.name}; '
+        "fix": (f"продолжите его: {python} status --project {printed(project)} --run {root.name}; "
                 f"{finish}нужен ещё один прогон рядом или этот не закрыть — "
                 + (_scan_command(project, request, extra=("--new-run",)) if request is not None else "повторите этот scan с флагом --new-run")),
     }
 
 
 def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
-    """The scan of the same request, its flags as given — printed for the human; the code never runs it."""
-    parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"']
+    """The scan of the same request, its flags as given — printed for the human; the code never runs it.  Every value through
+    ``printed`` (``COMMAND_NOT_PRINTABLE`` for one that cmd.exe, PowerShell or sh would read otherwise)."""
+    parts = [f"{printed(sys.executable)} -m tools.run_pipeline scan --project {printed(project)}"]
     if request.get("module"):
-        parts.append(f'--module "{request["module"]}"')
-    parts += [f'--docs "{doc}"' for doc in request.get("docs") or []]
+        parts.append(f"--module {printed(request['module'])}")
+    parts += [f"--docs {printed(doc)}" for doc in request.get("docs") or []]
     if request.get("target"):
-        parts.append(f'--target "{request["target"]}"')
+        parts.append(f"--target {printed(request['target'])}")
     parts.append(f"--profile {request.get('profile') or 'local-pilot-v1'}")
     if request.get("accept_self_review"):
         parts.append("--accept-self-review")
@@ -1152,9 +1181,9 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
     if request.get("disposition_policy"):
         parts.append(f"--disposition-policy {request['disposition_policy']}")
     if request.get("reference"):
-        parts.append(f'--reference "{request["reference"]}"')
+        parts.append(f"--reference {printed(request['reference'])}")
     if request.get("cases"):  # the import of the same CSV, never a run of cases from code
-        parts.append(f'--cases "{request["cases"]}"')
+        parts.append(f"--cases {printed(request['cases'])}")
     return " ".join([*parts, *extra])
 
 
@@ -1390,6 +1419,7 @@ def cmd_scan(args: Any) -> int:
 def _scan(args: Any) -> int:
     project = Path(args.project).resolve()
     request = _scan_request(args)
+    _scan_command(project, request)  # the commands of this run print every value of the request: refused here, before the run is written
     abandoned: list[str] = []
     if not getattr(args, "new_run", False):
         from tools.project_inventory import inventory_cache
@@ -1808,7 +1838,7 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
         "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
         "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
         "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — "
-               f'"{sys.executable}" -m tools.run_pipeline finish --project "{project}" --run {manifest["run_id"]} --abandon '
+               f"{printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project)} --run {manifest['run_id']} --abandon "
                "LEFT_BEFORE_REVIEW оставит прогон, и простой scan начнёт новый; следующий заход: " + command,
         "next_run": {"why": "попытка остановилась до ревью кейсов: следующий заход — новый прогон того же запроса", "command": command},
     }
@@ -1816,9 +1846,9 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
 
 def _exact_fix(fix: str, project: Path, root: Path, attempt_id: str) -> str:
     """The fix of finish with this run's own coordinates, a command to copy as it is."""
-    return (fix.replace("python -m tools.", f'"{sys.executable}" -m tools.').replace("<project>", f'"{project}"')
-            .replace("<run_id>", root.name).replace("<run>/tmp/session.json", f'"{root / "tmp" / "session.json"}"')
-            .replace("<run>", f'"{root}"').replace("<attempt_id>", attempt_id))
+    return (fix.replace("python -m tools.", f"{printed(sys.executable)} -m tools.").replace("<project>", printed(project))
+            .replace("<run_id>", root.name).replace("<run>/tmp/session.json", printed(root / "tmp" / "session.json"))
+            .replace("<run>", printed(root)).replace("<attempt_id>", attempt_id))
 
 
 def _execution_receipt_bound(root: Path, attempt_id: str) -> bool:

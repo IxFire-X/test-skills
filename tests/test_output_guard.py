@@ -1,5 +1,5 @@
-"""P8a-2 (security review 79d4052, unbounded paths): ``--out`` is one file in ``<run>/tmp/`` of an existing run, ``--output-dir``
-is a directory inside the project and never inside ``.git``.  Every entry point of the package that takes one of the flags checks it."""
+"""P8a-2: ``--out`` is one file in ``<run>/tmp/`` of an existing run; SEC-A: ``--output-dir`` is ``<run>/published`` of that run or
+below it (tests/test_sec_a.py).  Every entry point of the package that takes one of the flags checks it."""
 from __future__ import annotations
 
 import ast
@@ -109,48 +109,27 @@ def test_the_cli_takes_run_root_for_a_command_that_has_no_run_of_its_own(tmp_pat
 
 # ---- --output-dir ------------------------------------------------------------------------------------------------
 
-def test_output_dir_is_inside_the_project(tmp_path: Path) -> None:
-    from tools.output_guard import output_directory
+def test_output_dir_through_a_link_out_of_the_published_directory_is_refused(tmp_path: Path) -> None:
+    from tools.output_guard import OutputRefused, run_output_directory
 
-    project = tmp_path / "project"
-    project.mkdir()
-    assert output_directory(project / "test-cases", project) == (project / "test-cases").resolve()
-    assert output_directory(project, project) == project.resolve()
-
-
-@pytest.mark.parametrize("name", ["../outside", "../project-two/x", ".git", ".git/hooks", "a/.git/hooks", "a/.GIT/x", "sub/../.git/hooks"])
-def test_output_dir_outside_the_project_or_inside_git_is_refused(tmp_path: Path, name: str) -> None:
-    from tools.output_guard import OutputRefused, output_directory
-
-    project = tmp_path / "project"
-    (project / "a").mkdir(parents=True)
-    (project / "sub").mkdir()
-    with pytest.raises(OutputRefused) as refused:
-        output_directory(project / name, project)
-    assert refused.value.code == "OUTPUT_DIR_OUTSIDE_PROJECT" and "внутри проекта" in refused.value.fix
-    assert not (tmp_path / "outside").exists()
-
-
-def test_output_dir_through_a_link_out_of_the_project_or_into_git_is_refused(tmp_path: Path) -> None:
-    from tools.output_guard import OutputRefused, output_directory
-
-    project, outside = tmp_path / "project", tmp_path / "outside"
-    (project / ".git" / "hooks").mkdir(parents=True)
+    project, run_root, _attempt = _run(tmp_path / "p")
+    outside = tmp_path / "outside"
     outside.mkdir()
-    _link(project / "out-link", outside)
-    _link(project / "git-link", project / ".git")
-    for name in ("out-link", "out-link/x", "git-link/hooks"):
+    (run_root / "published").mkdir()
+    _link(run_root / "published" / "out-link", outside)
+    _link(run_root / "published" / "tmp-link", run_root / "tmp")
+    for name in ("out-link", "out-link/x", "tmp-link"):
         with pytest.raises(OutputRefused):
-            output_directory(project / name, project)
+            run_output_directory(run_root / "published" / name, run_root)
 
 
-def test_the_cli_refuses_an_output_dir_outside_the_project_before_it_reads_anything(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_cli_refuses_an_output_dir_outside_the_run_before_it_reads_anything(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     project, run_root, attempt_id = _run(tmp_path / "p")
     outside = tmp_path / "outside"
     for argv in (["review-open", "--output-dir", str(outside)], ["review-select", "--output-dir", str(outside)],
                  ["review-publish", "--output-dir", str(outside)], ["review-open", "--output-dir", str(project / ".git" / "hooks")]):
         code, refused = _api([argv[0], "--run-root", str(run_root), "--attempt", attempt_id, *argv[1:]], capsys)
-        assert code == 2 and refused["code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and refused["fix"], (argv, refused)
+        assert code == 2 and refused["code"] == "OUTPUT_DIR_OUTSIDE_RUN" and refused["fix"], (argv, refused)
     assert not outside.exists() and not (project / ".git").exists()
 
 
@@ -165,8 +144,8 @@ def test_the_old_publish_and_select_check_the_same_paths(tmp_path: Path, capsys:
     outside = tmp_path / "outside"
     assert main([*base, "--output-dir", str(outside)]) == 2
     printed = json.loads(capsys.readouterr().out)
-    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and printed["fix"] and not outside.exists()
-    assert main([*base, "--output-dir", str(project / "bundle"), "--out", str(run_root / "receipt.json")]) == 2
+    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_RUN" and printed["fix"] and not outside.exists()
+    assert main([*base, "--output-dir", str(run_root / "published"), "--out", str(run_root / "receipt.json")]) == 2
     printed = json.loads(capsys.readouterr().out)
     assert printed["code"] == printed["reason_code"] == "API_OUT_OUTSIDE_RUN"
     select = ["select", "--candidate", str(candidate), "--candidate-receipt", str(candidate), "--assembly-receipt", str(candidate),
@@ -174,7 +153,7 @@ def test_the_old_publish_and_select_check_the_same_paths(tmp_path: Path, capsys:
               "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root), "--attempt-id", attempt_id]
     assert main([*select, "--output-dir", str(outside)]) == 2
     printed = json.loads(capsys.readouterr().out)
-    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and not outside.exists()
+    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_RUN" and not outside.exists()
 
 
 # ---- every entry point -------------------------------------------------------------------------------------------

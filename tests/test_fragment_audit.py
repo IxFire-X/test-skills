@@ -77,7 +77,11 @@ def test_validate_fragment_and_the_command_put_an_order_error_in_order_and_assem
     assert result == {"normalized": [f"/test_cases/0/{broken}"]}, result
     candidate, _receipt = assemble_candidate(header, plan, [bad, _fragment(plan, context, 1)])  # P1-fix2: the same canon, from the same file
     assert candidate["test_cases"][0][broken] == (["positive", "functional"] if broken == "categories" else sorted(case["requirement_ids"]))
-    paths = {name: tmp_path / f"{name}.json" for name in ("fragment", "plan", "header", "context")}
+    from tests.test_output_guard import _run
+
+    run_tmp = _run(tmp_path)[1] / "tmp"  # SEC-A: a command without a run reads files in a run
+    run_tmp.mkdir(exist_ok=True)
+    paths = {name: run_tmp / f"{name}.json" for name in ("fragment", "plan", "header", "context")}
     for name, value in zip(paths, (bad, plan, header, context)):
         paths[name].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     code = api.main(["validate-fragment", "--fragment", str(paths["fragment"]), "--plan", str(paths["plan"]), "--header", str(paths["header"]),

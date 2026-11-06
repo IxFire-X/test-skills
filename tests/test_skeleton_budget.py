@@ -66,7 +66,8 @@ def test_plan_batches_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path,
     for name, value in (("req", run["requirements"]), ("grouping", {"header_digest": run["header_digest"],
                                                                         "context_receipt_digest": run["context"]["digest"]}),
                         ("context", run["context"])):
-        files[name] = tmp_path / f"{name}.json"
+        files[name] = run["root"] / "tmp" / f"{name}.json"  # SEC-A: inside the project of --project
+        files[name].parent.mkdir(exist_ok=True)
         files[name].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     assert api.main(["plan-batches", "--requirements", str(files["req"]), "--grouping", str(files["grouping"]),
                      "--project", str(run["project"]), "--input-file", str(files["req"]), "--context-receipt", str(files["context"]),

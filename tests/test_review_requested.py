@@ -118,7 +118,7 @@ def _open_session(run: dict, start: str = "fixture", budget_delta: int = 0, fres
                            "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", run_root)
     assert code == 0, assembled
     code, published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(tmp / "candidate.json"),
-                           "--output-dir", str(run["project"] / "bundles"), "--run-root", run_root, "--attempt-id", attempt)
+                           "--output-dir", str(run["run_root"] / "published"), "--run-root", run_root, "--attempt-id", attempt)
     assert code == 0 and published["status"] == "published", published
     receipt = _put(tmp / "candidate-receipt.json", published["candidate_bundle_receipt"])
     generator_flags = [flag for path in run["fragments"] for flag in ("--generator-fragment", path)]
@@ -311,7 +311,7 @@ def _select(run: dict, review: str | None) -> tuple[int, dict]:
                 "--inventory-receipt", run["inventory"], "--context-receipt", run["context"], "--context-marker-output", run["marker"],
                 *[flag for path in run["fragments"] for flag in ("--generator-fragment", path)],
                 "--reviewer-session", str(tmp / "session.json"), *(["--review", review] if review else []), *evidence,
-                "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"], "--output-dir", str(run["project"] / "bundles"))
+                "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"], "--output-dir", str(run["run_root"] / "published"))
 
 
 def test_from_open_session_to_select_by_commands_only(tmp_path: Path) -> None:
@@ -462,7 +462,7 @@ def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPa
     (run_root / "run-manifest.json").write_text("{}", encoding="utf-8")
     flags = ["--candidate", "c", "--candidate-receipt", "r", "--assembly-receipt", "a", "--inventory-receipt", "i", "--context-receipt", "x",
              "--context-marker-output", "m", "--generator-fragment", "g", "--reviewer-session", "s", "--run-root", str(run_root),
-             "--attempt-id", "a1", "--output-dir", str(tmp_path / "project" / "out")]
+             "--attempt-id", "a1", "--output-dir", str(run_root / "published")]
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     # FaT-U5: the envelope's code is the refusal's own code, not ORCHESTRATION_INPUT over it

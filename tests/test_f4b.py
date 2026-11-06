@@ -109,8 +109,8 @@ def test_a_truncated_answer_is_a_refusal_with_its_code_its_fix_and_a_line_in_the
     run = _generated_run(tmp_path)
     ids = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"]]
     if "--output-dir" in extra:
-        extra = ["--output-dir", str(run["project"] / "bundles")]
-    code, printed = _api(command, *ids, *extra, flag, _truncated(tmp_path))
+        extra = ["--output-dir", str(run["run_root"] / "published")]
+    code, printed = _api(command, *ids, *extra, flag, _truncated(run["tmp"]))  # SEC-A: the answer lies in the run
     assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED", printed
     assert printed["fix"] and "флаги" not in printed["fix"] and "--help" not in printed["fix"]
     lines = [json.loads(row) for row in (run["run_root"] / "refusals.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -120,9 +120,9 @@ def test_a_truncated_answer_is_a_refusal_with_its_code_its_fix_and_a_line_in_the
 def test_a_missing_or_broken_answer_file_has_a_code_and_a_fix_too(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     ids = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "context-marker:baseline"]
-    code, missing = _api("model-response", *ids, "--artifact", str(tmp_path / "nothing.json"))
+    code, missing = _api("model-response", *ids, "--artifact", str(run["tmp"] / "nothing.json"))
     assert code == 2 and missing["code"] == "ANSWER_FILE_UNREADABLE" and missing["fix"], missing
-    broken = tmp_path / "broken.json"
+    broken = run["tmp"] / "broken.json"
     broken.write_text('{"a": 1,, }', encoding="utf-8")
     code, bad = _api("model-response", *ids, "--artifact", str(broken))
     assert code == 2 and bad["code"] == "ANSWER_JSON_INVALID" and bad["fix"], bad
@@ -131,8 +131,8 @@ def test_a_missing_or_broken_answer_file_has_a_code_and_a_fix_too(tmp_path: Path
 def test_a_dry_run_leaves_no_refusal_line(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     before = (run["run_root"] / "refusals.jsonl").read_bytes() if (run["run_root"] / "refusals.jsonl").exists() else b""
-    code, printed = _api("review-select", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["project"] / "bundles"),
-                         "--verdict", _truncated(tmp_path), "--dry-run")
+    code, printed = _api("review-select", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["run_root"] / "published"),
+                         "--verdict", _truncated(run["tmp"]), "--dry-run")
     assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED"
     after = (run["run_root"] / "refusals.jsonl").read_bytes() if (run["run_root"] / "refusals.jsonl").exists() else b""
     assert after == before

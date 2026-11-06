@@ -172,9 +172,11 @@ def scope_state(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
 
 
 def pending_fix(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any]]) -> str:
+    from tools.run_pipeline import printed
+
     return ("покажи человеку требования ниже (полный текст вопросов — questions-for-analyst.md в каталоге прогона) и спроси: "
             "«исключить какие-то из них или продолжать как есть?»; ответ передай: `python -m tools.api plan-batches ... "
-            f"--run-root {root} --attempt {attempt_id} --exclude <SREQ-id> [--exclude …] --reason \"<текст человека>\"` "
+            f"--run-root {printed(root)} --attempt {attempt_id} --exclude <SREQ-id> [--exclude …] --reason \"<текст человека>\"` "
             "или `--continue`; прогон без остановки — начни его с `scan --no-pause`")
 
 

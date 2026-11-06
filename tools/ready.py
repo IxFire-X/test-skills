@@ -121,7 +121,9 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
 
 
 def _init_command(project: Path) -> str:
-    return f'"{sys.executable}" -m tools.init_skillsrc --project "{project}"'
+    from tools.run_pipeline import printed
+
+    return f"{printed(sys.executable)} -m tools.init_skillsrc --project {printed(project)}"
 
 
 _LEGACY_KEYS = {"limits": "limits", "review": "review", "service_url_env": "service_url_env", "include": "paths.include",
@@ -504,9 +506,12 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
 
 
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:
-    """The full scan command of this very request plus the flag — an agent runs a fix verbatim (package python)."""
-    parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
-             f"--profile {profile}", *([f'--module "{module}"'] if module else []), *([f'--target "{target}"'] if target else []),
+    """The full scan command of this very request plus the flag — an agent runs a fix verbatim (package python); every value
+    through ``printed``."""
+    from tools.run_pipeline import printed
+
+    parts = [f"{printed(sys.executable)} -m tools.run_pipeline scan --project {printed(project)}", *(f"--docs {printed(doc)}" for doc in docs),
+             f"--profile {profile}", *([f"--module {printed(module)}"] if module else []), *([f"--target {printed(target)}"] if target else []),
              "--accept-self-review"]
     return " ".join(parts)
 
@@ -530,6 +535,13 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     rows.append(_git_row(project, profile))
     rows.extend(check_run_root(project))
     rows.extend(check_docs(project, docs))
+    from tools.run_pipeline import HostStop
+
+    try:
+        _self_review_scan(project, docs, profile, module, target)  # the values every printed command of the run carries
+    except HostStop as stop:  # scan refuses the same request: said here, before anything else
+        rows.append(_row("command", CASES, "STOP", f"{stop.code}: {stop}", stop.fix))
+        return {"status": "BLOCKED", "project": str(project), "profile": requested_profile, "checks": rows}
     if deps["level"] != "OK":
         skipped = "пропущено до установки зависимостей пакета"
         rows.extend(_row(name, CASES, "WARN", skipped, deps.get("fix")) for name in ("pack", "skillsrc", "module", "scan"))

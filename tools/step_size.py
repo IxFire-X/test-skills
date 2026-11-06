@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from tools.json_cli import JsonArgumentParser, cli_error
+from tools.output_guard import input_file, project_path
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -250,7 +251,7 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
     for digest in sorted(dict.fromkeys(selected)):  # the receipts the journal selected, read the strict way — never a glob of the folder
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if batch is None or receipt.get("batch_index") == batch:
-            files.extend(project / item["project_path"] for item in receipt["files"])
+            files.extend(project_path(project, item["project_path"]) for item in receipt["files"])
     answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
                    if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
@@ -306,7 +307,7 @@ class _Journal:
                 from tools.pilot_state import read_context_selection
 
                 receipt = read_context_selection(root, attempt_id, digest)  # the strict reader, not the bytes of a file at that name
-                self.expands[digest] = ([project / item["project_path"] for item in receipt["files"]], True)
+                self.expands[digest] = ([project_path(project, item["project_path"]) for item in receipt["files"]], True)
             elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
                 self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
             elif event["event_type"] == "CANDIDATE_PUBLISHED":
@@ -673,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         args.stage = "context-marker"
     project = Path(args.project).resolve()
     try:
-        files = [Path(item) if Path(item).is_absolute() else project / item for item in args.files]
+        files = [input_file(item, project, base=project) for item in args.files]  # inside the project, checked before it is measured
         requested = None
         stage_role = args.stage.split(":", 1)[0] if args.stage else None
         if args.stage and stage_role not in _STAGE_ROLES and stage_role not in _REQUEST_STAGES:

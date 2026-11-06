@@ -21,7 +21,7 @@ def _flags(run: dict) -> list[str]:
 
 
 def _bundles(run: dict) -> str:
-    return str(run["project"] / "bundles")
+    return str(run["run_root"] / "published")
 
 
 def _file_inputs(run: dict) -> dict:
