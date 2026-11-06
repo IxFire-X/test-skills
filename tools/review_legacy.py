@@ -7,15 +7,15 @@ through ``execution_gate.load_legacy``.  The names of the core are read through 
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 
 from tools import orchestrate_test_case_revision as core
 from tools import output_guard
+from tools.json_cli import JsonArgumentParser
 
 
-class _Parser(argparse.ArgumentParser):
+class _Parser(JsonArgumentParser):  # a path on a share is refused while the arguments are read, as everywhere
     def error(self, message: str) -> None:
         print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [core._diag("", "ORCHESTRATION_ARGUMENT")], "status": "error", "successor_bundle_receipt": None,
                           "message": f"argument error: {message}", "fix": None, "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))

@@ -32,7 +32,7 @@ class OutputRefused(ValueError):
 def local_path_text(raw: str) -> bool:
     """A path that names a place on this machine by its text alone — no NUL, no UNC or device prefix: nothing that would reach the
     network.  Judged before anything opens, resolves or stats the path."""
-    return not ("\x00" in raw or raw.startswith(("\\\\", "//")) or PureWindowsPath(raw).drive.startswith("\\\\"))
+    return "\x00" not in raw and not raw.replace("/", "\\").startswith("\\\\")
 
 
 def _plain(raw: str, *, relative: bool = False) -> bool:

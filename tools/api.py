@@ -44,6 +44,9 @@ def plain(value: Any) -> Any:
 class _JsonFile:
     path: str
 
+    def __fspath__(self) -> str:  # a path to the parser: a share is refused while the arguments are read
+        return self.path
+
 
 def _json(path: str) -> _JsonFile:
     """A JSON input: read in ``main``, once its path is known to be inside the project (``_read_inputs``)."""

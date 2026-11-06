@@ -86,7 +86,7 @@ def test_step_size_refuses_a_file_outside_the_project(tmp_path: Path, capsys: py
     assert printed["code"] == "INPUT_OUTSIDE_PROJECT", printed
 
 
-@pytest.mark.parametrize("value", ["{outside}", "{project}/../outside.json", UNC, "//pg1-no-such-host.invalid/share/x.json"])
+@pytest.mark.parametrize("value", ["{outside}", "{project}/../outside.json"])  # a share: refused while the arguments are read (D2)
 def test_an_api_json_input_outside_the_project_of_the_run_is_refused(tmp_path: Path, value: str, capsys: pytest.CaptureFixture[str]) -> None:
     project, run_root, attempt_id = _run(tmp_path / "p")
     path = value.format(outside=_outside(tmp_path), project=project)
@@ -182,35 +182,105 @@ def _share_touches(monkeypatch: pytest.MonkeyPatch, call) -> list[str]:
 
 
 def test_scan_refuses_a_document_on_a_share_before_it_touches_it(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_documents_only import _documents_project, _run as _main
+    from tests.test_documents_only import _documents_project
     from tools import run_pipeline
 
     project = _documents_project(tmp_path)
-    result: list = []
-    touched = _share_touches(monkeypatch, lambda: result.append(
-        _main(run_pipeline, capsys, "scan", "--project", str(project), "--profile", "cases-only-v1", "--docs", SHARE + r"\x.md")))
-    (code, refused), = result
-    assert touched == [] and code == 2 and refused["reason"] == "SNAPSHOT_DOCS" and "UNC" in refused["fix"], (touched, refused)
-
-
-@pytest.mark.parametrize("argv", [["tools.run_pipeline", "scan", "--profile", "cases-only-v1", "--docs", "x.md", "--project", SHARE + r"\p"],
-                                  ["tools.api", "plan-batches", "--requirements", "r.json", "--grouping", "g.json", "--input-file", "r.json",
-                                   "--context-receipt", "c.json", "--project", "//pg1-no-such-host.invalid/share"]])
-def test_a_project_on_a_share_is_refused_when_the_arguments_are_read(argv: list[str], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-
-    module = importlib.import_module(argv[0])
     stopped: list = []
 
     def call() -> None:
         try:
-            module.main(argv[1:])
+            run_pipeline.main(["scan", "--project", str(project), "--profile", "cases-only-v1", "--docs", SHARE + r"\x.md"])
         except SystemExit as stop:
             stopped.append(stop.code)
 
     touched = _share_touches(monkeypatch, call)
-    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert touched == [] and stopped == [2] and printed["code"] == "INVALID_ARGUMENT" and "UNC" in printed["message"], (touched, printed)
+    assert touched == [] and stopped == [2] and "путь UNC" in capsys.readouterr().out and not (project / ".pilot-runs").exists(), touched
+
+
+def test_a_document_path_on_a_share_from_a_file_is_refused_by_scan_before_it_touches_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second layer, for a path that does not come from the command line (the request of a run, a reference)."""
+    from tools.run_pipeline import _docs_entries
+
+    refused: list = []
+
+    def call() -> None:
+        try:
+            _docs_entries(tmp_path, [SHARE + r"\x.md#Раздел"])
+        except HostStop as stop:
+            refused.append((stop.code, stop.fix))
+
+    assert _share_touches(monkeypatch, call) == [] and refused and refused[0][0] == "SNAPSHOT_DOCS" and "UNC" in refused[0][1], refused
+
+
+UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required ones local
+    "api": ["plan-batches", "--requirements", "r.json", "--grouping", "g.json", "--input-file", "r.json", "--context-receipt", "c.json",
+            "--project", "//pg1-no-such-host.invalid/share"],
+    "autotest_hints": ["--automation", SHARE + r"\a.json"],
+    "build_context": ["--project", SHARE, "--docs", "x.md"],
+    "ci_gate": ["--root", SHARE],
+    "context_marker_parts": ["plan", "--run-root", SHARE + r"\.pilot-runs\run"],
+    "contract_check": ["--root", SHARE],
+    "doctor": ["--root", SHARE],
+    "exec_commands": ["ingest", "--project", "p", "--run", "r", "--reports", SHARE + r"\reports"],  # its commands are run_pipeline's
+    "init_skillsrc": ["--project", SHARE],
+    "ready": ["--project", "p", "--docs", SHARE + r"\x.md"],
+    "release_manifest": ["--root", SHARE],
+    "render_contract_docs": ["--root", SHARE],
+    "review_edits": ["--candidate", "c.json", "--edits", "//pg1-no-such-host.invalid/share/e.json"],
+    "review_legacy": ["publish", "--candidate", "c.json", "--output-dir", SHARE, "--run-root", "r", "--attempt-id", "a"],
+    "review_view": ["--project", "p", "--run", "r", "--candidate", SHARE + r"\c.json"],
+    "run_pipeline": ["scan", "--profile", "cases-only-v1", "--docs", "x.md", "--project", SHARE + r"\p"],
+    "step_size": ["--project", "p", "--files", "a.md", SHARE + r"\b.md"],
+    "validate_artifact": [SHARE + r"\schema.json", "a.json"],
+    "zephyr_template_export": ["--project", "p", "--run", "r", "--cases", SHARE + r"\c.json"],
+}
+
+
+CLI_OF = {"exec_commands": "run_pipeline"}  # a module that adds its commands to another CLI
+
+
+@pytest.mark.parametrize("name", sorted(UNC_ARGV))
+def test_a_share_path_in_any_flag_of_any_cli_is_refused_when_the_arguments_are_read(name: str, capsys: pytest.CaptureFixture[str],
+                                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import inspect
+    import sys
+
+    module = importlib.import_module(f"tools.{CLI_OF.get(name, name)}")
+    argv = UNC_ARGV[name]
+    stopped: list = []
+
+    def call() -> None:
+        try:
+            if inspect.signature(module.main).parameters:
+                module.main(argv)
+            else:  # a main that reads sys.argv
+                monkeypatch.setattr(sys, "argv", [name, *argv])
+                module.main()
+        except SystemExit as stop:
+            stopped.append(stop.code)
+
+    touched = _share_touches(monkeypatch, call)
+    printed = capsys.readouterr().out
+    assert touched == [] and stopped == [2] and "путь UNC или путь устройства не принимается" in printed, (touched, stopped, printed[-400:])
+
+
+def test_every_cli_of_tools_builds_its_parser_from_the_json_parser() -> None:
+    """The rule of the share lives in JsonArgumentParser: a new CLI with a bare argparse parser would pass by it."""
+    import ast
+
+    tools = Path(__file__).resolve().parents[1] / "tools"
+    bare = []
+    for path in sorted(tools.glob("*.py")):
+        if path.name == "json_cli.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            named = node.func if isinstance(node, ast.Call) else node.bases[0] if isinstance(node, ast.ClassDef) and node.bases else None
+            if isinstance(named, (ast.Attribute, ast.Name)) and getattr(named, "attr", getattr(named, "id", None)) == "ArgumentParser":
+                bare.append(f"{path.name}:{node.lineno}")
+    assert bare == [], bare
+    assert set(UNC_ARGV) == {path.stem for path in tools.glob("*.py") if "add_argument(" in path.read_text(encoding="utf-8")}  # every CLI is in the table
 
 
 # ---- А4: --out ---------------------------------------------------------------------------------------------------

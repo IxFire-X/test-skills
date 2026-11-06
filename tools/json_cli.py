@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -129,13 +130,13 @@ class JsonArgumentParser(argparse.ArgumentParser):
         raise SystemExit(2)
 
     def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
-        """The arguments as argparse reads them; a ``--project`` or ``--run-root`` on a share or a device is refused here, before any
-        command resolves it (the subparsers are of this class too)."""
+        """The arguments as argparse reads them.  Any value of any flag — an item of a list too — that names a share or a device
+        (``\\\\…`` or ``//…``) is refused here, before any command reads, resolves or stats it; the subparsers are of this class too."""
         from tools.output_guard import local_path_text
 
         namespace, extras = super().parse_known_args(args, namespace)
-        for name in ("project", "run_root"):
-            value = getattr(namespace, name, None)
-            if value is not None and not local_path_text(str(value)):
-                self.error(f"--{name.replace('_', '-')}: локальный каталог, не UNC и не путь устройства")
+        for name, value in vars(namespace).items():
+            for item in value if isinstance(value, (list, tuple)) else (value,):
+                if isinstance(item, (str, os.PathLike)) and not local_path_text(os.fspath(item)):
+                    self.error(f"--{name.replace('_', '-')}: путь UNC или путь устройства не принимается — нужен локальный путь")
         return namespace, extras

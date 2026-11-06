@@ -2045,9 +2045,7 @@ def build_parser() -> JsonArgumentParser:
 
 
 def argparse_parent():
-    from argparse import ArgumentParser
-
-    shared = ArgumentParser(add_help=False)
+    shared = JsonArgumentParser(add_help=False)
     shared.add_argument("--project", required=True)
     shared.add_argument("--target")
     shared.add_argument("--module", help="Exact module ID from inventory/.skillsrc, not its filesystem path")

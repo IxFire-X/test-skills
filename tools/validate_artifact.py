@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 from typing import Any
@@ -145,12 +144,6 @@ def retry_prompt(artifact: Any, errors: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-class _JsonArgumentParser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:
-        _emit({"status": "error", "errors": [{"path": "", "message": f"argument error: {message}"}]})
-        raise SystemExit(2)
-
-
 def _emit(report: dict[str, Any]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -160,7 +153,14 @@ def _emit(report: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    parser = _JsonArgumentParser(description=__doc__)
+    from tools.json_cli import JsonArgumentParser  # the parser of the package: a path on a share is refused while it is read
+
+    class _Parser(JsonArgumentParser):
+        def error(self, message: str) -> None:
+            _emit({"status": "error", "errors": [{"path": "", "message": f"argument error: {message}"}]})
+            raise SystemExit(2)
+
+    parser = _Parser(description=__doc__)
     parser.add_argument("schema_path")
     parser.add_argument("artifact_path")
     args = parser.parse_args()
