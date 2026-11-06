@@ -10,6 +10,7 @@ GROUPS = {
     "budgets of the roles": ("test_review_view", "test_skeleton_budget", "test_p8a2_texts", "test_texts_cases_only", "test_fat3", "test_test_design",
                              "test_context_batches", "test_existing_tests"),
     "form of the CLI": ("test_api_cli", "test_api_error_fields", "test_next_step_commands", "test_output_raw", "test_pf1", "test_diagnostics_at_once"),
+    "classes of the security review": ("test_sec_a", "test_secb", "test_sec_c1", "test_sec_c2"),
     "texts": ("test_cases_import", "test_clear_refusals", "test_documents_only", "test_exec_prepares", "test_generator_skill_operators",
               "test_isolation_contract", "test_partial_automation", "test_pt2", "test_quality_hints", "test_release_ways_out", "test_abandon_closure"),
 }

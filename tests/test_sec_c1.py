@@ -19,6 +19,8 @@ import pytest
 
 from tools.run_pipeline import HostStop
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 NASTY = ['a&b', 'a;b', 'a$(x)', 'a`b`', "a'b", 'a"b', "a%b%", "a^b", "a!b", "a(b)"]
 

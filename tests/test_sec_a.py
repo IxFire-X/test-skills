@@ -15,6 +15,8 @@ from tests.test_output_guard import _api, _link, _run
 from tools.output_guard import OutputRefused
 from tools.run_pipeline import HostStop
 
+pytestmark = pytest.mark.contract
+
 UNC = "\\\\pg1-no-such-host.invalid\\share\\x.md"
 
 

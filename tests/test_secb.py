@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 ROOT = Path(__file__).resolve().parents[1]
 UNC = [r"\\host\share\mvn.cmd", "//host/share/mvn.cmd", r"\\?\C:\tools\mvn.cmd", r"\\.\pipe\mvn.cmd"]
 NT = [r"\??\UNC\host\share\mvn.cmd", "/??/UNC/host/share/mvn.cmd"]  # SEC-A D3: the prefix of an NT path, Win32 passes it as it is
