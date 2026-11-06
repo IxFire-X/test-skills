@@ -1021,6 +1021,9 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         if not (uncovered and row["code"] == "SEMANTIC_UNCOVERED_REQUIREMENT"):
             add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"],
                 f"canonical pre-review audit failed: {row['code']} at {row['path']} (of this fragment) — {row['message']}")
+    for path, message in _taken_groups(fragment, earlier):
+        add("BATCH_SEMANTIC_CONFLICT", "SEMANTIC_PARAM_GROUP_MISMATCH", path, message,
+            "дай группе этой пачки своё имя PG-…, которого нет в прошлых пачках: группа живёт в одной пачке")
     if rows:
         refuse()
     result = {key: names for key, names in (("normalized", normalized), ("filled", filled)) if names}
@@ -1028,9 +1031,9 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
 
 
 # the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
-# decided by one batch and runs on the fragment before the answer is written
+# decided by one batch and runs on the fragment before the answer is written. The param_group rules are of one batch — the
+# cases of a group share requirement_ids and a requirement belongs to its batch; a name of an earlier batch is _taken_groups
 DOCUMENT_WIDE_CODES = frozenset({
-    "SEMANTIC_PARAM_GROUP_SINGLE", "SEMANTIC_PARAM_GROUP_MISMATCH", "SEMANTIC_PARAM_GROUP_PARAMETER",  # a group may span batches
     "SEMANTIC_RU_RU_HUMAN_FIELDS",  # Russian prose anywhere in the document
 })
 
@@ -1055,6 +1058,23 @@ def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str
         for index, item in enumerate(probe[name], start=1):
             item["display_order"] = index
     return [row for row in validate_canonical_document_all(probe) if row["code"] not in DOCUMENT_WIDE_CODES]
+
+
+def _taken_groups(fragment: dict[str, Any], earlier: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """A param_group name an earlier batch took — (path, message), once per name. In the document the cases of both
+    batches are one group, and they cannot share requirement_ids: assemble refuses it as SEMANTIC_PARAM_GROUP_MISMATCH."""
+    taken: dict[str, str] = {}
+    for part in earlier:  # recorded answers: their shape is checked
+        for case in part["test_cases"]:
+            if "param_group" in case:
+                taken.setdefault(case["param_group"], part["namespace"])
+    rows: list[tuple[str, str]] = []
+    for index, case in enumerate(fragment["test_cases"]):
+        namespace = taken.pop(case.get("param_group"), None)  # a name once
+        if namespace is not None:
+            rows.append((f"/test_cases/{index}/param_group", f"{case['param_group']}: the group is already in batch {namespace}; a group lives in "
+                                                             "one batch (its cases share requirement_ids, a requirement belongs to its batch)"))
+    return rows
 
 
 def require_batch_coverage(fragment: dict[str, Any]) -> None:
