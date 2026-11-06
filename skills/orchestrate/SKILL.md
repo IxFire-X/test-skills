@@ -101,12 +101,12 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    <run>/tmp/plan.json --out-published <run>/tmp/published.json` строит и публикует план (формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan)).
    Пачки делит код по оценке ответа и окну `limits.step_window_bytes`; `notes` и `context` вывода покажи человеку как есть.
 4. **Генератор.** Пачки строго по очереди (`ordinal`), пачка k после принятого ответа k−1. `model-request --stage tc-generator:<batch>`
-   берёт входы из журнала; с пачки 2 — capabilities прошлых пачек (`prior-capabilities --batch-id <id>`). В начало задачи генератору вставь
+   берёт входы из журнала; с пачки 2 — capabilities прошлых пачек: сначала отдельной командой `prior-capabilities --batch-id <id>` (без неё `MODEL_INPUTS_MISMATCH`); её `result.digest` — последний входной digest. В начало задачи генератору вставь
    «Контрольное слово: <nonce>» из вывода `model-request` (в ответ и файлы слово не копируй); `existing-tests.md` из `step-inputs` дай
    генератору вместе со входами. **Фрагмент** — голый объект без конверта `artifacts`, образец — [fragment-sample.md](references/fragment-sample.md),
-   схема — `schemas/candidate-fragment.schema.json`; `context_receipt` — квитанция контекста пачки **целиком** (файл receipt как есть); digest-поля
-   ставит код (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
-   До `model-response` пачки — только `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (с пачки 2 — `--prior-fragment <f>`
+   схема — `schemas/candidate-fragment.schema.json`; `context_receipt` и digest-поля
+   ставит код — не пиши их (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
+   До `model-response` пачки — только `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (`--plan` — файл `--out-plan` команды `plan`, `--header` — тот header-файл, что подан в `plan`, не копии из журнала) (с пачки 2 — `--prior-fragment <f>`
    на каждую прошлую пачку: **записанный ответ**, `path` из вывода её `model-response`); `assemble` на части пачек всегда отказывает
    (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет). Отказ `validate-fragment` — ошибка ответа: единственный повтор с `retry_prompt`; лимит повторов
    (`--transport-attempts` ≤ 2) держишь ты, записанный ответ не заменить.

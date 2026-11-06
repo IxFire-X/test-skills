@@ -662,13 +662,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--files", nargs="+", default=[])
     parser.add_argument("--run")
-    parser.add_argument("--stage", help="context-marker, context-marker:requirements, tc-generator:<batch>, tc-to-autotest:rN, autotest-reviewer:rN")
+    parser.add_argument("--stage", help="context-marker (or context-marker:baseline), context-marker:requirements, tc-generator:<batch>, tc-to-autotest:rN, autotest-reviewer:rN")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--role")
     parser.add_argument("--step", help="the step name recorded in the run (default: --stage, else --role)")
     parser.add_argument("--tokens-per-byte", type=float, default=TOKENS_PER_BYTE)
     parser.add_argument("--budget-bytes", type=int)
     args = parser.parse_args(argv)
+    if args.stage == "context-marker:baseline":  # the name model-request asks for; the journal and the report know the step as context-marker
+        args.stage = "context-marker"
     project = Path(args.project).resolve()
     try:
         files = [Path(item) if Path(item).is_absolute() else project / item for item in args.files]

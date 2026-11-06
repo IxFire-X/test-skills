@@ -111,7 +111,8 @@ def test_step_size_counts_the_role_instructions_and_reads_the_skillsrc_budget(tm
     assert report["budget_bytes"] == 1500 and code == 0 and report["warning"] == "STEP_OVER_BUDGET"
 
 
-def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("stage", ["context-marker", "context-marker:baseline"])  # MB2 D-A2: model-request asks for the second
+def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str) -> None:
     from tests.test_phase2_scan import _args, _project
     from tools import run_pipeline
 
@@ -125,7 +126,7 @@ def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Pat
     args.docs = ["services/api/docs/feature.md"]
     args.profile = "cases-only-v1"
     assert run_pipeline.cmd_scan(args) == 0
-    code, report = _step("--project", str(project), "--run", payloads[-1]["run_id"], "--stage", "context-marker")
+    code, report = _step("--project", str(project), "--run", payloads[-1]["run_id"], "--stage", stage)
     skill = (ROOT / "skills" / "context-marker" / "SKILL.md").stat().st_size
     assert code == 0 and report["files"] >= 2 and report["bytes"] >= 600 + len("Требование.\n".encode()) + skill
     rows = (project / ".pilot-runs" / payloads[-1]["run_id"] / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()

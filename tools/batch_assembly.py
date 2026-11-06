@@ -62,10 +62,11 @@ def with_digest(value: dict[str, Any]) -> dict[str, Any]:
 _with_digest = with_digest
 
 
-def _schema_valid(value: dict[str, Any], schema: Path, label: str) -> None:
+def _schema_valid(value: dict[str, Any], schema: Path, label: str, fix: str | None = None) -> None:
     diagnostics = schema_diagnostics(value, schema, _ROOT)
     if diagnostics:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} schema is invalid: {diagnostics[0]['code']}")
+        where = f" at {diagnostics[0]['path']}" if diagnostics[0].get("path") else ""
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} schema is invalid: {diagnostics[0]['code']}{where}", fix=fix)
 
 
 def _self_digest_valid(value: dict[str, Any], label: str) -> None:
@@ -526,7 +527,8 @@ def requirement_groups(source_requirements: list[dict[str, Any]], project: Path,
 def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(plan, dict):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "plan must be an object")
-    _schema_valid(plan, _PLAN_SCHEMA, "batch plan")
+    _schema_valid(plan, _PLAN_SCHEMA, "batch plan",
+                  "--plan — сам план: файл, который команда plan записала по --out-plan (не обёртка публикации из batch-plans/ в журнале прогона)")
     _self_digest_valid(plan, "plan")
     batches = plan.get("batches")
     if not isinstance(batches, list) or not batches:
@@ -919,8 +921,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     header_bytes = {key: value for key, value in header.items() if key != "digest"}
     if _digest(header_bytes) != batch["header_digest"]:
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/header_digest", "fragment/header digest binding is invalid",
-                       "--header — тот header, что опубликован для плана (его digest без поля digest равен header_digest пачки в плане): "
-                       "возьми его из publish-generator-input header, не пересобирай")
+                       "--header — тот же header-файл, что подан в plan (его digest без поля digest равен header_digest пачки в плане); "
+                       "не копия из generator-headers/ журнала прогона и не пересобранный header")
     _validate_context_receipt(context_receipt, batch["context_receipt_digest"])
     if not isinstance(fragment.get("context_receipt"), dict):
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment lacks its context receipt",
