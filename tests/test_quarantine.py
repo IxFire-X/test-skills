@@ -382,3 +382,18 @@ def test_a_skillsrc_with_the_policy_key_still_validates(tmp_path: Path) -> None:
     document["disposition_policy"] = "cleanup"
     (tmp_path / ".skillsrc").write_text(json.dumps(document), encoding="utf-8")
     assert load_skillsrc(tmp_path / ".skillsrc")["disposition_policy"] == "cleanup"
+
+
+def test_ingest_prints_the_quarantine_for_the_human_when_it_closes_and_when_it_is_asked_again(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """MB2 №12: mode-b.md §6 hands the human what ``ingest`` prints; the quarantine was only in report.json."""
+    from tools import exec_commands
+    from tools.pilot_state import read_run
+
+    run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS)
+    coordinates = {"run_root": run_root, "attempt": {"attempt_id": attempt_id}, "manifest": read_run(run_root)["manifest"]}
+    exec_commands._finish_ingest(coordinates, {})
+    closed = json.loads(capsys.readouterr().out)
+    assert closed["quarantine"] == [{"file": delta["files"][0]["path"], "method": "test_selected", "ref": "ASSERT-batch-a-001",
+                                     "message": "expected: _2_ but was: _3_"}], closed
+    exec_commands._terminal_answer(coordinates, "ingest")
+    assert json.loads(capsys.readouterr().out)["quarantine"] == closed["quarantine"]

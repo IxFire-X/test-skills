@@ -47,6 +47,7 @@ from tools.run_pipeline import (
     baseline_check,
     drift_report,
     print_payload,
+    quarantine_summary,
     read_run_coordinate,
     report_mismatch,
     style_notes,
@@ -65,7 +66,7 @@ __all__ = (
     # journal
     "canonical_digest", "publish_fixed_receipt_resuming",
     # cli
-    "automation_split_fields", "baseline_check", "drift_report", "print_payload", "read_run_coordinate",
+    "automation_split_fields", "baseline_check", "drift_report", "print_payload", "quarantine_summary", "read_run_coordinate",
     "report_mismatch", "style_notes",
     # closure
     "accepted_unprepared",

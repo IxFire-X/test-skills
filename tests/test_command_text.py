@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -99,8 +100,7 @@ def test_the_next_line_of_materialize_quotes_the_project_like_the_command(tmp_pa
     output = _out(capsys)
     assert code == 0, output
     assert f"--project {exec_commands.command_token(str(project))}" in output["next"] and output["next"].startswith(exec_commands.command_token(sys.executable))
-    assert output["command_text"] == exec_commands.command_text(output["command"])
-    assert output["command_text_powershell"] == exec_commands.command_text_powershell(output["command"])
+    assert (output["command_text"], output["command_text_powershell"]) == exec_commands.printed_forms(project, output["working_directory"], output["command"])
     assert output["command_text_powershell"].startswith('& "') and output["next_powershell"].startswith('& "') and not output["next"].startswith("&")
     assert f'"--project" {exec_commands.command_text_powershell([str(project)])[2:]}' in output["next_powershell"]
 
@@ -129,3 +129,48 @@ def test_the_powershell_form_reaches_the_program_as_the_tokens_through_powershel
                           capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert json.loads(done.stdout) == tokens
+
+
+# --- the wrapper of the build is an absolute path in the printed forms (MB2 №11) ----------------------------------------
+
+def _wrapper_in(module: Path) -> tuple[str, list[str]]:
+    """A module directory with a wrapper that only prints its arguments, and the argv ``materialize`` keeps for it."""
+    if sys.platform == "win32":
+        (module / "mvnw.cmd").write_text("@echo off\r\necho ARGS %*\r\n", encoding="utf-8")
+        return "mvnw.cmd", ["mvnw.cmd", "-B", "test"]
+    (module / "mvnw").write_text('#!/bin/sh\necho ARGS "$@"\n', encoding="utf-8")
+    (module / "mvnw").chmod(0o755)
+    return "mvnw", ["mvnw", "-B", "test"]
+
+
+def test_the_printed_forms_name_the_wrapper_by_its_absolute_path_and_the_array_keeps_it_relative(tmp_path: Path) -> None:
+    from tools.exec_commands import printed_forms
+
+    module = tmp_path / "svc"
+    module.mkdir()
+    name, command = _wrapper_in(module)
+    shown, powershell = printed_forms(tmp_path, "svc", command)
+    absolute = str(module / name)
+    assert shown.startswith(f'"{absolute}"' if "\\" in absolute or " " in absolute else absolute) and powershell.startswith(f'& "{absolute}"')
+    assert command[0] == name
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="no PowerShell here")
+def test_the_powershell_form_starts_the_wrapper_of_the_module_from_its_directory(tmp_path: Path) -> None:
+    from tools.exec_commands import printed_forms
+
+    _name, command = _wrapper_in(tmp_path)
+    done = subprocess.run([shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-Command", printed_forms(tmp_path.parent, tmp_path.name, command)[1]],
+                          cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert done.returncode == 0 and "ARGS -B test" in done.stdout, (done.stdout, done.stderr)
+
+
+def test_the_plain_form_starts_the_wrapper_of_the_module_where_the_current_directory_is_not_searched(tmp_path: Path) -> None:
+    """cmd.exe with NoDefaultCurrentDirectoryInExePath, or sh: a bare name is not found in the current directory."""
+    from tools.exec_commands import printed_forms
+
+    _name, command = _wrapper_in(tmp_path)
+    env = {**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"}
+    done = subprocess.run(printed_forms(tmp_path.parent, tmp_path.name, command)[0], shell=True, cwd=tmp_path, env=env, capture_output=True, text=True,
+                          encoding="utf-8", timeout=120)
+    assert done.returncode == 0 and "ARGS -B test" in done.stdout, (done.stdout, done.stderr)

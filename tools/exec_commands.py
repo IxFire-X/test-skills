@@ -21,6 +21,7 @@ from tools.execution_core import (
     baseline_check as _baseline_check,
     drift_report as _drift_report,
     print_payload as _print,
+    quarantine_summary as _quarantine_summary,
     read_run_coordinate as _read_run_coordinate,
     report_mismatch as _report_mismatch,
     style_notes as _style_notes,
@@ -321,6 +322,7 @@ def _terminal_answer(coordinates: Mapping[str, Any], stage: str) -> int | None:
     _print({
         "status": "ok", "stage": stage, "run_id": coordinates["manifest"]["run_id"], "attempt_id": attempt_id,
         "verdict": terminal.get("verification"), "accepted": terminal.get("accepted"), "finalization": "complete",
+        **_quarantine_summary(root, attempt_id),
         **_style_notes(Path(coordinates["manifest"]["project"]), root, attempt_id),
         **_report_mismatch(root, attempt_id),
         **_automation_split(root, attempt_id),
@@ -487,6 +489,16 @@ def command_text_powershell(tokens: Sequence[str]) -> str:
     return "& " + " ".join('"' + token + '"' for token in tokens)
 
 
+def printed_forms(project: Path, working: str, command: Sequence[str]) -> tuple[str, str]:
+    """The command as printed for cmd.exe/sh and for PowerShell.  A wrapper of the module (``mvnw.cmd``, ``gradlew``) is named by its absolute path:
+    PowerShell never starts a program of the current directory by its bare name, nor do cmd.exe with NoDefaultCurrentDirectoryInExePath and sh.
+    The array ``command`` that the receipt binds stays as it is."""
+    first = str(command[0])
+    wrapper = os.path.normpath(os.path.join(project, working, first))
+    printed = [wrapper, *command[1:]] if not os.path.isabs(first) and os.path.isfile(wrapper) else list(command)
+    return command_text(printed), command_text_powershell(printed)
+
+
 def _command_line(tokens: Sequence[str]) -> str:
     """The command for a refusal's fix: its text, or the note that it cannot be printed."""
     try:
@@ -621,7 +633,7 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
     command = printed["command"]
     working = printed["working_directory"]
     try:
-        shown, shown_powershell = command_text(command), command_text_powershell(command)
+        shown, shown_powershell = printed_forms(project, working, command)
         tail = (f'--run {root.name} --reports <каталог с отчётами внутри модуля '
                 f'или {(root / "incoming").relative_to(project).as_posix()}/>')
         ingest = f'{command_text([sys.executable, "-m", "tools.run_pipeline", "ingest", "--project", str(project)])} {tail}'
@@ -820,6 +832,7 @@ def _finish_ingest(coordinates: Mapping[str, Any], report: Mapping[str, Any]) ->
         "status": "ok", "stage": "ingest", "run_id": coordinates["manifest"]["run_id"], "attempt_id": attempt_id,
         "verdict": result.get("verification"), "accepted": result.get("accepted"), "finalization": "complete",
         "execution_source": {**source, "note": HUMAN_RESULT_NOTE} if source else None,
+        **_quarantine_summary(root, attempt_id),
         **_style_notes(Path(coordinates["manifest"]["project"]), root, attempt_id),
         **_report_mismatch(root, attempt_id),
         **_automation_split(root, attempt_id),

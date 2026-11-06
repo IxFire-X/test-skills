@@ -2077,6 +2077,7 @@ digest_bytes = _digest_bytes
 style_notes = _style_notes
 report_mismatch = _report_mismatch
 automation_split_fields = _automation_split
+quarantine_summary = _quarantine_summary
 
 
 if __name__ == "__main__":

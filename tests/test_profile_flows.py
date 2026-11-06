@@ -189,8 +189,11 @@ def test_mode_b_delivery_opens_the_review_of_the_automation_and_walks_to_the_rep
                           "--invocation-id", record["reviewer_invocation_id"], "--input-digest", record["automation_digest"], "--input-digest", record["digest"])
     assert code == 0 and reviewer["status"] == "ok", reviewer
     verdict = review(document, artifact, record, "ПРИНЯТО", session_id=record["reviewer_session_id"])
+    left_to_the_code = ("automation_sha256", "reviewed_relations_sha256", "host_isolation_sha256")  # the SKILL tells the reviewer to leave them empty
+    for key in left_to_the_code:
+        del verdict["artifacts"]["autotest_review"][key]
     code, accepted = _api(pack, "model-response", *run, "--stage", "autotest-reviewer:r1", "--artifact", _put(tmp / "autotest-review.json", verdict))
-    assert code == 0, accepted
+    assert code == 0 and all(f"/artifacts/autotest_review/{key}" in accepted["result"]["filled"] for key in left_to_the_code), accepted
     # the canonical review has one way in a delivery without review_legacy: review-open / review-select
     code, refused = _api(pack, "review-requested", *run, "--stage", "tc-reviewer:canonical", "--digest", automation_digest)
     assert code == 2 and refused["code"] == "LEGACY_REVIEW_NOT_IN_PACKAGE" and "review-open" in refused["fix"] and "review-select" in refused["fix"], refused
