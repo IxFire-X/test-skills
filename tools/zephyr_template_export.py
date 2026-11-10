@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools import output_guard
+from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser
 from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _formula_safe
 from tools.zephyr_csv import detect_delimiter
@@ -271,8 +272,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except Exception as error:  # noqa: BLE001 - HostStop of the run coordinate and any other failure: one JSON, code 2
         code = getattr(error, "code", None)
-        print(json.dumps({"status": "error", "code": code if isinstance(code, str) and code else "ZEPHYR_EXPORT_FAILED",
-                          "hint": str(error) or type(error).__name__}, ensure_ascii=False))
+        code = code if isinstance(code, str) and code else "ZEPHYR_EXPORT_FAILED"
+        print(json.dumps({"status": "error", "code": code, "hint": str(error) or type(error).__name__,
+                          **({"fix": fix_for(code)} if fix_for(code) else {})}, ensure_ascii=False))
         return 2
     print(json.dumps(result, ensure_ascii=False))
     return 0

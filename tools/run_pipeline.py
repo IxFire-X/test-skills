@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 from tools import execution_gate
 from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser
+from tools.run_lock import JournalRefusal
 from tools.project_inventory import (
     ContextSelectionError,
     ContextStop,
@@ -1796,6 +1797,8 @@ def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = Fals
     try:
         run = read_run(root)
         state = derive_state(root)
+    except JournalRefusal:  # a busy run or a damaged journal says so; it is no wrong coordinate
+        raise
     except (OSError, ValueError, KeyError) as error:
         note = _moved_project_note(project, root)  # the run is there, but the project is not where it was made
         raise HostStop("EXECUTION_COORDINATES", "pilot run root is unreadable or outside this project",
@@ -2100,7 +2103,7 @@ def main(argv: list[str] | None = None) -> int:
             from tools.json_cli import error_code_prefix, error_fields
 
             fields = error_fields(error)
-            code = error_code_prefix(fields["message"]) or "INPUT_INVALID"
+            code = getattr(error, "code", None) or error_code_prefix(fields["message"]) or "INPUT_INVALID"
             _print({"status": "error", "reason": code, **fields, "code": code})
             return 2
         if isinstance(error, (KeyError, TypeError, OSError)):

@@ -51,6 +51,11 @@ def _sealed(value: dict) -> dict:
     return value
 
 
+def _recover(root: Path) -> list:
+    """What the writer does first, under the lock: check the journal and finish or roll back the record a killed writer left."""
+    return pilot_state._events(*pilot_state._run_root(root), repair=True)
+
+
 def _snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     return {
         str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns)
@@ -448,7 +453,7 @@ def test_event_pair_failure_rolls_back_and_retry_reuses_next_sequence(tmp_path: 
     marker_path = root / "pending-events" / "0000000003.json"
     marker_path.parent.mkdir(exist_ok=True)
     marker_path.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(orphan, orphan_data, (root / "events.jsonl").read_bytes())))
-    derive_state(root)
+    _recover(root)
     assert not orphan_path.exists()
     assert not marker_path.exists()
 
@@ -681,7 +686,7 @@ def test_recovery_distinguishes_pending_publication_from_committed_truncation(tm
     marker = before_root / "pending-events" / "0000000002.json"
     marker.parent.mkdir(exist_ok=True)
     marker.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(future, future_data, prior)))
-    assert derive_state(before_root)["events"][-1]["seq"] == 1
+    assert _recover(before_root)[-1]["seq"] == 1
     assert not marker.exists()
     after_project = tmp_path / "after-counterpart"
     after_project.mkdir()
@@ -691,7 +696,7 @@ def test_recovery_distinguishes_pending_publication_from_committed_truncation(tm
     after_data = pilot_state._canonical_bytes(after_event)
     after_marker = after_root / "pending-events" / "0000000002.json"
     after_marker.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(after_event, after_data, (after_root / "events.jsonl").read_bytes().rsplit(after_data, 1)[0])))
-    assert derive_state(after_root)["events"][-1]["seq"] == 2
+    assert _recover(after_root)[-1]["seq"] == 2
     assert not after_marker.exists()
     mismatches = {
         "run_id": "0" * 32,
@@ -848,7 +853,7 @@ def test_round4_marker_recovery_keeps_marker_last_across_cleanup_faults(
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", fail_counterpart)
     before = _snapshot(root)
     with pytest.raises(ValueError, match="event journal"):
-        derive_state(root)
+        _recover(root)
     assert _snapshot(root) == before
     assert marker.read_bytes() == marker_data and counterpart.read_bytes() == data
 
@@ -861,11 +866,11 @@ def test_round4_marker_recovery_keeps_marker_last_across_cleanup_faults(
 
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", fail_marker)
     with pytest.raises(ValueError, match="event journal"):
-        derive_state(root)
+        _recover(root)
     assert not counterpart.exists()
     assert marker.read_bytes() == marker_data
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", original)
-    assert derive_state(root)["events"][-1]["seq"] == 1
+    assert _recover(root)[-1]["seq"] == 1
     assert not marker.exists()
 
 

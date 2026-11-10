@@ -75,7 +75,7 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
 
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
-    if run_root is None:
+    if run_root is None or code == "CONCURRENT_WRITER":  # a busy run is written by no one else's command, ours included
         return
     try:
         from tools.output_guard import local_path_text

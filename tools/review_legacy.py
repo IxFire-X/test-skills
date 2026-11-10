@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         # the inner refusal code and its fix; the one envelope, the code is the refusal's own
         envelope = core.error_envelope(error)  # the same reading as tools.api
         reason_code = core.error_code_prefix(envelope["message"])
-        print(json.dumps({**envelope, "code": reason_code or "ORCHESTRATION_INPUT", "fix": core._FIXES.get(reason_code) or envelope["fix"],
+        print(json.dumps({**envelope, "code": getattr(error, "code", None) or reason_code or "ORCHESTRATION_INPUT", "fix": core._FIXES.get(reason_code) or envelope["fix"],
                           "candidate_bundle_receipt": None, "diagnostics": [core._diag("", "ORCHESTRATION_IO")], "successor_bundle_receipt": None,
                           "reason_code": reason_code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     output = {**core.select_output(result), "warnings": [_RENAMED["select"]], **core._canary_report(args.run_root, args.attempt_id, None)}

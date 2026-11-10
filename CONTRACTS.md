@@ -133,3 +133,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `release-eval-run.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `release-eval-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `release-manifest.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+
+
+## Durability
+
+A run recovers after the process of a command is cut off: the next command finishes or rolls back the half-written record of the journal. A crash of the operating system and a power loss are not promised.

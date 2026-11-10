@@ -18,6 +18,7 @@ __all__ = [
     "create_confined_directory_exclusive",
     "create_confined_bytes_exclusive",
     "ensure_project_child_directory",
+    "open_confined_lock_descriptor",
     "read_confined_bytes",
     "remove_confined_bytes_if_equal",
 ]
@@ -696,6 +697,23 @@ def read_confined_bytes(project_root: Path, confined_root: Path, target: Path) -
         with _acquire_confined_native_output(project_root, confined_root, target, create_parents=False) as record:
             result = _read_regular_confined(record)
             return None if result is None else result[0]
+    except FileNotFoundError:
+        return None
+
+
+def open_confined_lock_descriptor(project_root: Path, confined_root: Path, target: Path) -> int | None:
+    """A read descriptor of the existing regular file ``target`` below a pinned root, to hold an OS lock on — ``None`` where there is no such
+    file; nothing is created, the descriptor is never inherited."""
+    try:
+        with _acquire_confined_native_output(project_root, confined_root, target, create_parents=False) as record:
+            descriptor = _open_native_descriptor(record)
+            try:
+                _verify_regular_handle(record, descriptor)
+                os.set_inheritable(descriptor, False)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            return descriptor
     except FileNotFoundError:
         return None
 

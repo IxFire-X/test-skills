@@ -18,7 +18,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
-from tools import execution_gate
+from tools import execution_gate, run_lock
 from tools.fixes import delete_field_fix
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
@@ -48,8 +48,34 @@ _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
 _PACK_ROOT = _SCHEMA_ROOT.parent
 _CLOSURE_KINDS = {"pre_finalization_trace", "finalization_receipt", "terminal_trace"}
 _DEDICATED_RECEIPT_TOKEN = object()
-class _PublicationUnknown(ValueError):
+class _PublicationUnknown(run_lock.JournalRefusal):
     """A journal writer failed after an unclassifiable durable-state transition."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("PUBLICATION_UNKNOWN", message)
+
+
+class _InputRefusal(ValueError):
+    """An input error met while the journal is read — no journal, or a run of another project: never a damaged journal."""
+
+    code = "INPUT_INVALID"
+
+
+def _typed_corruption(function):
+    """A check of the journal that fails says ``JOURNAL_CORRUPT``; a refusal with a code of its own and a missing journal pass as they are."""
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        from tools.json_cli import error_code_prefix
+
+        try:
+            return function(*args, **kwargs)
+        except ValueError as error:
+            if getattr(error, "code", None) or error_code_prefix(str(error)):
+                raise
+            raise run_lock.JournalRefusal("JOURNAL_CORRUPT", str(error)) from error
+
+    return wrapper
 
 
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -163,6 +189,7 @@ def _run_root(run_root: Path) -> tuple[Path, Path]:
         resolved.relative_to(project / ".pilot-runs")
     except ValueError as error:
         raise ValueError("invalid run root") from error
+    run_lock.hold(project, resolved)  # the one door to a run: every command that works with it holds its lock
     return project, resolved
 
 
@@ -413,7 +440,7 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
         if refusal is not None:
             raise refusal
     if manifest.get("run_id") != root.name or (manifest.get("project") != str(project) and not _moved_project_ok(project, root)):
-        raise ValueError("invalid run boundary")
+        raise _InputRefusal("invalid run boundary")
     if receipt.get("run_id") != manifest["run_id"] or receipt.get("policy_profile") != manifest.get("policy_profile") or receipt.get("digest") != manifest.get("authorization_digest"):
         raise ValueError("invalid run boundary")
     auth = {key: receipt[key] for key in _AUTH_KEYS if key in receipt}
@@ -677,12 +704,14 @@ def _validate_process_stopped_bindings(
             raise ValueError("unproved process-stop event")
 
 
-def _events(project: Path, root: Path) -> list[dict[str, Any]]:
-    """The checked event journal; inside closure_cache() only the lines after the checked prefix are checked."""
+@_typed_corruption
+def _events(project: Path, root: Path, repair: bool = False) -> list[dict[str, Any]]:
+    """The checked event journal; inside closure_cache() only the lines after the checked prefix are checked.
+    A record a killed writer left (``pending-events/``) is checked and finished only with ``repair`` — the writer's call, under the lock."""
     cache = _CLOSURE_CACHE.get()
     pending = root / "pending-events"
     if cache is None or pending.is_dir() and any(pending.glob("*.json")):
-        return _events_full(project, root)  # a pending marker is checked and recovered by the full path
+        return _events_full(project, root, repair)  # a pending marker is checked (and, with repair, finished) by the full path
     try:
         journal_bytes = read_confined_bytes(project, root, root / "events.jsonl")
     except OutputConfinementError:
@@ -737,14 +766,23 @@ def _checked_event_line(project: Path, root: Path, manifest: Mapping[str, Any], 
     return event
 
 
-def _events_full(project: Path, root: Path) -> list[dict[str, Any]]:
+def _remove_record(project: Path, root: Path, path: Path, data: bytes) -> bool:
+    """Remove one half-written record (its marker or its copy) when its bytes are still the ones checked."""
+    try:
+        return remove_confined_bytes_if_equal(project, root, path, data)
+    except OutputConfinementError:
+        return False
+
+
+@_typed_corruption
+def _events_full(project: Path, root: Path, repair: bool = False) -> list[dict[str, Any]]:
     journal = root / "events.jsonl"
     try:
         journal_bytes = read_confined_bytes(project, root, journal)
     except OutputConfinementError as error:
         raise ValueError("invalid event journal") from error
     if journal_bytes is None:
-        raise ValueError("missing event journal")
+        raise _InputRefusal("missing event journal")
     if not journal_bytes.endswith(b"\n") or not journal_bytes:
         raise ValueError("invalid event journal")
     lines = journal_bytes.splitlines(keepends=True)
@@ -807,11 +845,7 @@ def _events_full(project: Path, root: Path) -> list[dict[str, Any]]:
             if marker["run_id"] != manifest["run_id"] or marker["prior_digest"] != previous or marker["prior_bytes_digest"] != journal_digest or marker["prior_bytes_length"] != len(journal_bytes):
                 raise ValueError("invalid event journal")
             if event_bytes is None:
-                try:
-                    removed_marker = remove_confined_bytes_if_equal(project, root, marker_path, marker_bytes)
-                except OutputConfinementError as error:
-                    raise ValueError("invalid event journal") from error
-                if not removed_marker:
+                if repair and not _remove_record(project, root, marker_path, marker_bytes):
                     raise ValueError("invalid event journal")
                 return result
             if marker["bytes_length"] != len(event_bytes) or marker["bytes_digest"] != "sha256:" + hashlib.sha256(event_bytes).hexdigest():
@@ -822,17 +856,7 @@ def _events_full(project: Path, root: Path) -> list[dict[str, Any]]:
             if event.get("digest") != marker["event_digest"] or event.get("seq") != marker["seq"] or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
                 raise ValueError("invalid event journal")
             _validate_event_transitions(result + [event])
-            try:
-                removed_event = remove_confined_bytes_if_equal(project, root, event_path, event_bytes)
-            except OutputConfinementError as error:
-                raise ValueError("invalid event journal") from error
-            if not removed_event:
-                raise ValueError("invalid event journal")
-            try:
-                removed_marker = remove_confined_bytes_if_equal(project, root, marker_path, marker_bytes)
-            except OutputConfinementError as error:
-                raise ValueError("invalid event journal") from error
-            if not removed_marker:
+            if repair and not (_remove_record(project, root, event_path, event_bytes) and _remove_record(project, root, marker_path, marker_bytes)):
                 raise ValueError("invalid event journal")
         elif marker["seq"] == len(result):
             committed = result[marker["seq"] - 1]
@@ -841,11 +865,7 @@ def _events_full(project: Path, root: Path) -> list[dict[str, Any]]:
             prior_event_digest = result[-2]["digest"] if len(result) > 1 else None
             if marker["run_id"] != manifest["run_id"] or marker["prior_digest"] != prior_event_digest or marker["prior_bytes_digest"] != "sha256:" + hashlib.sha256(prior_bytes).hexdigest() or marker["prior_bytes_length"] != len(prior_bytes) or marker["event_digest"] != committed["digest"] or marker["bytes_length"] != len(committed_bytes) or marker["bytes_digest"] != "sha256:" + hashlib.sha256(committed_bytes).hexdigest() or event_bytes != committed_bytes:
                 raise ValueError("invalid event journal")
-            try:
-                removed_marker = remove_confined_bytes_if_equal(project, root, marker_path, marker_bytes)
-            except OutputConfinementError as error:
-                raise ValueError("invalid event journal") from error
-            if not removed_marker:
+            if repair and not _remove_record(project, root, marker_path, marker_bytes):
                 raise ValueError("invalid event journal")
         else:
             raise ValueError("invalid event journal")
@@ -1217,7 +1237,7 @@ def model_transport_attempts_allowed(stage_instance_id: str, transport_attempts:
 
 
 def _append_event(project: Path, root: Path, event_type: str, *, actor: str, attempt_id: str | None, batch_id: str | None, artifact_digest: str | None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> dict[str, Any]:
-    events = _events(project, root) if (root / "events.jsonl").exists() else []
+    events = _events(project, root, repair=True) if (root / "events.jsonl").exists() else []
     manifest, _receipt = _run_boundary(project, root)
     if event_type == "MODEL_RESPONSE_RECEIVED" and transport_attempts is None:
         transport_attempts = 1
@@ -1370,7 +1390,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
                 raise _PublicationUnknown("event publication rollback is incomplete") from cleanup_error
             if not removed:
                 raise _PublicationUnknown("event publication rollback is incomplete") from error
-        raise ValueError("event publication failed") from error
+        raise run_lock.JournalRefusal("PUBLICATION_UNKNOWN", "event publication failed") from error
     return event
 
 

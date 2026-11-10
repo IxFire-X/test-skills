@@ -127,11 +127,14 @@ def input_file(value: str | Path, project: Path | None, *, base: Path | None = N
 def existing_run(run_root: object) -> tuple[Path, Path]:
     """``(project, run)`` of a run that exists: ``<project>/.pilot-runs/<id>`` with its ``run-manifest.json``."""
     from tools import pilot_state
+    from tools.run_lock import JournalRefusal
 
     if not local_path_text(str(run_root)):
         raise OutputRefused(OUT_CODE, "--run-root must name an existing run: <project>/.pilot-runs/<run_id>/", OUT_FIX)
     try:
         project, run = pilot_state._run_root(Path(str(run_root)))
+    except JournalRefusal:  # a busy run is no wrong --run-root
+        raise
     except (ValueError, OSError, TypeError):
         raise OutputRefused(OUT_CODE, "--run-root must name an existing run: <project>/.pilot-runs/<run_id>/", OUT_FIX) from None
     if not (run / "run-manifest.json").is_file():

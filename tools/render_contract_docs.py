@@ -12,6 +12,8 @@ from tools.json_cli import JsonArgumentParser
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 RUNTIME_SIGNATURE_ORDER = ("create_run", "append_event", "create_attempt", "derive_state", "terminal_result", "exit_code")
 RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", "reason_code", "accepted")
+DURABILITY = ("A run recovers after the process of a command is cut off: the next command finishes or rolls back the half-written record of the journal. "
+              "A crash of the operating system and a power loss are not promised.")
 POLICY_ORDER = ("cases-only-v1", "local-pilot-v1")
 ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
 STAGE_ORDER = ("orchestrate", "context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
@@ -66,6 +68,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
         f"- core-pilot N/A: `{', '.join(release['not_applicable'])}`",
     ])
     pipeline.append("")
+    contracts.extend(["", "## Durability", "", DURABILITY])
     return {contract["projections"]["contracts"]: "\n".join(contracts), contract["projections"]["pipeline"]: "\n".join(pipeline)}
 
 

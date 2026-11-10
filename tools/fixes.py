@@ -275,6 +275,9 @@ FIXES: dict[str, str] = {
     "MATERIALIZE_RESTORE_NOTHING": "тесты ещё не положены в проект: `materialize` без --restore",
     "MATERIALIZATION_COMMAND_UNBOUND": "файл команды materialize лежит без событий журнала: повторите `materialize` с теми же аргументами",
     # --- the refusals of the cases-only path that had no fix ---
+    "CONCURRENT_WRITER": "с этим прогоном работает другая команда: повтори свою через несколько секунд; команды одного прогона не запускай параллельно",
+    "JOURNAL_CORRUPT": "журнал прогона повреждён: начни новый прогон (`scan --new-run`); этот прогон не правь и не удаляй — он нужен для разбора",
+    "PUBLICATION_UNKNOWN": "исход записи в журнал неизвестен: повтори ту же команду с теми же входами один раз, затем `status` — он покажет, что записано",
     "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и --attempt (`status` называет попытку) и входные файлы команды; "
                      "повтори с исправленными аргументами",
     "GENERATOR_INPUT_INVALID": "`publish-generator-input` берёт `--kind plan|header` и `--value` — JSON-объект; план без пачек не публикуется: "
