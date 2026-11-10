@@ -354,7 +354,6 @@ WRITES_OUTSIDE_CONFINED_OUTPUT = {
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),
     "init_skillsrc.py": (3, "the .skillsrc of the project and its evidence copies, the project given by --project (confined target)"),
-    "exec_commands.py": (1, "the reports of the human's build: below <run>/ after the run name is checked"),
     "run_report.py": (3, "report.md/json below <run>/ (link install of a temporary file next to it)"),
 }
 
