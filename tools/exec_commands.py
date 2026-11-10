@@ -580,10 +580,13 @@ def _changed_files(coordinates: Mapping[str, Any], printed: Mapping[str, Any]) -
 def _restore_files(coordinates: Mapping[str, Any], printed: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     """``materialize --restore``: write again, from the reviewed answer of the journal, each file that is not as materialize wrote it —
     only when the bytes of the answer are the digest materialize recorded.  (restored, not restorable)"""
+    from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, read_confined_bytes
     from tools.generated_delta import journal_automation
+    from tools.pilot_state import read_attempt_receipt
 
     root, attempt_id = Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])
     module_root, project = Path(coordinates["module_root"]).resolve(), Path(coordinates["manifest"]["project"])
+    anchor = module_root / read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]["test_root"]  # as materialize
     inputs = journal_automation(root, attempt_id)
     answered = {row["path"]: row for row in inputs["automation"]["artifacts"]["generated_files"]} if inputs else {}
     wanted = {path: digest for path, digest in _changed_files(coordinates, printed)}
@@ -595,12 +598,15 @@ def _restore_files(coordinates: Mapping[str, Any], printed: Mapping[str, Any]) -
             continue
         content = answered.get(row["path"], {}).get("content")
         data = content.encode("utf-8") if isinstance(content, str) else None
-        safe = target.resolve().is_relative_to(module_root) and not (target.exists() and _link(target)) and target.parent.is_dir() and not _link(target.parent)
-        if data is None or not safe or "sha256:" + hashlib.sha256(data).hexdigest() != row["content_digest"]:
+        if data is None or not target.parent.is_dir() or "sha256:" + hashlib.sha256(data).hexdigest() != row["content_digest"]:
             stuck.append(shown)
             continue
-        target.write_bytes(data)
-        restored.append(shown)
+        try:  # the writer of materialize: every directory from the project down is checked, a temporary file is replaced in
+            atomic_write_confined_bytes_at_root(project, anchor, target, data)
+            written = read_confined_bytes(project, anchor, target) == data
+        except (OSError, OutputConfinementError):
+            written = False
+        (restored if written else stuck).append(shown)
     return restored, stuck
 
 

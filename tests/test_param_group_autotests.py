@@ -90,6 +90,7 @@ def test_an_unnamed_method_source_uses_the_method_s_own_name() -> None:
     _class(METHOD.replace('"[{index}] {0}"', '"{0}"'), VALID),
     # a comment or a text block inside the provider is not a literal row
     _class(METHOD, VALID.replace("return", "// rows\n    return")),
+    _class(METHOD, VALID.replace("return", 'String note = """\n      Arguments.of("TC-B1-001", 1)\n      """;\n    return')),
 ])
 def test_anything_but_literal_rows_is_refused(text: str) -> None:
     assert _rows(text) is None

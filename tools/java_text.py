@@ -14,6 +14,9 @@ def mask_java_noncode(text: str, *, keep_quotes: bool = False) -> str:
                 result[index:index + 2] = "  "; index += 2; state = "line"; continue
             if text.startswith("/*", index):
                 result[index:index + 2] = "  "; index += 2; state = "block"; continue
+            if text.startswith('"""', index):
+                if not keep_quotes: result[index:index + 3] = "   "
+                index += 3; state = "text_block"; escaped = False; continue
             if char == '"': result[index] = '"' if keep_quotes else " "; state = "string"; escaped = False
             elif char == "'": result[index] = " "; state = "char"; escaped = False
         elif state == "line":
@@ -22,6 +25,12 @@ def mask_java_noncode(text: str, *, keep_quotes: bool = False) -> str:
         elif state == "block":
             if text.startswith("*/", index): result[index:index + 2] = "  "; index += 1; state = "code"
             elif char != "\n": result[index] = " "
+        elif state == "text_block":
+            if not escaped and text.startswith('"""', index):
+                if not keep_quotes: result[index:index + 3] = "   "
+                index += 3; state = "code"; continue
+            escaped = not escaped and char == "\\"
+            if char != "\n": result[index] = " "
         else:
             if char == "\n": state = "code"
             elif escaped: result[index] = " "; escaped = False
