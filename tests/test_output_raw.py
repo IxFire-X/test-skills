@@ -66,6 +66,8 @@ def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path
     # V9a: the raw size is the agent's measurement (a file the journal does not bind): the report prints it apart and judges by the stored answer
     assert answered and all(call["output_raw_bytes"] == raw_by_digest[call["response_digest"]] for call in answered)
     assert all(call["output_basis"] == "compact" and call["output_bytes"] <= call["output_raw_bytes"] for call in answered)
+    markdown = (run_root / "report.md").read_text(encoding="utf-8")  # the table shows what the model wrote, not the stored answer
+    assert all(f"| {call['output_raw_bytes']}" in markdown for call in answered)
 
 
 def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: Path) -> None:
@@ -79,6 +81,27 @@ def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: 
     write_report(tmp_path, run_root.name)
     calls = [call for call in json.loads((run_root / "report.json").read_text(encoding="utf-8"))["model_calls"] if call["response_digest"]]
     assert calls and all(call["output_basis"] == "compact" for call in calls)
+
+
+def test_the_report_totals_the_model_calls_and_prints_the_raw_answer_size(tmp_path: Path) -> None:
+    from tests.test_automation_revision_budget import automated_document
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_self_review import _run
+    from tools.run_report import write_report
+    from tools.step_size import TOKENS_PER_BYTE
+
+    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
+    _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
+    write_report(tmp_path, run_root.name)
+    report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
+    calls, totals = [call for call in report["model_calls"] if call["by"] == "model"], report["model_totals"]
+    assert totals["calls"] == len(calls) > 0
+    assert totals["input_bytes"] == sum(call["input_bytes"] + call["role_bytes"] for call in calls)
+    assert totals["input_tokens_est"] == sum(call["tokens_est"] for call in calls)
+    assert totals["output_bytes"] == sum(call["output_raw_bytes"] or call["output_bytes"] or 0 for call in calls)
+    assert totals["output_tokens_est"] == sum(call["output_tokens_est"] for call in calls)
+    assert all(call["output_tokens_est"] == round((call["output_raw_bytes"] or call["output_bytes"]) * TOKENS_PER_BYTE) for call in calls)
+    assert "| Итого по прогону |" in (run_root / "report.md").read_text(encoding="utf-8")
 
 
 def _in_run(tmp_path: Path, path: Path) -> tuple[Path, Path]:

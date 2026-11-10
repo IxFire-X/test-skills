@@ -50,7 +50,7 @@ def _open(run: dict, monkeypatch: pytest.MonkeyPatch, seed: bool = True, invocat
 
     if seed:
         monkeypatch.setattr(review_canaries, "seed", _fake_seed)
-    return review_open_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["project"] / "bundles", model_id="model-reviewer",
+    return review_open_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["run_root"] / "published", model_id="model-reviewer",
                             invocation_id=invocation, fresh_context=fresh)
 
 
@@ -82,7 +82,7 @@ def _finding(severity: str, related: list[str], message: str = "Контроль
 def _select(run: dict, answer: dict, **extra) -> dict:
     from tools.orchestrate_test_case_revision import review_select_step
 
-    return review_select_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["project"] / "bundles", verdict=answer, **extra)
+    return review_select_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["run_root"] / "published", verdict=answer, **extra)
 
 
 def _events(run_root: Path) -> list[dict]:
@@ -218,8 +218,11 @@ def test_review_open_seeds_the_view_binds_it_and_leaves_the_canon_and_the_bundle
     # the view shows the mutated text, the canon and the published bundle keep the original
     mutated_text = candidate["test_cases"][0]["steps"][0]["expectations"][0]["text"] + " 6"
     assert mutated_text in view.read_text(encoding="utf-8")
-    bundle = b"".join(path.read_bytes() for path in (run["project"] / "bundles").rglob("*") if path.is_file())
-    assert mutated_text.encode("utf-8") not in bundle and document_sha256(candidate) == receipt["candidate_digest"]
+    from tools.publish_test_case_bundle import build_bundle
+
+    built = build_bundle(candidate)  # the set `select` publishes is built from the canon; before the verdict no file exists
+    assert not list((run["run_root"] / "published").rglob("*.json"))
+    assert mutated_text.encode("utf-8") not in built.json_bytes + built.preview_bytes + built.csv_bytes and document_sha256(candidate) == receipt["candidate_digest"]
     assert review_canaries.verify(*_flags(run)) == json.loads(mapped.read_bytes())["canaries"]
 
 
@@ -560,7 +563,7 @@ def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_can
 
     run = _generated_run(tmp_path)
     candidate = journal_assembly(*_flags(run))[0]
-    publish_command(candidate, run["project"] / "bundles", _PROFILE, run_root=run["run_root"], attempt_id=run["attempt_id"])
+    publish_command(candidate, run["run_root"] / "published", _PROFILE, run_root=run["run_root"], attempt_id=run["attempt_id"])
     digest = document_sha256(candidate)
     plain_view, empty_map = render(candidate), review_canaries.map_bytes(digest, [])
     (run["run_root"] / "review-views").mkdir(parents=True, exist_ok=True)

@@ -19,7 +19,7 @@ from tools.canonical_document import CanonicalDocumentError, canonical_bytes, do
 from tools.fixes import FIXES
 from tools import output_guard
 from tools.json_cli import error_code_prefix, error_envelope
-from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
+from tools.publish_test_case_bundle import Receipt, planned_receipt, publish_bundle, status_payloads, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
@@ -662,21 +662,19 @@ def publish_unreviewed_candidate(
     *,
     run_root: Path,
     attempt_id: str,
-    publisher=publish_bundle,
-    verifier=verify_bundle,
 ) -> Receipt:
+    """Record the candidate and give its receipt; no file is written — ``published/`` holds only the outcome of the review."""
     value = _plain(candidate); require_valid_canonical_document(value)
     from tools.pilot_state import append_event, derive_state
 
-    # the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is
-    # refused as before — now before any bundle file is written
+    # the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is refused as before
     digest = document_sha256(value)
     recorded = [str(event.get("artifact_digest")) for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
                 and event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
     if recorded and recorded[0] != digest:
         raise ValueError(f"assembled candidate already published: {recorded[0]}, not {digest}")
-    receipt = publisher(value, output_dir, csv_profile)
-    if _receipt_rows(receipt, value, output_dir, csv_profile) or verifier(value, output_dir, csv_profile) != receipt:
+    receipt = planned_receipt(value, output_dir, csv_profile)
+    if _receipt_rows(receipt, value, output_dir, csv_profile):
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
     if not recorded:
         append_event(
@@ -685,6 +683,38 @@ def publish_unreviewed_candidate(
             artifact_digest=digest,
         )
     return _receipt_copy(receipt)
+
+
+def write_status_files(run_root: Path, document: Mapping[str, Any], output_dir: str | os.PathLike[str], csv_profile: str, status: str,
+                       notes: Sequence[str] = ()) -> list[str]:
+    """``<doc>.rN.REJECTED|UNREVIEWED.html/.md`` — a set that is not accepted, with its header, never a CSV; created once below the run,
+    the same bytes again are accepted, nothing is replaced or removed."""
+    from tools.confined_output import create_confined_bytes_exclusive
+
+    root = Path(run_root).resolve(strict=True)  # <project>/.pilot-runs/<run>; the confinement refuses a target outside it
+    project = root.parent.parent
+    base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}.{status}"
+    paths = []
+    for suffix, data in status_payloads(dict(document), csv_profile, status, notes):
+        create_confined_bytes_exclusive(project, root, base.with_name(f"{base.name}.{suffix}"), data)
+        paths.append(str(base.with_name(f"{base.name}.{suffix}")))
+    return paths
+
+
+def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
+    """A run closed before the reviewer's verdict (``review-abort``, an answer that could not be used): the status file UNREVIEWED
+    in ``<run>/published``, unless the review ended in an effective document or a REJECTED set.  Called by ``finish``."""
+    from tools.pilot_state import read_effective_canonical_if_present
+
+    published = Path(run_root) / "published"
+    try:
+        candidate = journal_assembly(Path(run_root), attempt_id)[0]
+    except (KeyError, OSError, TypeError, ValueError):
+        return []  # nothing was assembled: there is no set to mark
+    name = f"{candidate['document_id']}.r{candidate['revision']}.REJECTED.md"
+    if read_effective_canonical_if_present(Path(run_root), attempt_id) or any(published.rglob(name)):
+        return []
+    return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED")
 
 
 def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
@@ -784,14 +814,14 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     except CanonicalDocumentError as error:
         raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_CANDIDATE")) from None
     rows = _receipt_rows(candidate_receipt, candidate_value, output_dir, csv_profile)
-    if rows or verifier(_plain(candidate_value), output_dir, csv_profile) != candidate_receipt:
+    if rows or planned_receipt(_plain(candidate_value), output_dir, csv_profile) != candidate_receipt:  # no file before the verdict
         raise OrchestrationError("ORCHESTRATION_RECEIPT", rows or [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
     candidate_receipt = _receipt_copy(candidate_receipt)
     if review_value is None:
         facts = validate_reviewer_session(reviewer_session, package_binding, None, run_root=run_root, attempt_id=attempt_id, evidence_receipts=reviewer_evidence_receipts)
         if facts.get("attempt_state") == "WAITING_FOR_MODEL":
             return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "WAITING_FOR_MODEL", _freeze(facts), ())
-        if facts.get("completion") == "PARTIAL":
+        if facts.get("completion") == "PARTIAL":  # closed without a verdict: ``finish`` leaves the UNREVIEWED file
             return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, str(facts.get("reason_code", "REWORK")), _freeze(facts), ())
         raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/review_artifact", "REVIEWER_PROTOCOL")], candidate_receipt)
     # every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
@@ -810,22 +840,27 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     if not facts["acceptance_eligible"]:
         raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag("/reviewer_session", "INDEPENDENCE_UNVERIFIED")], candidate_receipt)
     successor_receipt = None
-    if verdict == "AUTO_FIX_APPLIED" and not dry_run:
+    if verdict != "ТРЕБУЕТ ДОРАБОТКИ" and not dry_run:  # the accepted set — the files of the bundle, the import CSV among them — is written now
         try:
-            published_successor = publisher(_plain(effective), output_dir, csv_profile)
+            published_set = publisher(_plain(effective), output_dir, csv_profile)
         except Exception:
             raise OrchestrationError("ORCHESTRATION_PUBLICATION", [_diag("", "ORCHESTRATION_PUBLICATION")], candidate_receipt) from None
-        successor_receipt = _receipt_copy(published_successor) if type(published_successor) is Receipt else None
-        rows = _receipt_rows(published_successor, effective, output_dir, csv_profile)
+        if verdict == "AUTO_FIX_APPLIED":
+            successor_receipt = _receipt_copy(published_set) if type(published_set) is Receipt else None
+        rows = _receipt_rows(published_set, effective, output_dir, csv_profile)
         if rows:
             raise OrchestrationError("ORCHESTRATION_RECEIPT", rows, candidate_receipt, successor_receipt) from None
     if verdict == "ТРЕБУЕТ ДОРАБОТКИ":
+        if not dry_run:  # the rejected set with the blocking findings beside it — what the person has after a rejection
+            blocking = [f"{row.get('code', '—')} ({', '.join(map(str, row.get('related_ids') or [])) or '—'}): {row.get('message', '')}"
+                        for row in report.get("findings") or [] if row.get("severity") == "BLOCKING"]
+            write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", blocking)
         rework_facts = {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": "REWORK", "accepted": False, "reviewer_session_digest": facts["reviewer_session_digest"]}
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK", _freeze(rework_facts), ())
     if dry_run and verdict == "AUTO_FIX_APPLIED":  # the successor is not published: its bundle is checked when it is
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", _freeze(successor), None, _freeze(effective), None, "EFFECTIVE_SELECTED", _freeze({"reviewer_session_digest": facts["reviewer_session_digest"]}), ())
     try:
-        verified = verifier(_plain(effective), output_dir, csv_profile)
+        verified = planned_receipt(_plain(effective), output_dir, csv_profile) if dry_run else verifier(_plain(effective), output_dir, csv_profile)  # a dry run has no files to read
     except Exception:
         raise OrchestrationError("ORCHESTRATION_VERIFICATION", [_diag("", "ORCHESTRATION_VERIFICATION")], candidate_receipt, successor_receipt) from None
     rows = _receipt_rows(verified, effective, output_dir, csv_profile)
@@ -863,7 +898,7 @@ def _readback_rows(receipt: Any, document: Mapping[str, Any]) -> list[dict[str, 
     if len({path.parent.resolve() for path in paths}) != 1:
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     try:
-        verified = verify_bundle(dict(document), paths[0].parent, receipt.csv_profile)
+        verified = planned_receipt(dict(document), paths[0].parent, receipt.csv_profile)
     except Exception:
         return [_diag("/receipt", "ORCHESTRATION_PUBLICATION_READBACK")]
     return [] if verified == receipt else [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")]
@@ -1070,25 +1105,31 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
             "model_request": dict(request), "reviewer_view": str(view["path"]),
             "canaries": {"seeded": view["canaries"], "note": "канарейки — сигнал качества ревью, не защита; классы и кейсы здесь не печатаются"},
             "next_step": f"ревьюер читает пакет и отвечает; затем {select_command}",
-            "for_human": human_instruction(run_root, view["path"], select_command)}
+            "for_human": human_instruction(run_root, view["path"], select_command, fresh)}
         if published is not None:
             result.update(candidate_bundle_receipt=published["candidate_bundle_receipt"], questions_for_analyst=published["questions_for_analyst"],
                           warnings=published["warnings"])
         return result
 
 
-def human_instruction(run_root: Path, view: Path | str, select_command: str) -> str:
-    """What a person does to have the review made in a fresh session.  Printed text only — the model is not started here."""
+def human_instruction(run_root: Path, view: Path | str, select_command: str, fresh: bool = True) -> str:
+    """What a person does to have the review made: INDEPENDENT (``fresh``) in a new session, SELF in this one.  Printed text only."""
     from tools.run_pipeline import printed_or
 
     run_id = Path(run_root).name
     answer = Path(run_root) / "tmp" / "reviewer-answer.json"
+    codeword = ("В ответе поле codeword_seen: контрольное слово из задачи генератора, если оно есть в контексте "
+                "сессии, иначе null (слово не названо — признак свежего контекста, не доказательство).")
+    select = select_command.replace("<файл ответа ревьюера>", printed_or(answer, "<файл ответа ревьюера>"))
+    if not fresh:
+        return ("Ревью кейсов в этой же сессии (SELF; результат не называется независимым):\n"
+                f"1. Новую сессию не открывай. Прочти вид кейсов {view}, проверь кейсы по требованиям и запиши ответ в {answer}. {codeword}\n"
+                f"2. Выполни: {select}")
     return ("Ревью кейсов в свежей сессии (руками):\n"
             "1. Открой новую сессию GigaCode или выполни /clear: в ней не должно быть истории генерации этого прогона.\n"
             f"2. Вставь в неё: «проведи ревью test-skills {run_id}». Модель прочтёт вид кейсов {view}, проверит кейсы по требованиям "
-            f"и запишет ответ в {answer}. В ответе поле codeword_seen: контрольное слово из задачи генератора, если оно есть в контексте "
-            "сессии, иначе null (слово не названо — признак свежего контекста, не доказательство).\n"
-            f"3. Вернись в рабочую сессию и выполни: {select_command.replace('<файл ответа ревьюера>', printed_or(answer, '<файл ответа ревьюера>'))}")
+            f"и запишет ответ в {answer}. {codeword}\n"
+            f"3. Вернись в рабочую сессию и выполни: {select}")
 
 
 def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1184,7 +1225,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     """The seven reviewer-package inputs of the attempt, read from the journal (only reads).
 
     candidate and assembly receipt — ``assemble_candidate`` over the published plan, header and the tc-generator answers
-    (the bytes ``tools.api assemble`` gave); candidate receipt — ``verify_bundle`` of that candidate in ``output_dir``;
+    (the bytes ``tools.api assemble`` gave); candidate receipt — ``planned_receipt`` of that candidate for ``output_dir``;
     inventory — the attempt baseline's; context receipts — the package's when a session is open, else every receipt the
     attempt published; marker — the context-marker:baseline answer.  A value in ``given`` (a file the agent passed) is
     compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
@@ -1192,8 +1233,6 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     from tools.batch_assembly import BatchAssemblyError
     from tools.pilot_state import derive_state, frozen_baseline, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
-    from tools.publish_test_case_bundle import verify_bundle
-
     given = {key: value for key, value in (given or {}).items() if value not in (None, [])}
     root = Path(run_root)
     project, resolved = _run_root(root)
@@ -1233,8 +1272,8 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     candidate = journal.get("candidate", given.get("candidate"))
     if output_dir is not None and candidate is not None:
         try:
-            journal["candidate_receipt"] = verify_bundle(_plain(candidate), output_dir, csv_profile)
-            sources["candidate_receipt"] = f"проверка опубликованного bundle в {output_dir}"
+            journal["candidate_receipt"] = planned_receipt(_plain(candidate), output_dir, csv_profile)
+            sources["candidate_receipt"] = f"расчёт bundle кандидата для {output_dir} (файлов до вердикта нет)"
         except (OSError, ValueError) as error:
             missing["candidate_receipt"] = f"bundle кандидата в {output_dir} не проверен ({error})"
     else:

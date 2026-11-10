@@ -29,7 +29,7 @@ _RENAMED = {name: {"code": "COMMAND_RENAMED", "message": f"tools.api {new}"}
 def main(argv: list[str] | None = None) -> int:
     parser = _Parser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    publish = commands.add_parser("publish", help="Publish and read back revision 1 as UNREVIEWED.")
+    publish = commands.add_parser("publish", help="Record revision 1 and give its receipt (no file before the verdict).")
     publish.add_argument("--candidate", required=True, type=Path)
     publish.add_argument("--output-dir", required=True, type=Path)
     publish.add_argument("--run-root", required=True, type=Path)

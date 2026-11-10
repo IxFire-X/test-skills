@@ -1,6 +1,6 @@
 ---
 name: tc-reviewer
-description: Use when a complete canonical test-case candidate requires one fresh role-isolated review session, a bounded evidence retrieval, an effective selection, or rework.
+description: Use when a complete canonical test-case candidate requires one review session (INDEPENDENT: fresh and role-isolated; SELF: the same session, never called independent), a bounded evidence retrieval, an effective selection, or rework.
 permissions:
   read: "step inputs from the controller"
   write: "role answer in <run>/tmp/ only"
@@ -18,9 +18,9 @@ Read the candidate through its compact view `review-views/<sha>.md` (`python -m 
 
 ## Session boundary
 
-There is exactly one fresh, role-isolated reviewer session for the whole canonical branch. The controller first publishes and reads back revision 1 as `UNREVIEWED`, constructs the exact package binding, then owns the separate session ledger: `REVIEW_SESSION_STARTED`, zero or more bounded `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` pairs, one `AUTHORITATIVE_VERDICT`, then `REVIEW_SESSION_COMPLETED`; an explicit pre-verdict abort such as `REVIEW_CONTEXT_LIMIT` is the only terminal zero-verdict path. The model output never contains the session ledger. Do not create per-batch, hierarchical, or second reviewer sessions. Do not use generator dialogue or reasoning.
+There is exactly one reviewer session for the whole canonical branch, in one of two branches. `INDEPENDENT`: a fresh, role-isolated session with its own invocation and no generation history. `SELF`: the same session, no new one is required, only in a run that admitted it (`scan --accept-self-review`); its result is never called independent. The controller first records revision 1 (no file is written before the verdict; the accepted set is published after it), constructs the exact package binding, then owns the separate session ledger: `REVIEW_SESSION_STARTED`, zero or more bounded `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` pairs, one `AUTHORITATIVE_VERDICT`, then `REVIEW_SESSION_COMPLETED`; an explicit pre-verdict abort such as `REVIEW_CONTEXT_LIMIT` is the only terminal zero-verdict path. The model output never contains the session ledger. Do not create per-batch, hierarchical, or second reviewer sessions. Do not use generator dialogue or reasoning.
 
-Request only permitted C-lite evidence from the immutable inventory. Each request and provided evidence binds the immutable candidate/package digest and stays within the controller context budget. Same-model review is allowed only with distinct invocation IDs, fresh context, reviewer role policy, and host isolation evidence; otherwise report `independence_unverified` and do not claim acceptance.
+Request only permitted C-lite evidence from the immutable inventory. Each request and provided evidence binds the immutable candidate/package digest and stays within the controller context budget. `INDEPENDENT` needs distinct invocation IDs, fresh context, reviewer role policy, and host isolation evidence. Without them the review is `SELF`: `independence_unverified`, acceptable only in a run that admitted SELF, never called independent.
 
 The authoritative verdict selects or rejects canonical content only. It does not set the
 attempt's terminal `accepted`, materialize files, execute code, or bypass the later trace

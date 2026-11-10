@@ -259,7 +259,7 @@ Requirements детерминированно разбиваются на batche
 Каждый source requirement получает provenance и digest, затем many-to-many mapping к
 canonical requirements, cases, steps, assertions, symbols и execution evidence.
 
-Candidate revision 1 немедленно публикуется как `UNREVIEWED` и читается обратно.
+Candidate revision 1 записывается в журнал с расчётной квитанцией; в `published/` до вердикта файлов нет — набор (с CSV для импорта) появляется после принятия, после отказа остаётся `*.REJECTED.html/.md`.
 После этого открывается одна fresh role-isolated reviewer session для полного canonical
 branch. Внутри неё допустимы bounded C-lite evidence requests, но:
 

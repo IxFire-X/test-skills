@@ -1,4 +1,4 @@
-"""A run report without project code or case texts (what may leave — by the company's rules), and the analyst questions of the run (only reads the journal).
+"""A run report without project code or case texts, and the analyst questions of the run (only reads the journal).
 
 ``python -m tools.run_pipeline report --project <abs> --run <id>`` writes ``report.md``, ``report.json`` and
 ``questions-for-analyst.md`` into the run directory.  The report holds step names, times, sizes, counts and codes;
@@ -266,6 +266,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     # the raw size is the agent's measurement (a file nothing in the journal binds): printed as such, never the ground of a warning —
     # STEP_OUTPUT_LARGE is judged by the stored answer, whose bytes the journal seals
     call["output_raw_bytes"] = raw
+    call["output_tokens_est"] = None if (raw or answer) is None else round((raw or answer) * TOKENS_PER_BYTE)  # what the model wrote, as the input is counted
     call["output_basis"] = None if answer is None else "compact"
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer, limits) is not None)
     role = str(call["stage"]).split(":", 1)[0]
@@ -901,7 +902,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "duration_sec": _seconds(events[0].get("observed_at"), events[-1].get("observed_at")) if events else None,
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
-        "model_calls": calls, "step_sizes": measured,
+        "model_calls": calls, "model_totals": model_totals(calls), "step_sizes": measured,
         "phases": phases(events), "input_composition": composition, "refusals": refused, "canon": canon_numbers(document),
         "tmp": tmp_usage(root, project),
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
@@ -955,6 +956,16 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }
     return report, list(status.get("warnings") or [])
+
+
+def model_totals(calls: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """The calls a model made, summed: the bytes it read and wrote and the estimates in tokens (the answer by the bytes it wrote)."""
+    made = [call for call in calls if call.get("by") == "model"]
+    return {"calls": len(made),
+            "input_bytes": sum(int(call.get("input_bytes") or 0) + int(call.get("role_bytes") or 0) for call in made),
+            "input_tokens_est": sum(int(call.get("tokens_est") or 0) for call in made),
+            "output_bytes": sum(int(call.get("output_raw_bytes") or call.get("output_bytes") or 0) for call in made),
+            "output_tokens_est": sum(int(call.get("output_tokens_est") or 0) for call in made)}
 
 
 def _size_cell(call: Mapping[str, Any]) -> str:
@@ -1066,6 +1077,7 @@ def _canary_lines(report: Mapping[str, Any]) -> list[str]:
 
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
+    totals = report.get("model_totals") or model_totals(report["model_calls"])
     lines = [
         f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
         f"- Профиль: {report['policy_profile']}", *([f"- {_test_level_line(report['test_level'])}"] if report.get("test_level") else []),
@@ -1079,11 +1091,14 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *(f"- {key}: {_dash(value)}" for key, value in counts.items()),
         *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
-        "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа |", "|---|---|---|---|---|---|---|---|---|",
+        "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа | Токены ответа (оценка) |", "|---|---|---|---|---|---|---|---|---|---|",
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
           f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') in ('code', 'reuse') else _dash(c.get('fits'))} | "
-          f"{_dash(c.get('output_bytes'))}{' (большой)' if c.get('output_large') else ''} |"
-          for c in report["model_calls"]), "",
+          f"{_dash(c.get('output_raw_bytes') if c.get('output_raw_bytes') is not None else c.get('output_bytes'))}{' (большой)' if c.get('output_large') else ''} | "
+          f"{_dash(c.get('output_tokens_est'))} |"
+          for c in report["model_calls"]),
+        f"| Итого по прогону | вызовов модели {totals['calls']} | | | {totals['input_bytes']} | {totals['input_tokens_est']} | | | "
+        f"{totals['output_bytes']} | {totals['output_tokens_est']} |", "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
         *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),

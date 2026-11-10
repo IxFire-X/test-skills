@@ -1963,6 +1963,9 @@ def cmd_finish(args: Any) -> int:
         raise HostStop("FINISH_FACT_UNDETERMINED", f"the started execution has no receipt yet ({error})", _INTERRUPTED_FIX) from error
     result = closed["result"]
     manifest = run["manifest"]
+    from tools.orchestrate_test_case_revision import close_without_verdict
+
+    unreviewed = close_without_verdict(root, attempt_id)  # a run closed before the verdict leaves the UNREVIEWED file, never a CSV
     _print({
         "status": "ok", "stage": "finish", "run_id": manifest["run_id"], "attempt_id": attempt_id,
         "branch": "execution" if executed else "no-execution", "idempotent": bool(closed.get("idempotent")),
@@ -1971,6 +1974,7 @@ def cmd_finish(args: Any) -> int:
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
         **({"materialization_refusal": refusal} if refusal else {}),
+        **({"unreviewed_files": unreviewed} if unreviewed else {}),
         **_quarantine_summary(root, attempt_id),
         **_review_notes_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),

@@ -24,7 +24,7 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api read-context`, `tools.api publish-generator-input` (header, plan), `tools.api plan-batches` | independent plan и current receipt без truncation |
 | Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`, пачки по очереди; `tools.api validate-fragment`, с пачки 2 `tools.api prior-capabilities` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
-| Сборка | `tools.api assemble`, `tools.api review-publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
+| Сборка | `tools.api assemble`, `tools.api review-publish` | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
 | Canonical review | `tools.api review-open` (пакет и запрос проверяющего записаны до его вызова); вызов `tc-reviewer`; `tools.api review-select --verdict <ответ>`; при нужде `tools.api review-evidence`, `tools.api review-abort`, `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
 | Выбор | `review-select` (последняя команда ревью), затем `tools.api read-effective` | immutable selected document и receipt |
 | Закрытие | `tools.run_pipeline finish` | trace/finalization/terminal |
@@ -65,8 +65,8 @@ Inventory учитывает файлы выбранного модуля, paren
    `MODEL_REQUESTED` ссылается на этот envelope до вызова, затем следует
    `MODEL_RESPONSE_RECEIVED`. Каждый generator fragment немедленно получает
    `CANDIDATE_PUBLISHED`.
-6. Собери/audit bare canonical JSON; опубликуй revision 1 как `UNREVIEWED` с exact V4
-   bundle receipt и `CANDIDATE_PUBLISHED` stage `assembly`.
+6. Собери/audit bare canonical JSON; запиши revision 1: exact V4 bundle receipt (расчётный) и
+   `CANDIDATE_PUBLISHED` stage `assembly`. Файлов в `published/` до вердикта нет.
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
    candidate digest получает `REVIEW_REQUESTED` (его пишет `tools.api review-open`) до reviewer `MODEL_REQUESTED`;

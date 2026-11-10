@@ -38,6 +38,7 @@ def _reviewer_protocol_inputs(
     findings: list | None = None,
 ):
     from tools.canonical_document import document_sha256
+    from tools.publish_test_case_bundle import publish_bundle
     from tools.orchestrate_test_case_revision import (
         open_reviewer_session,
         publish_unreviewed_candidate,
@@ -142,6 +143,7 @@ def _reviewer_protocol_inputs(
         document, bundle_root or run_root / "candidate-bundle",
         run_root=run_root, attempt_id=attempt_id,
     )
+    publish_bundle(document, bundle_root or run_root / "candidate-bundle")  # the fixture's review accepts: the set is on disk, as select leaves it
     isolation = {"fresh_context": fresh_context, "distinct_invocations": True, "role_policy": "canonical-reviewer-v1"}
     isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     start = {

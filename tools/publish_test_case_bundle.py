@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
+import re
 import sys
 import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, require_valid_canonical_document
 from tools.schema_validation import classify_version
@@ -277,6 +279,33 @@ def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str],
             cleanup_failed = not _unlink_current(temporary) or cleanup_failed
         if cleanup_failed and sys.exc_info()[0] is None:
             raise BundlePublicationError("TARGET_INSTALL_FAILED") from None
+
+
+def planned_receipt(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE) -> Receipt:
+    """The receipt of the bundle ``publish_bundle`` writes once the set is accepted — computed, nothing read or written."""
+    bundle = build_bundle(document, csv_profile, _allow_historical=True)
+    targets = _targets(document, _resolved_output_directory(output_dir, create=False), csv_profile)
+    return _receipt(document, csv_profile, targets, tuple(payload for _label, payload in _payloads(bundle)[:3]))
+
+
+_STATUS_HEADERS = {"REJECTED": "ОТКЛОНЁН РЕВЬЮЕРОМ", "UNREVIEWED": "НЕ ПРОВЕРЕН РЕВЬЮЕРОМ"}
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]()#|>~])")
+
+
+def status_payloads(document: dict[str, Any], csv_profile: str, status: str, notes: Sequence[str] = ()) -> tuple[tuple[str, bytes], ...]:
+    """The ``.html`` and ``.md`` of a set that is not accepted, with a header that says so: ``(suffix, bytes)``.  Never a CSV.
+    The notes are model text: HTML-escaped, one line each, markdown signs escaped — they cannot reach the markup around them."""
+    title = f"{_STATUS_HEADERS[status]} — не импортировать в Zephyr"
+    lines = [" ".join(html.escape(note).split()) for note in notes]
+    header_html = ('<div style="border:3px solid #b00;background:#fee;padding:1rem;margin:0 0 1.5rem"><strong>' + title + "</strong>"
+                   + ("<ul>" + "".join(f"<li>{line}</li>" for line in lines) + "</ul>" if lines else "") + "</div>")
+    header_md = f"> **{title}**\n" + "".join("> - " + _MARKDOWN_SPECIAL.sub(lambda m: "\\" + m.group(1), line) + "\n" for line in lines) + "\n"
+    _validate_once(document, csv_profile)
+    page = _render_html_preview_validated(document, csv_profile).payload.decode("utf-8")
+    if "<body>" not in page:  # the header is the whole point of the file: a template without the tag is a refusal, not a file without it
+        raise ValueError("STATUS_HEADER_NOT_PLACED: the HTML preview has no <body> tag to put the status header after")
+    return (("html", page.replace("<body>", "<body>" + header_html, 1).encode("utf-8")),
+            ("md", header_md.encode("utf-8") + _render_markdown_validated(document, csv_profile).payload))
 
 
 def verify_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE) -> Receipt:

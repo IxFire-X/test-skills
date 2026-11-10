@@ -1,6 +1,6 @@
 # Pilot reviewer-session and verdict contract
 
-The controller publishes/reads back canonical revision 1 as `UNREVIEWED`, creates the exact reviewer package binding, and keeps the host-owned `reviewer-session` ledger separate from model-produced `tc-reviewer-output`. The allowed sequence is `STARTED -> (REQUESTED -> PROVIDED)* -> AUTHORITATIVE_VERDICT -> COMPLETED`, or `STARTED -> ... -> ABORTED` before a verdict. At most one verdict exists. A completed/effective canonical has exactly one verdict; only an explicit pre-verdict abort, including `REVIEW_CONTEXT_LIMIT`, has zero.
+The controller records canonical revision 1 (no file before the verdict), creates the exact reviewer package binding, and keeps the host-owned `reviewer-session` ledger separate from model-produced `tc-reviewer-output`. The allowed sequence is `STARTED -> (REQUESTED -> PROVIDED)* -> AUTHORITATIVE_VERDICT -> COMPLETED`, or `STARTED -> ... -> ABORTED` before a verdict. At most one verdict exists. A completed/effective canonical has exactly one verdict; only an explicit pre-verdict abort, including `REVIEW_CONTEXT_LIMIT`, has zero.
 
 Each package binds candidate, normalized requirements, source/canonical/case mappings, inventory/context receipts, and exact evidence digests. Retrieval is C-lite and budgeted. Per-batch reviewers, reviewer trees, a second session, a second verdict, generator reasoning, and silent context truncation are forbidden. Host evidence proves isolation; missing proof is `independence_unverified` and makes acceptance false.
 

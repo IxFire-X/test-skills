@@ -1,4 +1,5 @@
 import hashlib
+import dataclasses
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -280,15 +281,15 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     session["boundary_digest"] = boundary["digest"]
     session["digest"] = _digest({key: value for key, value in session.items() if key != "digest"})
 
-    assert Path(receipt.json_path).read_bytes()
+    assert not Path(receipt.json_path).exists()  # the candidate is bound by its receipt; no file is written before the verdict
     assert session["boundary_digest"]
     from tools.pilot_state import read_attempt_receipt
     boundary = read_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
     assert boundary["package_digest"] == binding["package_digest"]
 
-    Path(receipt.json_path).write_bytes(Path(receipt.json_path).read_bytes() + b" ")
+    forged = dataclasses.replace(receipt, preview_sha256="sha256:" + "0" * 64)  # a receipt that is not the candidate's (a changed file is refused when the set is published)
     with pytest.raises(ValueError, match="candidate receipt"):
-        reviewer_package_binding(candidate, receipt, assembly, inventory, [context], context_marker_output=marker, generator_fragments=fragments, run_root=run_root, attempt_id=attempt_id)
+        reviewer_package_binding(candidate, forged, assembly, inventory, [context], context_marker_output=marker, generator_fragments=fragments, run_root=run_root, attempt_id=attempt_id)
 
 
 def test_evidence_retrieval_is_bounded_and_abort_is_only_zero_verdict_terminal_path(tmp_path: Path):

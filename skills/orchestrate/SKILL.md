@@ -46,11 +46,10 @@ permissions:
 недостающее условие; заблокированные проверки; конкретный вопрос. Неопределённое требование остаётся в наборе; существенный пробел
 запрещает заявлять полный объём. `cases-only-v1`: код проекта не выполняется, `accepted=false`.
 
-Ревьюер должен быть в свежем контексте. Строка `review:isolation` в `ready` (уровень OK — ничего исправлять) подсказывает, открывает ли
-твоя CLI отдельный subagent. Если нет — спроси человека до scan, дословно: «Ревьюер будет работать в той же сессии, без свежего
-контекста. Принять такой прогон с пометкой SELF?». Только после явного «да» повтори scan с теми же `--project`, `--docs`, `--profile`,
-`--module` и `--accept-self-review` (готовая команда — `details.self_review_scan`). Без флага `finish` закрывает попытку с
-`INDEPENDENCE_UNVERIFIED`. Если в `.skillsrc` стоит `review: {"self": true}` — ключ ставит человек, scan принимает SELF сам.
+Ревью: `INDEPENDENT`: свежий контекст обязателен (субагент или вызов без истории генерации). `SELF`: та же сессия, новую не требуем, независимым не называем. `review:isolation` в `ready` подсказывает, есть ли у CLI субагент. Если нет — до scan спроси человека дословно: «Ревьюер будет работать в той же сессии, без свежего контекста. Принять такой
+прогон с пометкой SELF?». После явного «да» повтори scan с теми же аргументами и
+`--accept-self-review` (`details.self_review_scan`). Без флага `finish` закрывает попытку с `INDEPENDENCE_UNVERIFIED`. `review: {"self": true}`
+в `.skillsrc` ставит человек, scan принимает SELF сам.
 
 Scan создаёт run: `run-authorization-receipt.json`, `run-manifest.json`, `RUN_CREATED`; `run_id` — последняя строка вывода. Руками эти
 файлы и события не пиши. `SCAN_RUN_IN_PROGRESS` — незавершённый прогон этого запроса: продолжи по `fix` (`status`); `--new-run` — только
@@ -113,7 +112,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    bare canonical JSON `1.1.0` (`schema_version` в header). `--fragment` — файл ответа пачки как есть или записанный ответ (`read-model-artifact`). Проверь полноту по исходному документу; недоказанное — gap,
    не `FULL`-обещание. Human-facing поля — на русском, technical tokens exact; условия работы над тестами (заглушки, режим запуска)
    в предусловия, шаги и ожидания не пишутся — ревьюер вернёт весь набор. Потолка на число требований и кейсов нет.
-6. Revision 1 (`UNREVIEWED`, V4 derived bundle) публикует `review-open` из §4 сам. HTML/CSV никогда не входят в model input.
+6. `review-open` из §4 записывает кандидата сам; файлов до вердикта нет. HTML/CSV никогда не входят в model input.
 
 ## 4. Выполни одно authoritative canonical review
 
@@ -128,13 +127,13 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    выбирает ревизию. Отказ называет ошибку и ничего не пишет: единственный повтор стадии (`--transport-attempts 2`). Без `--verdict`
    берётся последняя ревизия журнала. `review-select --dry-run` — только при сомнении в ответе.
 
-**`--output-dir`** — один каталог на всё ревью: `<run>/published` или ниже (там кандидат и HTML/Markdown/CSV для человека). Тот же
+**`--output-dir`** — один каталог на всё ревью: `<run>/published` или ниже (только итог: принятый набор с CSV, `*.REJECTED.*` или `*.UNREVIEWED.*` без CSV). Тот же
 путь — в `review-open`, `review-select --run-root <run> --attempt <id> --output-dir <dir>` и `review-publish --run-root <run> --attempt <id> --output-dir <dir>`; иначе — `OUTPUT_DIR_OUTSIDE_RUN`. `--fresh-context yes` — честное
 заявление: ревьюер отдельный субагент или вызов без истории генерации; `no` допустим только в прогоне, принявшем SELF (§1) — там флаг можно
 опустить; иначе `FRESH_CONTEXT_REQUIRED` или `INDEPENDENCE_UNVERIFIED`. Бюджет сессии, `distinct_invocations` и `evidence_digest` считает
 код; бюджет меньше пакета — `REVIEW_CONTEXT_LIMIT` сразу.
 
-**Ревьюер.** Свежая сессия (`for_human`), ревьюер-субагент и его команды, канарейки, кардинальность сессии, бюджет и `review-abort` —
+**Ревьюер.** `INDEPENDENT` — свежая сессия (`for_human`) или субагент, `SELF` — та же; команды, канарейки, кардинальность сессии, бюджет и `review-abort` —
 [review.md](references/review.md). Карту канареек не читай и ревьюеру не показывай.
 
 `ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает один complete successor revision 2 (`successor_edits` — точные правки
