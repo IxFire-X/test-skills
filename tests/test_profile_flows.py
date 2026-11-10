@@ -1,18 +1,21 @@
-"""CO1 + MB1: each delivery profile walks its own path to the end, on a copy of the profile.
+"""CO1 + MB1 + R1: each delivery profile walks its whole path, from ``ready`` to ``report``, on a copy of the profile.
 
 The gate runs the full development package, so a command of the delivery that calls what the profile does not carry passes it.  Here
-the commands run in a copy of the files of the profile (``pack_registry.profile_paths``), the run itself is prepared by the fixtures
-of the development package up to the step the commands start from.
+every command runs in a copy of the files of the profile (``pack_registry.profile_paths``); only the answers of the model are written
+by the test (the marker, the fragments, the verdicts) and the run of the tests is the human's (``human_run``).
 
-- ``cases-only``: the answers of the generator (``model-request`` / ``model-response``), ``assemble``, ``review-open``,
-  ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1: the first ``model-response`` refused
-  ``MODE_B_NOT_IN_PACKAGE``);
-- ``mode-b``: the review of the automation by the commands of the text (``references/mode-b.md`` §5) — ``read-effective``,
-  ``model-response tc-to-autotest``, ``automation-boundary-facts``, ``open-automation-boundary``, ``review-requested``, the reviewer's
-  request and answer, ``materialize``, the human run, ``ingest``, ``report`` — no ``review_legacy`` is there (MB1: no ``review-requested``).
+- ``cases-only``: ``ready``, ``scan``, the marker (``context_marker_parts plan``, ``model-request`` / ``model-response``), the pause on a
+  gap, ``publish-generator-input``, ``plan``, the answers of the generator by batches (``validate-fragment``, ``prior-capabilities``),
+  ``assemble``, ``validate-canonical``, ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
+  the first ``model-response`` refused ``MODE_B_NOT_IN_PACKAGE``);
+- ``mode-b``: the same cases part, then the review of the automation by the commands of the text (``references/mode-b.md`` §5) —
+  ``read-effective``, ``model-response tc-to-autotest``, ``automation-boundary-facts``, ``open-automation-boundary``, ``review-requested``,
+  the reviewer's request and answer, ``materialize``, the human run, ``ingest``, ``report`` — no ``review_legacy`` is there (MB1: no
+  ``review-requested``).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -66,71 +69,50 @@ def test_the_two_profiles_leave_out_what_the_flows_below_must_not_need() -> None
     assert "tools/review_legacy.py" not in mode_b and "tools/automation_validation.py" in mode_b and "tools/exec_commands.py" in mode_b
 
 
-# ---- cases-only: scan-side answers → review → finish → report ----------------------------------------------------------
+# ---- the front half of a path: ready → scan → the marker → the plan of the batches --------------------------------------
 
-def test_cases_only_delivery_takes_the_answers_of_the_model_and_walks_to_the_report(tmp_path: Path, cases_only_pack: Path) -> None:
-    from tests.test_review_requested import _generated_run
-    from tests.test_review_two_commands import _bundles, _flags, _verdict
-
-    pack = cases_only_pack
-    run = _generated_run(tmp_path / "w", generated=False)
-    flags, tmp = _flags(run), run["tmp"]
-    fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
-    context = json.loads(Path(run["context"]).read_bytes())
-    for kind in ("header", "plan"):
-        code, published = _api(pack, "publish-generator-input", *flags, "--kind", kind, "--value", run[kind])
-        assert code == 0, published
-    for index, (fragment, path) in enumerate(zip(fragments, run["fragments"], strict=True)):
-        stage = f"tc-generator:{fragment['batch_id']}"
-        digests = [run["marker_digest"], context["digest"], fragment["plan_digest"], fragment["header_digest"]]
-        if index:
-            code, prior = _api(pack, "prior-capabilities", *flags, "--batch-id", fragment["batch_id"])
-            assert code == 0, prior
-            digests.append(prior["result"]["digest"])
-        code, requested = _api(pack, "model-request", *flags, "--stage", stage, "--model-id", "model-generator", "--invocation-id", f"invoke-{index + 1}",
-                               *[flag for digest in digests for flag in ("--input-digest", digest)])
-        assert code == 0, requested
-        code, answered = _api(pack, "model-response", *flags, "--stage", stage, "--artifact", path)
-        assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
-    code, assembled = _api(pack, "assemble", "--header", run["header"], "--plan", run["plan"], *[f for path in run["fragments"] for f in ("--fragment", path)],
-                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", str(run["run_root"]))
-    assert code == 0, assembled
-    code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",
-                        "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
-    assert code == 0 and opened["status"] == "ok", opened
-    code, selected = _api(pack, "review-select", *flags, "--output-dir", _bundles(run), "--verdict", _verdict(run))
-    assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", ("CO1: the answer of the reviewer", selected)
-    # the automation chain is not a step of this delivery: asking for it is a refusal with the code and the fix, not an accepted request
-    # that the answer cannot follow
-    code, effective = _api(pack, "read-effective", *flags)
-    assert code == 0, effective
-    effective = effective["result"]
-    for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
-        code, refused = _api(pack, "model-request", *flags, "--stage", stage, "--model-id", "m", "--invocation-id", "i",
-                             "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
-        assert code == 2 and refused["code"] == "MODEL_STAGE_NOT_IN_PROFILE" and refused["fix"], (stage, refused)
-    project, name = str(run["project"]), run["run_root"].name
-    for command in ("status", "finish", "report"):
-        code, answer = _cli(pack, "tools.run_pipeline", command, "--project", project, "--run", name)
-        assert code in (0, 1) and "MODE_B_NOT_IN_PACKAGE" not in json.dumps(answer), (command, answer)
-    assert (run["run_root"] / "report.json").is_file() and (run["run_root"] / "report.md").is_file()
+def _scan(pack: Path, *argv: str) -> tuple[int, dict]:
+    """``scan`` prints its JSON and then ``run_id: <id>`` as the last line."""
+    done = subprocess.run([sys.executable, "-m", "tools.run_pipeline", "scan", *argv], cwd=pack, capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
+    assert "Traceback" not in done.stderr, done.stderr
+    return done.returncode, json.loads(done.stdout.rsplit("\nrun_id: ", 1)[0])
 
 
-# ---- mode-b: the review of the automation without review_legacy → the human run → ingest → report --------------------
+def _command_of(step: dict) -> tuple[str, str]:
+    """The module and the command a ``next_step`` names: ``python -m tools.api review-open --run-root <run> …`` → (tools.api, review-open)."""
+    words = step["command"].split()
+    module, after = words[words.index("-m") + 1], words[words.index("-m") + 2]
+    return module, ("" if after.startswith(("-", "<")) else after)
 
-def _mode_b_project(tmp_path: Path) -> tuple[Path, Path, str, dict, dict]:
-    """The project of the fixture with a module venv and a local-pilot run whose effective canonical is selected."""
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_exec_prepares import _module_python
-    from tests.test_generated_delta import _effective_bundle, _published_reviewer_ledger
-    from tests.test_project_native_pytest import MODULE_PYTHON, _local_attempt
-    from tools.pilot_state import publish_effective_canonical
-    import shutil
 
-    project = tmp_path / "project"
-    shutil.copytree(ROOT / "tests" / "fixtures" / "projects" / "python-pytest", project)
+def _tree(root: Path) -> dict[str, tuple[int, int]]:
+    return {path.relative_to(root).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
+
+
+def _writes_stay_in_bounds(pack: Path, run: dict, *allowed: str) -> None:
+    """Since the last snapshot the commands left the copy of the profile as it was and wrote into the project only the run
+    (``.pilot-runs/``), ``.skillsrc`` and the files in ``allowed`` (the tests ``materialize`` named)."""
+    def changed(root: Path, before: dict) -> list[str]:
+        after = _tree(root)
+        return sorted(key for key in {**before, **after} if before.get(key) != after.get(key))
+
+    outside = [key for key in changed(run["project"], run["project_before"]) if not key.startswith(".pilot-runs/") and key != ".skillsrc" and key not in allowed]
+    assert changed(pack, run["pack_before"]) == [] and outside == [], outside
+
+
+def _next_step(pack: Path, project: Path, run_id: str) -> dict:
+    code, status = _cli(pack, "tools.run_pipeline", "status", "--project", str(project), "--run", run_id)
+    assert code == 0, status
+    return status["next_step"]
+
+
+def _skillsrc(project: Path, window: int | None) -> None:
+    from tests.test_project_native_pytest import MODULE_PYTHON
+
+    limits = {"limits": {"step_window_bytes": window}} if window is not None else {}
     (project / ".skillsrc").write_text(json.dumps({
-        "schema_version": "5.0.0", "version": "3.0", "project": {"name": "fixture"},
+        "schema_version": "5.0.0", "version": "3.0", "project": {"name": "fixture"}, **limits,
         "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
         "modules": [{
             "id": "python-pytest", "root": ".", "stack": {"language": "python", "build_tool": "pip"},
@@ -139,38 +121,204 @@ def _mode_b_project(tmp_path: Path) -> tuple[Path, Path, str, dict, dict]:
             "detected_from": ["pyproject.toml"],
         }],
     }, ensure_ascii=False), encoding="utf-8")
-    _module_python(project)
-    run_root, attempt_id, _authorization, _baseline = _local_attempt(project)
-    document = automated_document()
-    publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
-    return project, run_root, attempt_id, document, {}
 
 
-def test_mode_b_delivery_opens_the_review_of_the_automation_and_walks_to_the_report(tmp_path: Path, mode_b_pack: Path) -> None:
-    import hashlib
+def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, gap: bool = False) -> dict:
+    """The path of a delivery up to the answers of the generator, by the commands of the profile copy ``pack`` alone.
 
-    from tests.p4_flow import human_run, junit  # noqa: F401
-    from tests.test_automation_revision_budget import automation, review
-    from tests.test_generated_delta import _effective_bundle_digest
+    A project of the fixtures, a requirements document of ``requirements`` long lines (the plan splits the batches by the size of the
+    expected answer, 42 B per byte of text, so a window of 200 kB gives a batch each), ``ready``, ``scan``, the answer of the marker,
+    the pause on a gap (``gap``), ``plan``.  The returned run is the shape the commands of the back half read."""
+    import shutil
 
-    pack = mode_b_pack
-    assert not (pack / "tools" / "review_legacy.py").exists() and (pack / "tools" / "exec_commands.py").is_file()
-    project, run_root, attempt_id, document, _ = _mode_b_project(tmp_path)
-    run, tmp = ("--run-root", str(run_root), "--attempt", attempt_id), run_root / "tmp"
+    from tests.test_batch_assembly import _fragment
+    from tests.test_exec_prepares import _module_python
 
-    code, effective = _api(pack, "read-effective", *run)
-    assert code == 0, effective
-    effective = effective["result"]
-    code, requested = _api(pack, "model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
-                           "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
+    project = tmp_path / "project"
+    shutil.copytree(ROOT / "tests" / "fixtures" / "projects" / "python-pytest", project)
+    (project / "docs").mkdir()
+    lines = [f"REQ-{number} " + "Пользователь видит список значений. " * 60 for number in range(1, requirements + 1)]
+    (project / "docs" / "requirements.md").write_text("# Требования\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    _skillsrc(project, 200_000 if requirements > 1 else None)
+    if profile == "local-pilot-v1":
+        _module_python(project)
+    before = _tree(pack), _tree(project)
+    scope = ("--project", str(project), "--docs", "docs/requirements.md", "--profile", profile)
+    code, ready = _cli(pack, "tools.ready", *scope)
+    assert code == 0 and ready["status"] == "READY", [row for row in ready["checks"] if row["level"] == "STOP"]
+    code, scanned = _scan(pack, *scope, "--module", "python-pytest")
+    assert code == 0 and scanned["next_step"]["code"] == "MARKER", scanned
+    run_root, attempt = Path(scanned["run_root"]), scanned["attempt_id"]
+    flags, tmp = ("--run-root", str(run_root), "--attempt", attempt), Path(scanned["run_root"]) / "tmp"
+    assert _command_of(scanned["next_step"]) == ("tools.context_marker_parts", "plan")
+    code, parts = _cli(pack, "tools.context_marker_parts", "plan", "--run-root", str(run_root))
+    assert code == 0 and parts["mode"] == "single" and parts["next"] == "context-marker:baseline", parts
+    digests = parts["parts"][0]["input_digests"]
+    code, requested = _api(pack, "model-request", *flags, "--stage", "context-marker:baseline", "--model-id", "model-context", "--invocation-id", "context-1",
+                           *[flag for digest in digests for flag in ("--input-digest", digest)])
     assert code == 0, requested
+    source = [{"source_requirement_id": f"SREQ-{number:04d}", "display_order": number, "text": line, "provenance": [f"docs/requirements.md:{number + 2}"],
+               "digest": "sha256:" + hashlib.sha256(line.encode("utf-8")).hexdigest()} for number, line in enumerate(lines, start=1)]
+    warnings = ["REQ-1 сценарий (docs/requirements.md:3) — нет наблюдаемого канала — блокирует проверку списка — как увидеть список?"] if gap else []
+    marker = {"schema_version": "5.0.0", "stage": "context-marker", "warnings": warnings,
+              "artifacts": {"analytics_documentation": {"requirements": source}, "source_code_and_diff": {"sources": ["src/sample.py — immutable test source"]}}}
+    code, answered = _api(pack, "model-response", *flags, "--stage", "context-marker:baseline", "--artifact", _put(tmp / "marker.json", marker))
+    assert code == 0, answered
+    header = {"schema_version": "1.1.0", "document_id": "TCDOC-fixture", "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
+              "metadata": {"subject": {"kind": "generic", "name": "Фикстура"}, "documentation": ["docs/requirements.md"], "project": "fixture",
+                           "author": "controller", "date": "2026-11-10"}}
+    context_path = Path(scanned["evidence_path"])
+    context = json.loads(context_path.read_bytes())
+    plan_files = ("--header", _put(tmp / "header.json", header), "--requirements", _put(tmp / "requirements.json", source),
+                  "--grouping", _put(tmp / "grouping.json", {"context_receipt_digest": context["digest"], "context_receipt_digests": [context["digest"]]}),
+                  "--project", str(project), "--input-file", str(run_root / answered["result"]["path"]), "--context-receipt", str(context_path), *flags,
+                  "--out-plan", str(tmp / "plan.json"), "--out-published", str(tmp / "published.json"))
+    code, published = _api(pack, "publish-generator-input", *flags, "--kind", "header", "--value", str(tmp / "header.json"))
+    assert code == 0, published
+    if gap:  # the pause after the marker: status says so, the plan is refused until the human answers
+        step = _next_step(pack, project, run_root.name)
+        assert step["code"] == "SCOPE_PENDING" and step["gaps"][0]["source_requirement_ids"] == ["SREQ-0001"], step
+        code, refused = _api(pack, "plan", *plan_files)
+        assert code == 2 and refused["code"] == "SCOPE_PENDING" and "--continue" in refused["fix"], refused
+    code, planned = _api(pack, "plan", *plan_files, *(["--continue"] if gap else []))
+    assert code == 0, planned
+    plan = json.loads((tmp / "plan.json").read_bytes())
+    assert len(plan["batches"]) == requirements, planned["notes"]
+    make = _automated if profile == "local-pilot-v1" else (lambda fragment: fragment)
+    fragments = [_put(tmp / f"fragment-{index}.json", make(_fragment(plan, context, index))) for index in range(len(plan["batches"]))]
+    return {"run_root": run_root, "attempt_id": attempt, "project": project, "tmp": tmp, "header": str(tmp / "header.json"), "plan": str(tmp / "plan.json"),
+            "fragments": fragments, "context": str(context_path), "marker_digest": answered["result"]["content_digest"],
+            "pack_before": before[0], "project_before": before[1]}
+
+
+# ---- the cases part of a path, in both profiles: the answers of the generator → assemble → the review → the effective canonical ----
+
+def _cases_to_effective(pack: Path, run: dict) -> dict:
+    """The generator batch by batch (checked, requested, answered), ``assemble``, ``validate-canonical``, ``review-open``, ``review-select``,
+    ``read-effective``: the effective canonical of the run."""
+    from tests.test_review_two_commands import _bundles, _flags, _verdict
+
+    flags, tmp = _flags(run), run["tmp"]
+    context = json.loads(Path(run["context"]).read_bytes())
+    plan, prior = json.loads(Path(run["plan"]).read_bytes()), []
+    for index, path in enumerate(run["fragments"]):
+        batch, fragment = plan["batches"][index]["batch_id"], json.loads(Path(path).read_bytes())
+        stage = f"tc-generator:{batch}"
+        checked = ("--fragment", path, "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"], *flags[:2],
+                   *[flag for earlier in prior for flag in ("--prior-fragment", earlier)])
+        code, valid = _api(pack, "validate-fragment", *checked)
+        assert code == 0, valid
+        digests = [run["marker_digest"], context["digest"], fragment["plan_digest"], fragment["header_digest"]]
+        if index:
+            code, capabilities = _api(pack, "prior-capabilities", *flags, "--batch-id", batch)
+            assert code == 0, capabilities
+            digests.append(capabilities["result"]["digest"])
+        code, requested = _api(pack, "model-request", *flags, "--stage", stage, "--model-id", "model-generator", "--invocation-id", f"invoke-{index + 1}",
+                               *[flag for digest in digests for flag in ("--input-digest", digest)])
+        assert code == 0, requested
+        code, answered = _api(pack, "model-response", *flags, "--stage", stage, "--artifact", path)
+        assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
+        prior.append(str(run["run_root"] / answered["result"]["path"]))
+    code, assembled = _api(pack, "assemble", "--header", run["header"], "--plan", run["plan"], *[f for path in run["fragments"] for f in ("--fragment", path)],
+                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", str(run["run_root"]))
+    assert code == 0, assembled
+    code, valid = _api(pack, "validate-canonical", "--document", str(tmp / "candidate.json"))
+    assert code == 0, valid
+    code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",
+                        "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
+    assert code == 0 and opened["status"] == "ok", opened
+    step = _next_step(pack, run["project"], run["run_root"].name)  # the request of the reviewer is the one open step
+    assert step["code"] == "MODEL_RESPONSE" and _command_of(step) == ("tools.api", "model-response"), step
+    code, selected = _api(pack, "review-select", *flags, "--output-dir", _bundles(run), "--verdict", _verdict(run))
+    assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", ("CO1: the answer of the reviewer", selected)
+    code, effective = _api(pack, "read-effective", *flags)
+    assert code == 0, effective
+    return effective["result"]
+
+
+# ---- cases-only: the whole path of a delivery of cases, from ready to report ------------------------------------------
+
+def test_cases_only_delivery_walks_from_ready_to_the_report(tmp_path: Path, cases_only_pack: Path) -> None:
+    from tests.test_review_two_commands import _flags
+
+    pack = cases_only_pack
+    run = _front(pack, tmp_path, "cases-only-v1", requirements=2, gap=True)
+    flags = _flags(run)
+    effective = _cases_to_effective(pack, run)
+    # the automation chain is not a step of this delivery: asking for it is a refusal with the code and the fix, not an accepted request
+    # that the answer cannot follow
+    for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
+        code, refused = _api(pack, "model-request", *flags, "--stage", stage, "--model-id", "m", "--invocation-id", "i",
+                             "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
+        assert code == 2 and refused["code"] == "MODEL_STAGE_NOT_IN_PROFILE" and refused["fix"], (stage, refused)
+    project, name = str(run["project"]), run["run_root"].name
+    step = _next_step(pack, run["project"], name)  # the closing command is the one the status names
+    assert step["code"] == "FINISH" and _command_of(step) == ("tools.run_pipeline", "finish"), step
+    for command in ("status", _command_of(step)[1], "report"):
+        code, answer = _cli(pack, "tools.run_pipeline", command, "--project", project, "--run", name)
+        assert code in (0, 1) and "MODE_B_NOT_IN_PACKAGE" not in json.dumps(answer), (command, answer)
+    assert (run["run_root"] / "report.json").is_file() and (run["run_root"] / "report.md").is_file()
+    _writes_stay_in_bounds(pack, run)
+
+
+# ---- mode-b: the whole path, from ready to report: the cases, the review of the automation without review_legacy, the human run -----
+
+def _automated(fragment: dict) -> dict:
+    """The one case of the fragment with an automated step: a GET of the product list answered by 200."""
+    from tests.test_batch_assembly import _refresh
+
+    step = fragment["test_cases"][0]["steps"][0]
+    step.update(manual_only=False, manual_reason=None, test_data="Тело запроса отсутствует.", operation={
+        "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": {"kind": "environment", "name": "BASE_URL", "provenance": ["test"]},
+        "method": "GET", "path": "/products"})
+    expectation = step["expectations"][0]
+    expectation["text"] = "Отображается список доступных товаров.\n\nHTTP 200 OK"
+    expectation["assertions"] = [{"assertion_id": expectation["expectation_id"].replace("EXP-", "ASSERT-") + "-1", "display_order": 1,
+                                  "actual": {"kind": "http_status"}, "operator": "equals", "expected": {"kind": "literal", "value": 200}}]
+    _refresh(fragment)
+    return fragment
+
+
+def _automation_answer(document: dict, effective: dict) -> dict:
+    """The answer of ``tc-to-autotest``: one generated test whose relations name the ids of the document of the run."""
+    from tests.test_automation_revision_budget import automation
+    from tests.test_generated_delta import _effective_bundle_digest  # noqa: F401
+
     content = ("import pytest\n\nfrom sample import combine\n\n\n@pytest.mark.native\n"
                "def test_selected(plugin_value: str, conftest_value: str) -> None:\n"
                "    assert combine(plugin_value, conftest_value) == \"from-project-plugin:from-conftest\"\n")
-    artifact = automation(document, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    artifact["artifacts"]["generated_files"][0].update(path="tests/test_generated.py", content=content,
-                                                         content_digest="sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest())
-    artifact["artifacts"]["generated_symbols"][0]["locator"] = {"kind": "python_module_function", "function_name": "test_selected"}
+    artifact = automation(document, effective_bundle_receipt_digest=effective["effective_bundle_receipt_digest"])
+    generated = artifact["artifacts"]
+    generated["generated_files"][0].update(path="tests/test_generated.py", content=content,
+                                           content_digest="sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest())
+    generated["generated_symbols"][0]["locator"] = {"kind": "python_module_function", "function_name": "test_selected"}
+    case = document["test_cases"][0]
+    step = case["steps"][0]
+    expectation = step["expectations"][0]
+    where = {"case_id": case["case_id"], "step_id": step["step_id"], "file_id": "FILE-products", "symbol_id": "SYMBOL-products"}
+    generated["implementation_relations"] = [{"kind": "operation", **where}, {
+        "kind": "assertion", **where, "expectation_id": expectation["expectation_id"], "assertion_id": expectation["assertions"][0]["assertion_id"]}]
+    return artifact
+
+
+def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_pack: Path) -> None:
+    from tests.p4_flow import human_run
+    from tests.test_automation_revision_budget import review
+    from tests.test_review_two_commands import _flags
+
+    pack = mode_b_pack
+    assert not (pack / "tools" / "review_legacy.py").exists() and (pack / "tools" / "exec_commands.py").is_file()
+    front = _front(pack, tmp_path, "local-pilot-v1")
+    effective = _cases_to_effective(pack, front)
+    step = _next_step(pack, front["project"], front["run_root"].name)  # after the canonical review the automation is the next step
+    assert step["code"] == "AUTOMATION" and _command_of(step) == ("tools.api", "model-request"), step
+    project, run_root, tmp = front["project"], front["run_root"], front["tmp"]
+    run = _flags(front)
+    document = json.loads((tmp / "candidate.json").read_bytes())
+    code, requested = _api(pack, "model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
+                           "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
+    assert code == 0, requested
+    artifact = _automation_answer(document, effective)
     code, answered = _api(pack, "model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))
     assert code == 0, answered
     statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
@@ -201,13 +349,16 @@ def test_mode_b_delivery_opens_the_review_of_the_automation_and_walks_to_the_rep
     shared = ("--project", str(project), "--run", run_root.name, "--module", "python-pytest")
     code, printed = _cli(pack, "tools.run_pipeline", "materialize", *shared)
     assert code == 0 and printed["stage"] == "materialize", ("MB1: the static review was not taken", printed)
+    _writes_stay_in_bounds(pack, front, *printed["files_to_review"])
     assert human_run(project, printed).returncode == 0
+    front["project_before"] = _tree(project)  # what the person's own run wrote is the person's, not a command of the pack
     code, ingested = _cli(pack, "tools.run_pipeline", "ingest", *shared)
     assert code == 0 and ingested["verdict"] == "PASS", ingested
     code, reported = _cli(pack, "tools.run_pipeline", "report", "--project", str(project), "--run", run_root.name)
     assert code == 0 and (run_root / "report.json").is_file(), reported
     code, finished = _cli(pack, "tools.run_pipeline", "finish", "--project", str(project), "--run", run_root.name)
     assert "MODE_B_NOT_IN_PACKAGE" not in json.dumps(finished), finished
+    _writes_stay_in_bounds(pack, front)
 
 
 # ---- the texts of a profile name only the commands the profile has ---------------------------------------------------
