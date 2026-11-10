@@ -95,3 +95,13 @@ def test_on_drift_the_next_step_is_the_new_scan_of_drift_command(tmp_path, monke
 def test_without_a_scan_request_the_new_scan_stays_a_template_and_names_drift_command() -> None:
     step = _next_step({"next_expected_artifact": "validated inputs or new scan"})
     assert step["command"].startswith("python -m tools.run_pipeline scan") and "drift.command" in step["action"], step
+
+
+def test_the_plan_step_names_plan_not_plan_batches() -> None:
+    step = _next_step({"next_expected_artifact": "generator fragments"})
+    assert step["code"] == "GENERATOR_PLAN" and step["command"].startswith("python -m tools.api plan --header"), step
+
+
+def test_the_assembly_step_names_assemble_and_review_open() -> None:
+    step = _next_step({"next_expected_artifact": "assembly of the candidate"})
+    assert step["code"] == "GENERATOR_ASSEMBLE" and step["command"].startswith("python -m tools.api assemble ") and "review-open" in step["action"], step

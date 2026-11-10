@@ -180,6 +180,9 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
         assert step["code"] == "SCOPE_PENDING" and step["gaps"][0]["source_requirement_ids"] == ["SREQ-0001"], step
         code, refused = _api(pack, "plan", *plan_files)
         assert code == 2 and refused["code"] == "SCOPE_PENDING" and "--continue" in refused["fix"], refused
+    if not gap:  # the plan is published by `tools.api plan` (SKILL §3), not named by its inner step plan-batches
+        step = _next_step(pack, project, run_root.name)
+        assert step["code"] == "GENERATOR_PLAN" and _command_of(step) == ("tools.api", "plan"), step
     code, planned = _api(pack, "plan", *plan_files, *(["--continue"] if gap else []))
     assert code == 0, planned
     plan = json.loads((tmp / "plan.json").read_bytes())
@@ -219,9 +222,14 @@ def _cases_to_effective(pack: Path, run: dict) -> dict:
         code, answered = _api(pack, "model-response", *flags, "--stage", stage, "--artifact", path)
         assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
         prior.append(str(run["run_root"] / answered["result"]["path"]))
+        step = _next_step(pack, run["project"], run["run_root"].name)  # the last answer asks for the assembly, an earlier one for the next batch
+        expected = ("GENERATOR_ASSEMBLE", "assemble") if index == len(run["fragments"]) - 1 else ("GENERATOR_NEXT", "model-request")
+        assert (step["code"], _command_of(step)) == (expected[0], ("tools.api", expected[1])), step
     code, assembled = _api(pack, "assemble", "--header", run["header"], "--plan", run["plan"], *[f for path in run["fragments"] for f in ("--fragment", path)],
                            "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", str(run["run_root"]))
     assert code == 0, assembled
+    step = _next_step(pack, run["project"], run["run_root"].name)  # the journal does not see assemble: the hint still ends with review-open
+    assert step["code"] == "GENERATOR_ASSEMBLE" and "review-open" in step["action"], step
     code, valid = _api(pack, "validate-canonical", "--document", str(tmp / "candidate.json"))
     assert code == 0, valid
     code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",

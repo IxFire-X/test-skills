@@ -242,7 +242,7 @@ def test_every_next_artifact_the_code_sets_has_a_next_step() -> None:
     from tools.run_pipeline import _next_step
 
     artifacts = _next_artifacts()
-    assert {"authorized context", "context-marker response", "generator fragments", "remaining fragments or assembled candidate",
+    assert {"authorized context", "context-marker response", "generator fragments", "remaining fragments or assembled candidate", "assembly of the candidate",
             "reviewer ledger and effective selection or negative closure", "static automation review"} <= artifacts
     assert len(artifacts) >= 24
     for expected in sorted(artifacts) + ["context-marker:baseline response", "tc-generator:BATCH-1 response"]:

@@ -167,11 +167,15 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
         "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели",
         "3", _PARTS + "plan --run-root <run>"),
     "generator fragments": (
-        "GENERATOR_PLAN", "tc-generator", "header и план пачек, затем запрос генератора на первую пачку плана и его ответ", "3",
-        _API + "plan-batches --requirements <f> --grouping <f> --project <project> --input-file <f> --context-receipt <f>"),
+        "GENERATOR_PLAN", "tc-generator", "header (publish-generator-input --kind header), затем plan: строит и публикует план пачек; потом запрос генератора на первую пачку и его ответ", "3",
+        _API + "plan --header <f> --requirements <f> --grouping <f> --project <project> --input-file <f> --context-receipt <f> --run-root <run> --attempt <attempt> "
+               "--out-plan <f> --out-published <f>"),
     "remaining fragments or assembled candidate": (
-        "GENERATOR_NEXT", "tc-generator", "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3",
+        "GENERATOR_NEXT", "tc-generator", "следующая пачка генератора по плану", "3",
         _API + "model-request --run-root <run> --attempt <attempt> --stage tc-generator:<batch> --input-digest <d> ..."),
+    "assembly of the candidate": (
+        "GENERATOR_ASSEMBLE", "assembly", "все пачки отвечены: assemble и validate-canonical по записанным ответам, затем review-open", "3",
+        _API + "assemble --header <f> --plan <f> --fragment <f> ... --run-root <run> --out-candidate <f> --out-receipt <f>"),
     "canonical reviewer package and boundary": (
         "REVIEW_SESSION", "canonical-review", "открыть ревью одной командой (review-open: кандидат, пакет, запрос), затем ревьюер и review-select --verdict",
         "4", _API + "review-open --run-root <run> --attempt <attempt> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> "
@@ -262,6 +266,17 @@ def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, 
     except (KeyError, OSError, ValueError):
         return None
     return exclusion_summary(inventory["exclusions"], str(attempt.get("module") or "."))
+
+
+def _batches_all_answered(root: Path, attempt_id: str, responses: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether every batch of the published plan has its answer in the journal (only reads; an unreadable plan is «not yet»)."""
+    from tools import pilot_state as pilot
+
+    try:
+        batches = pilot.read_attempt_receipt(root, attempt_id, "batch-plan", "ARTIFACT_READ_BACK")["record"]["plan"]["batches"]
+        return bool(batches) and {f"tc-generator:{row['batch_id']}" for row in batches} <= {row.get("stage_instance_id") for row in responses}
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
 
 
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
@@ -527,6 +542,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             }[stage_id.split(":", 1)[0]]
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
                 next_artifact = "context-marker parts merge"  # the remaining parts, then the merge by code
+            if stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
+                next_artifact = "assembly of the candidate"  # the journal does not see assemble: the hint holds until review-open publishes the candidate
             if stage_id.startswith("autotest-reviewer:"):
                 from tools.finalize_attempt import automation_next
 
