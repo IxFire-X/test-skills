@@ -328,3 +328,17 @@ def test_finish_with_a_correction_still_possible_names_the_next_revision(
         cmd_finish(SimpleNamespace(project=str(tmp_path), run=root.name))
     assert stop.value.code == "FINISH_FACT_UNDETERMINED" and revision in str(stop.value)
 
+
+
+def test_a_second_finish_in_a_cases_only_delivery_does_not_open_a_schema_the_delivery_lacks(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_pack_profile import copy_profile
+    from tools import pilot_state
+
+    pack = copy_profile(tmp_path / "pack", "cases-only")
+    monkeypatch.setattr(pilot_state, "_SCHEMA_ROOT", pack / "schemas")
+    monkeypatch.setattr(pilot_state, "_PACK_ROOT", pack)
+    root, _attempt = _cases_only_effective(tmp_path / "finish")
+    _finish(tmp_path / "finish", root, capsys)
+    _code, again = _finish(tmp_path / "finish", root, capsys)
+    assert again.get("idempotent") is True, again

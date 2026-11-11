@@ -56,7 +56,8 @@ def test_the_registry_carries_the_generated_documents_and_the_cases_only_profile
     assert {"tools/ci_gate.py", "tools/compatibility_contract.py", "tools/contract_check.py", "tools/render_contract_docs.py",
             "tools/release_manifest.py", "evals/release_eval.py", "evals/scenarios/pilot-critical.json",
             "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json",
-            "schemas/compatibility-evidence.schema.json", "schemas/scenario-observation-receipt.schema.json"} <= left
+            "schemas/compatibility-evidence.schema.json"} <= left
+    assert "schemas/scenario-observation-receipt.schema.json" in kept  # V0a: a second ``finish`` writes it in a delivery of cases too
     assert not [path for path in kept if path.startswith("evals/")] and {"CONTRACTS.md", "PIPELINE.md", "tools/doctor.py", "tools/pack_registry.py"} <= kept
     assert {row["id"]: row for row in manifest["delivery_profiles"]}["cases-only"]["skill_pack_digest"] == pack_registry.digest_bytes(
         pack_registry.canonical([row for row in manifest["registry"] if row["path"] in kept]))
@@ -478,3 +479,26 @@ def test_a_cases_only_copy_with_one_file_of_mode_b_is_refused(tmp_path: Path) ->
     pack = copy_profile(tmp_path / "pack", "cases-only")
     shutil.copyfile(ROOT / "tools" / "run_tests.py", pack / "tools" / "run_tests.py")
     assert "match no delivery profile" in " ".join(_doctor(pack)["messages"])
+
+
+def test_every_schema_the_code_of_a_profile_names_is_in_the_profile() -> None:
+    """V0a (C22): ``finish`` in a cases-only delivery opened a schema the profile left out.  A schema file whose name stands in a
+    ``.py`` or skill text of the profile is in the profile (``pack_registry`` lists the exclusions, so it names them all)."""
+    from tools import pack_registry
+
+    paths = [row["path"] for row in pack_registry.registry_rows(ROOT)]
+    schemas = {Path(path).name for path in paths if path.startswith("schemas/")}
+    for profile in ("mode-b", "cases-only"):
+        kept = set(pack_registry.profile_paths(paths, profile))
+        carried = {Path(path).name for path in kept if path.startswith("schemas/")}
+        read = {name for path in kept if path != "tools/pack_registry.py" and path.endswith((".py", ".md")) and path.startswith(("tools/", "skills/"))
+                for name in schemas if name in (ROOT / path).read_text(encoding="utf-8")}
+        assert read <= carried, (profile, sorted(read - carried))
+
+
+def test_a_missing_file_of_the_pack_is_named_an_incomplete_delivery() -> None:
+    from tools.json_cli import error_fields
+
+    error = FileNotFoundError(2, "No such file or directory", str(ROOT / "schemas" / "gone.schema.json"))
+    fields = error_fields(error)
+    assert fields["code"] == "PACK_INCOMPLETE" and "поставка неполна" in fields["message"] and "schemas/gone.schema.json" in fields["message"] and fields.get("fix")

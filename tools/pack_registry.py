@@ -42,7 +42,7 @@ CASES_ONLY_EXCLUDED_FILES = (
     "tools/ci_gate.py", "tools/compatibility_contract.py", "tools/contract_check.py", "tools/release_manifest.py",
     "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
-    "schemas/release-eval-run.schema.json", "schemas/scenario-observation-receipt.schema.json",
+    "schemas/release-eval-run.schema.json",
     "tools/review_legacy.py", "requirements-dev.txt", "HOW-TO-USE-MODE-B.md",  # the text of mode B for the human: only the delivery of mode B
     # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b``
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
@@ -56,7 +56,7 @@ CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/auto
 
 # What the delivery of mode B leaves out: the tools of development and the maintainer files.  ``ci_gate`` and ``release_manifest``
 # run ``git`` and write the manifest; the others check the contract, render its documents and keep the evidence of the release
-# evaluation.  ``scenario-observation-receipt`` stays: a run of mode B writes it.
+# evaluation.  ``scenario-observation-receipt`` stays, in the delivery of cases too: a second ``finish`` writes it in either.
 MODE_B_EXCLUDED_FILES = (
     "tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
     "tools/render_contract_docs.py", "tools/review_legacy.py", "requirements-dev.txt",

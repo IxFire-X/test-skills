@@ -23,12 +23,29 @@ def error_code_prefix(message: str) -> str | None:
     return found.group(1) if found else None
 
 
+_PACK_DIRS = ("contracts", "schemas", "skills", "tools")
+
+
+def _missing_pack_file(error: BaseException) -> str | None:
+    """The path, relative to the root of the pack, of a file of the pack that is not there (a delivery that lacks a file); else None."""
+    if not isinstance(error, FileNotFoundError) or not error.filename:
+        return None
+    try:
+        relative = Path(os.fsdecode(error.filename)).resolve().relative_to(Path(__file__).resolve().parents[1])
+    except (ValueError, OSError):
+        return None
+    return relative.as_posix() if relative.parts and relative.parts[0] in _PACK_DIRS else None
+
+
 def error_fields(error: BaseException, table: bool = True) -> dict[str, str]:
     """``{code, message[, fix]}`` of a refusal — the error's own code, else the ``CODE:`` its message starts with,
     else its type; the fix is the error's own, else the ``; fix: …`` tail of the message.  The message stays whole: its
     readers look for the fix text in it, the separate field is for the code.  An OSError names its file — the agent's own
     input, not a secret. With no fix of its own the code's fix is the one of ``tools.fixes`` — unless ``table`` is
     False, for a call site that has a more exact fix of its own to fall back to; the error's own fix is above both."""
+    missing = _missing_pack_file(error)
+    if missing:
+        return {"code": "PACK_INCOMPLETE", "message": f"PACK_INCOMPLETE: поставка неполна: нет файла пакета {missing}", "fix": str(fix_for("PACK_INCOMPLETE"))}
     message = str(error)
     if isinstance(error, OSError):
         message = f"{type(error).__name__}: {error.strerror or 'input/output error'}" + (f": {error.filename}" if error.filename else "")
