@@ -166,6 +166,14 @@ def disposition_receipt(delta: Mapping[str, Any] | None, *, verification: str) -
     })
 
 
+def _partial_acceptance(run_root: Path, attempt_id: str, effective: Mapping[str, Any] | None) -> bool:
+    """The effective canonical is r2 of a ``ТРЕБУЕТ ДОРАБОТКИ`` answer: cases were sent back and the code subtracted them (derived, nothing stored)."""
+    from tools.review_canaries import recorded_answer
+
+    report = ((recorded_answer(run_root, attempt_id) or {}).get("artifacts") or {}).get("validation_report") or {}
+    return effective is not None and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ" and effective["document"]["revision"] == 2
+
+
 def effective_canonical_required(reviewer: Mapping[str, Any]) -> bool:
     """A completed ACCEPTED review selects an effective canonical when it is isolated or self-accepted."""
     return (
@@ -1073,9 +1081,12 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
                           and bool(automation_artifact.get("artifacts", {}).get("excluded_cases")))
     if partial_automation:
         reason_code = "AUTOMATION_PARTIAL"
+    partial_cases = verification == "PASS" and reason_code is None and _partial_acceptance(run_root, attempt_id, effective)  # the rest of the cases was accepted, not all
+    if partial_cases:
+        reason_code = "PARTIAL_ACCEPTED"
     facts = {
         "run_id": attempt["run_id"], "attempt_id": attempt_id, "attempt_state": "TERMINAL",
-        "completion": "PARTIAL" if verification == "UNKNOWN" or partial_automation else "COMPLETE",
+        "completion": "PARTIAL" if verification == "UNKNOWN" or partial_automation or partial_cases else "COMPLETE",
         "verification": verification, "coverage": coverage, "reason_code": reason_code,
         "canonical_schema_valid": True, "canonical_semantics_valid": True,
         "canonical_provenance_valid": True,
@@ -1350,9 +1361,11 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
     if effective is not None:
         coverage, blockers = _coverage_and_blockers(effective["document"])
         if profile == "cases-only-v1":
-            facts = {**base, "completion": "COMPLETE", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": None,
-                     "blocker_count": blockers, "mixed_manual_traceable": coverage == "MIXED", "prior_stage_cause": "CANONICAL_COMPLETE"}
-            causes = ["CANONICAL_COMPLETE"]
+            partial = _partial_acceptance(run_root, attempt_id, effective)
+            cause = "PARTIAL_ACCEPTED" if partial else "CANONICAL_COMPLETE"
+            facts = {**base, "completion": "PARTIAL" if partial else "COMPLETE", "verification": "NOT_APPLICABLE", "coverage": coverage,
+                     "reason_code": cause if partial else None, "blocker_count": blockers, "mixed_manual_traceable": coverage == "MIXED", "prior_stage_cause": cause}
+            causes = [cause]
         else:
             refusal = _automation_refusal(run_root, attempt_id, blockers, abandon)
             facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": refusal,

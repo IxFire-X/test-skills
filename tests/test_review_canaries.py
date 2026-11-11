@@ -404,23 +404,52 @@ def test_an_answer_whose_only_edits_act_on_canaries_is_refused_and_writes_nothin
     assert (run["run_root"] / "events.jsonl").read_bytes() == before
 
 
-def test_a_rework_that_stands_on_canaries_alone_is_refused_and_a_retry_with_info_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _boundary_and_removed(run: dict) -> tuple[dict, dict]:
+    one, two = _ids(run)
+    return (_finding("BLOCKING", [one["steps"][0]["expectations"][0]["expectation_id"]], "Ожидание называет 6, а требование — 5.", code="BOUNDARY"),
+            _finding("BLOCKING", [two["steps"][0]["expectations"][0]["expectation_id"]], "Нет проверки delta = 1."))
+
+
+def test_a_rework_that_stands_on_canaries_alone_accepts_the_whole_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    done = _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=_boundary_and_removed(run)))
+    assert done["status"] == "EFFECTIVE_SELECTED" and done["effective_source"]["revision"] == 1
+    assert done["review_canaries"]["status"] == "ALL_CAUGHT" and done["review_canaries"]["caught"] == 2
+
+
+def test_an_accepting_ledger_with_no_effective_canonical_does_not_close_the_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The answer goes back whole (a blocking finding names no case: ledger REJECTED, no effective canonical).  A ledger that said ACCEPTED instead
+    would have to come with an effective canonical; without it ``finish`` refuses (FINISH_FACT_UNDETERMINED) and the attempt stays open."""
+    from tools import finalize_attempt, pilot_state
+
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    done = _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", ["CREQ-batch-a-001"], "Требование не покрыто.")]))
+    assert done["status"] == "REWORK" and finalize_attempt._durable_branch_facts(run["run_root"], run["attempt_id"])[2]["reason_code"] == "REWORK"
+    real = pilot_state.terminal_reviewer_evidence(run["run_root"], run["attempt_id"])
+    monkeypatch.setattr(pilot_state, "terminal_reviewer_evidence", lambda *_args: {**real, "authoritative_verdict": "ACCEPTED", "isolation": "verified"})
+    with pytest.raises(finalize_attempt.FinalizationError, match="FINISH_FACT_UNDETERMINED"):
+        finalize_attempt._durable_branch_facts(run["run_root"], run["attempt_id"])
+
+
+def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_attempt_is_partially_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import finalize_attempt, orchestrate_test_case_revision as orchestrate, pilot_state
+
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # one case of the two of the fixture
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     one, two = _ids(run)
-    exp_one, exp_two = one["steps"][0]["expectations"][0]["expectation_id"], two["steps"][0]["expectations"][0]["expectation_id"]
-    before = (run["run_root"] / "events.jsonl").read_bytes()
-    only = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [exp_one], "Ожидание называет 6, а требование — 5.", code="BOUNDARY"),
-                                                                _finding("BLOCKING", [exp_two], "Нет проверки delta = 1.")])
-    with pytest.raises(ValueError) as refused:
-        _select(run, only)
-    message = str(refused.value)
-    assert "REVIEW_CANARY_ONLY_VERDICT" in message and "#1 BOUNDARY" in message and "INFO" in message and "--transport-attempts 2" in message
-    assert (run["run_root"] / "events.jsonl").read_bytes() == before  # nothing recorded: the stage keeps its retry
-    retry = _answer(run, "ПРИНЯТО", findings=[_finding("INFO", [exp_one]), _finding("INFO", [exp_two])])
-    done = _select(run, retry, transport_attempts=2)
-    assert done["status"] == "EFFECTIVE_SELECTED" and done["review_canaries"]["status"] == "ALL_CAUGHT" and done["review_canaries"]["caught"] == 2
-    assert done["review_warnings"] == []
+    findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")]
+    done = _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))
+    assert done["status"] == "EFFECTIVE_SELECTED" and done["effective_source"]["revision"] == 2
+    effective = pilot_state.read_effective_canonical(run["run_root"], run["attempt_id"])["document"]
+    assert [case["case_id"] for case in effective["test_cases"]] == [two["case_id"]]
+    assert pilot_state.terminal_reviewer_evidence(run["run_root"], run["attempt_id"])["authoritative_verdict"] == "ACCEPTED"
+    facts = finalize_attempt._durable_branch_facts(run["run_root"], run["attempt_id"])[2]
+    assert (facts["completion"], facts["reason_code"], facts["prior_stage_cause"]) == ("PARTIAL", "PARTIAL_ACCEPTED", "PARTIAL_ACCEPTED")
+    result = pilot_state.terminal_result({key: value for key, value in facts.items() if key != "policy_profile"}, facts["policy_profile"])
+    assert pilot_state._validate_result_record(result) and result["accepted"] is False
 
 
 def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -583,56 +612,44 @@ def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_can
 REMOVED = {"class": "assertion_removed", "field": "assertions", "original": "owner_id = 1", "mutated": "", "markers": ["owner_id = 1"]}
 
 
-def _answer_with(*findings: dict) -> dict:
-    return {"artifacts": {"validation_report": {"verdict": "ТРЕБУЕТ ДОРАБОТКИ", "findings": list(findings)}}}
-
-
 def _blocking(ids: list[str], message: str = "Проверки нет.") -> dict:
     return {"severity": "BLOCKING", "code": "ORACLE_MISSING", "message": message, "evidence": [], "related_ids": ids}
 
 
+def _is_canary(canary: dict, finding: dict, cases: set[str] | None = None) -> bool:
+    from tools.review_canaries import canary_finding
+
+    return canary_finding([canary], finding, set() if cases is None else cases)
+
+
 def test_a_blocking_finding_on_the_place_of_a_canary_needs_no_quotation() -> None:
-    from tools.review_canaries import only_canary_verdict
-
-    canary = _canary(**REMOVED)
-    assert only_canary_verdict([canary], _answer_with(_blocking(["TC-S", "STEP-S1", "EXP-S1", "CREQ-1"])))
+    assert _is_canary(_canary(**REMOVED), _blocking(["TC-S", "STEP-S1", "EXP-S1", "CREQ-1"]), {"TC-S"})
 
 
-def test_a_real_blocking_finding_beside_a_place_hit_stands() -> None:
-    from tools.review_canaries import only_canary_verdict
-
-    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["EXP-S1"]), _blocking(["REQ-OTHER"]))) == []
-
-
-def test_a_finding_that_names_only_the_case_is_not_a_canary() -> None:
-    from tools.review_canaries import only_canary_verdict
-
-    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["TC-S"]))) == []
+def test_a_finding_that_names_only_the_case_or_a_requirement_is_not_a_canary() -> None:
+    assert not _is_canary(_canary(**REMOVED), _blocking(["TC-S"]), {"TC-S"})
+    assert not _is_canary(_canary(**REMOVED), _blocking(["REQ-OTHER"]))
 
 
 def test_a_finding_that_names_another_expectation_too_is_not_a_canary() -> None:
-    from tools.review_canaries import only_canary_verdict
+    assert not _is_canary(_canary(**REMOVED), _blocking(["EXP-S1", "EXP-S2"]))
 
-    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["EXP-S1", "EXP-S2"]))) == []
+
+def test_a_finding_that_names_another_case_too_is_not_a_canary() -> None:
+    assert not _is_canary(_canary(**REMOVED), _blocking(["EXP-S1"]), {"TC-S", "TC-OTHER"})
 
 
 def test_the_step_is_a_place_only_for_a_canary_without_an_expectation() -> None:
-    from tools.review_canaries import only_canary_verdict
-
-    finding = _answer_with(_blocking(["STEP-S1"]))
-    assert only_canary_verdict([_canary(**REMOVED, expectation_id=None)], finding)
-    assert only_canary_verdict([_canary(**REMOVED)], finding) == []
+    finding = _blocking(["STEP-S1"])
+    assert _is_canary(_canary(**REMOVED, expectation_id=None), finding)
+    assert not _is_canary(_canary(**REMOVED), finding)
 
 
 def test_a_boundary_finding_on_the_place_without_the_value_is_not_a_canary() -> None:
     """The quotation stays the condition for the classes whose view keeps the changed value."""
-    from tools.review_canaries import only_canary_verdict
-
-    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1"]))) == []
-    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1"], "Называется 6."))) != []
+    assert not _is_canary(_canary(), _blocking(["EXP-S1"]))
+    assert _is_canary(_canary(), _blocking(["EXP-S1"], "Называется 6."))
 
 
 def test_a_foreign_expectation_in_related_ids_is_no_canary_in_any_class() -> None:
-    from tools.review_canaries import only_canary_verdict
-
-    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1", "EXP-S2"], "Называется 6."))) == []
+    assert not _is_canary(_canary(), _blocking(["EXP-S1", "EXP-S2"], "Называется 6."))

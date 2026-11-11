@@ -20,7 +20,8 @@ from tools.fixes import FIXES
 from tools import output_guard
 from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, planned_receipt, publish_bundle, status_payloads, verify_bundle
-from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
+from tools.revision_selection import (DEFAULT_REJECT_SHARE, SelectionError, candidate_rows, review_outcome, reviewer_verdict_is_bound,
+                                      select_effective_document, validate_review_decision)
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -198,6 +199,8 @@ def reviewer_package_binding(
     """Bind reviewer input to exact canonical and controller receipt bytes."""
     candidate_value = _plain(candidate)
     require_valid_canonical_document(candidate_value)
+    if candidate_rows(candidate_value):
+        raise ValueError("REVIEWER_PROTOCOL: a candidate is revision 1 without a parent")
     if _receipt_rows(candidate_receipt, candidate_value, None, candidate_receipt.csv_profile) or _readback_rows(candidate_receipt, candidate_value):
         raise ValueError("REVIEWER_PROTOCOL: candidate receipt is invalid")
     assembly, inventory = _exact_receipt(assembly_receipt, "assembly"), _exact_receipt(inventory_receipt, "inventory")
@@ -402,6 +405,23 @@ def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[st
     return record
 
 
+def reject_share(run_root: Path, attempt_id: str) -> int:
+    """``.skillsrc`` ``limits.review_reject_share`` (percent, 0..50) of the limits the run froze at scan; 20 when none."""
+    from tools.pilot_state import derive_state, run_root_of
+    from tools.step_size import run_limits, whole_limit
+
+    project, root = run_root_of(Path(run_root))
+    value = whole_limit(run_limits(project, root, derive_state(root), attempt_id)[0].get("review_reject_share"))
+    return DEFAULT_REJECT_SHARE if value is None else min(max(value, 0), 50)
+
+
+def answer_outcome(run_root: Path, attempt_id: str, report: Mapping[str, Any]) -> dict[str, Any]:
+    """The outcome of a ``ТРЕБУЕТ ДОРАБОТКИ`` report over the candidate and the canaries of the journal."""
+    from tools.review_canaries import verify
+
+    return review_outcome(journal_assembly(Path(run_root), attempt_id)[0], _plain(report), verify(run_root, attempt_id) or (), reject_share(run_root, attempt_id))
+
+
 _VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}
 
 
@@ -427,6 +447,8 @@ def complete_reviewer_session(run_root: Path, attempt_id: str, *, review: Mappin
     verdict = _VERDICT_EVENT.get(report.get("verdict")) if isinstance(report, dict) else None
     if verdict is None:
         raise ValueError("REVIEWER_VERDICT_INVALID: the recorded review has no ПРИНЯТО / AUTO_FIX_APPLIED / ТРЕБУЕТ ДОРАБОТКИ verdict")
+    if verdict == "REJECTED" and answer_outcome(run_root, attempt_id, report)["kind"] != "REWORK":
+        verdict = "ACCEPTED"  # sent back, and the code took the rejected cases out (or only canaries blocked): the review accepts a set
     session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)))
     lifecycle = reviewer_lifecycle_projection(session)
     events = list(session["events"])
@@ -645,6 +667,8 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     verdict_event = next(event for event in events if event["event_type"] == "AUTHORITATIVE_VERDICT")
     if not reviewer_verdict_is_bound(report, verdict_event):
         raise ValueError("REVIEWER_PROTOCOL: verdict is not bound to review report")
+    if report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ" and verdict_event.get("verdict") != ("ACCEPTED" if effective_canonical else "REJECTED"):
+        raise ValueError("REVIEWER_PROTOCOL: verdict is not bound to the outcome of the report")
     ledger_digest = str(value["digest"]) if dry_run else _publish_reviewer_ledger(Path(run_root), attempt_id, value)
     verdict_count = lifecycle["authoritative_verdict_count"]
     from tools.pilot_state import self_review_accepted
@@ -665,6 +689,8 @@ def publish_unreviewed_candidate(
 ) -> Receipt:
     """Record the candidate and give its receipt; no file is written — ``published/`` holds only the outcome of the review."""
     value = _plain(candidate); require_valid_canonical_document(value)
+    if candidate_rows(value):
+        raise ValueError("CANDIDATE_REVISION: a candidate is revision 1 without a parent")
     from tools.pilot_state import append_event, derive_state
 
     # the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is refused as before
@@ -718,7 +744,8 @@ def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
 
 
 def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
-                    candidate_receipt: Receipt | None = None, canaries: Sequence[Mapping[str, Any]] | None = None) -> tuple[Any, Any]:
+                    candidate_receipt: Receipt | None = None, canaries: Sequence[Mapping[str, Any]] | None = None,
+                    share: int = DEFAULT_REJECT_SHARE) -> tuple[Any, Any]:
     """``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
     decision, writing nothing: the review shape, the successor edits, the decision against the candidate, the successor
     document and the human fields of an import.  select runs it before it publishes the ledger, model-response
@@ -759,6 +786,12 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
             effective = select_effective_document(candidate_value, _plain(report), _plain(successor) if verdict == "AUTO_FIX_APPLIED" else None)
         except SelectionError as error:
             raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
+    else:  # sent back: the blocking findings of real cases reject them, the code subtracts; the whole set only for a finding without a case or over the share
+        effective = review_outcome(candidate_value, _plain(report), canaries or (), share)["effective"]
+        try:
+            require_valid_canonical_document(effective) if effective is not None else None
+        except CanonicalDocumentError as error:
+            raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_SUBTRACTION"), candidate_receipt) from None
     return successor, effective
 
 
@@ -813,6 +846,8 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
         require_valid_canonical_document(candidate_value)
     except CanonicalDocumentError as error:
         raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_CANDIDATE")) from None
+    if candidate_rows(candidate_value):
+        raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/revision", "CANDIDATE_REVISION")])
     rows = _receipt_rows(candidate_receipt, candidate_value, output_dir, csv_profile)
     if rows or planned_receipt(_plain(candidate_value), output_dir, csv_profile) != candidate_receipt:  # no file before the verdict
         raise OrchestrationError("ORCHESTRATION_RECEIPT", rows or [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
@@ -827,38 +862,39 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     # every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
     from tools.review_canaries import verify as _verify_canaries
 
-    successor, effective = review_decision(candidate_value, review_value, imported=_run_imported(run_root, attempt_id),
-                                           candidate_receipt=candidate_receipt, canaries=_verify_canaries(run_root, attempt_id))
+    successor, effective = review_decision(candidate_value, review_value, imported=_run_imported(run_root, attempt_id), candidate_receipt=candidate_receipt,
+                                           canaries=_verify_canaries(run_root, attempt_id), share=reject_share(run_root, attempt_id))
     report = review_value["artifacts"]["validation_report"]
     verdict = report["verdict"]
+    second = effective is not None and _plain(effective)["revision"] > 1  # AUTO_FIX or a subtraction: a second bundle beside the candidate's
     facts = validate_reviewer_session(
         reviewer_session, package_binding, review_value,
         run_root=run_root, attempt_id=attempt_id,
         evidence_receipts=reviewer_evidence_receipts,
-        effective_canonical=verdict != "ТРЕБУЕТ ДОРАБОТКИ", dry_run=dry_run,
+        effective_canonical=effective is not None, dry_run=dry_run,
     )
     if not facts["acceptance_eligible"]:
         raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag("/reviewer_session", "INDEPENDENCE_UNVERIFIED")], candidate_receipt)
     successor_receipt = None
-    if verdict != "ТРЕБУЕТ ДОРАБОТКИ" and not dry_run:  # the accepted set — the files of the bundle, the import CSV among them — is written now
+    if effective is not None and not dry_run:  # the accepted set — the files of the bundle, the import CSV among them — is written now
         try:
             published_set = publisher(_plain(effective), output_dir, csv_profile)
         except Exception:
             raise OrchestrationError("ORCHESTRATION_PUBLICATION", [_diag("", "ORCHESTRATION_PUBLICATION")], candidate_receipt) from None
-        if verdict == "AUTO_FIX_APPLIED":
+        if second:
             successor_receipt = _receipt_copy(published_set) if type(published_set) is Receipt else None
         rows = _receipt_rows(published_set, effective, output_dir, csv_profile)
         if rows:
             raise OrchestrationError("ORCHESTRATION_RECEIPT", rows, candidate_receipt, successor_receipt) from None
-    if verdict == "ТРЕБУЕТ ДОРАБОТКИ":
+    if effective is None:
         if not dry_run:  # the rejected set with the blocking findings beside it — what the person has after a rejection
             blocking = [f"{row.get('code', '—')} ({', '.join(map(str, row.get('related_ids') or [])) or '—'}): {row.get('message', '')}"
                         for row in report.get("findings") or [] if row.get("severity") == "BLOCKING"]
             write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", blocking)
         rework_facts = {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": "REWORK", "accepted": False, "reviewer_session_digest": facts["reviewer_session_digest"]}
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK", _freeze(rework_facts), ())
-    if dry_run and verdict == "AUTO_FIX_APPLIED":  # the successor is not published: its bundle is checked when it is
-        return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", _freeze(successor), None, _freeze(effective), None, "EFFECTIVE_SELECTED", _freeze({"reviewer_session_digest": facts["reviewer_session_digest"]}), ())
+    if dry_run and second:  # the successor is not published: its bundle is checked when it is
+        return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None if successor is None else _freeze(successor), None, _freeze(effective), None, "EFFECTIVE_SELECTED", _freeze({"reviewer_session_digest": facts["reviewer_session_digest"]}), ())
     try:
         verified = planned_receipt(_plain(effective), output_dir, csv_profile) if dry_run else verifier(_plain(effective), output_dir, csv_profile)  # a dry run has no files to read
     except Exception:

@@ -3732,6 +3732,12 @@ def _validate_factual_receipt(
                 (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
                 None,
             ) if isinstance(ledger, Mapping) else None
+            partial: dict[str, Any] = {}
+            if isinstance(report, Mapping) and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted: bound to the candidate and the canaries of the journal
+                from tools.orchestrate_test_case_revision import journal_assembly
+                from tools.review_canaries import verify as verify_canaries
+
+                partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or []}
             review_bound = (
                 isinstance(package_binding, Mapping)
                 and effective_review_is_bound(
@@ -3740,6 +3746,7 @@ def _validate_factual_receipt(
                     dict(report) if isinstance(report, Mapping) else report,
                     dict(successor) if isinstance(successor, Mapping) else successor,
                     dict(verdict_event) if isinstance(verdict_event, Mapping) else verdict_event,
+                    **partial,
                 )
             )
             ledger_events = [event for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == reviewer_digest]
@@ -5981,6 +5988,10 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
     if reason == "REWORK" and (not e["reviewer_session_complete"] or e["authoritative_verdict"] != "REJECTED" or e["authoritative_verdict_count"] != 1 or e["reviewer_pre_verdict_abort"]):
         raise ValueError("rework requires one rejected reviewer verdict")
     if reason == "EXECUTION_UNKNOWN" and (facts["completion"] != "PARTIAL" or facts["verification"] != "UNKNOWN"):
+        raise ValueError("invalid result reason tuple")
+    # cases were sent back and the code subtracted them: the review accepted the rest (one accepting verdict), the set is not whole
+    if reason == "PARTIAL_ACCEPTED" and (facts["completion"] != "PARTIAL" or not e["reviewer_session_complete"] or e["authoritative_verdict"] != "ACCEPTED"
+                                         or e["authoritative_verdict_count"] != 1 or e["reviewer_pre_verdict_abort"]):
         raise ValueError("invalid result reason tuple")
     # the automated subset passed, the cases with blockers stayed manual
     if reason == "AUTOMATION_PARTIAL" and (policy_profile != "local-pilot-v1" or facts["completion"] != "PARTIAL"

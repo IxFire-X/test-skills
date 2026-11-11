@@ -391,22 +391,13 @@ def hit_ids(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) ->
     return found
 
 
-def only_canary_verdict(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) -> list[str]:
-    """For ``ТРЕБУЕТ ДОРАБОТКИ`` whose every BLOCKING finding is about a canary: those findings as «#n code (step)»; else ``[]``."""
-    report = (answer.get("artifacts") or {}).get("validation_report") or {}
-    blocking = [(index, item) for index, item in enumerate(report.get("findings") or [], start=1)
-                if isinstance(item, Mapping) and item.get("severity") == "BLOCKING"]
-    named = []
-    for index, finding in blocking:
-        canary = next((row for row in canaries if finding_hits(row, finding, strict=True)), None)
-        if canary is None:
-            return []
-        named.append(f"находка #{index} {finding.get('code')} (шаг {canary['step_id']})")
-    return named
+def canary_finding(canaries: Sequence[Mapping[str, Any]], finding: Mapping[str, Any], cases: set[str]) -> bool:
+    """A finding is a canary's when it stands on a canary's place by the strict rule and names no case but the canary's own."""
+    return any(finding_hits(row, finding, strict=True) and cases <= {row["case_id"]} for row in canaries)
 
 
 def refuse_if_only_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any], edits_dropped: Sequence[str]) -> None:
-    """The two refusals before the answer is written (and in ``--dry-run``): a verdict that stands on canaries alone."""
+    """The refusal before the answer is written (and in ``--dry-run``): fixes that stand on canaries alone.  A blocking finding on a canary rejects nothing."""
     report = (answer.get("artifacts") or {}).get("validation_report") or {}
     verdict = report.get("verdict")
     tail = ("этих ошибок нет в кандидате, их поставил код в вид ревьюера; оставь эти находки с severity INFO, правки по ним убери, "
@@ -416,10 +407,6 @@ def refuse_if_only_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mappi
             and "successor_document" not in (answer.get("artifacts") or {}):
         named = ", ".join(sorted(set(edits_dropped)))
         raise ValueError(f"REVIEW_ONLY_CANARY_FIXES: все правки ответа — по контрольным ошибкам ({named}); fix: {tail}")
-    if verdict == "ТРЕБУЕТ ДОРАБОТКИ":
-        named = only_canary_verdict(canaries, answer)
-        if named:
-            raise ValueError(f"REVIEW_CANARY_ONLY_VERDICT: отказ держится только на контрольных ошибках ({'; '.join(named)}); fix: {tail}")
 
 
 def _filtered(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) -> dict[str, Any]:

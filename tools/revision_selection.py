@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ def reviewer_verdict_is_bound(report: Any, verdict_event: Any) -> bool:
     normalized = {
         "ПРИНЯТО": "ACCEPTED",
         "AUTO_FIX_APPLIED": "ACCEPTED",
-        "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED",
+        "ТРЕБУЕТ ДОРАБОТКИ": verdict_event.get("verdict") if verdict_event.get("verdict") in {"ACCEPTED", "REJECTED"} else None,  # which: the outcome, see partial_is_bound
     }.get(report.get("verdict"))
     report_digest = "sha256:" + hashlib.sha256(canonical_bytes(report)).hexdigest()
     verdict_digest = "sha256:" + hashlib.sha256(canonical_bytes({
@@ -44,6 +45,8 @@ def effective_review_is_bound(
     report: Any,
     successor: Any,
     verdict_event: Any,
+    candidate: Any = None,
+    canaries: Sequence[Any] = (),
 ) -> bool:
     """Bind one accepted durable effective document to the reviewer decision."""
     if (
@@ -53,6 +56,9 @@ def effective_review_is_bound(
         or not reviewer_verdict_is_bound(report, verdict_event)
     ):
         return False
+    if report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted by the code: ACCEPTED in the ledger, and the set is exactly the reviewer's
+        return (isinstance(candidate, dict) and document_sha256(candidate) == candidate_digest and verdict_event.get("verdict") == "ACCEPTED"
+                and successor is None and partial_is_bound(candidate, report, canaries, effective_document))
     expected_effective = {
         "document_id": effective_document.get("document_id"),
         "revision": effective_document.get("revision"),
@@ -196,8 +202,9 @@ def _successor_diagnostics(candidate: dict[str, Any], successor: dict[str, Any])
         return [_diagnostic("/source_to_canonical_mappings", "TRACEABILITY_CHANGED", "a reviewer successor must preserve source/canonical mappings exactly")]
     candidate_cases = {case["case_id"]: case["requirement_ids"] for case in candidate["test_cases"]}
     successor_cases = {case["case_id"]: case["requirement_ids"] for case in successor["test_cases"]}
-    if successor_cases != candidate_cases:
-        return [_diagnostic("/test_cases", "TRACEABILITY_CHANGED", "a reviewer successor must preserve canonical requirement ownership for every case")]
+    if successor_cases != candidate_cases or [item["requirement_id"] for item in successor["requirements"]] != [item["requirement_id"] for item in candidate["requirements"]] \
+            or {case["case_id"]: case["display_order"] for case in successor["test_cases"]} != {case["case_id"]: case["display_order"] for case in candidate["test_cases"]}:
+        return [_diagnostic("/test_cases", "TRACEABILITY_CHANGED", "a reviewer successor must preserve canonical requirement ownership and the order of every case")]
     if _machine_contract(successor) != _machine_contract(candidate):
         return [_diagnostic("/test_cases", "MACHINE_SEMANTICS_CHANGED", "a reviewer successor cannot rewrite confirmed operation, input, output, assertion, blocker, or literal semantics")]
 
@@ -315,3 +322,109 @@ def select_effective_document(candidate: dict[str, Any], validation_report: dict
     if successor is not None:
         raise SelectionError([_diagnostic("/successor_document", "SUCCESSOR_FORBIDDEN", "successor is forbidden for a rework review")])
     raise SelectionError([_diagnostic("/verdict", "NO_EFFECTIVE_DOCUMENT", "rework review has no effective document")])
+
+
+# --- partial acceptance: the reviewer's blocking findings reject their cases, the code only subtracts and checks ----------------------
+
+DEFAULT_REJECT_SHARE = 20  # percent; ``.skillsrc`` limits.review_reject_share (0..50)
+
+
+def candidate_rows(document: dict[str, Any]) -> list[dict[str, str]]:
+    """What every agent-fed input (assemble, validate-canonical, review files) requires of a candidate: revision 1, no parent.  The two validator
+    clauses of a subtraction successor are by content, so only a document the code built (``subtract``) may carry them."""
+    if document.get("revision") != 1 or document.get("parent_sha256") is not None:
+        return [_diagnostic("/revision", "CANDIDATE_REVISION", "a candidate is revision 1 without a parent; a later revision is built by the code from the reviewer's answer")]
+    return []
+
+
+def coverage_gaps(document: dict[str, Any]) -> list[str]:
+    """The requirements of a subtraction successor that no case covers - computed, never stored (r1 was fully covered)."""
+    from tools.canonical_document import uncovered_requirements
+
+    return [document["requirements"][index]["requirement_id"] for index in uncovered_requirements(document["requirements"], document["test_cases"])]
+
+
+def _owners(document: dict[str, Any]) -> dict[str, str]:
+    """case, step, expectation and assertion IDs (document-global) -> the case that owns them."""
+    owners: dict[str, str] = {}
+    for case in document["test_cases"]:
+        owners[case["case_id"]] = case["case_id"]
+        for step in case["steps"]:
+            owners[step["step_id"]] = case["case_id"]
+            for expectation in step["expectations"]:
+                owners[expectation["expectation_id"]] = case["case_id"]
+                owners.update({item["assertion_id"]: case["case_id"] for item in expectation["assertions"]})
+    return owners
+
+
+def _rejection(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any]) -> tuple[str | None, list[str], list[str]]:
+    """``(reason, rejected, with_group)`` without the share: ``NO_BLOCKING`` - nothing blocks; ``NO_CASES`` - a blocking finding names no case (the whole set); else the cases the
+    blocking findings name, canary findings excepted, and the cases of a group that is left with one variant."""
+    from tools.review_canaries import canary_finding
+
+    owners, rejected = _owners(candidate), set()
+    if not any(item.get("severity") == "BLOCKING" for item in report.get("findings") or []):
+        return "NO_BLOCKING", [], []  # sent back with nothing that blocks: the schema forbids it, and the code does not lean on that
+    for finding in report.get("findings") or []:
+        if finding.get("severity") != "BLOCKING":
+            continue
+        named = {owners[item] for item in finding.get("related_ids") or [] if item in owners}
+        if canary_finding(canaries, finding, named):
+            continue
+        if not named:
+            return "NO_CASES", [], []
+        rejected |= named
+    groups: dict[str, list[str]] = {}
+    for case in candidate["test_cases"]:
+        if "param_group" in case:
+            groups.setdefault(case["param_group"], []).append(case["case_id"])
+    dragged = {case_id for members in groups.values() if rejected & set(members) and len(set(members) - rejected) < 2 for case_id in members} - rejected
+    order = [case["case_id"] for case in candidate["test_cases"]]
+    return None, [item for item in order if item in rejected], [item for item in order if item in dragged]
+
+
+def subtract(candidate: dict[str, Any], removed: Sequence[str]) -> dict[str, Any]:
+    """r2: the candidate without the removed cases; the kept cases are r1's (copied), nothing is renumbered."""
+    successor = copy.deepcopy(candidate)
+    successor["revision"], successor["parent_sha256"] = candidate["revision"] + 1, document_sha256(candidate)
+    successor["test_cases"] = [case for case in successor["test_cases"] if case["case_id"] not in set(removed)]
+    return successor
+
+
+def check_subtraction(candidate: dict[str, Any], effective: dict[str, Any], removed: Sequence[str]) -> list[dict[str, str]]:
+    """The lineage of r2 as the code checks it: only the cases, the revision and the parent differ from r1; every kept case is r1's byte for byte
+    (canonical JSON), in r1's order; exactly the removed cases are gone."""
+    def bare(document: dict[str, Any]) -> bytes:
+        return canonical_bytes({key: value for key, value in document.items() if key not in {"test_cases", "revision", "parent_sha256"}})
+
+    if candidate["revision"] != 1 or (effective["revision"], effective["parent_sha256"]) != (2, document_sha256(candidate)) or bare(candidate) != bare(effective):
+        return [_diagnostic("/", "SUBTRACTION_DOCUMENT_CHANGED", "r2 may differ from r1 only in its cases, revision and parent")]
+    before = {case["case_id"]: case for case in candidate["test_cases"]}
+    kept = [case["case_id"] for case in effective["test_cases"]]
+    if any(item not in before or canonical_bytes(case) != canonical_bytes(before[item]) for item, case in zip(kept, effective["test_cases"])):
+        return [_diagnostic("/test_cases", "SUBTRACTION_CASE_CHANGED", "a kept case is not r1's byte for byte")]
+    if kept != [item for item in before if item not in set(removed)] or not kept:
+        return [_diagnostic("/test_cases", "SUBTRACTION_REMOVED_SET", "the cases taken out of r2 are not exactly the rejected ones")]
+    return []
+
+
+def review_outcome(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any] = (), share: int = DEFAULT_REJECT_SHARE) -> dict[str, Any]:
+    """The outcome of a ``ТРЕБУЕТ ДОРАБОТКИ`` answer: ``ACCEPTED_WHOLE`` (every blocking finding is a canary's: effective = r1), ``PARTIAL`` (effective = r2)
+    or ``REWORK`` (a blocking finding without a case, or more than ``share`` percent of the cases removed)."""
+    reason, rejected, dragged = _rejection(candidate, report, canaries)
+    total, removed = len(candidate["test_cases"]), len(rejected) + len(dragged)
+    base = {"rejected": rejected, "with_group": dragged, "removed": removed, "total": total, "share": share, "reason": reason, "effective": None}
+    if reason is None and not rejected:
+        return {**base, "kind": "ACCEPTED_WHOLE", "effective": candidate}
+    if reason is None and removed * 100 > share * total:
+        reason = "OVER_SHARE"
+    return {**base, "kind": "REWORK", "reason": reason} if reason else {**base, "kind": "PARTIAL", "effective": subtract(candidate, [*rejected, *dragged])}
+
+
+def partial_is_bound(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any], effective: Any) -> bool:
+    """Whether *effective* is what the reviewer's report gives: r1 itself when only canaries were blocking, else a valid subtraction of exactly the
+    cases the report rejects.  The share is not part of it (a limit edited since the selection must not unseal the run)."""
+    reason, rejected, dragged = _rejection(candidate, report, canaries)
+    if reason is not None or not isinstance(effective, dict):
+        return False
+    return effective == candidate if not rejected else not check_subtraction(candidate, effective, [*rejected, *dragged])

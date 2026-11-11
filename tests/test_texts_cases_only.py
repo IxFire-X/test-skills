@@ -94,7 +94,7 @@ ANCHORS = (
     "`context_receipt` и digest-поля", "ставит код, не пиши их", "--prior-fragment", "`path` из вывода её `model-response`", "validate-fragment", "--context-receipt <f> --run-root <run>`",
     "fragment-sample.md", "schemas/candidate-fragment.schema.json", "<run>/published", "OUTPUT_DIR_OUTSIDE_RUN",
     "read-receipt --run-root <run> --attempt <id> --kind reviewer-session-boundary --event ARTIFACT_READ_BACK", "read-effective", "read-ledger",
-    "review-evidence", "`for_human`", "REVIEW_CANARY_ONLY_VERDICT", "REVIEW_ONLY_CANARY_FIXES", "REVIEW_CANARY_MISMATCH", "REVIEW_UNRELIABLE",
+    "review-evidence", "`for_human`", "REVIEW_ONLY_CANARY_FIXES", "REVIEW_CANARY_MISMATCH", "REVIEW_UNRELIABLE",
     "details.self_review_scan", "`SCOPE_PENDING`", "reviewer-answer.json",
 )
 

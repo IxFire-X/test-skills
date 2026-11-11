@@ -1188,6 +1188,8 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
 
 def _document(header: dict[str, Any], plan: dict[str, Any], ordered: list[dict[str, Any]]) -> dict[str, Any]:
     """The canonical document of the complete fragments in plan order — what assemble audits and the last batch checks."""
+    if header.get("revision") != 1 or header.get("parent_sha256") is not None:  # a later revision is the code's (subtraction), never a header's
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "the generator header must be revision 1 without a parent")
     capabilities = _unique_by_id([item for fragment in ordered for item in fragment["operation_capabilities"]], "capability_id", "BATCH_ID_CONFLICT", permit_equal=True)
     requirements = _unique_by_id([item for fragment in ordered for item in fragment["requirements"]], "requirement_id", "BATCH_ID_CONFLICT")
     cases = _unique_by_id([item for fragment in ordered for item in fragment["test_cases"]], "case_id", "BATCH_ID_CONFLICT")

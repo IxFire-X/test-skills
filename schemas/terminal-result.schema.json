@@ -67,6 +67,10 @@
       "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "evidence": {"properties": {"reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "REJECTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}}}}}
     },
     {
+      "if": {"properties": {"reason_code": {"const": "PARTIAL_ACCEPTED"}}, "required": ["reason_code"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "accepted": {"const": false}, "evidence": {"properties": {"reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}}}}}
+    },
+    {
       "if": {"properties": {"reason_code": {"const": "EXECUTION_UNKNOWN"}}, "required": ["reason_code"]},
       "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "UNKNOWN"}, "accepted": {"const": false}}}
     },

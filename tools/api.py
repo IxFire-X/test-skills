@@ -257,7 +257,9 @@ def _cmd_document_digest(a):
 
 
 def _cmd_validate_canonical(a):
-    return canonical_document.validate_canonical_document(a.document)
+    from tools.revision_selection import candidate_rows
+
+    return candidate_rows(a.document) or canonical_document.validate_canonical_document(a.document)
 
 
 def _review_files(a):

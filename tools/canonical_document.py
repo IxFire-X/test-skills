@@ -379,7 +379,8 @@ def _requirement_coverage(index: _DocumentIndex, document: dict[str, Any], diagn
         for requirement_index, requirement_id in enumerate(requirement_ids):
             if requirement_id not in index.requirements:
                 diagnostics.append(_diagnostic(_pointer("test_cases", case_index, "requirement_ids", requirement_index), "SEMANTIC_UNKNOWN_REQUIREMENT", f"unknown requirement_id: {requirement_id}"))
-    for requirement_index in uncovered_requirements(document["requirements"], index.cases):
+    # a subtraction successor (revision >= 2 with a parent) may leave requirements without a case: r1 was fully covered, so they are its gaps
+    for requirement_index in [] if document["revision"] >= 2 and document["parent_sha256"] is not None else uncovered_requirements(document["requirements"], index.cases):
         if document["requirements"][requirement_index]["requirement_id"] in index.requirements:
             diagnostics.append(_diagnostic(_pointer("requirements", requirement_index, "requirement_id"), "SEMANTIC_UNCOVERED_REQUIREMENT", "every requirement must be covered by a test case"))
 

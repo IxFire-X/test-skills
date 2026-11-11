@@ -350,7 +350,13 @@ def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
     diagnostics.extend(_nonfinite_number_diagnostics(instance, []))
     diagnostics.extend(_sorted_field_diagnostics(instance.get("operation_capabilities"), ["operation_capabilities"], "capability_id", "CANONICAL_CAPABILITY_ORDER"))
     diagnostics.extend(_display_order_diagnostics(instance.get("requirements"), ["requirements"]))
-    diagnostics.extend(_display_order_diagnostics(instance.get("test_cases"), ["test_cases"]))
+    cases = instance.get("test_cases")
+    if instance.get("revision", 1) >= 2 and instance.get("parent_sha256") is not None and isinstance(cases, list):
+        # a subtraction successor keeps the display_order of its cases, so it has holes; whether it is one is the lineage check's (revision_selection)
+        orders = [case.get("display_order") for case in cases if isinstance(case, dict)]
+        if all(type(order) is int and order >= 1 for order in orders) and orders == sorted(set(orders)):
+            cases = []
+    diagnostics.extend(_display_order_diagnostics(cases, ["test_cases"]))
     rank = {category: index for index, category in enumerate(CATEGORY_PRECEDENCE)}
 
     for capability_index, capability in enumerate(instance.get("operation_capabilities", [])):
