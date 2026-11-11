@@ -357,14 +357,14 @@ def _owners(document: dict[str, Any]) -> dict[str, str]:
     return owners
 
 
-def _rejection(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any]) -> tuple[str | None, list[str], list[str]]:
-    """``(reason, rejected, with_group)`` without the share: ``NO_BLOCKING`` - nothing blocks; ``NO_CASES`` - a blocking finding names no case (the whole set); else the cases the
+def _rejection(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any]) -> tuple[str | None, list[str], list[str], dict[str, list[Any]]]:
+    """``(reason, rejected, with_group, said)`` without the share (``said``: the blocking findings of each rejected case): ``NO_BLOCKING`` - nothing blocks; ``NO_CASES`` - a blocking finding names no case (the whole set); else the cases the
     blocking findings name, canary findings excepted, and the cases of a group that is left with one variant."""
     from tools.review_canaries import canary_finding
 
-    owners, rejected = _owners(candidate), set()
+    owners, rejected, said = _owners(candidate), set(), {}
     if not any(item.get("severity") == "BLOCKING" for item in report.get("findings") or []):
-        return "NO_BLOCKING", [], []  # sent back with nothing that blocks: the schema forbids it, and the code does not lean on that
+        return "NO_BLOCKING", [], [], {}  # sent back with nothing that blocks: the schema forbids it, and the code does not lean on that
     for finding in report.get("findings") or []:
         if finding.get("severity") != "BLOCKING":
             continue
@@ -372,15 +372,17 @@ def _rejection(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequ
         if canary_finding(canaries, finding, named):
             continue
         if not named:
-            return "NO_CASES", [], []
+            return "NO_CASES", [], [], {}
         rejected |= named
+        for case_id in named:
+            said.setdefault(case_id, []).append(finding)
     groups: dict[str, list[str]] = {}
     for case in candidate["test_cases"]:
         if "param_group" in case:
             groups.setdefault(case["param_group"], []).append(case["case_id"])
     dragged = {case_id for members in groups.values() if rejected & set(members) and len(set(members) - rejected) < 2 for case_id in members} - rejected
     order = [case["case_id"] for case in candidate["test_cases"]]
-    return None, [item for item in order if item in rejected], [item for item in order if item in dragged]
+    return None, [item for item in order if item in rejected], [item for item in order if item in dragged], said
 
 
 def subtract(candidate: dict[str, Any], removed: Sequence[str]) -> dict[str, Any]:
@@ -411,9 +413,9 @@ def check_subtraction(candidate: dict[str, Any], effective: dict[str, Any], remo
 def review_outcome(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any] = (), share: int = DEFAULT_REJECT_SHARE) -> dict[str, Any]:
     """The outcome of a ``ТРЕБУЕТ ДОРАБОТКИ`` answer: ``ACCEPTED_WHOLE`` (every blocking finding is a canary's: effective = r1), ``PARTIAL`` (effective = r2)
     or ``REWORK`` (a blocking finding without a case, or more than ``share`` percent of the cases removed)."""
-    reason, rejected, dragged = _rejection(candidate, report, canaries)
+    reason, rejected, dragged, said = _rejection(candidate, report, canaries)
     total, removed = len(candidate["test_cases"]), len(rejected) + len(dragged)
-    base = {"rejected": rejected, "with_group": dragged, "removed": removed, "total": total, "share": share, "reason": reason, "effective": None}
+    base = {"rejected": rejected, "with_group": dragged, "removed": removed, "total": total, "share": share, "reason": reason, "effective": None, "said": said}
     if reason is None and not rejected:
         return {**base, "kind": "ACCEPTED_WHOLE", "effective": candidate}
     if reason is None and removed * 100 > share * total:
@@ -424,7 +426,7 @@ def review_outcome(candidate: dict[str, Any], report: dict[str, Any], canaries: 
 def partial_is_bound(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any], effective: Any) -> bool:
     """Whether *effective* is what the reviewer's report gives: r1 itself when only canaries were blocking, else a valid subtraction of exactly the
     cases the report rejects.  The share is not part of it (a limit edited since the selection must not unseal the run)."""
-    reason, rejected, dragged = _rejection(candidate, report, canaries)
+    reason, rejected, dragged, _said = _rejection(candidate, report, canaries)
     if reason is not None or not isinstance(effective, dict):
         return False
     return effective == candidate if not rejected else not check_subtraction(candidate, effective, [*rejected, *dragged])

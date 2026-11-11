@@ -208,6 +208,24 @@ def _grouped_cases(document: dict[str, Any]) -> list[tuple[dict[str, Any], dict[
     return shown
 
 
+def section_labels(document: dict[str, Any]) -> dict[str, int]:
+    """The number «ТК-n» of every case of a document as it is shown: the ordinal of its section (a group is one section)."""
+    labels: dict[str, int] = {}
+    for number, (case, group, _rows) in enumerate(_grouped_cases(document), 1):
+        labels.update({item["case_id"]: number for item in (group["cases"] if group else [case])})
+    return labels
+
+
+def _number(extras: dict[str, Any] | None, number: int, case: dict[str, Any], group: dict[str, Any] | None) -> int:
+    """The label of a section: its place in the shown set, or — in a set the code took cases out of — its place in the set the reviewer read."""
+    labels = (extras or {}).get("labels")
+    return number if labels is None else labels[(group["cases"][0] if group else case)["case_id"]]
+
+
+def _notes(extras: dict[str, Any] | None, case: dict[str, Any]) -> list[tuple[str, str]]:
+    return ((extras or {}).get("notes") or {}).get(case.get("case_id"), [])
+
+
 def _variant_columns(rows: list[dict[str, str]]) -> tuple[bool, bool]:
     """A title column only when titles differ, an expected column only when some row expects more than its value."""
     return len({row["title"] for row in rows}) > 1, any(row["expected"] != "—" for row in rows)
@@ -356,7 +374,7 @@ def render_html_preview(document: dict[str, Any], profile: str = _PROFILE) -> Pr
     return _render_html_preview_validated(document, profile)
 
 
-def _render_html_preview_validated(document: dict[str, Any], profile: str = _PROFILE) -> Projection:
+def _render_html_preview_validated(document: dict[str, Any], profile: str = _PROFILE, extras: dict[str, Any] | None = None) -> Projection:
     """Render the current preview after the caller has validated the document."""
     if profile not in _PUBLISHABLE_PROFILES:
         raise ValueError(f"HTML preview is only available for {_PROFILE_V5} and {_PROFILE_V4}")
@@ -377,8 +395,9 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
     ]
     for case_number, (case, group, variants) in enumerate(_grouped_cases(document), 1):
         start = len(rows)
+        notes = "".join(f"<p><strong>{_html_text(label)}</strong> {_html_text(text)}</p>" for label, text in _notes(extras, case))
         rows.extend((
-            f"<section><h2>ТК-{case_number}. {_html_text(case['title'])}</h2><p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
+            f"<section><h2>ТК-{_number(extras, case_number, case, group)}. {_html_text(case['title'])}</h2>{notes}<p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
             + (f"<p>Техника: {html.escape(technique_name(case['technique']))}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
             "<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in case["preconditions"]) + "</ul>" if case["preconditions"] else "<p>Не требуются.</p>",
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
@@ -402,7 +421,7 @@ def render_markdown(document: dict[str, Any], profile: str = _PROFILE) -> Projec
     raise ValueError("historical Markdown projections are verification-only through an explicit bundle receipt")
 
 
-def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projection:
+def _render_markdown_validated(document: dict[str, Any], profile: str, extras: dict[str, Any] | None = None) -> Projection:
     """Render Markdown after the public facade has accepted the canonical document."""
     if profile == _PROFILE_V5:
         profile = _PROFILE_V4  # the human Markdown companion is identical for both publishable profiles
@@ -428,7 +447,9 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
     shown = _grouped_cases(document) if profile == _PROFILE_V4 else [(case, None, []) for case in document["test_cases"]]
     for case_number, (case, group, variants) in enumerate(shown, 1):
         start = len(lines)
-        lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
+        lines.extend(["", "---", "", f"## ТК-{_number(extras, case_number, case, group)}. {escape_inline(case['title'])}", ""])
+        for label, text in _notes(extras, case):
+            lines.extend([f"**{escape_inline(label)}** {escape_inline(text)}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
         if "technique" in case:
             lines.extend([f"Техника: {technique_name(case['technique'])}", ""])

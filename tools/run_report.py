@@ -873,6 +873,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     answer = None
     canaries = None
     codeword = None
+    acceptance = None
     if attempt_id:  # what the canaries and the control word say of the review — derived from the journal, nothing stored
         try:
             answer = review_canaries.recorded_answer(root, attempt_id)
@@ -881,6 +882,12 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         canaries = review_canaries.summary(root, attempt_id, answer)
         if answer is None and canaries["status"] != "MISMATCH":  # before the answer only a map that does not match is news
             canaries = None
+        try:
+            from tools.orchestrate_test_case_revision import acceptance_summary
+
+            acceptance = acceptance_summary(root, attempt_id, answer)
+        except (KeyError, OSError, TypeError, ValueError):
+            acceptance = None
         if answer is not None:
             codeword = review_canaries.codeword_state(root, attempt_id, answer)
     unreliable = canaries is not None and canaries.get("status") == "UNRELIABLE"
@@ -942,7 +949,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         # the run of the tests was a human's — the package did not reproduce it
         "execution_source": ({**execution["execution_source"], "note": HUMAN_RESULT_NOTE} if execution.get("execution_source") else None),
-        "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
+        "acceptance": acceptance, "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
         "quarantine": [{key: row[key] for key in ("file", "method", "ref", "failed_rows", "disabled_passed_rows") if key in row}
@@ -1075,11 +1082,50 @@ def _canary_lines(report: Mapping[str, Any]) -> list[str]:
     return lines + [""]
 
 
+def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
+    """The «Итог» block at the top: the outcome of the review in a line, the warning when the reviewer missed a control error and, for a partial
+    acceptance, the numbers, the files to work with and the requirements left without a case."""
+    from tools.publish_test_case_bundle import plural
+    from tools.test_case_projections import escape_inline
+
+    acc = report.get("acceptance")
+    if not acc:
+        return []
+    total, accepted, removed = acc["generated"], acc["accepted"], acc["removed"]
+    if acc["outcome"] == "ACCEPTED_WHOLE":
+        head = f"**ПРИНЯТ: {total} из {total} кейсов.**"
+    elif acc["outcome"] == "PARTIAL":
+        head = f"**ПРИНЯТ ЧАСТИЧНО: {accepted} из {total} кейсов.** {removed} {plural(removed, 'кейс не дорабатывался', 'кейса не дорабатывались', 'кейсов не дорабатывались')}."
+    elif acc["reason"] == "OVER_SHARE":
+        head = f"**ТРЕБУЕТ ДОРАБОТКИ:** отклонено {removed} из {total} кейсов — больше допустимого ({acc['share']} %)."
+    else:
+        head = "**ТРЕБУЕТ ДОРАБОТКИ:** замечание ревьюера относится ко всему набору."
+    lines = ["## Итог", "", head, ""]
+    canaries = report.get("review_canaries") or {}
+    if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
+        lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
+                  "> Ревью могло пропустить и настоящие ошибки — просмотрите принятые кейсы внимательнее перед импортом.", ""]
+    if acc["outcome"] != "PARTIAL":
+        return lines
+    gaps, files = acc["coverage_gaps"], acc["files"]
+    lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {accepted} |", f"| Не принято (вынесено отдельно) | {removed} |", "",
+              f"Ревью: {'независимое (INDEPENDENT)' if report.get('reviewer_isolation_state') == 'verified' else 'в той же сессии (SELF)'}, 1 круг: весь набор.",
+              (f"Пробелы покрытия: {len(gaps)} {plural(len(gaps), 'требование осталось', 'требования остались', 'требований остались')} без принятого кейса — см. «Пробелы покрытия»." if gaps
+               else "Пробелов покрытия нет: у каждого требования остался принятый кейс."), "",
+              "Файлы для работы:", f"- Набор для импорта в Zephyr: {files['csv']} ({accepted} кейсов)", f"- Набор для чтения: {files['set']}",
+              f"- Не принятые кейсы — не импортировать: {files['rejected']}", "- Вопросы аналитику: questions-for-analyst.md", ""]
+    if gaps:
+        lines += ["## Пробелы покрытия", "", "| Требование | Почему нет кейса | Что сказал ревьюер |", "|---|---|---|",
+                  *(f"| {row['requirement']} | Его покрывали только отклонённые кейсы: {', '.join(f'ТК-{label}' for label in row['labels'])} | "
+                    + (escape_inline(", ".join(row["codes"])) + " (текст — в файле набора)" if row["codes"] else "—") + " |" for row in gaps), ""]
+    return lines
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     totals = report.get("model_totals") or model_totals(report["model_calls"])
     lines = [
-        f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
+        f"# Отчёт прогона {report['run_id']}", "", *_acceptance_lines(report), f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
         f"- Профиль: {report['policy_profile']}", *([f"- {_test_level_line(report['test_level'])}"] if report.get("test_level") else []),
         f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}",

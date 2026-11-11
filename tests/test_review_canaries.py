@@ -433,6 +433,24 @@ def test_an_accepting_ledger_with_no_effective_canonical_does_not_close_the_atte
         finalize_attempt._durable_branch_facts(run["run_root"], run["attempt_id"])
 
 
+def _acceptance(run: dict):
+    from tools.run_report import build_report
+
+    return build_report(run["run_root"].parent.parent, run["run_root"].name)[0]["acceptance"]
+
+
+def test_the_report_says_nothing_of_acceptance_before_the_review_is_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The answer is recorded before ``select``: until the ledger has its verdict (and, for an accepting one, the effective canonical) there is no «Итог»."""
+    from tools.pilot_state import publish_model_stage_artifact
+
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    publish_model_stage_artifact(run["run_root"], run["attempt_id"], "tc-reviewer:canonical", _answer(run, "ПРИНЯТО"))
+    assert _acceptance(run) is None
+    assert _select(run, _answer(run, "ПРИНЯТО"))["status"] == "EFFECTIVE_SELECTED"
+    assert _acceptance(run)["outcome"] == "ACCEPTED_WHOLE"
+
+
 def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_attempt_is_partially_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import finalize_attempt, orchestrate_test_case_revision as orchestrate, pilot_state
 
@@ -450,6 +468,23 @@ def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_atte
     assert (facts["completion"], facts["reason_code"], facts["prior_stage_cause"]) == ("PARTIAL", "PARTIAL_ACCEPTED", "PARTIAL_ACCEPTED")
     result = pilot_state.terminal_result({key: value for key, value in facts.items() if key != "policy_profile"}, facts["policy_profile"])
     assert pilot_state._validate_result_record(result) and result["accepted"] is False
+    published = sorted(path.name for path in (run["run_root"] / "published").iterdir())  # r1 is not published; r2 is a bundle, the rejected case a file of its own without a CSV
+    document_id = effective["document_id"]
+    assert published == sorted(f"{document_id}.r2.{suffix}" for suffix in ("html", "json", "md", "zephyr-scale.csv", "REJECTED-CASES.html", "REJECTED-CASES.md"))
+    page = (run["run_root"] / "published" / f"{document_id}.r2.md").read_text(encoding="utf-8")
+    assert "**Принят частично: 1 из 2 кейсов.** Кейс ТК-1 «" in page and f"{document_id}.r2.REJECTED-CASES.md" in page and "\n## ТК-2. " in page
+    assert "НЕ ПРИНЯТЫ РЕВЬЮЕРОМ" in (run["run_root"] / "published" / f"{document_id}.r2.REJECTED-CASES.md").read_text(encoding="utf-8")
+    again = _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))  # the same answer again: the same files, nothing replaced
+    assert again["status"] == "EFFECTIVE_SELECTED"
+    from tools.canonical_document import document_sha256
+
+    project, root = pilot_state.run_root_of(run["run_root"])  # mode B: the automation request reads r2 — the accepted cases only
+    assert pilot_state._automation_inputs(project, root, pilot_state.derive_state(root), run["attempt_id"], "tc-to-autotest:r1")[0][0] == document_sha256(effective)
+    from tools.run_report import build_report
+
+    acceptance = build_report(tmp_path / "project", run["run_root"].name)[0]["acceptance"]  # the verdict as given, the outcome the code drew, the numbers — codes, no texts
+    assert (acceptance["verdict_given"], acceptance["outcome"], acceptance["generated"], acceptance["accepted"], acceptance["rejected_by_findings"]) == ("ТРЕБУЕТ ДОРАБОТКИ", "PARTIAL", 2, 1, 1)
+    assert acceptance["rejected_cases"][0]["codes"] == ["REVIEW_NOTE"] and "Нет проверки состояния." not in json.dumps(acceptance, ensure_ascii=False)
 
 
 def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

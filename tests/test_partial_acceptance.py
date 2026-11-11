@@ -287,3 +287,17 @@ def test_a_ledger_that_accepts_an_answer_the_code_sends_back_whole_binds_no_effe
         assert not effective_review_is_bound(digest, effective, whole, None, _event(whole), document, [])
     partial = _report(document, *_real(document, 1))
     assert effective_review_is_bound(digest, subtracted, partial, None, _event(partial), document, [])
+
+
+def test_partial_accepted_is_a_reason_of_a_review_that_accepted_a_set_and_never_an_accepted_attempt() -> None:
+    """Mode B: a PASS over r2 closes PARTIAL / PARTIAL_ACCEPTED with accepted=false; the tuple check refuses it without one accepting verdict."""
+    from tests.test_partial_automation import _evidence
+    from tools.pilot_state import _result_facts
+
+    base = {"run_id": "a" * 32, "attempt_id": "b" * 32, "attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "PASS", "coverage": "FULL",
+            "reason_code": "PARTIAL_ACCEPTED", "prior_stage_cause": "EXECUTION_COMPLETE", **_evidence(blocker_count=0)}
+    facts, accepted = _result_facts(base, "local-pilot-v1", external_cause_available=False)
+    assert accepted is False and facts["reason_code"] == "PARTIAL_ACCEPTED"
+    for broken in ({"completion": "COMPLETE"}, {"authoritative_verdict": "REJECTED"}, {"authoritative_verdict_count": 0, "reviewer_session_complete": False}):
+        with pytest.raises(ValueError):
+            _result_facts({**base, **broken}, "local-pilot-v1", external_cause_available=False)
