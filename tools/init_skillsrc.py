@@ -691,6 +691,45 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
     return {**discovery, "questions": questions}, rest, context
 
 
+SOURCE_ROOT_FIX = ("ответ на вопрос о корне исходников — путь папки от корня модуля (несколько — через запятую), в ней должны лежать исходники; "
+                   "исходники прямо в корне модуля этим способом не задать — впишите paths.source в .skillsrc вручную")
+
+
+def _answered_sources(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
+                      declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
+    """The ``paths.source`` question of a module with no source folder is closed by an answer: folders of the module, comma-separated.
+    Each goes through ``_resolve_explicit_target`` (inside the project, no ``..``, no link) and holds source files.
+    Returns (discovery without the answered questions, the other answers, {module: folders})."""
+    modules = {str(module.get("id")): module for module in discovery.get("modules", []) if isinstance(module, Mapping)}
+    questions: list[Any] = []
+    rest = dict(answers)
+    chosen: dict[str, list[str]] = {}
+    for question in discovery.get("questions", []):
+        field = str(question.get("field", "")) if isinstance(question, Mapping) else ""
+        if not field.endswith(".paths.source") or str(question.get("id")) not in rest or field.split(".")[1] in declared:
+            questions.append(question)
+            continue
+        module_id = field.split(".")[1]
+        base = str((modules.get(module_id) or {}).get("root") or ".")
+        items = [item.strip().replace("\\", "/") for item in rest.pop(str(question["id"])).split(",") if item.strip()]
+        suffixes = SOURCE_SUFFIXES.get(((modules.get(module_id) or {}).get("stack") or {}).get("language"), frozenset().union(*SOURCE_SUFFIXES.values()))
+        folders = [_resolve_explicit_target(root, item if base == "." else f"{base}/{item}") for item in items]
+        if not items or any(folder is None or not folder.is_dir() or not _source_dir_has_code(root, folder, suffixes) for folder in folders):
+            raise InitError("source_root_invalid", f"{question['id']}: {SOURCE_ROOT_FIX}")
+        chosen[module_id] = items
+    return {**discovery, "questions": questions}, rest, chosen
+
+
+def answers_hint(project: Path, questions: list[Any]) -> str:
+    """What a stop that waits for answers prints: the file, its format and the command (the file lies inside the project)."""
+    from tools.run_pipeline import printed
+
+    first = next((item for item in questions if isinstance(item, Mapping) and item.get("options")), {"id": "<id вопроса>", "options": [{"id": "<id варианта>"}]})
+    example = "<папка исходников от корня модуля>" if str(first.get("field", "")).endswith(".paths.source") else first["options"][0]["id"]
+    return (f'файл ответов — JSON-объект {{"<id вопроса>": "<id варианта или путь>"}}, например {{"{first["id"]}": "{example}"}}; сохраните его внутри проекта '
+            f'(например .pilot-runs/init/answers.json) и повторите: {printed(sys.executable)} -m tools.init_skillsrc --project {printed(project)} --answers <файл> --write')
+
+
 def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | None) -> tuple[dict[str, str], list[str]]:
     """``(answers, notes)`` for questions of modules the human did not select whose only option is the
     host's supported runner — no decision is left there.  A question with several options stays a question."""
@@ -734,6 +773,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     if not isinstance(discovery, Mapping):
         return _receipt("error", root, False, [], [], ["discovery_invalid"], hashlib.sha256(b"").hexdigest(), 2)
     fingerprint = _safe_fingerprint(discovery.get("fingerprint"))
+    notes.extend(str(item) for item in discovery.get("warnings") or [])
     raw_modules = discovery.get("modules", [])
     modules = list(raw_modules) if isinstance(raw_modules, list) else []
     if discovery.get("status") == "error":
@@ -772,8 +812,10 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     }
     try:
         working_discovery, answers, context_paths = _tests_only_context(root, working_discovery, answers, declared_existing)
+        working_discovery, answers, source_paths = _answered_sources(root, working_discovery, answers, declared_existing)
     except InitError as error:
-        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+        receipt = _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+        return receipt | ({"_message": str(error), "_fix": SOURCE_ROOT_FIX} if error.code == "source_root_invalid" else {})
     working_discovery["questions"] = [
         question
         for question in working_discovery.get("questions", [])
@@ -802,10 +844,14 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         for module in proposed.get("modules") or []:  # the answered context roots of a tests-only module
             if isinstance(module, dict) and module.get("id") in context_paths:
                 module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])
+            if isinstance(module, dict) and module.get("id") in source_paths:
+                module.setdefault("paths", {})["source"] = list(source_paths[module["id"]])
             # discovery cannot see what the person declared; a repeated init keeps it instead of proposing its removal
             declared = next((row for row in existing_modules if isinstance(module, dict) and row.get("id") == module.get("id")), {})
             if (declared.get("paths") or {}).get("context") and module.get("id") not in context_paths:
                 module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
+            if (declared.get("paths") or {}).get("source") and not (module.get("paths") or {}).get("source"):
+                module.setdefault("paths", {})["source"] = list(declared["paths"]["source"])
             if declared.get("service_url_env") and "service_url_env" not in module:
                 module["service_url_env"] = declared["service_url_env"]
             _keep_declared_test_keys(module, declared, new_file=existing is None)
@@ -892,6 +938,8 @@ def main() -> int:
             return 1
         finally:
             output_target.close()
+    if public_report["status"] == "needs_input" and public_report.get("questions") and "fix" not in public_report:
+        public_report["fix"] = answers_hint(root, public_report["questions"])
     print(json.dumps(public_report, ensure_ascii=False, indent=2))
     return 0 if public_report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if public_report["status"] in {"needs_input", "conflict"} else int(report.get("_exit_code", 1))
 

@@ -1713,7 +1713,7 @@ def _skillsrc_defaults(project: Path, module: Mapping[str, Any]) -> dict[str, An
     if framework is None or module_test_evidenced(project, module):
         return {}
     return {"skillsrc_defaults": [
-        f"{module.get('id')}: test.framework={framework} выбран по умолчанию — в сборке модуля нет признака тестового "
+        f"{module.get('id')}: test.framework={framework} указан в .skillsrc, а в сборке модуля нет признака тестового "
         f"фреймворка; проверьте, что тесты модуля на {framework}, иначе исправьте .skillsrc"]}
 
 

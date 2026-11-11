@@ -178,7 +178,7 @@ def check_run_root(project: Path) -> list[dict[str, Any]]:
 def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
     from tools.fixes import fix_for
-    from tools.init_skillsrc import ensure_skillsrc
+    from tools.init_skillsrc import answers_hint, ensure_skillsrc
     from tools.skillsrc_manifest import COMMENTS_FIX, COMMENTS_MESSAGE, json_with_comments, skillsrc_file_problem
 
     unreadable = skillsrc_file_problem(Path(project) / ".skillsrc")  # the scan's SKILLSRC_UNREADABLE, seen here first
@@ -200,7 +200,8 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
     status = receipt.get("status")
     if not (Path(project) / ".skillsrc").is_file():
         return [_row("skillsrc", CASES, "OK", ".skillsrc нет — первый scan создаст его по проекту")] if status in {"preview", "created"} else \
-            [_row("skillsrc", CASES, "STOP", f".skillsrc не создаётся: {status} {receipt.get('errors') or receipt.get('questions')}", _init_command(project))]
+            [_row("skillsrc", CASES, "STOP", f".skillsrc не создаётся: {status} {receipt.get('errors') or receipt.get('questions')}",
+                  answers_hint(Path(project), receipt.get("questions") or []) if status == "needs_input" else _init_command(project))]
     if status in {"unchanged", "preview"}:
         return [_row("skillsrc", CASES, "OK", ".skillsrc валиден и совпадает с проектом")]
     proposal = receipt.get("proposal")
@@ -223,7 +224,7 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
         return [_row("skillsrc", CASES, "OK", ".skillsrc валиден; scan возьмёт его как есть (обнаружение по проекту не однозначно)",
                      None, {"questions": receipt.get("questions")})]
     if status == "conflict":
-        return [_row("skillsrc", CASES, "STOP", f".skillsrc требует ответа ({status})", _init_command(project) + " --answers <файл ответов>",
+        return [_row("skillsrc", CASES, "STOP", f".skillsrc требует ответа ({status})", answers_hint(Path(project), receipt.get("questions") or []),
                      {"questions": receipt.get("questions")})]
     if receipt.get("_fix"):  # a foreign file — what is wrong in it (the key or the line) and the way out
         return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {receipt.get('_message')}", str(receipt["_fix"]))]

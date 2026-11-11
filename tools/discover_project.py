@@ -391,7 +391,13 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
             if test:
                 module["test"] = test
         modules.append(module)
-    return modules,qs,[],errors,unresolved
+    # A folder with one manifest of another stack and no source folder (`examples/package.json` beside a Python package) is no module.
+    sourced={m["stack"].get("language") for m in modules if m["_source_ready"]}
+    foreign=[m for m in modules if sourced and not m.get("paths") and len(m["detected_from"])==1 and m["stack"].get("language") not in sourced|{None}]
+    warnings=[f"{m['root']}: найден по {m['detected_from'][0]}, исходников нет — модулем не считается; нужен — объявите его в .skillsrc" for m in foreign]
+    for m in foreign:
+        qs=[q for q in qs if not q["field"].startswith(f"modules.{m['id']}.")]; unresolved={f for f in unresolved if not f.startswith(f"modules.{m['id']}.")}
+    return [m for m in modules if m not in foreign],qs,warnings,errors,unresolved
 def _module_evidence(modules: Sequence[Mapping[str, Any]] | Sequence[dict[str, Any]]) -> list[str]:
     extra: list[str] = []
     for module in modules:

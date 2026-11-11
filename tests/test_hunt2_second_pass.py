@@ -123,7 +123,7 @@ def test_ready_and_scan_ask_only_about_the_selected_module_and_a_later_scan_name
     code, later = scan(ids["admin"], "admin/docs/admin.md")
     assert code == 0, later
     [note] = later["skillsrc_defaults"]
-    assert "test.framework=junit5" in note and "по умолчанию" in note and "нет признака" in note
+    assert "test.framework=junit5" in note and "указан в .skillsrc" in note and "нет признака" in note
 
 
 # --------------------------------------------------------------------------------------
