@@ -278,6 +278,10 @@ def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> s
     from tools.execution_core import accepted_unprepared as _accepted_unprepared
     from tools.pilot_state import read_run
 
+    if getattr(error, "code", None) == "EXECUTION_RUNTIME_UNAVAILABLE":
+        return ("остановись и попроси человека вернуть то, чего не хватает (причина в message: Maven (mvn) в PATH, wrapper или интерпретатор модуля); "
+                "сам ничего не устанавливай и не скачивай; после этого повтори materialize — прогон остаётся открытым; если человек среду вернуть не может, "
+                "новый прогон: scan с теми же --module, --docs, --profile и флагом --new-run")
     try:
         outcome, _detail = automation_next(root, attempt_id)
     except (KeyError, OSError, TypeError, ValueError):

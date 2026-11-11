@@ -1197,7 +1197,8 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
         if abandon == "AUTOMATION_NOT_MATERIALIZABLE" and _accepted_unprepared(run_root, attempt_id):
             return abandon
         raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — тесты кладёт materialize, попытку закрывает ingest",
-                                fix="python -m tools.run_pipeline materialize --project <project> --run <run_id>")
+                                fix="python -m tools.run_pipeline materialize --project <project> --run <run_id>; если materialize отказал из-за среды запуска, человек возвращает её (агент ничего не ставит); если не может — "
+                                    "новый прогон: scan с теми же --module, --docs, --profile и флагом --new-run")
     if outcome == "PENDING":
         if abandon in _PENDING_ABANDON:
             return str(abandon)

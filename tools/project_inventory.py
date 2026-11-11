@@ -30,6 +30,11 @@ class InventoryError(ValueError):
     """The controller could not build a safe inventory."""
 
 
+class RuntimeUnavailableError(InventoryError):
+    """The build tool or module runtime is not there now (no ``mvn`` on PATH, a missing wrapper or interpreter): a fact of the
+    environment a person can restore, not a damaged receipt.  Every other refusal of the same functions stays a closed InventoryError."""
+
+
 class ContextSelectionError(ValueError):
     """A requested context batch is not safely selectable."""
 
@@ -166,6 +171,8 @@ def module_runtime_path(project_root: Path, relative_path: str) -> Path:
     candidate = project
     for part in text.split("/"):
         candidate /= part
+        if not os.path.lexists(candidate):  # absent is not a link (``_is_reparse`` reads a failed stat as one): the person restores it
+            raise RuntimeUnavailableError(f"module runtime {text} does not exist")
         if _is_reparse(candidate):
             if candidate != project / text or os.name == "nt" or not candidate.is_symlink():
                 raise InventoryError("runtime path contains a symlink or reparse point")
@@ -209,16 +216,16 @@ def system_maven_path(executable: str) -> Path:
         raise InventoryError("system Maven requires mvn or an absolute launcher path")
     found = shutil.which("mvn") if executable == "mvn" else executable
     if not found:
-        raise InventoryError("system Maven is unavailable on PATH")
+        raise RuntimeUnavailableError("system Maven is unavailable on PATH")
     candidate = Path(found).absolute()
     if candidate.name.casefold() not in ({"mvn.cmd"} if os.name == "nt" else {"mvn"}):
         raise InventoryError("system Maven path must name the closed launcher")
     try:
         candidate = candidate.resolve(strict=True)
     except OSError as error:
-        raise InventoryError("system Maven launcher is unavailable") from error
+        raise RuntimeUnavailableError("system Maven launcher is unavailable") from error
     if not candidate.is_file() or (os.name != "nt" and not os.access(candidate, os.X_OK)):
-        raise InventoryError("system Maven launcher is unavailable or not executable")
+        raise RuntimeUnavailableError("system Maven launcher is unavailable or not executable")
     return candidate.resolve()
 
 

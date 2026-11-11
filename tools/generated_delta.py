@@ -160,6 +160,7 @@ def _frozen_attempt(
         from tools.pilot_state import derive_state, read_run
         from tools.project_inventory import (
             InventoryError,
+            RuntimeUnavailableError,
             read_execution_baseline,
             read_inventory_receipt,
             validate_execution_baseline_binding,
@@ -182,8 +183,12 @@ def _frozen_attempt(
         validate_execution_baseline_binding(frozen, inventory, module)
     except GeneratedDeltaError:
         raise
+    except RuntimeUnavailableError as error:  # the tool or runtime is gone: the person brings it back, the run stays open
+        raise GeneratedDeltaError("EXECUTION_RUNTIME_UNAVAILABLE", " ".join(str(error).split())[:200]) from error
     except (ValueError, OSError, InventoryError) as error:
-        raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "immutable execution baseline is invalid or unreadable") from error
+        # the cause only of an InventoryError (fixed texts, relative paths) - never the text of an OSError or ValueError
+        cause = f": {' '.join(str(error).split())[:200]}" if isinstance(error, InventoryError) else ""
+        raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "immutable execution baseline is invalid or unreadable" + cause) from error
     if dict(baseline) != frozen or baseline.get("module") != _module_name(project, module):
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "caller baseline is not the exact frozen receipt")
     if not isinstance(canonical_document, Mapping) or validate_canonical_document(dict(canonical_document)):
@@ -384,7 +389,7 @@ def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
                                  attempt_id=attempt_id, automation_history=inputs["automation_history"],
                                  review_history=inputs["review_history"])
     except GeneratedDeltaError as error:
-        return str(error)
+        return None if error.code == "EXECUTION_RUNTIME_UNAVAILABLE" else str(error)  # fixable: not a final refusal
     return None
 
 
