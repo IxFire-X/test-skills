@@ -200,6 +200,16 @@ def _java_class(path: Path, text: str) -> tuple[str, str] | None:
     return class_fqn, "".join(pieces)
 
 
+_JAVA_TEST = re.compile(r"@\s*(?:[\w$]+\s*\.\s*)*(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate|Nested)\b")
+
+
+def java_class_holds_its_tests(path: Path, text: str) -> bool:
+    """Whether every test annotation of the file is in the body of its class: no nested or second class holds a test, so a run of the class runs
+    exactly the methods that are generated symbols (the nested classes are blanked in ``_java_class``, so their tests are never symbols)."""
+    parsed = _java_class(path, text)
+    return parsed is not None and len(_JAVA_TEST.findall(_mask_java_noncode(text))) == len(_JAVA_TEST.findall(parsed[1]))
+
+
 def _brace_pairs(text: str) -> dict[int, int]:
     """Position of every ``{`` of *text* with the position of the ``}`` that closes it; a brace never closed has no entry."""
     pairs: dict[int, int] = {}

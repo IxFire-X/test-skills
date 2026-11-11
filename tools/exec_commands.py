@@ -4,6 +4,8 @@ it, ``ingest`` takes the reports; ``exec`` only answers that it was replaced.  T
 
 from __future__ import annotations
 
+import ast
+import dataclasses
 import hashlib
 import os
 import stat
@@ -460,6 +462,72 @@ def _human_command(project: Path, module_root: Path, module_relative: str, reque
     return module_relative, [_relative_executable(request.executable, module_root), *argv[1:]]
 
 
+# cmd.exe takes 8191 characters, and gradlew.bat / mvn.cmd build a longer line inside themselves (the path of java, -classpath, options, then %*): 300 to 1500
+# more, by the length of the project path and JAVA_HOME.  A printed command over this limit lists its tests by class; over it still, it is refused.
+_LINE_LIMIT = 6000
+
+
+def _python_tests(text: str) -> set[str]:
+    """The pytest node ids (default collection) a generated file holds; empty when it does not parse."""
+    def walk(body: Sequence[ast.stmt], prefix: str) -> set[str]:
+        found: set[str] = set()
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                found.add(prefix + node.name)
+            elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+                found |= walk(node.body, f"{prefix}{node.name}::")
+        return found
+    try:
+        return walk(ast.parse(text).body, "")
+    except (SyntaxError, ValueError):
+        return set()
+
+
+def _by_class(request: Any, artifacts: Mapping[str, Any]) -> tuple[str, ...]:
+    """The selectors with each class (pytest: file) written once where every test it holds is selected — the same tests.  A Java file whose nested or second
+    class holds a test is never listed by class: such a test is no generated symbol, and the class would run it too."""
+    from tools.execution_adapters import PYTEST
+    from tools.run_tests import java_class_holds_its_tests
+
+    pytest_run = request.adapter_id == PYTEST
+    files = {row["file_id"]: row for row in artifacts["generated_files"]}
+    whole: dict[str, set[str]] = {}  # the group -> every test of it, as a selector
+    if pytest_run:
+        for row in files.values():
+            whole[row["path"]] = {f"{row['path']}::{node}" for node in _python_tests(row["content"])}
+    else:
+        for row in artifacts["generated_symbols"]:
+            locator = row["locator"]
+            source = files[row["file_id"]]
+            if java_class_holds_its_tests(Path(source["path"]), source["content"]):
+                whole.setdefault(locator["class_fqn"], set()).add(f"{locator['class_fqn']}#{locator['method_name']}")
+    group = lambda selector: selector.partition("::" if pytest_run else "#")[0]  # noqa: E731
+    chosen: dict[str, set[str]] = {}
+    for selector in request.selectors:
+        chosen.setdefault(group(selector), set()).add(selector)
+    listed = [name if whole.get(name) == chosen[name] else selector for selector in request.selectors for name in [group(selector)]]
+    return tuple(dict.fromkeys(listed))
+
+
+def _fit_command(project: Path, module_root: Path, module_relative: str, request: Any, challenge: Mapping[str, Any],
+                 artifacts: Mapping[str, Any]) -> tuple[str, list[str]]:
+    """``_human_command`` that fits the limit in both printed forms: by class where the same tests stay selected, else ``COMMAND_NOT_PRINTABLE``."""
+    from tools.execution_adapters import command_for
+
+    longest = lambda working, command: max(len(form) for form in printed_forms(project, working, command))  # noqa: E731
+    working, command = _human_command(project, module_root, module_relative, request, challenge)
+    if longest(working, command) > _LINE_LIMIT:
+        selectors = _by_class(request, artifacts)
+        _reports, argv = command_for(request.adapter_id, request.executable, request.build_profile, selectors)
+        working, command = _human_command(project, module_root, module_relative, dataclasses.replace(request, selectors=selectors, argv=argv), challenge)
+    if (length := longest(working, command)) > _LINE_LIMIT:
+        raise HostStop("COMMAND_NOT_PRINTABLE", f"команда запуска тестов — {length} знаков, предел {_LINE_LIMIT}: cmd.exe и .bat/.cmd сборщика длиннее не принимают, "
+                       "а перечислить тесты по классам нельзя (выбраны не все тесты класса или в классе есть вложенный класс)",
+                       "повтор materialize даст тот же отказ: тесты уже в проекте, команда не напечатана. Выход — новый прогон (scan с теми же --module, --docs, --profile "
+                       "и флагом --new-run) с более узкой областью (--target) или проект в каталоге с более коротким путём")
+    return working, command
+
+
 def command_text(tokens: Sequence[str]) -> str:
     return " ".join(command_token(token) for token in tokens)
 
@@ -698,8 +766,8 @@ def cmd_materialize(args: Any) -> int:
     nonce = hashlib.sha256(f"{attempt_id}\n{delta['digest']}\n{digest}".encode("utf-8")).hexdigest()[:16]
     challenge = _challenge(request, nonce)
     module_relative = str(attempt["module"])
-    working, command = _human_command(project, Path(coordinates["module_root"]), module_relative, request, challenge)
     try:
+        working, command = _fit_command(project, Path(coordinates["module_root"]), module_relative, request, challenge, carriers["automation"]["artifacts"])
         command_text([working, *command])  # a command that cannot be printed is not published as one
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
