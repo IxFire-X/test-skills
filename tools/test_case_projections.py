@@ -148,14 +148,24 @@ SLOT = "\ue000"
 _TOKEN = re.compile(r"\d+(?:[.,]\d+)*|\w+|\W", re.S)
 
 
+_PAIRS = ("()", "[]", "{}", "«»")
+
+
+def _whole(tokens: list[str]) -> bool:
+    """No bracket or quote of the tokens is left without its pair."""
+    return all(tokens.count(opening) == tokens.count(closing) for opening, closing in _PAIRS) and all(tokens.count(quote) % 2 == 0 for quote in '"`')
+
+
 def template_texts(texts: list[str]) -> tuple[str, list[str]]:
-    """The common text of the variants with one slot, cut between whole words and numbers, and each variant's middle."""
+    """The common text of the variants with one slot, cut between whole words and numbers and never through a pair of brackets or quotes, and each variant's middle."""
     if len(set(texts)) == 1:
         return texts[0], []
     tokens = [_TOKEN.findall(text) for text in texts]
     head = len(os.path.commonprefix(tokens))
+    tail = len(os.path.commonprefix([own[head:][::-1] for own in tokens]))
+    while (head or tail) and not _whole(tokens[0][:head] + tokens[0][len(tokens[0]) - tail:]):  # the template as a whole keeps its pairs; the slot sits between them
+        head, tail = (head, tail - 1) if tail else (head - 1, tail)
     rests = [own[head:] for own in tokens]
-    tail = len(os.path.commonprefix([rest[::-1] for rest in rests]))
     middles = ["".join(rest[:len(rest) - tail]) for rest in rests]
     return "".join(tokens[0][:head]) + SLOT + "".join(tokens[0][len(tokens[0]) - tail:]), middles
 
@@ -224,6 +234,28 @@ def _number(extras: dict[str, Any] | None, number: int, case: dict[str, Any], gr
 
 def _notes(extras: dict[str, Any] | None, case: dict[str, Any]) -> list[tuple[str, str]]:
     return ((extras or {}).get("notes") or {}).get(case.get("case_id"), [])
+
+
+def _facts(shown: list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]], extras: dict[str, Any] | None) -> list[tuple[str, ...]]:
+    """What the tester reads of every shown section in the table and under its title: ``(ТК-n, title, folder, priority, requirements)``."""
+    rows = []
+    for number, (case, group, _rows) in enumerate(shown, 1):
+        title = case["title"].replace(SLOT, "<" + group["parameter"]["name"].replace("\n", " ") + ">") if group else case["title"]
+        requirements = dict.fromkeys(item for own in (group["cases"] if group else [case]) for item in own["requirement_ids"])
+        rows.append((f"ТК-{_number(extras, number, case, group)}", title, case["management"]["folder"] or "—", _PRIORITIES[case["priority"]], ", ".join(requirements)))
+    return rows
+
+
+def _overview(facts: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+    """The table of the set, its head first; the folder column only when some case has a folder."""
+    keep = [index for index in range(5) if index != 2 or any(row[2] != "—" for row in facts)]
+    return [tuple(row[index] for index in keep) for row in (("№", "Название", "Папка", "Приоритет", "Требования"), *facts)]
+
+
+def _common_preconditions(shown: list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]]) -> list[str]:
+    """The preconditions word for word the same in every shown case, in a set of three cases or more."""
+    cases = [case for case, _group, _rows in shown]
+    return [item for item in cases[0]["preconditions"] if all(item in own["preconditions"] for own in cases)] if len(cases) >= 3 else []
 
 
 def _variant_columns(rows: list[dict[str, str]]) -> tuple[bool, bool]:
@@ -339,7 +371,7 @@ def _html_test_data(step: dict[str, Any]) -> str:
         return f"<pre>{html.escape(data, quote=True)}</pre>" if "{" in data or "[" in data else f"<p>{_html_text(data)}</p>"
     marker = step["test_data"].strip()
     if marker in {"—", "Тело запроса отсутствует."}:
-        return marker
+        return "—"
     prose, body = _trailing_json(step["test_data"])
     operation = step["operation"]
     if operation is None or operation["kind"] != "http":
@@ -347,11 +379,7 @@ def _html_test_data(step: dict[str, Any]) -> str:
         if body is not None:
             parts.append(_json_html(body))
         return "".join(parts) or "—"
-    if body is not None:
-        return _json_html(body)
-    if not any(item["target"]["location"] == "body" for item in step["inputs"]):
-        return "Тело запроса отсутствует."
-    return "—"
+    return _json_html(body) if body is not None else "—"
 
 
 def _html_expected(step: dict[str, Any]) -> str:
@@ -388,18 +416,25 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         warnings = ('MISSING_DOCUMENTATION: metadata.documentation is empty; rendered as "Не предоставлена"',)
     subject = metadata["subject"]
     title = f"Тест-кейсы метода {subject['method']} {subject['path']}" if subject["kind"] == "http_endpoint" else f"Тест-кейсы: {subject['name']}"
+    shown = _grouped_cases(document)
+    facts, common = _facts(shown, extras), _common_preconditions(shown)
+    table = _overview(facts)
     rows = [
         "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>" + html.escape(title, quote=True) + "</title>",
         "<style>body{font:16px/1.45 system-ui,sans-serif;margin:2rem;max-width:1200px}table{border-collapse:collapse;table-layout:fixed;width:100%;margin:1rem 0 2rem}th,td{border:1px solid #bbb;padding:.75rem;vertical-align:top;text-align:left;overflow-wrap:anywhere}th{background:#f3f3f3}pre{margin:.5rem 0;white-space:pre-wrap}p{margin:.5rem 0}code{font-family:ui-monospace,monospace}</style></head><body>",
-        f"<h1>{html.escape(title, quote=True)}</h1><p><strong>Проект:</strong> {_html_text(metadata['project'])}<br><strong>Автор:</strong> {_html_text(metadata['author'])}<br><strong>Дата:</strong> {_html_text(metadata['date'])}</p><h2>Документация</h2>{docs}",
+        f"<h1>{html.escape(title, quote=True)}</h1><p><strong>Проект:</strong> {_html_text(metadata['project'])}<br><strong>Дата:</strong> {_html_text(metadata['date'])}</p><h2>Документация</h2>{docs}"
+        + ("<h2>Общие предусловия</h2><ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in common) + "</ul>" if common else "")
+        + "<h2>Кейсы набора</h2><table><thead><tr>" + "".join(f"<th>{name}</th>" for name in table[0]) + "</tr></thead><tbody>"
+        + "".join("<tr>" + "".join(f"<td>{_html_text(cell)}</td>" for cell in row) + "</tr>" for row in table[1:]) + "</tbody></table>",
     ]
-    for case_number, (case, group, variants) in enumerate(_grouped_cases(document), 1):
+    for case_number, (case, group, variants) in enumerate(shown, 1):
         start = len(rows)
+        own = [item for item in case["preconditions"] if item not in common]
         notes = "".join(f"<p><strong>{_html_text(label)}</strong> {_html_text(text)}</p>" for label, text in _notes(extras, case))
         rows.extend((
-            f"<section><h2>ТК-{_number(extras, case_number, case, group)}. {_html_text(case['title'])}</h2>{notes}<p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
-            + (f"<p>Техника: {html.escape(technique_name(case['technique']))}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
-            "<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in case["preconditions"]) + "</ul>" if case["preconditions"] else "<p>Не требуются.</p>",
+            f"<section><h2>ТК-{_number(extras, case_number, case, group)}. {_html_text(case['title'])}</h2><p><strong>Приоритет:</strong> {facts[case_number - 1][3]}. <strong>Требования:</strong> {_html_text(facts[case_number - 1][4])}</p>{notes}<p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
+            + (f"<p>Техника: {html.escape(technique_name(case['technique']))}</p>" if case.get("technique", "OTHER") != "OTHER" else "")
+            + (("<h3>Предусловия</h3>" + ("<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in own) + "</ul>" if own else "<p>Не требуются.</p>")) if own or not common else ""),
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
         ))
         display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
@@ -437,27 +472,35 @@ def _render_markdown_validated(document: dict[str, Any], profile: str, extras: d
         rendered_documentation = "Не предоставлена"
         warnings = ('MISSING_DOCUMENTATION: metadata.documentation is empty; rendered as "Не предоставлена"',)
 
+    current = profile == _PROFILE_V4  # the files of an older profile keep their bytes: a receipt of theirs still has to verify
+    shown = _grouped_cases(document) if current else [(case, None, []) for case in document["test_cases"]]
+    facts, common = _facts(shown, extras), _common_preconditions(shown) if current else []
     lines = [
         _markdown_subject(metadata["subject"]), "",
         f"**Документация:** {rendered_documentation}",
         f"**{'Project' if profile == _PROFILE_V1 else 'Проект'}:** {escape_inline(metadata['project'])}",
-        f"**Автор:** {escape_inline(metadata['author'])}",
+        *([] if current else [f"**Автор:** {escape_inline(metadata['author'])}"]),
         f"**Дата:** {escape_inline(metadata['date'])}",
     ]
-    shown = _grouped_cases(document) if profile == _PROFILE_V4 else [(case, None, []) for case in document["test_cases"]]
+    if common:
+        lines.extend(["", "**Общие предусловия:**", *("- " + escape_inline(item) for item in common)])
+    if current:
+        table = _overview(facts)
+        lines.extend(["", "**Кейсы набора**", "", "| " + " | ".join(table[0]) + " |", "|" + "---|" * len(table[0]),
+                      *("| " + " | ".join(_readable_table_cell(cell) for cell in row) + " |" for row in table[1:])])
     for case_number, (case, group, variants) in enumerate(shown, 1):
         start = len(lines)
+        own = [item for item in case["preconditions"] if item not in common]
         lines.extend(["", "---", "", f"## ТК-{_number(extras, case_number, case, group)}. {escape_inline(case['title'])}", ""])
+        if current:
+            lines.extend([f"**Приоритет:** {facts[case_number - 1][3]}. **Требования:** {_readable_table_cell(facts[case_number - 1][4])}", ""])
         for label, text in _notes(extras, case):
             lines.extend([f"**{escape_inline(label)}** {escape_inline(text)}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
-        if "technique" in case:
+        if case.get("technique", "OTHER") != "OTHER":
             lines.extend([f"Техника: {technique_name(case['technique'])}", ""])
-        lines.append("**Предусловия:**")
-        if case["preconditions"]:
-            lines.extend("- " + escape_inline(item) for item in case["preconditions"])
-        else:
-            lines.append("- Не требуются.")
+        if own or not common:
+            lines.extend(["**Предусловия:**", *("- " + escape_inline(item) for item in own or ["Не требуются."])])
         if profile == _PROFILE_V1:
             lines.extend(["", "**Шаги:**", "", "| № | Действие | Ожидаемый результат |", "|---|---|---|"])
         elif profile == _PROFILE_V2:

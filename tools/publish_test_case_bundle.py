@@ -420,7 +420,7 @@ def rejected_cases(candidate: dict[str, Any], partial: dict[str, Any], run_id: s
     notes: dict[str, list[tuple[str, str]]] = {}
     for row in partial["rejected"]:
         alone = [gap["requirement"] for gap in partial["gaps"] if gap["requirement"] in row["requirements"]]
-        notes[row["case_id"]] = [("Требования:", ", ".join(row["requirements"]) + (f". Без другого принятого кейса: {', '.join(alone)}." if alone else "")),
+        notes[row["case_id"]] = [*([("Без другого принятого кейса:", ", ".join(alone) + ".")] if alone else []),
                                  *([("Вынесен вместе с группой параметров:", "в ней остался один вариант, а группа из одного кейса невозможна.")] if row["with_group"] else []),
                                  *((f"Замечание ревьюера (блокирующее, {code}):", text) for code, text in row["said"])]
     subject = candidate["metadata"]["subject"]

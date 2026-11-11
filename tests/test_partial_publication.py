@@ -139,7 +139,7 @@ def test_the_rejected_cases_are_whole_with_their_numbers_requirements_and_findin
     files = _rejected_files(document, [_finding("BLOCKING", [document["test_cases"][2]["case_id"]], "Нет <проверки> | состояния.")])
     text = files["md"]
     assert text.startswith("# НЕ ПРИНЯТЫ РЕВЬЮЕРОМ — не импортировать в Zephyr\n\nПрогон abc") and set(files) == {"html", "md"}
-    assert "## ТК-3. " in text and "**Требования:** CREQ-B1-001" in text and "Без другого принятого кейса: CREQ-B1-011" in text
+    assert "## ТК-3. " in text and "**Требования:** CREQ-B1-001" in text and "**Без другого принятого кейса:** CREQ-B1-011" in text
     assert "**Замечание ревьюера (блокирующее, REVIEW\\_NOTE):**" in text and "Нет \\<проверки\\> \\| состояния" in text
     assert "&lt;проверки&gt;" in files["html"] and "<h2>ТК-3. " in files["html"] and "НЕ ПРИНЯТЫ РЕВЬЮЕРОМ" in files["html"]
 
