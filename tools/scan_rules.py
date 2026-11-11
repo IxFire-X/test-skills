@@ -13,7 +13,12 @@ from fnmatch import fnmatchcase
 from typing import Any, Container, Iterable, Mapping, Sequence
 
 VCS_DIRS = frozenset({".git", ".hg", ".svn"})
-CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
+# Work directories that the build tool of the module itself writes while the build the package prints runs, so no input of the baseline (a file the
+# build rewrites cannot be restored: BASELINE_DRIFT on every ingest).  Each name is one tool's own directory: ``.gradle`` (Gradle project cache: its
+# properties files are rewritten on every build, its stores are binary and were never inputs), ``__pycache__`` (CPython), ``.pytest_cache`` (pytest);
+# ``build`` (Gradle) and ``target`` (Maven) are in DUAL_DIRS below, ``test-results`` (the pytest report) too.  What stays under digest: sources, build files
+# (build.gradle, pom.xml, pyproject.toml, gradle/wrapper), the wrapper/interpreter identity, the generated tests and the fingerprints of the reports.
+CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".gradle"})
 DEPENDENCY_DIRS = frozenset({"node_modules", ".venv", "venv", "site-packages", ".tox"})
 # Tools and CLI agents: settings, skills, worktrees — never project code.
 TOOLING_DIRS = frozenset({".idea", ".vscode", ".tools", ".worktrees", ".gigacode", ".claude", ".codex", ".qwen", ".gemini"})
