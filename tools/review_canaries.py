@@ -331,12 +331,20 @@ def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, stric
     """A finding is about a canary when its ``related_ids`` or its text name the mutated step, expectation or assertion, or name
     the case and, in the text, a value of the canary.  A bare case ID in a general finding is not a hit.  *strict* — what a refusal
     may stand on: the ID of the step, expectation or assertion is in ``related_ids`` as a whole item **and** the text names the
-    mutated or the original value; a looser hit is for the statistics only."""
+    mutated or the original value (for ``assertion_removed``, whose view holds nothing to quote, the ID of the expectation or the
+    assertion — the step only when there is no expectation — is enough); a looser hit is for the statistics only."""
     ids = {str(item) for item in finding.get("related_ids") or []}
     text = " ".join([str(finding.get("message", "")), *(str(item) for item in finding.get("evidence") or [])])
     specific = {str(canary[key]) for key in ("step_id", "expectation_id", "assertion_id") if canary.get(key)}
     named = any(_names(marker, text) for marker in canary.get("markers") or [])
     if strict:
+        # a finding that names another step, expectation or assertion is not only about this canary (the prefixes are the ones of
+        # schemas/canonical-test-document.schema.json)
+        if any(item.startswith(("STEP-", "EXP-", "ASSERT-")) and item not in specific for item in ids):
+            return False
+        if canary.get("class") == "assertion_removed":  # the view shows the step without the removed checks: nothing to quote, the place is the hit
+            place = {str(canary[key]) for key in ("expectation_id", "assertion_id") if canary.get(key)} or specific
+            return bool(ids & place)
         return bool(ids & specific) and named
     if ids & specific or any(_has_id(text, item) for item in specific):
         return True

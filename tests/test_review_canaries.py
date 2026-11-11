@@ -574,3 +574,65 @@ def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_can
     with pytest.raises(ValueError, match="REVIEW_CANARY_MISMATCH"):
         _open(run, monkeypatch)  # the seeding gives two canaries here, the planted files give none
     assert [row for row in _events(run["run_root"]) if row.get("batch_id") == review_canaries.BATCH_ID] == []  # no event was added for them
+
+
+# --------------------------------------------------------------------------------------
+# V0a: a refusal stands on the place of a canary, not on a quotation of it
+# --------------------------------------------------------------------------------------
+
+REMOVED = {"class": "assertion_removed", "field": "assertions", "original": "owner_id = 1", "mutated": "", "markers": ["owner_id = 1"]}
+
+
+def _answer_with(*findings: dict) -> dict:
+    return {"artifacts": {"validation_report": {"verdict": "ТРЕБУЕТ ДОРАБОТКИ", "findings": list(findings)}}}
+
+
+def _blocking(ids: list[str], message: str = "Проверки нет.") -> dict:
+    return {"severity": "BLOCKING", "code": "ORACLE_MISSING", "message": message, "evidence": [], "related_ids": ids}
+
+
+def test_a_blocking_finding_on_the_place_of_a_canary_needs_no_quotation() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    canary = _canary(**REMOVED)
+    assert only_canary_verdict([canary], _answer_with(_blocking(["TC-S", "STEP-S1", "EXP-S1", "CREQ-1"])))
+
+
+def test_a_real_blocking_finding_beside_a_place_hit_stands() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["EXP-S1"]), _blocking(["REQ-OTHER"]))) == []
+
+
+def test_a_finding_that_names_only_the_case_is_not_a_canary() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["TC-S"]))) == []
+
+
+def test_a_finding_that_names_another_expectation_too_is_not_a_canary() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    assert only_canary_verdict([_canary(**REMOVED)], _answer_with(_blocking(["EXP-S1", "EXP-S2"]))) == []
+
+
+def test_the_step_is_a_place_only_for_a_canary_without_an_expectation() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    finding = _answer_with(_blocking(["STEP-S1"]))
+    assert only_canary_verdict([_canary(**REMOVED, expectation_id=None)], finding)
+    assert only_canary_verdict([_canary(**REMOVED)], finding) == []
+
+
+def test_a_boundary_finding_on_the_place_without_the_value_is_not_a_canary() -> None:
+    """The quotation stays the condition for the classes whose view keeps the changed value."""
+    from tools.review_canaries import only_canary_verdict
+
+    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1"]))) == []
+    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1"], "Называется 6."))) != []
+
+
+def test_a_foreign_expectation_in_related_ids_is_no_canary_in_any_class() -> None:
+    from tools.review_canaries import only_canary_verdict
+
+    assert only_canary_verdict([_canary()], _answer_with(_blocking(["EXP-S1", "EXP-S2"], "Называется 6."))) == []
