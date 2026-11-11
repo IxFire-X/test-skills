@@ -84,3 +84,13 @@ def test_ready_target_previews_the_narrowed_context(tmp_path: Path) -> None:
                                 "--target", "src/app.py"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert completed.returncode == 0 and json.loads(completed.stdout)["status"] == "READY", completed.stderr[-2000:]
+
+
+def test_the_scan_row_warns_only_when_an_exclusion_is_suspicious(tmp_path: Path) -> None:
+    from tests.test_first_run import _python_project
+    from tools.ready import check_scan
+
+    project = _python_project(tmp_path, runtime=True)
+    assert check_scan(project, {"root": "."})[0]["level"] == "OK"
+    _write(project, "config/credentials.txt", "x\n")  # a secret-looking name (secret-filename-v1) is left out: somebody should look
+    assert check_scan(project, {"root": "."})[0]["level"] == "WARN"

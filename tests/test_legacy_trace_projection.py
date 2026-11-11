@@ -8,11 +8,10 @@ from tools.schema_validation import schema_diagnostics
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
 
-def test_trace_v5_projects_unknown_pre_finalization_verification_without_final_authority() -> None:
+def _timeout_trace() -> dict:
     from tools.automation_validation import automation_sha256
     from tools.build_trace_document import _construct
     from tools.canonical_document import document_sha256
-    from tools.trace_check import check
 
     document = automated_document()
     generated = automation(document)
@@ -41,7 +40,13 @@ def test_trace_v5_projects_unknown_pre_finalization_verification_without_final_a
         "autotest_review_sha256": automation_sha256({}),
     }
 
-    trace = _construct(document, generated, {}, run)
+    return _construct(document, generated, {}, run)
+
+
+def test_trace_v5_projects_unknown_pre_finalization_verification_without_final_authority() -> None:
+    from tools.trace_check import check
+
+    trace = _timeout_trace()
     report = check(trace)
 
     assert trace["schema_version"] == "5.0.0"
@@ -52,3 +57,13 @@ def test_trace_v5_projects_unknown_pre_finalization_verification_without_final_a
     assert report["schema_version"] == "5.0.0"
     assert report["trace_audit"]["lifecycle"] == trace["lifecycle"]
     assert "final_verdict" not in report["trace_audit"]
+
+
+def test_an_evidence_row_of_another_run_is_stale_in_the_trace() -> None:
+    from tools.trace_check import check
+
+    trace = _timeout_trace()
+    row = {"run_id": "RUN-other", "source_digest": trace["source"]["source_digest"], "file_id": "FILE-x", "symbol_id": "SYMBOL-x",
+           "file_digest": "sha256:" + "0" * 64, "status": "PASSED"}
+    trace["execution"]["evidence"] = [row]
+    assert "TRACE_STALE_EVIDENCE" in check(trace)["trace_audit"]["errors"]

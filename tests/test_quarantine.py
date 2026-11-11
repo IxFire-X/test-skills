@@ -397,3 +397,11 @@ def test_ingest_prints_the_quarantine_for_the_human_when_it_closes_and_when_it_i
                                      "message": "expected: _2_ but was: _3_"}], closed
     exec_commands._terminal_answer(coordinates, "ingest")
     assert json.loads(capsys.readouterr().out)["quarantine"] == closed["quarantine"]
+
+
+def test_a_nested_helper_is_inside_the_lines_of_its_caller_and_is_no_helper_of_its_own() -> None:
+    from tools.code_slices import Member, _helpers
+
+    case = Member("case", "function", 1, 10, calls={"inner", "outer"})
+    inner, outer = Member("inner", "function", 3, 5), Member("outer", "function", 20, 25)  # inner is a nested function of the case
+    assert [item.name for item in _helpers(case, [case, inner, outer], set())] == ["outer"]

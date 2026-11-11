@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -246,3 +247,25 @@ def test_exec_never_trusts_the_profile_written_in_the_baseline(tmp_path: Path, m
     with pytest.raises(run_pipeline.HostStop) as stop:  # the runtime identity is always computed: none here — fail closed
         exec_commands._revalidate_execution_baseline(coordinates, request)
     assert stop.value.code == "BASELINE_INCOMPLETE", (stop.value.code, str(stop.value))
+
+
+def test_the_digest_of_the_requirement_is_over_its_utf8_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _python_project(tmp_path, runtime=True)
+    doc = "services/api/docs/требование.md"
+    _write(project, doc, "Текст.\n")
+    code, scan = _scan(project, monkeypatch, docs=[doc])
+    assert code == 0, scan
+    requirement = {"module_id": "nested", "selected_target": None,
+                   "docs": [{"path": doc, "sha256": "sha256:" + hashlib.sha256((project / doc).read_bytes()).hexdigest()}]}
+    wanted = hashlib.sha256(json.dumps(requirement, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    [baseline] = (Path(scan["run_root"]) / "baselines").glob("*.json")
+    assert json.loads(baseline.read_bytes())["requirements"]["digest"] == "sha256:" + wanted
+
+
+def test_a_file_with_a_cyrillic_name_is_no_drift_after_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _python_project(tmp_path, runtime=True)
+    _write(project, "services/api/src/модуль.py", "X = 1\n")
+    code, scan = _scan(project, monkeypatch)
+    assert code == 0, scan
+    status = _status(project, scan["run_id"], monkeypatch)
+    assert "drift" not in status and "drift_check_error" not in status, status

@@ -53,6 +53,15 @@ def test_starter_test_is_junit5_unless_junit4_is_there(tmp_path: Path, deps: tup
         assert module["test"]["framework"] == "junit5" and not fields, report
 
 
+def test_a_build_wrapper_is_named_only_when_the_file_is_there(tmp_path: Path) -> None:
+    from tools.discover_project import discover_project
+
+    project = _single(tmp_path)
+    assert "wrapper" not in discover_project(project)["modules"][0].get("test", {})
+    _write(project, "mvnw", "#!/bin/sh\n")
+    assert discover_project(project)["modules"][0]["test"]["wrapper"] == {"linux": "mvnw"}
+
+
 def _microservices(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     """Two modules like spring-petclinic-microservices: customers with tests, admin-server with no test dependency."""
     from tools.discover_project import discover_project

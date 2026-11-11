@@ -302,6 +302,13 @@ def test_the_confined_output_refuses_a_device_or_a_share_by_its_text(tmp_path, v
         _relative_output(tmp_path, value)
 
 
+def test_the_confined_output_takes_a_local_path_below_docs_to_do(tmp_path) -> None:
+    from tools.confined_output import acquire_confined_output
+
+    with acquire_confined_output(tmp_path, "docs/to_do/out/skillsrc.json") as target:
+        assert target.destination.name == "skillsrc.json" and target.destination.parent.name == "out"
+
+
 # --- K-a: the working copy has the helper that the registry names -----------------------------------------------------------
 
 def test_the_guard_of_the_registry_exists() -> None:

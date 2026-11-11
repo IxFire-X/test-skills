@@ -109,3 +109,31 @@ def test_the_text_of_mode_b_says_materialize_right_after_the_static_review() -> 
     text = (PACK_ROOT / "skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
     assert "materialize" in text and "ingest" in text and "exec сам" not in text
     assert "exec сам" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(("local", "has_report", "kept"), [(True, False, False), (False, True, False), (True, True, True)])
+def test_a_prestart_rejection_keeps_the_request_only_when_it_is_local_and_has_a_report_path(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local: bool, has_report: bool, kept: bool) -> None:
+    from tools import exec_commands, execution_core, pilot_state, project_inventory
+    from tools.execution_adapters import PYTEST
+
+    taken: list = []
+
+    def report(*_args, request=None, **_kwargs):
+        taken.append(request)
+        raise ValueError("stop here")  # the rejection is persisted by the caller of this report: not the matter of this test
+
+    delta = {"baseline_digest": "sha256:b", "automation_digest": "sha256:a", "review_digest": "sha256:r"}
+    monkeypatch.setattr(execution_core, "runner_report", report)
+    monkeypatch.setattr(execution_core, "request_is_attempt_local", lambda *_: local)
+    monkeypatch.setattr(execution_core, "request_report_path", lambda _request: Path("r.xml") if has_report else None)
+    monkeypatch.setattr(project_inventory, "read_execution_baseline", lambda _path: {"adapter_id": PYTEST})
+    monkeypatch.setattr(pilot_state, "read_attempt_receipt", lambda *_: {"record": {"delta": delta}})
+    monkeypatch.setattr(pilot_state, "read_effective_canonical", lambda *_: {
+        "document": {"document_id": "D", "revision": 1}, "document_digest": "sha256:d", "effective_bundle_receipt_digest": "sha256:e"})
+    monkeypatch.setattr(exec_commands, "_attempt_time", lambda *_: "2026-01-01T00:00:00+00:00")
+    (tmp_path / "m").mkdir()
+    attempt = {"attempt_id": "A", "project": str(tmp_path), "module": "m", "baseline_digest": "sha256:b"}
+    marker = object()
+    exec_commands._reject_prestart_execution({"run_root": tmp_path / "run", "attempt": attempt}, "CODE", "message", request=marker)
+    assert taken == [marker if kept else None]

@@ -176,3 +176,12 @@ def test_a_truly_broken_json_skillsrc_is_refused_with_its_cause_and_a_fix(tmp_pa
     assert not (project / ".pilot-runs").exists()
     code, out = _cli("tools.init_skillsrc", "--project", str(project), "--write")
     assert code == 2 and out["errors"] == ["invalid_json"] and out["fix"] == caught.value.fix and "must be one JSON object" in out["message"]
+
+
+def test_the_v2_feature_sources_reach_the_module_only_when_there_are_some() -> None:
+    from tools.skillsrc_manifest import normalize_skillsrc
+
+    plain = {"version": "2.0", "project": {"language": "python"}}
+    assert "feature_sources" not in normalize_skillsrc(plain)["modules"][0]
+    declared = normalize_skillsrc({**plain, "sdd": {"requirements": "docs/r.md"}})["modules"][0]
+    assert declared["feature_sources"] == {"requirements": ["docs/r.md"]}

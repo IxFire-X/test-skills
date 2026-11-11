@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from tests.test_requirement_traceability import canonical_fixture
 from tools.canonical_document import validate_canonical_document
 
@@ -100,3 +102,25 @@ def test_service_only_expected_in_last_step_is_rejected_before_publication() -> 
     http_document["test_cases"][0]["steps"][0]["expectations"][0]["text"] = "Проверено автотестом\n\nHTTP 200 OK"
     with pytest.raises(CanonicalDocumentError, match="SEMANTIC_HUMAN_EXPECTED_PLACEHOLDER"):
         build_bundle(http_document)
+
+
+def test_a_path_that_is_not_in_the_human_json_is_missing() -> None:
+    from tools.canonical_document import _MISSING, _json_value_at
+
+    assert _json_value_at({"a": [10]}, ("a", "0")) == 10
+    assert all(_json_value_at(value, tokens) is _MISSING for value, tokens in [({"a": 1}, ("b",)), ({"a": 1}, ("0",)), ([1], ("5",)), ([1], ("x",))])
+
+
+def _exists_step(response: str) -> dict:
+    assertion = {"actual": {"kind": "http_body", "pointer": "/id"}, "operator": "exists"}
+    return {"operation": {"kind": "http"}, "manual_only": False, "inputs": [], "automation_blockers": [], "test_data": "Тело запроса отсутствует.",
+            "expectations": [{"text": "Ответ.\n\n" + response, "assertions": [assertion]}]}
+
+
+@pytest.mark.parametrize(("value", "codes"), [('"<идентификатор>"', []), ('"abc"', ["SEMANTIC_HUMAN_EXPECTATION_PLACEHOLDER"])])
+def test_an_exists_assertion_wants_a_placeholder_in_the_human_response(value: str, codes: list[str]) -> None:
+    from tools.canonical_document import _human_http_alignment
+
+    diagnostics: list[dict] = []
+    _human_http_alignment(_exists_step('{\n  "id": ' + value + "\n}"), (), diagnostics)
+    assert [item["code"] for item in diagnostics] == codes
