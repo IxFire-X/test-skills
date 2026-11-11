@@ -65,7 +65,7 @@ def test_status_of_a_moved_project_works_and_says_it_was_moved(tmp_path: Path, c
     # the answer is the one of the place where the run was made
     _, home = _call(["status", "--project", str(source), "--run", run_id], capsys)
     assert not [item for item in home.get("warnings", []) if "PROJECT_MOVED" in str(item)] and "project_moved" not in home
-    assert status["last_confirmed_stage"] == home["last_confirmed_stage"] and status["attempt_state"] == home["attempt_state"]
+    assert status["attempt_state"] == home["attempt_state"]
 
 
 def test_status_of_a_moved_open_attempt_makes_no_baseline_comparison(tmp_path: Path, capsys: pytest.CaptureFixture[str], made_runs) -> None:

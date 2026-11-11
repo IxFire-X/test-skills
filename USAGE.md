@@ -201,7 +201,7 @@ AUTO_FIX_APPLIED, без дрейфа) размечал ровно те же в�
 подаются `scan --reference <csv>` (подсказка ревьюеру `CV_REFERENCE`, во вход генератора не идут), готовые кейсы для
 автотестов — `scan --cases <csv>` без `--docs`. Проект только с документами — модуль `root`, профиль `cases-only-v1`
 (`local-pilot-v1` отвечает `NO_BUILD_MODULE`), все шаги ручные. Продолжение после `/clear` — «продолжай test-skills <run_id>», дальше
-`run_pipeline status` и его `next_step`.
+`run_pipeline status` и его поля `state` и `next`.
 
 **Закрытие.** `python -m tools.run_pipeline materialize --project <abs> --module <ID> --run <id>` кладёт тесты в проект и печатает
 команду; человек запускает её, затем `python -m tools.run_pipeline ingest --project <abs> --module <ID> --run <id> --reports <каталог>`

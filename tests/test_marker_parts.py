@@ -190,15 +190,12 @@ def test_plan_names_a_part_over_budget_because_of_its_requirements(tmp_path: Pat
 
 
 def test_the_cli_plan_and_status_name_the_merge_as_code(tmp_path: Path) -> None:
-    from tools.run_pipeline import _next_step
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     completed = subprocess.run([sys.executable, "-m", "tools.context_marker_parts", "plan", "--run-root", str(root)],
                                cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout)
     assert report["next"] == "context-marker:requirements" and "слияние частей кодом" in report["merge"]
-    assert "слияние частей кодом" in _next_step({"next_expected_artifact": "context-marker parts merge"})["action"]
 
 
 def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

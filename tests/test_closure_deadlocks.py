@@ -63,7 +63,7 @@ def test_an_accepted_review_materialize_cannot_write_is_closed_by_finish(tmp_pat
     root, attempt_id = _journal_before_dg(tmp_path, monkeypatch)
 
     status = _status(tmp_path, root, capsys)
-    assert status["next_step"]["stage"] == "finish", status["next_step"]
+    assert status["state"] == "closure" and status["next"]["verb"] == "finish", status
 
     code, refused = _run(capsys, "materialize", tmp_path, root)
     assert code == 2 and refused["reason"] == "EXECUTION_NOT_PREPARED", refused

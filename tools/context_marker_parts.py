@@ -156,11 +156,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "ok", "stage": "context-marker:baseline", "kind": "слияние частей кодом",
                               "content_digest": published["content_digest"],
                               **({"questions_draft": published["questions_draft"],
-                                  "next": "пауза: покажи человеку пробелы разметки (status → next_step SCOPE_PENDING)"}
+                                  "next": "пауза: покажи человеку пробелы разметки (status → state: scope_pause)"}
                                  if published.get("questions_draft") else {})}, ensure_ascii=False, sort_keys=True))
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps(cli_error(error, fix="--run-root — каталог прогона .pilot-runs/<run_id> (его создаёт scan); команда запускается из каталога пакета; "
-                                   "что делать дальше, называет `python -m tools.run_pipeline status --project <проект> --run <run_id>` (next_step)"),
+                                   "что делать дальше, называет `python -m tools.run_pipeline status --project <проект> --run <run_id>` (state, next)"),
                          ensure_ascii=False))
         return 2
     return 0

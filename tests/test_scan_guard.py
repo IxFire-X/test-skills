@@ -76,7 +76,7 @@ def test_a_repeated_scan_is_refused_with_the_open_run(tmp_path: Path, monkeypatc
                                         "accept_self_review": False, "disposition_policy": None}
     code, again = _scan(project, monkeypatch)
     assert code == 2 and again["reason"] == "SCAN_RUN_IN_PROGRESS" and again["run_id"] == first["run_id"], again
-    assert "status" in again["fix"] and "--new-run" in again["fix"] and again.get("next_step")
+    assert "status" in again["fix"] and "--new-run" in again["fix"] and again["state"] == "marker"
     assert "finish" not in again["fix"]  # FaT-H2b 2.2: finish would not close a fresh attempt — never offered as a dead end
     assert _runs(project) == [first["run_id"]]
     code, forced = _scan(project, monkeypatch, new_run=True)
@@ -127,6 +127,7 @@ def test_status_names_the_changed_files_and_the_new_scan(tmp_path: Path, monkeyp
     assert command.startswith(f'"{sys.executable}" -m tools.run_pipeline scan') and f'--docs "{DOCS}"' in command
     assert "--accept-self-review" in command and "--disposition-policy cleanup" in command and "--new-run" in command
     assert "верните" in drift["fix"] and "X = 2" not in json.dumps(status, ensure_ascii=False)
+    assert (status["state"], status["next"]["verb"]) == ("drift", "scan") and "проект" in status["recovery"], status
     assert "дочерн" not in json.dumps(status, ensure_ascii=False) and "child attempt" not in json.dumps(status)
 
 
@@ -154,11 +155,6 @@ def test_materialize_names_the_changed_files_instead_of_a_child_attempt(tmp_path
     payload, _end = json.JSONDecoder().raw_decode(output)
     assert code != 0 and "src/sample.py" in json.dumps(payload, ensure_ascii=False), payload
     assert "child attempt" not in output and "дочерн" not in output
-
-
-def test_no_next_step_mentions_a_child_attempt() -> None:
-    text = json.dumps(run_pipeline._NEXT_STEPS, ensure_ascii=False)
-    assert "child attempt" not in text and "дочерн" not in text
 
 
 def test_ready_says_not_to_change_the_project_after_the_scan(tmp_path: Path) -> None:
@@ -223,6 +219,10 @@ def test_the_second_pass_starts_from_the_printed_command(tmp_path: Path, monkeyp
     first = json.loads((Path(scan["run_root"]) / "run-manifest.json").read_text(encoding="utf-8"))["scan_request"]
     second = json.loads((Path(payload["run_root"]) / "run-manifest.json").read_text(encoding="utf-8"))["scan_request"]
     assert first == second
+    assert _status(project, scan["run_id"], monkeypatch)["state"] == "done"
+    _write(project, "services/api/src/app.py", "X = 3\n")  # a closed run lets its project change: not a drift
+    status = _status(project, scan["run_id"], monkeypatch)
+    assert (status["state"], status["next"]["verb"]) == ("done", "report") and "drift" not in status, status
 
 
 def test_exec_never_trusts_the_profile_written_in_the_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

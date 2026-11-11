@@ -79,13 +79,6 @@ def _scan(pack: Path, *argv: str) -> tuple[int, dict]:
     return done.returncode, json.loads(done.stdout.rsplit("\nrun_id: ", 1)[0])
 
 
-def _command_of(step: dict) -> tuple[str, str]:
-    """The module and the command a ``next_step`` names: ``python -m tools.api review-open --run-root <run> …`` → (tools.api, review-open)."""
-    words = step["command"].split()
-    module, after = words[words.index("-m") + 1], words[words.index("-m") + 2]
-    return module, ("" if after.startswith(("-", "<")) else after)
-
-
 def _tree(root: Path) -> dict[str, tuple[int, int]]:
     return {path.relative_to(root).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
 
@@ -101,10 +94,12 @@ def _writes_stay_in_bounds(pack: Path, run: dict, *allowed: str) -> None:
     assert changed(pack, run["pack_before"]) == [] and outside == [], outside
 
 
-def _next_step(pack: Path, project: Path, run_id: str) -> dict:
+def _status(pack: Path, project: Path, run_id: str, state: str, verb: str, waiting: str = "agent") -> dict:
+    """``status`` of the run says its state, who waits and the one verb of the next step."""
     code, status = _cli(pack, "tools.run_pipeline", "status", "--project", str(project), "--run", run_id)
     assert code == 0, status
-    return status["next_step"]
+    assert (status["state"], status["waiting_for"], status["next"]["verb"]) == (state, waiting, verb), status
+    return status
 
 
 def _skillsrc(project: Path, window: int | None) -> None:
@@ -147,10 +142,9 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
     code, ready = _cli(pack, "tools.ready", *scope)
     assert code == 0 and ready["status"] == "READY", [row for row in ready["checks"] if row["level"] == "STOP"]
     code, scanned = _scan(pack, *scope, "--module", "python-pytest")
-    assert code == 0 and scanned["next_step"]["code"] == "MARKER", scanned
+    assert code == 0 and (scanned["state"], scanned["waiting_for"], scanned["next"]["verb"]) == ("marker", "agent", "context_marker_parts"), scanned
     run_root, attempt = Path(scanned["run_root"]), scanned["attempt_id"]
     flags, tmp = ("--run-root", str(run_root), "--attempt", attempt), Path(scanned["run_root"]) / "tmp"
-    assert _command_of(scanned["next_step"]) == ("tools.context_marker_parts", "plan")
     code, parts = _cli(pack, "tools.context_marker_parts", "plan", "--run-root", str(run_root))
     assert code == 0 and parts["mode"] == "single" and parts["next"] == "context-marker:baseline", parts
     digests = parts["parts"][0]["input_digests"]
@@ -176,13 +170,12 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
     code, published = _api(pack, "publish-generator-input", *flags, "--kind", "header", "--value", str(tmp / "header.json"))
     assert code == 0, published
     if gap:  # the pause after the marker: status says so, the plan is refused until the human answers
-        step = _next_step(pack, project, run_root.name)
-        assert step["code"] == "SCOPE_PENDING" and step["gaps"][0]["source_requirement_ids"] == ["SREQ-0001"], step
+        status = _status(pack, project, run_root.name, "scope_pause", "plan-batches", "human")
+        assert status["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-0001"], status
         code, refused = _api(pack, "plan", *plan_files)
         assert code == 2 and refused["code"] == "SCOPE_PENDING" and "--continue" in refused["fix"], refused
     if not gap:  # the plan is published by `tools.api plan` (SKILL §3), not named by its inner step plan-batches
-        step = _next_step(pack, project, run_root.name)
-        assert step["code"] == "GENERATOR_PLAN" and _command_of(step) == ("tools.api", "plan"), step
+        _status(pack, project, run_root.name, "generator", "plan")
     code, planned = _api(pack, "plan", *plan_files, *(["--continue"] if gap else []))
     assert code == 0, planned
     plan = json.loads((tmp / "plan.json").read_bytes())
@@ -222,21 +215,18 @@ def _cases_to_effective(pack: Path, run: dict) -> dict:
         code, answered = _api(pack, "model-response", *flags, "--stage", stage, "--artifact", path)
         assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
         prior.append(str(run["run_root"] / answered["result"]["path"]))
-        step = _next_step(pack, run["project"], run["run_root"].name)  # the last answer asks for the assembly, an earlier one for the next batch
-        expected = ("GENERATOR_ASSEMBLE", "assemble") if index == len(run["fragments"]) - 1 else ("GENERATOR_NEXT", "model-request")
-        assert (step["code"], _command_of(step)) == (expected[0], ("tools.api", expected[1])), step
+        # the last answer asks for the assembly, an earlier one for the next batch
+        _status(pack, run["project"], run["run_root"].name, "generator", "assemble" if index == len(run["fragments"]) - 1 else "model-request")
     code, assembled = _api(pack, "assemble", "--header", run["header"], "--plan", run["plan"], *[f for path in run["fragments"] for f in ("--fragment", path)],
                            "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", str(run["run_root"]))
     assert code == 0, assembled
-    step = _next_step(pack, run["project"], run["run_root"].name)  # the journal does not see assemble: the hint still ends with review-open
-    assert step["code"] == "GENERATOR_ASSEMBLE" and "review-open" in step["action"], step
+    _status(pack, run["project"], run["run_root"].name, "generator", "assemble")  # the journal does not see assemble
     code, valid = _api(pack, "validate-canonical", "--document", str(tmp / "candidate.json"))
     assert code == 0, valid
     code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",
                         "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
     assert code == 0 and opened["status"] == "ok", opened
-    step = _next_step(pack, run["project"], run["run_root"].name)  # the request of the reviewer is the one open step
-    assert step["code"] == "MODEL_RESPONSE" and _command_of(step) == ("tools.api", "model-response"), step
+    _status(pack, run["project"], run["run_root"].name, "review", "model-response", "model")  # the request of the reviewer is the one open step
     code, selected = _api(pack, "review-select", *flags, "--output-dir", _bundles(run), "--verdict", _verdict(run))
     assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", ("CO1: the answer of the reviewer", selected)
     code, effective = _api(pack, "read-effective", *flags)
@@ -260,9 +250,8 @@ def test_cases_only_delivery_walks_from_ready_to_the_report(tmp_path: Path, case
                              "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
         assert code == 2 and refused["code"] == "MODEL_STAGE_NOT_IN_PROFILE" and refused["fix"], (stage, refused)
     project, name = str(run["project"]), run["run_root"].name
-    step = _next_step(pack, run["project"], name)  # the closing command is the one the status names
-    assert step["code"] == "FINISH" and _command_of(step) == ("tools.run_pipeline", "finish"), step
-    for command in ("status", _command_of(step)[1], "report"):
+    _status(pack, run["project"], name, "closure", "finish")
+    for command in ("status", "finish", "report"):
         code, answer = _cli(pack, "tools.run_pipeline", command, "--project", project, "--run", name)
         assert code in (0, 1) and "MODE_B_NOT_IN_PACKAGE" not in json.dumps(answer), (command, answer)
     assert (run["run_root"] / "report.json").is_file() and (run["run_root"] / "report.md").is_file()
@@ -318,8 +307,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     assert not (pack / "tools" / "review_legacy.py").exists() and (pack / "tools" / "exec_commands.py").is_file()
     front = _front(pack, tmp_path, "local-pilot-v1")
     effective = _cases_to_effective(pack, front)
-    step = _next_step(pack, front["project"], front["run_root"].name)  # after the canonical review the automation is the next step
-    assert step["code"] == "AUTOMATION" and _command_of(step) == ("tools.api", "model-request"), step
+    _status(pack, front["project"], front["run_root"].name, "automation", "model-request")  # after the canonical review the automation is next
     project, run_root, tmp = front["project"], front["run_root"], front["tmp"]
     run = _flags(front)
     document = json.loads((tmp / "candidate.json").read_bytes())
@@ -329,6 +317,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     artifact = _automation_answer(document, effective)
     code, answered = _api(pack, "model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))
     assert code == 0, answered
+    _status(pack, project, run_root.name, "automation_review", "open-automation-boundary")
     statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
     code, facts = _api(pack, "automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))
     assert code == 0, facts
@@ -350,6 +339,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
         del verdict["artifacts"]["autotest_review"][key]
     code, accepted = _api(pack, "model-response", *run, "--stage", "autotest-reviewer:r1", "--artifact", _put(tmp / "autotest-review.json", verdict))
     assert code == 0 and all(f"/artifacts/autotest_review/{key}" in accepted["result"]["filled"] for key in left_to_the_code), accepted
+    _status(pack, project, run_root.name, "materialize", "materialize")
     # the canonical review has one way in a delivery without review_legacy: review-open / review-select
     code, refused = _api(pack, "review-requested", *run, "--stage", "tc-reviewer:canonical", "--digest", automation_digest)
     assert code == 2 and refused["code"] == "LEGACY_REVIEW_NOT_IN_PACKAGE" and "review-open" in refused["fix"] and "review-select" in refused["fix"], refused
@@ -357,11 +347,13 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     shared = ("--project", str(project), "--run", run_root.name, "--module", "python-pytest")
     code, printed = _cli(pack, "tools.run_pipeline", "materialize", *shared)
     assert code == 0 and printed["stage"] == "materialize", ("MB1: the static review was not taken", printed)
+    _status(pack, project, run_root.name, "human_run", "ingest", "human")
     _writes_stay_in_bounds(pack, front, *printed["files_to_review"])
     assert human_run(project, printed).returncode == 0
     front["project_before"] = _tree(project)  # what the person's own run wrote is the person's, not a command of the pack
     code, ingested = _cli(pack, "tools.run_pipeline", "ingest", *shared)
     assert code == 0 and ingested["verdict"] == "PASS", ingested
+    _status(pack, project, run_root.name, "done", "report")  # the ingest closes the attempt
     code, reported = _cli(pack, "tools.run_pipeline", "report", "--project", str(project), "--run", run_root.name)
     assert code == 0 and (run_root / "report.json").is_file(), reported
     code, finished = _cli(pack, "tools.run_pipeline", "finish", "--project", str(project), "--run", run_root.name)

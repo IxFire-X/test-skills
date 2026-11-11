@@ -102,13 +102,13 @@ def test_the_cut_run_is_named_incomplete_until_the_scan_is_repeated(tmp_path: Pa
     project, expected, _cut = _cut_scan(tmp_path, monkeypatch, capsys, nth=2)
     [root] = _runs(project)
     code, status = _pipeline(capsys, ["status", "--project", str(project), "--run", root.name])
-    assert status["next_step"]["code"] == "SCAN_INCOMPLETE" and "scan" in status["next_step"]["action"], status["next_step"]
-    assert f"1 из {expected}" in status["next_step"]["action"]
+    assert status["state"] == "scan" and status["next"]["verb"] == "scan", status
+    assert f"1 из {expected}" in status["scan_incomplete"] and " scan " in status["scan_command"] and "--new-run" not in status["scan_command"]
     with pytest.raises(ValueError, match="SCAN_INCOMPLETE"):
         context_marker_parts.plan(root)
     _pipeline(capsys, _scan_argv(project))
     code, status = _pipeline(capsys, ["status", "--project", str(project), "--run", root.name])
-    assert status["next_step"]["code"] != "SCAN_INCOMPLETE"
+    assert status["state"] == "marker" and "scan_incomplete" not in status
     assert context_marker_parts.plan(root)["parts"]
 
 

@@ -25,10 +25,11 @@ def test_a_missing_module_python_names_the_cause_and_leaves_the_run_open(tmp_pat
     assert code == 2 and refused["reason"] == "EXECUTION_NOT_PREPARED", refused
     assert "EXECUTION_RUNTIME_UNAVAILABLE" in refused["message"] and ".venv" in refused["message"], refused
     assert "AUTOMATION_NOT_MATERIALIZABLE" not in refused["fix"] and "materialize" in refused["fix"] and "--new-run" in refused["fix"], refused
-    assert _status(project, root, capsys)["next_step"]["stage"] == "materialize"
+    assert _status(project, root, capsys)["state"] == "drift"  # the vanished runtime is a changed file of the project
     code, finish = _run(capsys, "finish", project, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED" and "--new-run" in finish["fix"], finish
     _venv(project, present=True)
+    assert _status(project, root, capsys)["state"] == "materialize"  # the file is back: the run goes on
     code, printed = _run(capsys, "materialize", project, root)
     assert code == 0 and printed["stage"] == "materialize", printed
 
@@ -44,7 +45,7 @@ def test_a_system_maven_missing_from_path_reaches_the_refusal(tmp_path: Path, ca
     monkeypatch.setattr(project_inventory, "validate_execution_baseline_binding", gone)
     code, refused = _run(capsys, "materialize", project, root)
     assert code == 2 and "system Maven is unavailable on PATH" in refused["message"], refused
-    assert _status(project, root, capsys)["next_step"]["stage"] == "materialize"
+    assert _status(project, root, capsys)["state"] == "materialize"
 
 
 def test_a_damaged_baseline_still_closes_the_attempt_and_says_why(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:

@@ -64,7 +64,7 @@ def test_cases_only_reaches_the_context_marker_request(tmp_path: Path, capsys: p
     assert code == 0 and report["status"] == "READY", [row for row in report["checks"] if row["level"] != "OK"]
     code, scanned = _run(run_pipeline, capsys, "scan", "--project", str(project), "--profile", "cases-only-v1", "--docs", DOC)
     assert code == 0 and scanned["status"] == "ok" and scanned["policy_profile"] == "cases-only-v1", scanned
-    assert scanned["next_expected_artifact"] == "context-marker response" and scanned["attempt_state"] == "ACTIVE"
+    assert scanned["state"] == "marker" and scanned["attempt_state"] == "ACTIVE"
     from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc
 
     [module] = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]

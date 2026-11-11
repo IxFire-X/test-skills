@@ -236,18 +236,23 @@ def test_the_published_plan_after_continue_has_no_out_of_scope(tmp_path: Path) -
     assert pilot_state.publish_generator_input(root, attempt_id, "plan", plain)["digest"] == plain["digest"]
 
 
-def test_status_shows_the_pause_with_the_gaps_and_the_commands(tmp_path: Path) -> None:
+def test_status_shows_the_pause_with_the_gaps(tmp_path: Path) -> None:
     from tools import scope_pause
-    from tools.run_pipeline import _scope_pause_step
+    from tools.run_pipeline import _durable_status
 
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
-    step = {"code": "GENERATOR_PLAN", "stage": "tc-generator", "action": "план", "skill_section": "3", "command": "plan-batches"}
-    paused = _scope_pause_step(root, attempt_id, step)
-    assert paused["code"] == "SCOPE_PENDING" and paused["gaps"][0]["source_requirement_ids"] == ["SREQ-batch-a-001"]
-    assert "--exclude" in paused["command"] and "--continue" in paused["command"] and "--no-pause" in paused["no_pause"]
-    assert _scope_pause_step(root, attempt_id, {**step, "code": "MARKER"})["code"] == "MARKER"
+    paused = _durable_status(tmp_path, root, stage="status")
+    assert (paused["state"], paused["waiting_for"], paused["next"]["verb"]) == ("scope_pause", "human", "plan-batches"), paused
+    assert paused["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-batch-a-001"] and paused["scope_gaps"][0]["question"]
     scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
-    assert _scope_pause_step(root, attempt_id, step) == step
+    answered = _durable_status(tmp_path, root, stage="status")
+    assert (answered["state"], answered["waiting_for"]) == ("generator", "agent") and "scope_gaps" not in answered, answered
+
+
+def test_the_skill_names_the_answer_commands_of_the_pause() -> None:
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "state: scope_pause" in skill and "`scope_gaps`" in skill
+    assert "plan-batches --exclude" in skill and "--continue" in skill and "--no-pause" in skill
 
 
 def test_the_merge_of_the_parts_leaves_the_draft_questions(tmp_path: Path) -> None:
@@ -352,12 +357,12 @@ def test_a_forged_or_broken_decision_file_fails_closed(tmp_path: Path, content: 
 
 def test_status_names_a_forged_decision_instead_of_going_on(tmp_path: Path) -> None:
     from tools import scope_pause
-    from tools.run_pipeline import _scope_pause_step
+    from tools.run_pipeline import _durable_status
 
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     pilot_state.publish_run_artifact_bytes(root, attempt_id, scope_pause.DECISION_NAME, b"{}")
-    step = {"code": "GENERATOR_PLAN", "stage": "tc-generator", "action": "план", "skill_section": "3", "command": "plan-batches"}
-    assert _scope_pause_step(root, attempt_id, step)["code"] == "SCOPE_DECISION_INVALID"
+    status = _durable_status(tmp_path, root, stage="status")
+    assert (status["state"], status["waiting_for"]) == ("scope_pause", "human") and status["scope_warning"]["code"] == "SCOPE_DECISION_INVALID", status
 
 
 # --- PH: the report names a forged decision instead of dropping the section --------------------------------------------------------------

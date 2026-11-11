@@ -380,6 +380,6 @@ def test_the_tester_documents_carry_the_p9_sections_and_no_word_of_the_security_
     for code in ("MODEL_OUTPUT_TRUNCATED", "TASK_DOC_OUTSIDE_CONTEXT", "MODULE_UNKNOWN", "EXECUTION_COORDINATES",
                  "FINISH_FACT_UNDETERMINED", "ZEPHYR_CSV_COLUMNS"):
         assert f"| `{code}` |" in table, code
-    assert "## Памятка: модель запуталась" in how_to and "next_step" in how_to and "--new-run" in how_to
+    assert "## Памятка: модель запуталась" in how_to and "`next`" in how_to and "--new-run" in how_to
     for text in (readme, how_to):
         assert "безопасн" not in text.lower()

@@ -145,7 +145,7 @@ def test_the_events_between_the_others_change_no_reader_of_the_order(tmp_path: P
     plain_status, plain_report, plain_shape = flow(tmp_path / "plain", False)
     noisy_status, noisy_report, noisy_shape = flow(tmp_path / "noisy", True)
     assert noisy_shape == plain_shape
-    assert noisy_status["next_step"]["code"] == plain_status["next_step"]["code"] and noisy_status.get("stop_reason") == plain_status.get("stop_reason")
+    assert noisy_status["state"] == plain_status["state"] and noisy_status.get("stop_reason") == plain_status.get("stop_reason")
     for key in ("counts", "canon", "phases"):
         assert json.dumps(noisy_report[key], sort_keys=True, default=str) == json.dumps(plain_report[key], sort_keys=True, default=str) or key == "phases", key
     assert noisy_report["refusals"]["total"] == 3

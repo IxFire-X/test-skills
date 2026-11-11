@@ -4,7 +4,7 @@
 - P2b: a question of a module that was not selected, with the one host runner as its only option, answers itself
   (default:not-selected-module); a later scan of that module says the framework was taken by default;
 - 2.11: status names a vanished runtime in drift.changed and still compares the files;
-- 2.7–2.9: next_step and fix name the right action after a review that was not accepted;
+- 2.7–2.9: status (state, next) and fix name the right action after a review that was not accepted;
 - 2.2: an abandoned run of the same request (drift) never blocks the next scan.
 """
 from __future__ import annotations
@@ -167,32 +167,19 @@ def test_exec_names_a_vanished_runtime(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# 2.7 / 2.8 / 2.9 next_step and fix by the verdict
+# 2.7 / 2.8 / 2.9 state, next and fix by the verdict
 # --------------------------------------------------------------------------------------
 
-def test_right_after_scan_the_next_step_starts_with_the_parts_plan() -> None:
-    from tools.run_pipeline import _next_step
-
-    step = _next_step({"next_expected_artifact": "context-marker response"})
-    assert step["stage"] == "context-marker" and step["skill_section"] == "3"
-    assert step["action"].startswith("сначала context_marker_parts plan") and "context-marker:requirements" in step["action"]
-
-
-@pytest.mark.parametrize(("verdict", "stage", "section", "needle"), [
-    ("ПРИНЯТО", "materialize", "5", "команду запуска для человека"),
-    ("ТРЕБУЕТ ДОРАБОТКИ", "finish", "6", "next_run"),
-])
+@pytest.mark.parametrize(("verdict", "state", "verb"), [("ПРИНЯТО", "materialize", "materialize"), ("ТРЕБУЕТ ДОРАБОТКИ", "closure", "finish")])
 def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, capsys: pytest.CaptureFixture[str],
-                                                          verdict: str, stage: str, section: str, needle: str) -> None:
+                                                          verdict: str, state: str, verb: str) -> None:
     from tests.test_exec_prepares import _project
     from tools.run_pipeline import cmd_status
 
     project, run_root, _attempt_id = _project(tmp_path, static_verdict=verdict)
     cmd_status(SimpleNamespace(project=str(project), run=run_root.name))
-    step = json.loads(capsys.readouterr().out)["next_step"]
-    assert step["stage"] == stage and step["skill_section"] == section and needle in step["action"], step
-    if verdict != "ПРИНЯТО":
-        assert "ревью сверх лимита" in step["action"] and "materialize" not in step["action"]
+    status = json.loads(capsys.readouterr().out)
+    assert (status["state"], status["next"]["verb"]) == (state, verb), status
 
 
 def test_materialize_after_a_refused_static_review_points_to_finish_not_to_another_review(tmp_path: Path,

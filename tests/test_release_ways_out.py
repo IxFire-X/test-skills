@@ -122,9 +122,8 @@ def test_o12b_a_left_run_takes_no_model_step_and_says_so(tmp_path: Path, capsys:
     code, left = _main(capsys, ["finish", "--project", str(project), "--run", first["run_id"], "--abandon", "LEFT_BEFORE_REVIEW"])
     assert code == 0, left
     code, status = _main(capsys, ["status", "--project", str(project), "--run", first["run_id"]])
-    step = status["next_step"]
-    assert step["code"] == "RUN_LEFT" and step["why"] == "прогон оставлен до ревью кейсов", step
-    assert " scan " in step["command"] and "--new-run" not in step["command"], step
+    assert status["state"] == "left" and status["next"]["verb"] == "scan", status
+    assert " scan " in status["scan_command"] and "--new-run" not in status["scan_command"], status  # the plain scan of the request starts anew
     root, attempt_id = Path(first["run_root"]), first["attempt_id"]
     state = pilot_state.derive_state(root)
     baseline = read_execution_baseline(root / "baselines" / (state["attempts"][-1]["baseline_digest"].removeprefix("sha256:") + ".json"))

@@ -106,11 +106,9 @@ def _print(payload: dict[str, Any]) -> None:
 
 def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
-    next_step = payload.get("next_step")
-    command = next_step.get("command") if isinstance(next_step, Mapping) else None
     reason = payload.get("reason") or payload.get("code") or "ERROR"
     return {**payload, "code": payload.get("code") or reason, "message": payload.get("message") or payload.get("detail") or reason,
-            "fix": payload.get("fix"), "next": payload.get("next", command)}
+            "fix": payload.get("fix"), "next": payload.get("next")}
 
 
 def _digest_bytes(data: bytes) -> str:
@@ -141,118 +139,6 @@ def _confined(project: Path, candidate: Path) -> Path:
     return resolved
 
 
-_API = "python -m tools.api "
-_PIPELINE = "python -m tools.run_pipeline "
-_PARTS = "python -m tools.context_marker_parts "
-_FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
-_MATERIALIZE = _PIPELINE + "materialize --project <project> --run <run_id>"
-_INGEST = _PIPELINE + "ingest --project <project> --run <run_id> --reports <каталог с отчётами>"
-_NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
-# the exact next_expected_artifact of _durable_status_facts -> (code, stage, action, section of
-# skills/orchestrate/SKILL.md, command template).  The command only names the tool of the step: the agent picks the step
-# by the SKILL and runs it, status never does. Every value _durable_status_facts sets has a row
-# (tests/test_fat3.py walks them all); tests/test_next_step_commands.py checks each command against the real parsers.
-_NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
-    "module selection, inventory and profile baseline": (
-        "SCAN", "scan", "scan: выбрать модуль и заморозить baseline", "2", _PIPELINE + "scan --project <project> --module <module>"),
-    "authorized context": (
-        "CONTEXT_SELECTION", "context", "квитанции выбора контекста публикует только scan: начни новый прогон тем же scan", "2",
-        _NEW_SCAN),
-    "context-marker response": (
-        "MARKER", "context-marker",
-        "сначала context_marker_parts plan --run-root <run>: single — запрос context-marker:baseline и вызов модели; "
-        "parts — context-marker:requirements, затем части по плану", "3", _PARTS + "plan --run-root <run>"),
-    "context-marker parts merge": (
-        "MARKER_PARTS", "context-marker:parts",
-        "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели",
-        "3", _PARTS + "plan --run-root <run>"),
-    "generator fragments": (
-        "GENERATOR_PLAN", "tc-generator", "header (publish-generator-input --kind header), затем plan: строит и публикует план пачек; потом запрос генератора на первую пачку и его ответ", "3",
-        _API + "plan --header <f> --requirements <f> --grouping <f> --project <project> --input-file <f> --context-receipt <f> --run-root <run> --attempt <attempt> "
-               "--out-plan <f> --out-published <f>"),
-    "remaining fragments or assembled candidate": (
-        "GENERATOR_NEXT", "tc-generator", "следующая пачка генератора по плану", "3",
-        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-generator:<batch> --input-digest <d> ..."),
-    "assembly of the candidate": (
-        "GENERATOR_ASSEMBLE", "assembly", "все пачки отвечены: assemble и validate-canonical по записанным ответам, затем review-open", "3",
-        _API + "assemble --header <f> --plan <f> --fragment <f> ... --run-root <run> --out-candidate <f> --out-receipt <f>"),
-    "canonical reviewer package and boundary": (
-        "REVIEW_SESSION", "canonical-review", "открыть ревью одной командой (review-open: кандидат, пакет, запрос), затем ревьюер и review-select --verdict",
-        "4", _API + "review-open --run-root <run> --attempt <attempt> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> "
-                    "--fresh-context yes|no"),
-    "reviewer evidence or verdict": (
-        "REVIEW_CONTINUE", "canonical-review", "ревьюер отвечает: review-select --verdict <файл> закрывает ревью (нужен файл проекта — review-evidence --path)",
-        "4", _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir> --verdict <файл ответа ревьюера>"),
-    "reviewer ledger and effective selection or negative closure": (
-        "REVIEW_SELECT", "canonical-review", "выбрать effective canonical или закрыть отрицательную ветку: review-select (сессия — последняя ревизия журнала)",
-        "4", _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir>"),
-    "effective canonical": (
-        "REVIEW_EFFECTIVE", "canonical-review", "завершить ревью и опубликовать effective canonical: review-select", "4",
-        _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir>"),
-    "negative branch trace and finalization": (
-        "FINISH_NEGATIVE", "finish", "отрицательная ветка ревью: finish закрывает попытку", "6", _FINISH),
-    "automation artifact": (
-        "AUTOMATION", "automation", "автоматизация принятых кейсов: запрос tc-to-autotest:r1", "5",
-        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-to-autotest:r1 --input-digest <d> ..."),
-    "static automation review": (
-        "AUTOMATION_REVIEW", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5",
-        _API + "open-automation-boundary ..."),
-    # after autotest-reviewer the verdict decides — materialize, the next revision, or finish
-    "automation revision": (
-        "AUTOMATION_REVISION", "tc-to-autotest",
-        "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5",
-        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-to-autotest:r2 --input-digest <d> ..."),
-    "automation refused": (
-        "FINISH_REFUSED", "finish",
-        "автоматизация отклонена, заблокирована или не записывается в проект: finish закрывает попытку и печатает next_run — "
-        "команду следующего захода; нового ревью сверх лимита ревизий нет", "6", _FINISH),
-    "review disposition and materialization": ("MATERIALIZE", "materialize", "materialize: положить принятые автотесты в проект и получить команду запуска для человека", "5", _MATERIALIZE),
-    "materialization": ("MATERIALIZE", "materialize", "materialize: положить автотесты в проект и получить команду запуска", "5", _MATERIALIZE),
-    "materialization command": ("MATERIALIZE", "materialize", "materialize: команда запуска для человека и файлы на просмотр", "5", _MATERIALIZE),
-    "human run report": ("INGEST", "ingest", "человек запускает команду из materialize и приносит отчёты: ingest", "5", _INGEST),
-    "execution trace and dispositions": ("FINISH", "closure", "трасса исполнения и диспозиции", "6", _FINISH),
-    "disposition receipt": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
-    "disposition and finalization": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
-    "pre-finalization trace": ("FINISH", "closure", "линейное закрытие и финализация", "6", _FINISH),
-    "finalization receipt": ("FINISH", "closure", "линейное закрытие и финализация", "6", _FINISH),
-    "terminal result and trace": ("FINISH", "closure", "терминальный результат", "6", _FINISH),
-    "terminal event": ("FINISH", "closure", "терминальный результат", "6", _FINISH),
-    "validated inputs or new scan": (
-        "DRIFT", "resume", "файлы проекта изменились после scan: верните их или начните новый прогон (status: drift)",
-        "Resume и дрейф", _NEW_SCAN),
-}
-_MODEL_RESPONSE = ("MODEL_RESPONSE", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3",
-                   _API + "model-response --run-root <run> --attempt <attempt> --stage <stage> --artifact <ответ.json>")
-_TERMINAL = ("TERMINAL", "terminal", "передать человеку результат попытки и отчёт", "6",
-             _PIPELINE + "report --project <project> --run <run_id>")
-
-
-_NEW_SCAN_CODES = {"CONTEXT_SELECTION", "DRIFT"}
-
-
-def _next_step(status: Mapping[str, Any], project: Path | None = None, request: Any = None) -> dict[str, Any]:
-    """What to do next after /clear, from the same facts status shows (only reads).  Audit D5: the code of the state
-    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL. The
-    new scan of a run with its *request* is the command of drift.command and next_run, with all the flags of the request."""
-    expected = status.get("next_expected_artifact")
-    if expected is None:
-        code, stage, action, section, command = _TERMINAL
-    elif str(expected) in _NEXT_STEPS:
-        code, stage, action, section, command = _NEXT_STEPS[str(expected)]
-    elif str(expected).endswith(" response"):
-        stage = str(expected).removesuffix(" response")
-        code, action, section, command = _MODEL_RESPONSE
-        command = command.replace("<stage>", stage)
-    else:
-        return {"code": "UNKNOWN", "stage": "unknown", "action": f"следующий артефакт: {expected}", "skill_section": "Stop conditions"}
-    if code in _NEW_SCAN_CODES:
-        if project is not None and isinstance(request, Mapping):
-            command = _scan_command(project, request, extra=("--new-run",))
-        else:
-            action += "; полная команда с флагами прогона — drift.command в status"
-    return {"code": code, "stage": stage, "action": action, "skill_section": section, "command": command}
-
-
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     """What the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
     from tools.pilot_state import frozen_baseline
@@ -280,28 +166,32 @@ def _batches_all_answered(root: Path, attempt_id: str, responses: Sequence[Mappi
 
 
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
+    """The facts of the run and, from them, its ``state``, who is ``waiting_for`` and the ``next`` verb (``tools.stages``)."""
     from tools.pilot_state import read_run
+    from tools.stages import next_action
 
     result = _durable_status_facts(project, run_root, stage=stage, status=status, **extra)
+    cut = left = scope = None
     if result.get("attempt_id") is not None:
-        try:  # the scan request of the run, for the full command of a new scan
+        try:  # the scan request of the run, to see a scan that was cut
             request = read_run(Path(run_root))["manifest"].get("scan_request")
         except (KeyError, OSError, TypeError, ValueError):
             request = None
-        result["next_step"] = _scope_pause_step(Path(run_root), str(result["attempt_id"]), _next_step(result, project, request))
         cut = _scan_cut(Path(run_root), request if isinstance(request, Mapping) else None)
-        if cut is not None and _left_mark(Path(run_root)) is None:  # nothing goes on from half a context
-            result["next_step"] = {"code": "SCAN_INCOMPLETE", "stage": "scan", "skill_section": "1",
-                                   "why": f"scan оборван: записано {cut}",
-                                   "action": f"scan не завершён: записано {cut}; повтори тот же scan — он достроит недостающее в этом прогоне",
-                                   "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
+        left = _left_mark(Path(run_root)) is not None  # a left run goes nowhere; the plain scan of its request starts anew
+        if result.get("next_expected_artifact") == "generator fragments":
+            scope = _scope_pause(Path(run_root), str(result["attempt_id"]))
+        if cut is not None and not left:  # nothing goes on from half a context
+            result["scan_incomplete"] = f"scan оборван: записано {cut}; повтори тот же scan (scan_command) — он достроит недостающее в этом прогоне"
+        if (left or cut is not None) and isinstance(request, Mapping):  # after /clear the flags of the request are nowhere else
+            result["scan_command"] = _scan_command(project, request)
         note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
         if note:
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
-        if _left_mark(Path(run_root)):  # a left run goes nowhere; the plain scan of its request starts anew
-            result["next_step"] = {"code": "RUN_LEFT", "stage": "scan", "why": "прогон оставлен до ревью кейсов",
-                                   "action": "простой scan того же запроса начнёт новый прогон", "skill_section": "Resume и дрейф",
-                                   "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
+    result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None}))
+    result.update(scope or {})
+    for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
+        result.pop(gone, None)
     return result
 
 
@@ -316,31 +206,23 @@ def _scope_mismatch(run_root: Path, attempt_id: str) -> str | None:
     return published["note"] if published is not None and published["mismatch"] else None
 
 
-def _scope_pause_step(run_root: Path, attempt_id: str, step: dict[str, Any]) -> dict[str, Any]:
-    """After the marker the plan of the batches waits for the human's answer on the gaps of the marker.  Only reads;
-    the step is the plan step itself until the marker has gaps, the human has not answered and the run keeps its pause."""
-    if step.get("code") != "GENERATOR_PLAN":
-        return step
+def _scope_pause(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
+    """After the marker the plan of the batches waits for the human's answer on the gaps of the marker.  Only reads; ``None`` until the
+    marker has gaps, the human has not answered and the run keeps its pause."""
     from tools import scope_pause
 
     try:
         scope = scope_pause.scope_state(run_root, attempt_id)
     except scope_pause.ScopeRefused as error:  # a decision file that is not the human's answer: fail closed, say so
-        return {"code": error.code, "stage": "scope", "skill_section": "3", "action": str(error), "command": None}
+        return {"scope_warning": {"code": error.code, "detail": str(error)}}
     except (OSError, KeyError, TypeError, ValueError):
-        return step
+        return None
     if not scope["pending"]:
-        return step
+        return None
     gaps = scope["gaps"]
     rows = [{"source_requirement_ids": row["source_requirement_ids"], "requirement": row["requirement"], "missing": row["missing"],
              "blocks": row["blocks"], "question": row["question"]} for row in gaps[:scope_pause.LISTED]]
-    return {"code": "SCOPE_PENDING", "stage": "scope", "skill_section": "3",
-            "action": f"пауза после разметки: {len(gaps)} требований с пробелом (нет наблюдаемого канала, ожидаемого результата, доступа). "
-                      "Покажи список человеку (вопросы аналитику — questions-for-analyst.md в каталоге прогона) и спроси: исключить ли какие-то "
-                      "из них? Ответ человека передай в plan-batches; без ответа план отказывает кодом SCOPE_PENDING",
-            "command": _API + "plan-batches ... --run-root <run> --attempt <attempt> (--exclude <SREQ-id> [--exclude ...] --reason \"<текст человека>\" | --continue)",
-            "gaps": rows, **({"gaps_not_listed": len(gaps) - len(rows)} if len(gaps) > len(rows) else {}),
-            "no_pause": "scan --no-pause начинает прогон без этой остановки"}
+    return {"scope_gaps": rows, **({"scope_gaps_not_listed": len(gaps) - len(rows)} if len(gaps) > len(rows) else {})}
 
 
 def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -1185,9 +1067,10 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
 
     python = f"{printed(sys.executable)} -m tools.run_pipeline"
     try:
-        next_step = _durable_status(project, root, stage="status").get("next_step")
+        facts = _durable_status(project, root, stage="status")
+        where = {key: facts[key] for key in ("state", "waiting_for", "next")}
     except (HostStop, OSError, KeyError, TypeError, ValueError):
-        next_step = None
+        where = {}
     try:
         closes = finish_closes(root, str(derive_state(root)["attempts"][-1]["attempt_id"]))
     except (OSError, KeyError, IndexError, TypeError, ValueError):
@@ -1196,7 +1079,7 @@ def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | Non
     finish = f"закрыть его без продолжения: {python} finish --project {printed(project)} --run {root.name}; " if closes else ""
     return {
         "status": "error", "stage": "scan", "reason": "SCAN_RUN_IN_PROGRESS", "run_id": root.name, "run_root": str(root),
-        "next_step": next_step,
+        **where,
         "message": "для этого проекта, документа и профиля уже есть незавершённый прогон; новый не создан",
         "fix": (f"продолжите его: {python} status --project {printed(project)} --run {root.name}; "
                 f"{finish}нужен ещё один прогон рядом или этот не закрыть — "
@@ -1336,7 +1219,7 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
         fields = error_fields(error, table=False)  # the fix of this place below is more exact than the table's
         return {"drift_check_error": {"code": fields["code"], "message": fields["message"][:500], "fix": fields.get("fix") or (
             "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, materialize и ingest остановятся "
-            "на той же сверке: начни новый прогон тем же scan с --new-run (команда — next_step.command)")}}
+            "на той же сверке: начни новый прогон тем же scan с --new-run (команда — drift.command в status)")}}
     if result.get("status") == "UNCHANGED":
         return {}
     return {"drift": _drift_report(project, manifest, result.get("changed") or [])}
@@ -1879,7 +1762,7 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
     return {
         "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
         "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
-        "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — "
+        "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (state, next); если нет — "
                f"{printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project)} --run {printed(manifest['run_id'])} --abandon "
                "LEFT_BEFORE_REVIEW оставит прогон, и простой scan начнёт новый; следующий заход: " + command,
         "next_run": {"why": "попытка остановилась до ревью кейсов: следующий заход — новый прогон того же запроса", "command": command},
@@ -2022,8 +1905,12 @@ def cmd_status(args: Any) -> int:
 
 def _status_result(project: Path, run_id: str) -> dict[str, Any]:
     root, run, state = _read_run_coordinate(project, run_id, allow_moved=True)
-    result = _durable_status(project, root, stage="status")
     attempt = state["attempts"][-1] if state["attempts"] else None
+    # the drift of the project is a fact of the run, so it makes the state; a closed or left run is not changed by it (tools.stages)
+    open_run = attempt is not None and attempt.get("state") != "TERMINAL" and _moved_project_note(project, root) is None
+    # in a moved project the baseline binds the folder name and path of the scan, so the comparison would report a
+    # drift of no file at all; the PROJECT_MOVED note says that the check is not made here
+    result = _durable_status(project, root, stage="status", **(_status_drift(project, root, run["manifest"], attempt) if open_run else {}))
     if attempt is not None:
         result.update(_review_notes_summary(root, str(attempt["attempt_id"])))
         from tools.review_canaries import status_fields
@@ -2036,10 +1923,6 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
             result.update(_next_run(project, run["manifest"], read_terminal_result(root, str(attempt["attempt_id"])).get("reason_code")))
         except (KeyError, OSError, TypeError, ValueError):
             pass
-    elif attempt is not None and _moved_project_note(project, root) is None:
-        # in a moved project the baseline binds the folder name and path of the scan, so the comparison would report a
-        # drift of no file at all; the PROJECT_MOVED note says that the check is not made here
-        result.update(_status_drift(project, root, run["manifest"], attempt))
     return _with_moved_note(result, project, root)
 
 

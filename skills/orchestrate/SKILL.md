@@ -16,7 +16,7 @@ permissions:
 проверяют и публикуют артефакты (с readback); сборку и тесты не запускают. Кейсы идут профилем `cases-only-v1`; автотесты
 (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.
 
-Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `next_step` в `status`.
+Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `state` и `next` в `status`.
 Прочитай [контракт оркестрации](references/orchestration-contract.md). До работы — `python -m tools.doctor --root <pack-root>`.
 Используй только exact registered Skills и stages из `contracts/pipeline.json`. Роль читает свои инструкции, контракт, схему ответа и полные
 входы; validators выполняются как код, их чтение не заменяет выполнения.
@@ -90,7 +90,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 1. **Разметка.** `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и `input_digests`. `mode: single` — одна
    стадия `context-marker`; `mode: parts` — `context-marker:requirements` (только документы), затем по части `context-marker:batch-NNN`,
    затем `merge` (слияние кодом, не вызов модели); между частями можно `/clear`. Импорт готовых кейсов (`scan --cases`) — [import.md](references/import.md).
-2. **Пауза после разметки.** Пробелы без наблюдаемого канала, ожидаемого результата или доступа — `next_step.code: SCOPE_PENDING` и
+2. **Пауза после разметки.** Пробелы без наблюдаемого канала, ожидаемого результата или доступа — `state: scope_pause` (список — `scope_gaps`) и
    черновик `questions-for-analyst.md`. Остановись: покажи человеку список и спроси, исключать ли требования (кейсы для них не пишутся) или
    продолжать как есть. Ответ — в `plan-batches --exclude <SREQ-id> --reason "<текст человека>"` или `--continue`: код пишет
    `scope-decision.json`; без ответа `plan-batches` и `publish-generator-input --kind plan` отказывают `SCOPE_PENDING`. Решение за
@@ -163,10 +163,10 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 ## Resume и дрейф
 
 Если контекст занят больше чем наполовину, после завершённого шага попроси человека `/clear` (или новую сессию) и «продолжай test-skills
-<run_id>». Затем `python -m tools.run_pipeline status --project <abs> --run <run_id>` и продолжай с `next_step` (стадия, действие, раздел
-этого SKILL; при `pending_request_path` — ответ на этот запрос). `next_step.command` — шаблон с `<…>` вместо значений: шаг выбираешь по
-SKILL, значения берёшь из результатов tools. Подтверждённое журналом не повторяй. `RUN_LEFT` — прогон оставлен до ревью (`finish --abandon LEFT_BEFORE_REVIEW`): выполни
-`next_step.command` (простой scan того же запроса).
+<run_id>». Затем `python -m tools.run_pipeline status --project <abs> --run <run_id>` и продолжай с `state` и `next` (`waiting_for: model` — ответ на запрос из
+`pending_request_path`; `human` — жди человека). `next.verb` — имя команды шага; аргументы — по SKILL, `--help` и результатам
+tools. Подтверждённое журналом не повторяй. `state: left` (`RUN_LEFT`) — прогон оставлен до ревью (`finish --abandon LEFT_BEFORE_REVIEW`): `scan_command`
+(простой scan того же запроса). `recovery` — скажи человеку.
 
 `status: drift` — передай человеку `drift.changed` и `drift.fix` как есть: вернуть файлы или начать новый прогон командой `drift.command`;
 файлы не правь, прогон сам не начинай. После `finish` с `next_run` (ТРЕБУЕТ ДОРАБОТКИ) — команда `next_run.command` как есть.

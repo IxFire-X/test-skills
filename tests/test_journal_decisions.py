@@ -61,7 +61,7 @@ def test_a_planted_mark_without_events_leaves_nothing_and_the_same_command_binds
     (root / LEFT_MARK).write_bytes(_left_bytes(first["attempt_id"]))
     assert left_attempt(root) is None and _left_mark(root) is None  # the file is not the decision
     code, status = _main(capsys, ["status", "--project", str(project), "--run", first["run_id"]])
-    assert status["next_step"]["code"] != "RUN_LEFT", status["next_step"]
+    assert status["state"] != "left", status
     code, left = _main(capsys, ["finish", "--project", str(project), "--run", first["run_id"], "--abandon", "LEFT_BEFORE_REVIEW"])
     assert code == 0, left
     assert left_attempt(root) == first["attempt_id"]

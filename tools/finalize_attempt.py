@@ -1272,7 +1272,7 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
 # the ways out of an attempt finish cannot close yet; each names its exact abort code
 _REVIEW_ABORT = ("python -m tools.api review-abort --run-root <run> --attempt <attempt_id> --reason {code} "
                  "--out <run>/tmp/session.json, затем python -m tools.api review-select без --verdict (сессию он берёт из журнала)")
-_OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (next_step); "
+_OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (state, next); "
                     "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
                     + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
                     "select отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")

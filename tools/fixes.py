@@ -298,7 +298,7 @@ FIXES: dict[str, str] = {
                        "следующий заход — команда `next_run` из его вывода",
     "REVIEW_CANDIDATE_NOT_PUBLISHED": "этот кандидат не тот, что опубликован журналом: не подставляй свои файлы, повтори `review-open` — "
                                       "он возьмёт кандидата из журнала",
-    "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → next_step), новое — новый прогон",
+    "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → state, next), новое — новый прогон",
     "REVIEW_INPUTS_UNAVAILABLE": "попытки нет в прогоне: проверь --run-root и --attempt (`status` называет текущую попытку)",
     "CONTEXT_MARKER_PARTS_INCOMPLETE": "не все части разметки отвечены: `python -m tools.context_marker_parts plan --run-root <run>` показывает недостающие; "
                                        "ответь на них, затем повтори `merge`",
