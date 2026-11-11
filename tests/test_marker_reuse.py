@@ -145,8 +145,7 @@ def test_the_scan_suggestion_names_the_source_and_the_commands(tmp_path: Path) -
     assert reuse["run_id"] == source_root.name
     [stage] = reuse["stages"]
     assert stage["stage"] == "context-marker:baseline" and stage["response_digest"] == digest
-    assert Path(stage["artifact"]).is_file() and "--reuse-from " + source_root.name in stage["commands"][0]
-    assert all("--input-digest " + item in stage["commands"][0] for item in inputs) and stage["artifact"] in stage["commands"][1]
+    assert stage["command"] == f'python -m tools.api prepare --run-root "{run_root}" --stage context-marker:baseline --reuse-from {source_root.name}'
 
 
 def test_the_scan_suggestion_says_which_input_differs(tmp_path: Path) -> None:
@@ -243,7 +242,7 @@ def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts
     reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     assert reuse["run_id"] == source_id
     assert [row["stage"] for row in reuse["stages"]] == ["context-marker:requirements", *(f"context-marker:batch-{n:03d}" for n in range(1, parts + 1))]
-    assert reuse["then"].endswith(f'context_marker_parts merge --run-root "{run_root}"')
+    assert all("--reuse-from " + source_id in row["command"] for row in reuse["stages"])
 
 
 def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,5 +255,5 @@ def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: 
     reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     first, *rest = reuse["stages"]
     assert first == {"stage": "context-marker:requirements", "by": "cases-import",
-                     "commands": [f'python -m tools.api cases-import --run-root "{run_root}" --attempt {attempt_id}']}
+                     "command": f'python -m tools.api cases-import --run-root "{run_root}" --attempt {attempt_id}'}
     assert [row["stage"] for row in rest] == ["context-marker:batch-001", "context-marker:batch-002"]

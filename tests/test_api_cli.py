@@ -16,7 +16,7 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted([*ROOT.glob("skills/*/SKILL.md"), *ROOT.glob("skills/*/references/*.md"), ROOT / "USAGE.md", ROOT / "README.md", ROOT / "HOW-TO-USE.md"])
 NAMED = re.compile(r"python -m tools\.([a-z_]+)(?: ([a-z][a-z-]+)(?![\w/.-]))?")
-SUBCOMMAND = re.compile(r"(?<![\w.])tools\.(api|orchestrate_test_case_revision|run_pipeline|context_marker_parts) ([a-z][a-z-]+)")
+SUBCOMMAND = re.compile(r"(?<![\w.])tools\.(api|orchestrate_test_case_revision|run_pipeline) ([a-z][a-z-]+)")
 
 
 def _named_commands() -> list[tuple[str, str | None]]:
@@ -74,7 +74,7 @@ def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsy
     from tools import api
 
     assert set(api.COMMANDS) >= {
-        "model-request", "model-response", "read-model-artifact", "read-context", "plan-batches", "publish-generator-input",
+        "model-request", "model-response", "read-model-artifact", "prepare", "submit", "plan-batches", "publish-generator-input",
         "validate-fragment", "assemble", "document-digest", "validate-canonical", "read-ledger",
         "read-effective", "open-automation-boundary", "read-receipt", "automation-digest", "relations-digest",
         "validate-automation", "runner-compat",

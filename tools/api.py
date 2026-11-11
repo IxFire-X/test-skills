@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import batch_assembly, canonical_document, cases_import, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, step_size
+from tools import batch_assembly, canonical_document, cases_import, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, stage_steps, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -109,8 +109,8 @@ def _load_answer(path: str, project: Path | None = None) -> _Answer:
     try:
         raw = output_guard.input_file(path, project).read_bytes()
     except OSError as error:
-        raise ValueError(f"ANSWER_FILE_UNREADABLE: {path}: {error.strerror or error}; fix: --artifact/--verdict — путь к файлу ответа модели, "
-                         "который лежит на диске; запиши ответ в файл и подай его путь") from error
+        raise ValueError(f"ANSWER_FILE_UNREADABLE: {path}: {error.strerror or error}; fix: ответ модели — файл в слоте стадии (answer_slot из prepare или status) "
+                         "или путь к файлу ответа на диске; запиши ответ в файл и повтори") from error
     try:
         return _Answer(loads_json_strict(raw.decode("utf-8")), len(raw))
     except (UnicodeDecodeError, StrictJsonError) as error:
@@ -133,7 +133,7 @@ def _yes_no(value: str) -> bool:
 
 def _cmd_model_request(a):
     return pilot_state.publish_model_request(a.run_root, a.attempt, a.stage, model_id=a.model_id, invocation_id=a.invocation_id,
-                                             input_digests=a.input_digest, reuse_from=a.reuse_from)
+                                             input_digests=a.input_digest)
 
 
 def _cmd_model_response(a):
@@ -152,8 +152,12 @@ def _cmd_read_model_artifact(a):
     return pilot_state.read_model_stage_artifact(a.run_root, a.attempt, a.stage, a.digest)
 
 
-def _cmd_read_context(a):
-    return pilot_state.read_context_selection(a.run_root, a.attempt, a.digest)
+def _cmd_prepare(a):
+    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, reuse_from=a.reuse_from)
+
+
+def _cmd_submit(a):
+    return stage_steps.submit(a.run_root, a.stage, _load_answer, dry_run=a.dry_run, transport_attempts=a.transport_attempts)
 
 
 def _cmd_cases_import(a):
@@ -393,11 +397,12 @@ def _not_runnable(result: Any) -> bool:
 
 # name: (handler, options, invalid-when, named parts of a tuple result)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
-    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional"), ("--reuse-from", str, None)), None, ()),
+    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional")), None, ()),
     "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None, ()),
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
-    "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
+    "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--reuse-from", str, None)), None, ()),
+    "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
     "cases-import": (_cmd_cases_import, RUN, None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
                                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),

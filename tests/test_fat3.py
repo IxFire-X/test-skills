@@ -190,7 +190,7 @@ def test_status_names_the_state_and_the_next_verb(tmp_path: Path, monkeypatch: p
     assert run_pipeline.cmd_scan(args) == 0
     run_pipeline.cmd_status(type("A", (), {"project": str(project), "run": payloads[-1]["run_id"]})())
     status = payloads[-1]
-    assert (status["state"], status["waiting_for"], status["next"]["verb"]) == ("marker", "agent", "context_marker_parts") and "next_step" not in status
+    assert (status["state"], status["waiting_for"], status["next"]["verb"]) == ("marker", "agent", "prepare") and "next_step" not in status
 
 
 def test_the_automation_role_counts_its_conventions_fat_b() -> None:

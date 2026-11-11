@@ -1,4 +1,4 @@
-"""FaT-O3 (audit 2): ``context_marker_parts merge`` builds and checks the merged marker before it writes the request of
+"""FaT-O3 (audit 2): ``the merge of the marker parts (merge_parts)`` builds and checks the merged marker before it writes the request of
 ``context-marker:baseline`` — a refusal leaves no orphan request, names its own code and no ``--transport-attempts``."""
 from __future__ import annotations
 

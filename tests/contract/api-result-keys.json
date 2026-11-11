@@ -109,6 +109,10 @@
    "schema_version",
    "source_requirements"
   ],
+  "prepare": [
+   "answered",
+   "stage"
+  ],
   "prior-capabilities": [
    "batch_id",
    "body_at",
@@ -121,16 +125,6 @@
    "digest",
    "kind",
    "path"
-  ],
-  "read-context": [
-   "batch_count",
-   "batch_index",
-   "byte_count",
-   "byte_set_digest",
-   "digest",
-   "files",
-   "inventory_digest",
-   "schema_version"
   ],
   "read-effective": [
    "attempt_id",
@@ -274,6 +268,10 @@
    "request_digest",
    "stage",
    "unresolved"
+  ],
+  "submit": [
+   "answered",
+   "stage"
   ],
   "validate-automation": "array",
   "validate-canonical": "array",

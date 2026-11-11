@@ -91,8 +91,8 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         assert code == 0, response
         assert rr._api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
                        "--digest", response["result"]["content_digest"])[0] == 0
-        context = json.loads(Path(run["context"]).read_bytes())
-        assert rr._api("read-context", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--digest", context["digest"])[0] == 0
+        for verb in ("prepare", "submit"):  # the marker is answered: both say so
+            assert rr._api(verb, "--run-root", str(run["run_root"]), "--stage", "context-marker:baseline")[0] == 0
         code, prior = _prior(run, second)
         assert code == 0, prior
         assert rr._api("validate-fragment", "--fragment", run["fragments"][0], "--plan", run["plan"], "--header", run["header"],

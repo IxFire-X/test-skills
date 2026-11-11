@@ -137,7 +137,7 @@ def test_public_entry_points_open_a_closure_cache(module: str, name: str) -> Non
     assert getattr(function, "__closure_cached__", False) is True, f"{module}.{name}"
 
 
-@pytest.mark.parametrize("module", ["tools.run_pipeline", "tools.orchestrate_test_case_revision", "tools.context_marker_parts", "tools.zephyr_template_export"])
+@pytest.mark.parametrize("module", ["tools.run_pipeline", "tools.orchestrate_test_case_revision", "tools.zephyr_template_export"])
 def test_a_cli_main_is_not_one_block(module: str) -> None:
     """The final full check must run before a command prints its answer, so main() opens no block of its own."""
     import importlib

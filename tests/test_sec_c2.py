@@ -38,7 +38,6 @@ PATH_FLAGS = {
     "autotest_hints.py": {"--automation": "guard"},
     "build_context.py": {"--project": "parser", "--docs": "guard"},
     "ci_gate.py": {"--root": "maintainer"},
-    "context_marker_parts.py": {"--run-root": "guard"},
     "contract_check.py": {"--root": "maintainer"},
     "doctor.py": {"--root": "maintainer"},
     "exec_commands.py": {"--run": "run"},

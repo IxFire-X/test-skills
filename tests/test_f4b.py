@@ -5,7 +5,7 @@
   ``review-requested``, ``complete-review`` are not commands there; the build of development keeps all of them;
 - A5-5: ``MODEL_OUTPUT_TRUNCATED`` of ``--artifact`` / ``--verdict`` is a refusal with its code and fix, recorded in
   ``refusals.jsonl`` — not ``INVALID_ARGUMENT`` with «check the flags»;
-- A5-9: ``context_marker_parts``, ``step_size``, ``review_view``, ``review_edits`` refuse with ``code`` and ``fix``;
+- A5-9: ``step_size``, ``review_view``, ``review_edits`` refuse with ``code`` and ``fix``;
 - O-9: ``_plain`` leaves a scalar as it is."""
 from __future__ import annotations
 
@@ -140,10 +140,9 @@ def test_a_dry_run_leaves_no_refusal_line(tmp_path: Path) -> None:
 
 # ---- A5-9 -------------------------------------------------------------------------------------------------------------
 
-def test_the_four_cli_refuse_with_a_code_and_a_fix(tmp_path: Path) -> None:
+def test_the_cli_refuse_with_a_code_and_a_fix(tmp_path: Path) -> None:
     missing = tmp_path / ".pilot-runs" / ("a" * 32)
     cases = [
-        ("tools.context_marker_parts", ["plan", "--run-root", str(missing)]),
         ("tools.step_size", ["--project", str(tmp_path), "--run", "nothing", "--stage", "context-marker"]),
         ("tools.review_view", ["--project", str(tmp_path), "--run", "nothing", "--candidate", str(tmp_path / "c.json")]),
         ("tools.review_edits", ["--candidate", str(tmp_path / "c.json"), "--edits", str(tmp_path / "e.json")]),

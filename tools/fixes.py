@@ -89,10 +89,10 @@ FIXES: dict[str, str] = {
     "MODEL_RESPONSE_DIGEST_MISMATCH": "удали из ответа поля digest, названные в сообщении, — код поставит их сам; отдай ответ "
                                       "единственным повтором стадии (--transport-attempts 2)",
     "MODEL_REUSE_REFUSED": "переиспользовать можно только ответ context-marker принятого прогона того же проекта; "
-                           "иначе model-request без --reuse-from",
+                           "иначе prepare без --reuse-from",
     "MODEL_REUSE_MISMATCH": "ответ переиспользуемой стадии не меняется: передай файл ответа источника как есть",
     "MODEL_STAGE_ANSWERED": "у стадии уже есть ответ, другой его не заменит; дальше — следующая стадия",
-    "MODEL_STAGE_NOT_REQUESTED": "сначала tools.api model-request этой стадии, потом model-response",
+    "MODEL_STAGE_NOT_REQUESTED": "сначала запрос стадии (prepare; у остальных стадий tools.api model-request), потом ответ (submit; model-response)",
     # --- batches (BatchAssemblyError) ---
     "BATCH_ID_CONFLICT": "batch_id, namespace и идентификаторы фрагмента должны быть из плана пачки: возьми их из batch-plan.json "
                          "и не меняй; идентификаторы внутри фрагмента начинаются с namespace пачки",
@@ -300,8 +300,8 @@ FIXES: dict[str, str] = {
                                       "он возьмёт кандидата из журнала",
     "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → state, next), новое — новый прогон",
     "REVIEW_INPUTS_UNAVAILABLE": "попытки нет в прогоне: проверь --run-root и --attempt (`status` называет текущую попытку)",
-    "CONTEXT_MARKER_PARTS_INCOMPLETE": "не все части разметки отвечены: `python -m tools.context_marker_parts plan --run-root <run>` показывает недостающие; "
-                                       "ответь на них, затем повтори `merge`",
+    "CONTEXT_MARKER_PARTS_INCOMPLETE": "не все части разметки отвечены: `status` называет недостающую (next.stage); "
+                                       "ответь на неё (`prepare`, `submit`) — последний `submit` повторит слияние",
     "CONTEXT_MARKER_REQUIREMENTS_CHANGED": "часть разметки может только добавлять наблюдения по коду, требования шага `context-marker:requirements` "
                                            "не меняются: убери правки требований из ответа части и повтори единственный раз",
     "HARDLINK_UNAVAILABLE": "каталог публикации не поддерживает жёсткие ссылки: возьми `--output-dir` на том же диске внутри проекта (`<run>/published`)",

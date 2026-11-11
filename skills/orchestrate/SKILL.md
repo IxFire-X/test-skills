@@ -72,24 +72,25 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
   лишнее исключение возвращает `.skillsrc` `paths.include` (`hint`).
 - **`--docs путь#Раздел`** (Markdown): модель читает только вид `<run>/doc-sections/<имя>.md`; нет заголовка — `TASK_DOC_SECTION_MISSING`
   с перечнем; один раздел на файл. Документ задачи всегда в контексте; `TASK_DOC_OUTSIDE_CONTEXT` — передай человеку `fix`.
-- **Повтор разметки.** Поле `reuse` вывода scan называет прошлый прогон с теми же входами и даёт команды `model-request --reuse-from
-  <run_id>` и `model-response --artifact <файл>`: повтори их или размечай заново; без `--reuse-from` ответы прошлых прогонов не копируй.
+- **Повтор разметки.** `reuse` в выводе scan называет прошлый прогон с теми же входами и `prepare … --reuse-from <run_id>` на стадию: он сам
+  отвечает её ответом того прогона, `submit` не нужен; ответы прошлых прогонов не копируй.
 
 Анализ неполон, пока обязательная зависимость не прочитана: верни её контроллеру, область не расширяй самовольно; исключение файла по
 политике не доказывает его нерелевантность. Вход, зависимости и снимок после scan не меняются до закрытия попытки.
 
 ## 3. Построй canonical из deterministic batches
 
-Каждый запрос стадии (`model-request`) и ответ (`model-response`) — разные команды: `model-request --stage <stage> --model-id <id>
+Запрос стадии (`model-request`) и ответ (`model-response`) — разные команды: `model-request --stage <stage> --model-id <id>
 --invocation-id <id>` (входы из журнала; у разметки — `--input-digest` по порядку входов), затем `model-response --stage <stage> --artifact
 <ответ.json>` — ответ как есть. `model-response` печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело; тело —
 `read-model-artifact`. `--out` ему не нужен: с `--out` в stdout только `out`, `bytes`, `sha256`, квитанция — в файле. Перед шагом модели —
-`step_size` (до `model-request` у частей разметки, после него у генератора и ревью). Сводка входов — `files_summary` с `list_path`: один
+`step_size` (после `model-request`; у разметки размер печатает `prepare`). Сводка входов — `files_summary` с `list_path`: один
 вызов размера на пачку; `tools.api step-inputs` — только если нужен список без замера. `--input-file` плана — абсолютный путь.
 
-1. **Разметка.** `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и `input_digests`. `mode: single` — одна
-   стадия `context-marker`; `mode: parts` — `context-marker:requirements` (только документы), затем по части `context-marker:batch-NNN`,
-   затем `merge` (слияние кодом, не вызов модели); между частями можно `/clear`. Импорт готовых кейсов (`scan --cases`) — [import.md](references/import.md).
+1. **Разметка.** `status`: `next` — `prepare` или `submit`, `stage` (`context-marker:baseline`; частями — `:requirements`, затем `:batch-NNN`).
+   `tools.api prepare --run-root <run> --stage <id>` печатает `read` (файлы модели), `answer_slot`, `budget`; ответ модели — как есть в
+   `answer_slot`; `submit` с теми же флагами принимает его (`--dry-run` — без записи; `--transport-attempts 2` — один повтор;
+   последний `submit` сливает части). Импорт — [import.md](references/import.md).
 2. **Пауза после разметки.** Пробелы без наблюдаемого канала, ожидаемого результата или доступа — `state: scope_pause` (список — `scope_gaps`) и
    черновик `questions-for-analyst.md`. Остановись: покажи человеку список и спроси, исключать ли требования (кейсы для них не пишутся) или
    продолжать как есть. Ответ — в `plan-batches --exclude <SREQ-id> --reason "<текст человека>"` или `--continue`: код пишет

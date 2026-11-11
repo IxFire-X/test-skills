@@ -302,10 +302,11 @@ def _select(run: dict, review: str | None) -> tuple[int, dict]:
     tmp = run["tmp"]
     evidence = []
     for index, digest in enumerate(run.get("evidence", [])):
-        code, read = _api("read-context", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--digest", digest,
-                          "--out", str(tmp / f"evidence-{index}.json"))
-        assert code == 0, read
-        evidence += ["--evidence-receipt", read["out"]]
+        from tools.pilot_state import read_context_selection
+
+        path = tmp / f"evidence-{index}.json"
+        path.write_text(json.dumps(read_context_selection(run["run_root"], run["attempt_id"], digest)), encoding="utf-8")
+        evidence += ["--evidence-receipt", str(path)]
     return _cmd("tools.orchestrate_test_case_revision", "select", "--candidate", str(tmp / "candidate.json"),
                 "--candidate-receipt", str(tmp / "candidate-receipt.json"), "--assembly-receipt", str(tmp / "assembly-receipt.json"),
                 "--inventory-receipt", run["inventory"], "--context-receipt", run["context"], "--context-marker-output", run["marker"],

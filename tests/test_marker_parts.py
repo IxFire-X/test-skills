@@ -3,8 +3,6 @@ a merge by code into the same context-marker:baseline the generator and the revi
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -187,15 +185,6 @@ def test_plan_names_a_part_over_budget_because_of_its_requirements(tmp_path: Pat
     over = [part for part in steps["parts"][1:] if not part["fits"]]
     assert over and all("limits.context_batch_bytes" in part["hint"] for part in over)
     assert requirements["content_digest"] in json.dumps(steps)
-
-
-def test_the_cli_plan_and_status_name_the_merge_as_code(tmp_path: Path) -> None:
-    root, attempt_id, baseline, receipts = _run(tmp_path)
-    completed = subprocess.run([sys.executable, "-m", "tools.context_marker_parts", "plan", "--run-root", str(root)],
-                               cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
-    assert completed.returncode == 0, completed.stderr
-    report = json.loads(completed.stdout)
-    assert report["next"] == "context-marker:requirements" and "слияние частей кодом" in report["merge"]
 
 
 def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -272,7 +272,6 @@ def _commands(project: Path, root: Path) -> dict[str, tuple[str, list[str]]]:
         "exec_commands": ("tools.run_pipeline", ["materialize", *run]),
         "ingest": ("tools.run_pipeline", ["ingest", *run, "--no-reports", "--reason", "BUILD_FAILED"]),
         "api": ("tools.api", ["read-effective", "--run-root", name, "--attempt", "a"]),
-        "context_marker_parts": ("tools.context_marker_parts", ["plan", "--run-root", name]),
         "review_legacy": ("tools.review_legacy", ["publish", "--candidate", str(project / "c.json"), "--run-root", name, "--attempt-id", "a",
                                                   "--output-dir", name + "/tmp"]),
         "review_view": ("tools.review_view", [*run, "--effective"]),
@@ -282,11 +281,11 @@ def _commands(project: Path, root: Path) -> dict[str, tuple[str, list[str]]]:
 
 
 def test_every_command_with_a_run_argument_is_in_the_table_below() -> None:
-    assert _modules_with_a_run_argument() == {"api", "context_marker_parts", "exec_commands", "review_legacy", "review_view", "run_pipeline",
+    assert _modules_with_a_run_argument() == {"api", "exec_commands", "review_legacy", "review_view", "run_pipeline",
                                               "step_size", "zephyr_template_export"}
 
 
-_TABLE = ["run_pipeline", "finish", "report", "exec_commands", "ingest", "api", "context_marker_parts", "review_legacy", "review_view", "step_size",
+_TABLE = ["run_pipeline", "finish", "report", "exec_commands", "ingest", "api", "review_legacy", "review_view", "step_size",
           "zephyr_template_export"]
 
 

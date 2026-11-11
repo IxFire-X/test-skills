@@ -1,4 +1,4 @@
-"""F2 (A2-2, A2-4, arch review 3): cases-import, context_marker_parts merge and the batch skeletons of a plan cut between two writes —
+"""F2 (A2-2, A2-4, arch review 3): cases-import, the merge of the marker parts (merge_parts) and the batch skeletons of a plan cut between two writes —
 the same command again finishes the work."""
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def test_cases_import_cut_between_its_writes(tmp_path: Path, monkeypatch, capsys
 
 
 # --------------------------------------------------------------------------------------
-# context_marker_parts merge: request file + MODEL_REQUESTED, answer file + MODEL_RESPONSE_RECEIVED, questions draft
+# the merge of the marker parts (merge_parts): request file + MODEL_REQUESTED, answer file + MODEL_RESPONSE_RECEIVED, questions draft
 # --------------------------------------------------------------------------------------
 
 def _parts_answered(tmp_path: Path):

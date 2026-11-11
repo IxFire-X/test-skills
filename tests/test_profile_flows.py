@@ -4,7 +4,7 @@ The gate runs the full development package, so a command of the delivery that ca
 every command runs in a copy of the files of the profile (``pack_registry.profile_paths``); only the answers of the model are written
 by the test (the marker, the fragments, the verdicts) and the run of the tests is the human's (``human_run``).
 
-- ``cases-only``: ``ready``, ``scan``, the marker (``context_marker_parts plan``, ``model-request`` / ``model-response``), the pause on a
+- ``cases-only``: ``ready``, ``scan``, the marker (``prepare`` / ``submit``), the pause on a
   gap, ``publish-generator-input``, ``plan``, the answers of the generator by batches (``validate-fragment``, ``prior-capabilities``),
   ``assemble``, ``validate-canonical``, ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
   the first ``model-response`` refused ``MODE_B_NOT_IN_PACKAGE``);
@@ -142,21 +142,20 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
     code, ready = _cli(pack, "tools.ready", *scope)
     assert code == 0 and ready["status"] == "READY", [row for row in ready["checks"] if row["level"] == "STOP"]
     code, scanned = _scan(pack, *scope, "--module", "python-pytest")
-    assert code == 0 and (scanned["state"], scanned["waiting_for"], scanned["next"]["verb"]) == ("marker", "agent", "context_marker_parts"), scanned
+    assert code == 0 and (scanned["state"], scanned["waiting_for"], scanned["next"]["verb"]) == ("marker", "agent", "prepare"), scanned
+    assert scanned["next"]["stage"] == "context-marker:baseline", scanned
     run_root, attempt = Path(scanned["run_root"]), scanned["attempt_id"]
     flags, tmp = ("--run-root", str(run_root), "--attempt", attempt), Path(scanned["run_root"]) / "tmp"
-    code, parts = _cli(pack, "tools.context_marker_parts", "plan", "--run-root", str(run_root))
-    assert code == 0 and parts["mode"] == "single" and parts["next"] == "context-marker:baseline", parts
-    digests = parts["parts"][0]["input_digests"]
-    code, requested = _api(pack, "model-request", *flags, "--stage", "context-marker:baseline", "--model-id", "model-context", "--invocation-id", "context-1",
-                           *[flag for digest in digests for flag in ("--input-digest", digest)])
-    assert code == 0, requested
+    code, prepared = _api(pack, "prepare", "--run-root", str(run_root), "--stage", "context-marker:baseline", "--model-id", "model-context")
+    assert code == 0 and prepared["result"]["answer_slot"] == str(run_root / "incoming" / "context-marker-baseline.json"), prepared
+    _status(pack, project, run_root.name, "marker", "submit", "model")
     source = [{"source_requirement_id": f"SREQ-{number:04d}", "display_order": number, "text": line, "provenance": [f"docs/requirements.md:{number + 2}"],
                "digest": "sha256:" + hashlib.sha256(line.encode("utf-8")).hexdigest()} for number, line in enumerate(lines, start=1)]
     warnings = ["REQ-1 сценарий (docs/requirements.md:3) — нет наблюдаемого канала — блокирует проверку списка — как увидеть список?"] if gap else []
     marker = {"schema_version": "5.0.0", "stage": "context-marker", "warnings": warnings,
               "artifacts": {"analytics_documentation": {"requirements": source}, "source_code_and_diff": {"sources": ["src/sample.py — immutable test source"]}}}
-    code, answered = _api(pack, "model-response", *flags, "--stage", "context-marker:baseline", "--artifact", _put(tmp / "marker.json", marker))
+    _put(Path(prepared["result"]["answer_slot"]), marker)
+    code, answered = _api(pack, "submit", "--run-root", str(run_root), "--stage", "context-marker:baseline")
     assert code == 0, answered
     header = {"schema_version": "1.1.0", "document_id": "TCDOC-fixture", "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
               "metadata": {"subject": {"kind": "generic", "name": "Фикстура"}, "documentation": ["docs/requirements.md"], "project": "fixture",

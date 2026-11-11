@@ -21,7 +21,7 @@ not rescan the project, create a run/attempt, or widen feature/module scope.
 
 ## Parts (FaT-5)
 
-A module whose context does not fit one call is marked in parts (`python -m tools.context_marker_parts plan`):
+A module whose context does not fit one call is marked in parts (`status` names the step, `tools.api prepare` publishes it):
 
 - `context-marker:requirements` — the documents of the run only, no code. Produce the complete normalized requirement
   set as below, with the one source `шаг требований — код не анализировался`.

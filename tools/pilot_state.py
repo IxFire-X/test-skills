@@ -2180,7 +2180,7 @@ def publish_model_request(
         (not _safe_model_label(invocation_id), "--invocation-id is not a safe label (letters, digits, . _ -, no secret-like value)",
          "--invocation-id — " + label_fix),
         (not inputs, f"MODEL_INPUTS_REQUIRED: the journal does not fix the inputs of {stage_instance_id}, no --input-digest given",
-         "--input-digest на каждый вход стадии, в её порядке (для context-marker — из context_marker_parts plan; при неверном входе "
+         "--input-digest на каждый вход стадии, в её порядке (для context-marker — вход строит `prepare`; при неверном входе "
          "отказ MODEL_INPUTS_MISMATCH называет верный digest и его источник)"),
         (len(inputs) != len(set(inputs)), "an --input-digest is repeated", "каждый вход один раз, в порядке стадии"),
         (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>",
@@ -5345,8 +5345,7 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     """An earlier run of the project whose context marker this attempt may reuse, with the commands — or why not.
 
-    A suggestion only: the agent decides; every reused answer still goes through model-request --reuse-from and
-    model-response, the same checks as a fresh one."""
+    A suggestion only: the agent decides; every reused answer still goes through prepare --reuse-from and the same checks as a fresh one."""
     from tools.project_inventory import read_execution_baseline
 
     project, root = _run_root(run_root)
@@ -5381,7 +5380,6 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": refusal,
                                               **({"differences": differences} if refusal == "входы иные" else {})}
             continue
-        source_attempt = str(source["attempt"]["attempt_id"])
         from tools.run_pipeline import HostStop, printed
 
         try:  # a source whose answer file lies where no shell takes the path is not offered: the commands would not be run as they are
@@ -5389,19 +5387,11 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
             if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
                 rows.append({"stage": "context-marker:requirements", "by": "cases-import",
-                             "commands": [f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"]})
-            for stage in model_stages:
-                request, response = source["stages"][stage]
-                artifact = _model_stage_artifact_target(source["root"], source_attempt, response)
-                head = f"python -m tools.api model-{{kind}} --run-root {printed(root)} --attempt {attempt_id} --stage {stage}"
-                rows.append({"stage": stage, "response_digest": response, "artifact": str(artifact), "commands": [
-                    head.format(kind="request") + f" --model-id reuse --invocation-id reuse-{path.name[:8]}-{stage.replace(':', '-')} "
-                    + " ".join(f"--input-digest {digest}" for digest in request["input_digests"]) + f" --reuse-from {path.name}",
-                    head.format(kind="response") + f" --artifact {printed(artifact)}"]})
-            merged = made_by.get("context-marker:baseline") == "controller:context-marker-merge"
-            return {"run_id": path.name, "stages": rows,
-                    **({"then": "слияние частей кодом, не вызов модели: python -m tools.context_marker_parts merge "
-                                f"--run-root {printed(root)}"} if merged else {})}
+                             "command": f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"})
+            for stage in model_stages:  # the reuse answers each stage from the source run itself; the merge of the parts follows by code
+                rows.append({"stage": stage, "response_digest": source["stages"][stage][1],
+                             "command": f"python -m tools.api prepare --run-root {printed(root)} --stage {stage} --reuse-from {path.name}"})
+            return {"run_id": path.name, "stages": rows}
         except HostStop:
             first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": "путь файла ответа источника нельзя записать в команде"}
             continue
@@ -5463,8 +5453,7 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], he
                                      "files of the context changed after the scan; fix: `run_pipeline status` shows drift.changed — "
                                      "restore those files, or start the run again with `scan --new-run`") from error
                 raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
-                                 f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
-                                 "(tools.api read-context --digest <d>)") from error
+                                 f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'}") from error
     # the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
     # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
     ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(

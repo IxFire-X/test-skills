@@ -1,27 +1,22 @@
-"""The context marker in parts: the plan of the parts and the merge by code.
+"""The context marker in parts: the plan of the parts and the merge by code (``tools.stage_steps`` calls both; no command of its own).
 
-``python -m tools.context_marker_parts plan --run-root <project>/.pilot-runs/<run_id>`` lists the marker steps of the
-current attempt: with one context batch the single ``context-marker:baseline`` as before; with more,
+``plan(root)`` lists the marker steps of the current attempt: with one context batch the single ``context-marker:baseline`` as before; with more,
 ``context-marker:requirements`` (documents only), one ``context-marker:batch-NNN`` per batch and the merge.  A part binds the
 inventory, its receipt and the requirements answer — the documents are read once, by the requirements step.  Each step
 comes with its ``input_digests``, its bytes (batch / requirements / role instructions) against the step budget of
-``tools.step_size`` and the next step to take.  ``merge`` publishes ``context-marker:baseline`` from the recorded answers:
+``tools.step_size`` and the next step to take.  ``merge_parts`` publishes ``context-marker:baseline`` from the recorded answers:
 a merge of the parts by code, recorded with the model id ``controller:context-marker-merge`` — not a model call.
 """
 
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 from tools import pilot_state
 from tools.cases_import import cases_path, docs_run
-from tools.json_cli import JsonArgumentParser, cli_error
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
-MERGE_TEXT = "слияние частей кодом (не вызов модели): python -m tools.context_marker_parts merge --run-root <run>"
 
 
 def _attempt(root: Path) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
@@ -100,7 +95,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         following = pending[0]
     else:
         following = "merge"
-    return {"mode": mode, "attempt_id": attempt_id, "budget_bytes": budget, "parts": parts, "next": following, "merge": MERGE_TEXT}
+    return {"mode": mode, "attempt_id": attempt_id, "budget_bytes": budget, "parts": parts, "next": following}
 
 
 def merge_parts(root: Path) -> Mapping[str, Any]:
@@ -139,32 +134,3 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
 
     draft = write_draft(root, attempt_id)  # the gaps of the marker as questions, for the human's decision on the scope
     return {**published, **({"questions_draft": str(draft)} if draft else {})}
-
-
-def main(argv: list[str] | None = None) -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    parser = JsonArgumentParser(description="The context marker in parts: plan and merge.")
-    parser.add_argument("command", choices=("plan", "merge"))
-    parser.add_argument("--run-root", required=True, type=Path)
-    args = parser.parse_args(argv)
-    try:
-        if args.command == "plan":
-            print(json.dumps(plan(args.run_root), ensure_ascii=False, sort_keys=True))
-        else:
-            published = merge_parts(args.run_root)
-            print(json.dumps({"status": "ok", "stage": "context-marker:baseline", "kind": "слияние частей кодом",
-                              "content_digest": published["content_digest"],
-                              **({"questions_draft": published["questions_draft"],
-                                  "next": "пауза: покажи человеку пробелы разметки (status → state: scope_pause)"}
-                                 if published.get("questions_draft") else {})}, ensure_ascii=False, sort_keys=True))
-    except (OSError, ValueError, KeyError) as error:
-        print(json.dumps(cli_error(error, fix="--run-root — каталог прогона .pilot-runs/<run_id> (его создаёт scan); команда запускается из каталога пакета; "
-                                   "что делать дальше, называет `python -m tools.run_pipeline status --project <проект> --run <run_id>` (state, next)"),
-                         ensure_ascii=False))
-        return 2
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

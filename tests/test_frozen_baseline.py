@@ -67,13 +67,13 @@ def test_a_missing_baseline_is_unbound_too(tmp_path: Path) -> None:
         pilot_state.frozen_baseline(run["run_root"], attempt)
 
 
-def test_the_marker_parts_plan_refuses_a_forged_baseline_and_writes_nothing(tmp_path: Path, capsys) -> None:
+def test_prepare_refuses_a_forged_baseline_and_writes_nothing(tmp_path: Path, capsys) -> None:
     run = _generated_run(tmp_path)
     _forge(run, adapter_id="forged:adapter")
     before = _journal(run["run_root"])
-    from tools import context_marker_parts
+    from tools import api
 
-    code = context_marker_parts.main(["plan", "--run-root", str(run["run_root"])])
+    code = api.main(["prepare", "--run-root", str(run["run_root"]), "--stage", "context-marker:baseline"])
     refusal = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code != 0 and refusal.get("code") == "BASELINE_UNBOUND" or "BASELINE_UNBOUND" in json.dumps(refusal, ensure_ascii=False), refusal
     assert _journal(run["run_root"]) == before

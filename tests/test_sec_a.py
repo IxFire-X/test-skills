@@ -221,7 +221,6 @@ UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required one
     "autotest_hints": ["--automation", SHARE + r"\a.json"],
     "build_context": ["--project", SHARE, "--docs", "x.md"],
     "ci_gate": ["--root", SHARE],
-    "context_marker_parts": ["plan", "--run-root", SHARE + r"\.pilot-runs\run"],
     "contract_check": ["--root", SHARE],
     "doctor": ["--root", SHARE],
     "exec_commands": ["ingest", "--project", "p", "--run", "r", "--reports", SHARE + r"\reports"],  # its commands are run_pipeline's

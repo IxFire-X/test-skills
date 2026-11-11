@@ -190,6 +190,13 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
     result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None}))
     result.update(scope or {})
+    if result["state"] == "marker":  # the id of the step, the slot and the size: from the plan of the marker
+        from tools.stage_steps import marker_status
+
+        try:
+            result.update(marker_status(Path(run_root)))
+        except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
+            pass
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
         result.pop(gone, None)
     return result

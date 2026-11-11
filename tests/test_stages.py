@@ -25,8 +25,8 @@ def _shape(result: dict) -> tuple:
 
 
 @pytest.mark.parametrize(("name", "expected", "facts", "shape"), [
-    ("after the scan the marker is next", "context-marker response", {}, ("marker", "agent", "context_marker_parts", "context-marker")),
-    ("marker in parts: the merge is next", "context-marker parts merge", {}, ("marker", "agent", "context_marker_parts", "context-marker")),
+    ("after the scan the marker is next", "context-marker response", {}, ("marker", "agent", "prepare", "context-marker")),
+    ("marker in parts: the next part is asked", "context-marker parts merge", {}, ("marker", "agent", "prepare", "context-marker")),
     ("the marker answered: the plan of the batches", "generator fragments", {}, ("generator", "agent", "plan", "tc-generator")),
     ("the marker has gaps: the human answers", "generator fragments", {"scope_pause": True}, ("scope_pause", "human", "plan-batches", None)),
     ("a batch answered, not the last", "remaining fragments or assembled candidate", {}, ("generator", "agent", "model-request", "tc-generator")),
@@ -63,7 +63,7 @@ def test_a_run_without_an_attempt_waits_for_the_scan() -> None:
 ])
 def test_a_pending_request_waits_for_the_model(stage_id: str, state: str, role: str) -> None:
     result = _next(f"{stage_id} response", pending_request_path="x")
-    assert _shape(result) == (state, "model", "model-response", role)
+    assert _shape(result) == (state, "model", "submit" if state == "marker" else "model-response", role)
 
 
 def test_an_exact_value_is_never_taken_for_a_model_response() -> None:

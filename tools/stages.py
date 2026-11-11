@@ -8,8 +8,9 @@ from typing import Any, Mapping
 STAGES = ("scan", "marker", "scope_pause", "generator", "review", "automation", "automation_review", "materialize", "human_run",
           "closure", "done", "drift", "left", "unknown")
 ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
-# The verb is the old command of the step by its one name (flags and paths are gone); V5 replaces it with ``prepare`` and ``submit``.
-VERBS = ("scan", "context_marker_parts", "plan-batches", "plan", "model-request", "model-response", "assemble", "review-open", "review-select",
+# The verb is the command of the step by its one name (flags and paths are gone): ``prepare`` and ``submit`` for the stages that went over to
+# them (the marker, V2), the old command of the others until their packages; V5 drops the old ones.
+VERBS = ("scan", "prepare", "submit", "cases-import", "plan-batches", "plan", "model-request", "model-response", "assemble", "review-open", "review-select",
          "open-automation-boundary", "materialize", "ingest", "finish", "report", None)
 _ROLE_OF_STATE = {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer", "automation": "tc-to-autotest",
                   "automation_review": "autotest-reviewer"}
@@ -18,7 +19,7 @@ _STATE_OF_ROLE = {role: state for state, role in _ROLE_OF_STATE.items()}
 # the value of ``next_expected_artifact`` that ``_durable_status_facts`` sets -> (state, verb)
 _TABLE = {
     "module selection, inventory and profile baseline": ("scan", "scan"), "authorized context": ("scan", "scan"),
-    "context-marker response": ("marker", "context_marker_parts"), "context-marker parts merge": ("marker", "context_marker_parts"),
+    "context-marker response": ("marker", "prepare"), "context-marker parts merge": ("marker", "prepare"),
     "generator fragments": ("generator", "plan"), "remaining fragments or assembled candidate": ("generator", "model-request"),
     "assembly of the candidate": ("generator", "assemble"),
     "canonical reviewer package and boundary": ("review", "review-open"), "reviewer evidence or verdict": ("review", "review-select"),
@@ -63,10 +64,11 @@ def next_action(facts: Mapping[str, Any]) -> dict[str, Any]:
     elif str(expected) in _TABLE:
         state, verb = _TABLE[str(expected)]
     elif str(expected).endswith(" response") and str(expected).split(":", 1)[0] in _STATE_OF_ROLE:  # a pending request of the model
-        state, verb = _STATE_OF_ROLE[str(expected).split(":", 1)[0]], "model-response"
+        state = _STATE_OF_ROLE[str(expected).split(":", 1)[0]]
+        verb = "submit" if state == "marker" else "model-response"
     else:
         state, verb, recovery = "unknown", None, _RECOVERY["unknown"]
     # drift and unknown wait for the human: to bring the files back or to start anew is his decision, never the agent's
-    waiting = "model" if verb == "model-response" else "human" if state in ("scope_pause", "human_run", "drift", "unknown") else "agent"
+    waiting = "model" if verb in ("model-response", "submit") else "human" if state in ("scope_pause", "human_run", "drift", "unknown") else "agent"
     return {"state": state, "waiting_for": waiting, "next": {"verb": verb, "stage": _ROLE_OF_STATE.get(state)},
             **({"recovery": recovery} if recovery else {})}

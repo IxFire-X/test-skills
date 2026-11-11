@@ -56,7 +56,7 @@ def test_no_command_leaves_a_state_file_in_tmp(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     digest = json.loads(Path(run["context"]).read_bytes())["digest"]
     journal = _journal(run["run_root"])
-    code, read = _api("read-context", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--digest", digest)
+    code, read = _api("read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "batch-plan", "--event", "ARTIFACT_READ_BACK")
     assert code == 0, read
     assert not (run["run_root"] / "tmp" / "state-cache.json").exists() and _journal(run["run_root"]) == journal
 
