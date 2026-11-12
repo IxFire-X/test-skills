@@ -1,6 +1,6 @@
 # Batch-fragment generation contract (candidate fragment 1.0.0)
 
-The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0/1.1.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
+The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0/1.1.0 document validated by `tools.canonical_document`.
 
 The fragment preserves `SREQ-*` source requirements with exact provenance/digests,
 `CREQ-*` canonical requirements within the controller-owned batch namespace, and
@@ -43,20 +43,12 @@ and clarification, not an invented oracle or silent omission.
 
 ## Human and machine ownership
 
-For each case retain a human Title, Goal, and Preconditions. Its arbitrary sequential steps are in physical order and may be any necessary length. Each numbered step has:
+For each case retain a human Title, Goal, and Preconditions. Its arbitrary sequential steps are in physical order and may be any necessary length. Each step has `action` (the human instruction), `test_data` (the concrete parameters/request used by the person executing the step) and `expectations[].text` (the human-observable result), and separately owns its operation, typed inputs, outputs, and assertions. An input may reference a previous-step output only. Every assertion is covered by the step's Expected Result. A manual-only step has its `manual_reason`; an automation-blocked step has exact canonical blockers. Preconditions describe the required starting state. Setup the case does not check goes to Preconditions, and its calls run in the capability composition of the first step (exact calls/order, inputs, outputs and provenance), never an undocumented fixture side channel; for `http`, one step is one request, so setup stays ordered steps. Preconditions alone cannot supply executable setup or a missing binding.
 
-1. **Action:** the human instruction.
-2. **Test Data:** the concrete parameters/request used by the person executing the step.
-3. **Expected Result:** the human-observable result.
-
-The `action` is the human action; the canonical fields are `action`, `test_data`, and `expectations[].text`. The same step separately owns its operation, typed inputs, outputs, and assertions. An input may reference a previous-step output only. Every assertion is covered by the step's Expected Result. A manual-only step has its `manual_reason`; an automation-blocked step has exact canonical blockers. Preconditions describe the required starting state. Meaningful actions establishing it remain explicit in ordered steps; internal setup may belong to that step's capability composition, with exact calls/order, inputs, outputs and provenance, never an undocumented fixture side channel. Preconditions alone cannot supply executable setup or a missing binding.
-
-Give each case one coherent testing objective, not necessarily one assertion. State that
-objective briefly as the behavior being checked. Keep data separate from actions and
+Give each case one coherent testing objective, not necessarily one assertion. Keep data separate from actions and
 observed outcomes; do not repeat the entire expected result or execution policy in the
 objective. A step represents one meaningful action or cohesive preparation, not every
-setter or click. Separate setup from the tested action when combining them obscures
-sequence, data flow or failure location. Do not add assertions merely to recheck literal
+setter or click. Do not add assertions merely to recheck literal
 assignments made by test setup; keep checks needed to establish an observable prerequisite
 or required behavior. Show required final state and cleanup when the scenario changes
 shared state; do not invent cleanup for stateless calls or local disposable objects.
@@ -67,12 +59,10 @@ because a shared helper accepts them. A date boundary needs the server date, its
 the actual submitted dates and a reproducibility check. A date used only to create an
 existing visit belongs to that cohesive preparation with its exact derivation recorded;
 an owner-only validation without date-dependent setup needs no calendar operation.
-Expose a preparation output as a typed output when a later step consumes it. Keep the
-meaningful prerequisite visible, but do not turn each internal call or conversion into
-a separate human action or an assertion of a value just assigned by setup.
+Expose a preparation output as a typed output when a later step consumes it. Do not turn each internal call or conversion into
+a separate human action.
 
-The objective adds the purpose, risk or state transition to the title, briefly; copying
-the title with punctuation adds no information. Expected results name the affected
+Expected results name the affected
 objects and the required change or preservation. Several machine checks may support
 one precise sentence; they do not require a prose transcription of every comparison.
 For an unchanged-state check, identify its actual scope (for example, the owner's
@@ -81,11 +71,9 @@ describe that scope honestly too. Do not remove required preservation assertions
 brevity or add all-table invariants automatically to unrelated scenarios.
 
 Prefer one short objective sentence and a result stated as an observable fact. For
-example, an empty-name case can aim to "Не допустить создание владельца без имени";
+example, an empty-name case can aim to "Убедиться, что владелец без имени не создаётся";
 its result can say "Форма сообщает об обязательном имени; новый владелец не сохранён".
-Use only outcomes supported at the selected test boundary. A preservation result can
-say "Контакты владельца обновлены; его ID, питомцы и визиты сохранены без изменений"
-when those are the actual checks. Identify a broader snapshot's contents once in the
+Use only outcomes supported at the selected test boundary. Identify a broader snapshot's contents once in the
 step that captures it, then refer to that named snapshot rather than repeating its
 table list. Keep source call chains in provenance; a characterization expectation
 still identifies the current component boundary and the exact observed failure.
@@ -93,7 +81,7 @@ For catalog prerequisites, check the entries needed by the scenario. Require the
 entire catalog or its order only when that is part of the required behavior; source
 seed contents alone do not make catalog equality a requirement.
 
-The HTML preview and the default v5 Zephyr CSV display only `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL, a non-literal one shows a readable placeholder. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
+The HTML preview and the default v5 Zephyr CSV display only `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL, a non-literal one shows a readable placeholder.
 
 ## Canonical physical order
 
@@ -125,7 +113,20 @@ A capability declaration alone never proves that an implementation exists or pas
 
 ## Human scenario rules
 
-Write the title as `<проверяемое поведение> <объекта> [при значимом условии]`. It always says what is checked; add where/when only when that context changes the scenario. Do not repeat an environment such as «в магазине по умолчанию» without a cross-environment distinction. Write every ordinary human field in clear Russian, including requirement text, objective, preconditions and manual/blocker reasons. Preserve exact technical tokens. Reject wording when it changes meaning, makes an action ambiguous or violates the mandatory format; stylistic preference alone is not a blocking finding.
+Write every ordinary human field in clear Russian, including requirement text, objective, preconditions and manual/blocker reasons. Preserve exact technical tokens. Reject wording when it changes meaning, makes an action ambiguous or violates the mandatory format; stylistic preference alone is not a blocking finding.
+
+### Case form
+
+Not for imported cases (`imported`): their human fields stay as given.
+
+1. **Title** — action + condition; the outcome goes last, only when it is not the ordinary success: «Регистрация без username: отказ». Never start with «Проверка», «Отказ», «Отклонение». Up to 80 characters; data values go to the steps, except a value that is itself the condition («длина city 80»). «и» / «или» in a title: split the case or make a `param_group`; an end-to-end scenario is the exception. Titles in a set are unique. Do not repeat an environment without a cross-environment distinction.
+2. **Objective** — «Убедиться, что …»: the requirement or risk the case covers, not a retelling of the title.
+3. **Preconditions** — the system state with data and how to reach it; setup the case does not check goes here, not into a step (for `http` a step is a request, so setup stays steps; the machine side is above). No implementation facts (source path, setting name) and no oracle caveats; a case does not depend on the order of other cases.
+4. **Step** — one action, one observable result. Data as «field: value», from the document or the starting data; a variable («позиция A») only when the value is unknown in advance. Bulk data: one step with a template where the operation is composite (for `http` a request is a step). No data: `test_data` is `—` (an `http` step without a body: «Тело запроса отсутствует.»), never empty and never filler.
+5. **Expected result** names what is seen: a code, a field, on-screen text — not «Статья создана». Above JSON: «Ожидаемое тело» (exact) or «Пример тела» (sample); JSON holds exact values (for `exists`: `<значение присутствующего поля>`), a condition («непустой массив») goes in words above it. No instructions to the tester, no remarks on the document.
+6. **Cleanup** — the last step, its action starts with «Уборка:»; its expectation only says it was done (an HTTP step with a status keeps the status line).
+7. **Outcome undefined by the document:** a `manual_only` step, `manual_reason` is the question to the analyst, priority `LOW`, label `наблюдение` in `management.labels`, objective «Зафиксировать …». Never «ожидается по реализации»: a case fixes what the program must do, not what it does.
+8. **Priority:** `HIGH` — main path and prohibitions from the requirements; `MEDIUM` — variants and boundaries; `LOW` — observations. **Folder** (`management.folder`) — a requirements section, not one per set. Cases that differ in one data value are one `param_group` (rule in `SKILL.md`).
 
 Cases also document behavior for readers unfamiliar with the project. Explain the
 domain object and unfamiliar terms where needed; understanding the scenario must not
@@ -161,24 +162,20 @@ preceding action whose result is observed. State what is captured (records, IDs 
 count) and preserve the scope used by later comparisons. Do not expose a helper's
 `entity="none"` or imply that a server-date control is an HTTP parameter. Identify a previous-step ID as “ID of the owner created in step N”
 and bind that exact output structurally. Human wording is a view of those bindings,
-never a source from which automation reconstructs missing values. The direct `http`
-body-format rules below remain specific to that operation kind.
+never a source from which automation reconstructs missing values.
 
-For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A no-body request says exactly `Тело запроса отсутствует.`; a manual or undefined body says `—`. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings. A project-native call of an HTTP endpoint follows the same human rule: Action names the method and path, `test_data` is the whole pretty-printed JSON request body, as for `http`, or exactly `Тело запроса отсутствует.`
+For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A no-body request says exactly `Тело запроса отсутствует.`; a manual or undefined body says `—`. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings. A project-native call of an HTTP endpoint follows the same human rule: Action names the method and path, `test_data` is as for `http`.
 
 The Expected Result first states the observable system result, then, for HTTP, a blank line, exact `HTTP <status> <reason>`, and only confirmed response fields as pretty-printed JSON. Omit an unconfirmed body rather than inventing it. Do not print `Выход:`, `Проверка:`, `http_body:/...`, assertion expressions, «успешно», `ok`, or a bare HTTP code. Do not fork `200 или 201`. Data is deterministic: no `random` / `faker` / «любое значение». A source-proven non-secret helper/default with one safe deterministic value is a canonical literal, visible in the URL or body. Use a fixture only when authorized sources do not safely determine that value. Secret values and handles never render; only `safe_label` may appear, and it is not a resolved value.
 
 Expected describes a criterion before execution. «Проверено автотестом», «проверка
 пройдена» and other execution-only marks cannot replace the system result, including
 in the last step. Mentioning an autotest inside a substantive observable result is not
-itself a violation. Actual PASS/FAIL remains in the execution report. The shared
-canonical validator applies these rules before assembly, successor selection and
-publication.
+itself a violation. Actual PASS/FAIL remains in the execution report.
 A valid single-action case needs no extra CRUD cycle or ID transfer. Review its oracle
 and requirement coverage rather than its length.
 
-For example, with a confirmed GET returning the product list:
-`test_data` is `Тело запроса отсутствует.` and Expected is:
+For example, with a confirmed GET returning the product list, Expected is:
 
 ```text
 Приложение возвращает список доступных товаров.
@@ -210,8 +207,7 @@ results, create separate meta-cases, or invent product APIs to verify the testin
 Required starting state, access and inputs remain visible and structurally represented.
 Actual product requirements about permissions, integrity, isolation or other nonfunctional
 behavior still need observable checks or justified gaps. For example, “the export must
-not modify its input file” requires a before/after content check; “do not edit project
-files when writing tests” constrains the testing work. A requirement link establishes
+not modify its input file” requires a before/after content check. A requirement link establishes
 applicability, not proof of compliance. Never use this distinction to hide missing
 behavior, unsupported execution or an unresolved oracle.
 
@@ -228,31 +224,22 @@ foreign data/changes when faithfully observable at that boundary. Do not replace
 with “any exception”, a fabricated status, or an unsupported error classifier. Preserve
 explicit field error codes exactly. An unresolved observation mechanism remains a gap.
 For a requirement-silent characterization, trace the reachable call path: a later not-found branch is not evidence when a lower layer throws first. Correct a mistaken inference only through a reviewed canonical successor, never by weakening an assertion for PASS. Such a disagreement can be the defect the test must detect; it does not authorize a
-weaker expectation. Cover each distinct in-scope behavior with steps and observable
-expectations, including relevant failure, permission, boundary and state-change cases.
-Links and counts alone do not prove completeness. Preserve unresolved or manual work as
+weaker expectation. Preserve unresolved or manual work as
 visible gaps, and request clarification when authoritative requirements conflict or
 leave the oracle unresolved. A requirement/runtime disagreement alone is not such a conflict.
 
 The request shown to a person is derived from structured inputs, never a second semantic source. Every request-affecting path/query/header/body value and source-proven default has one exact structured input target/source. Every JSON leaf is owned by that model. For a negative branch, retain all source-proven prerequisites needed to reach the intended branch and vary only its invalid value. Automation must not recover a missing literal or binding from `test_data`.
 
-A non-literal object/array cannot own concrete human JSON leaves through a fixture/environment/step-output label alone. Bind each resolved leaf explicitly, including prior-step substitutions; otherwise use an exact literal container or the canonical unresolved-input blocker.
-
-Use human placeholders for previous-step values without exposing internal step/output IDs. An `exists` assertion renders `<значение присутствующего поля>`, not a sample or a claim of nonempty data: presence alone permits null and empty values. Non-null, nonempty and exact-value requirements need separate supported assertions. When a lookup requirement identifies the requested entity and evidence exposes its response identity, assert and show that identity; a status-only check is incomplete.
+Use human placeholders for previous-step values without exposing internal step/output IDs. An `exists` assertion renders `<значение присутствующего поля>`, not a sample or a claim of nonempty data: presence alone permits null and empty values. Non-null, nonempty and exact-value requirements need separate supported assertions.
 
 Remember an id from step N and use it later (`step_output`). After create or change, read the result back. A gap is `manual_only` or a canonical blocker, not an invented URL.
 
-Do not invent a catalog of one-shot handle checks or list every route. Apply the
-behavior/prerequisite/testing-instruction distinction above to inventory requirements.
+Do not invent a catalog of one-shot handle checks or list every route.
 
 ## What the check of a fragment refuses most often
 
-The check of a fragment returns the whole list of refusals, each with a `fix`: correct all of them in one pass.
+The check of a fragment returns the whole list of refusals, each with a `fix`: correct all of them in one pass, yourself, and write no scripts that import or call the package. Write no `digest` or `*_digest` field and do not order `requirement_ids` or `categories` — the code does.
 
-- Do not write `digest` or any `*_digest` field — the code sets them; a wrong value is refused («удали поле»).
-- Do not order `requirement_ids` or `categories` — the code does and names it (`normalized`).
-- Correct the fragment yourself; write no scripts that import or call the package.
-- `SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING`: an expectation with `http_body` assertions ends with the pretty-printed response JSON — `"id": "<значение присутствующего поля>"` for `exists`, the literal for `equals`.
 - `SEMANTIC_HUMAN_BODY_UNBOUND`: every leaf of the request JSON in `test_data` has its own input with `target.location = body` and its RFC 6901 pointer (`{"a": {"b": 1}}` → `/a/b`).
 - `SEMANTIC_BODY_TARGET_OVERLAP`: body pointers are never equal or nested; `semantic_type` sits beside `target` and `source`, not inside: `{"target": {"location": "body", "pointer": "/a/b", "sensitive": false}, "source": {…}, "semantic_type": {…}}`.
 - Blockers (`SEMANTIC_BLOCKER_PATH`, `SEMANTIC_MISSING_ASSERTION_BLOCKER`, `SEMANTIC_SPURIOUS_BLOCKER`) mark only an absent or unconfirmed element: `UNRESOLVED_OPERATION`/`UNSUPPORTED_AUTOMATION_CAPABILITY` → `/operation`; `UNRESOLVED_INPUT_BINDING` → `/inputs`; `UNRESOLVED_OUTPUT_BINDING` → `/outputs`; `UNRESOLVED_ASSERTION`/`UNSUPPORTED_ASSERTION_DIALECT`/`UNCONFIRMED_TYPE` → `/expectations/<n>/assertions`. An expectation of a blocked step without assertions has its own blocker; a fully bound step has none.
