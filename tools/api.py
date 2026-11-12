@@ -196,37 +196,25 @@ def _cmd_plan_batches(a):
     imported = a.imported if isinstance(a.imported, dict) else None  # the receipt or its value; its bytes
     # one --context-receipt per context batch of the attempt; one is the receipt itself, as before
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
-    out_of_scope, commit = _scope_answer(a)
-    plan = _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
+    out_of_scope = _scope_answer(a)
+    return _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
                                                                                          imported, out_of_scope))
-    if commit is not None:
-        commit()  # the answer of the human is recorded after the plan's inputs passed — a refused input leaves no decision
-    return plan
 
 
 def _scope_answer(a):
-    """The pause after the marker. With --run-root and --attempt the plan is bound to the human's answer: --exclude with
-    --reason or --continue records it (scope-decision.json), a recorded one is used as it is, none (and gaps in the marker) is
-    SCOPE_PENDING. Without them nothing is checked here; publish-generator-input checks the plan against the answer anyway.
-    Returns ``(out_of_scope, commit)`` — the answer is checked here and written by ``commit()`` once the inputs of the plan passed."""
+    """The pause after the marker. With --run-root and --attempt the plan is bound to the human's answer (``submit --stage scope`` records it):
+    a recorded one is used as it is, none (and gaps in the marker) is SCOPE_PENDING. Without them nothing is checked here;
+    publish-generator-input checks the plan against the answer anyway."""
     from tools import scope_pause
 
     step_size.require_generator_context_all(a.project)  # limits.generator_context: own is not implemented yet
-    excluded, proceed = list(a.exclude), bool(getattr(a, "continue"))
     if a.run_root is None or a.attempt is None:
-        if excluded or proceed or a.reason:
-            raise scope_pause.ScopeRefused("SCOPE_ANSWER_INVALID", "--exclude, --reason и --continue — с --run-root и --attempt прогона; "
-                                           "fix: добавь их")
-        return None, None
+        return None
     root = Path(a.run_root).resolve()
-    if excluded or proceed:
-        value = scope_pause.prepare_decision(root, a.attempt, excluded=excluded, reason=a.reason, proceed=proceed)
-        return scope_pause.out_of_scope(value) or None, lambda: scope_pause.commit_decision(root, a.attempt, value)
     scope = scope_pause.scope_state(root, a.attempt)
     if scope["pending"]:
-        scope_pause.write_draft(root, a.attempt)
         raise scope_pause.ScopePending(scope_pause.pending_message(root, a.attempt, scope["gaps"]))
-    return scope_pause.out_of_scope(scope["decision"]) or None, None
+    return scope_pause.out_of_scope(scope["decision"]) or None
 
 
 def _cmd_plan(a):
@@ -234,9 +222,9 @@ def _cmd_plan(a):
     the pause after the marker answers first, before anything is published."""
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     imported = a.imported if isinstance(a.imported, dict) else None
-    answer, commit = _scope_answer(a)
+    answer = _scope_answer(a)
     return _plan_inputs("plan", lambda: pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file,
-                                                                 contexts, imported, answer, before_check=commit))
+                                                                 contexts, imported, answer))
 
 
 def _cmd_validate_fragment(a):
@@ -406,13 +394,11 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "cases-import": (_cmd_cases_import, RUN, None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
                                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
-                                         ("--run-root", Path, None), ("--attempt", str, None), ("--exclude", str, "append", "optional"),
-                                         ("--reason", str, None), ("--continue", "flag")), None, ()),
+                                         ("--run-root", Path, None), ("--attempt", str, None)), None, ()),
     # header + plan-batches + publish of both in one command; --out-plan is the plan (the file validate-fragment and assemble read)
     "plan": (_cmd_plan, (("--header", _json), ("--requirements", _json), ("--grouping", _json), ("--project", Path),
                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
-                         "--run-root", "--attempt", ("--exclude", str, "append", "optional"), ("--reason", str, None),
-                         ("--continue", "flag")), None, ("plan", "published")),
+                         "--run-root", "--attempt"), None, ("plan", "published")),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
                                                    ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),

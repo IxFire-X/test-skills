@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from tools import confined_output, context_marker_parts, output_guard, pilot_state, step_size
+from tools import confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
 
 SLOT_DIR = "incoming"
 
@@ -25,8 +25,19 @@ def _marker_accepted(root: Path) -> Mapping[str, Any] | None:
     return context_marker_parts.merge_parts(root) if context_marker_parts.plan(root)["next"] == "merge" else None
 
 
+def _scope_steps(root: Path) -> list[dict[str, Any]]:
+    """The scope the human sets after the marker: a step without a request of a model (``direct``: what ``prepare`` says, what ``submit`` does with the answer)."""
+    state = pilot_state.derive_state(root)
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    scope = scope_pause.scope_state(root, attempt_id, state)
+    return [{"stage": "scope", "waiting_for": "human", "done": scope["decision"] is not None, **scope,
+             "direct": (lambda root, step: scope_pause.ask(root, attempt_id, step), lambda root, value, dry_run: scope_pause.take(root, attempt_id, value, dry_run))}
+            ] if scope["known"] else []
+
+
 STEPS: dict[str, tuple[Callable, Callable]] = {
     "context-marker": (lambda root: context_marker_parts.plan(root)["parts"], _marker_accepted),
+    "scope": (_scope_steps, lambda root: None),
 }
 
 
@@ -44,7 +55,7 @@ def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], 
     step = next((item for item in steps if item["stage"] == stage), None)
     if step is None:
         raise ValueError(f"STAGE_UNKNOWN: {stage} — не стадия, которую ведут prepare и submit; fix: next.stage из `status` "
-                         f"({', '.join(item['stage'] for item in steps) or 'эта стадия идёт своей командой — next.verb'})")
+                         f"({', '.join(item['stage'] for item in steps) or 'эта стадия идёт своей командой или её в этом прогоне нет (scope: разметка ещё не принята) — next.verb'})")
     return project, root, state, str(state["attempts"][-1]["attempt_id"]), step
 
 
@@ -78,6 +89,13 @@ def _refuse_unready(stage: str, step: Mapping[str, Any]) -> None:
 def prepare(run_root: Path, stage: str, *, model_id: str | None = None, reuse_from: str | None = None) -> dict[str, Any]:
     """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
+    if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
+        if not step["done"]:
+            _refuse_linked_inbox(root)
+        asked = step["direct"][0](root, step)
+        if not step["done"] and not (root / SLOT_DIR).is_dir():
+            confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)
+        return {"stage": stage, **asked, **({} if step["done"] else {"answer_slot": str(slot(root, stage)), "waiting_for": step["waiting_for"]})}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):
         return {"stage": stage, "answered": True}
     _refuse_unready(stage, step)
@@ -102,6 +120,10 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, reuse_fr
 def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1) -> dict[str, Any]:
     """Take the answer of ``stage`` from its slot and record it; ``load(path, project)`` reads the file strictly (``api._load_answer``)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
+    if "direct" in step:  # a recorded answer stands without a file; with a file the step checks it again
+        if step["done"] and not slot(root, stage).is_file():
+            return {"stage": stage, **step["direct"][0](root, step)}
+        return {"stage": stage, **step["direct"][1](root, load(str(slot(root, stage)), project).value, dry_run)}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):  # the recorded answer stands: the slot is not read again
         return {"stage": stage, "answered": True, **({} if dry_run else _accepted(root, stage))}
     _refuse_unready(stage, step)

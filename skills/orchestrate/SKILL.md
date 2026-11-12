@@ -91,11 +91,11 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    `tools.api prepare --run-root <run> --stage <id>` печатает `read` (файлы модели), `answer_slot`, `budget`; ответ модели — как есть в
    `answer_slot`; `submit` с теми же флагами принимает его (`--dry-run` — без записи; `--transport-attempts 2` — один повтор;
    последний `submit` сливает части). Импорт — [import.md](references/import.md).
-2. **Пауза после разметки.** Пробелы без наблюдаемого канала, ожидаемого результата или доступа — `state: scope_pause` (список — `scope_gaps`) и
-   черновик `questions-for-analyst.md`. Остановись: покажи человеку список и спроси, исключать ли требования (кейсы для них не пишутся) или
-   продолжать как есть. Ответ — в `plan-batches --exclude <SREQ-id> --reason "<текст человека>"` или `--continue`: код пишет
-   `scope-decision.json`; без ответа `plan-batches` и `publish-generator-input --kind plan` отказывают `SCOPE_PENDING`. Решение за
-   человеком; другое — новый прогон. `scan --no-pause` просит человек, ты его не добавляешь.
+2. **Пауза после разметки.** Пробелы без наблюдаемого канала, ожидаемого результата или доступа — `state: scope_pause` (`scope_gaps`).
+   `prepare --stage scope` печатает пробелы, `answer_slot`, формы ответа. Остановись: покажи человеку
+   список, спроси: исключить или продолжать; его слова — в `answer_slot`
+   (`{"decision":"exclude","excluded":["SREQ-…"],"reason":"<слова>"}` или `{"decision":"continue"}`), затем `submit --stage scope` (исключить можно и без пробелов, до плана). Без ответа
+   `plan` отказывает `SCOPE_PENDING`. Решение за человеком; другое — новый прогон. `scan --no-pause` просит человек, ты его не добавляешь.
 3. **План пачек.** Header — `tools.api publish-generator-input --kind header --value <f>`; `tools.api plan --header <f> --requirements <f>
    --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f> --run-root <run> --attempt <id> --out-plan
    <run>/tmp/plan.json --out-published <run>/tmp/published.json` строит и публикует план (формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan)).

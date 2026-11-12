@@ -42,6 +42,21 @@ def _plan_arguments(root: Path, attempt_id: str, receipts: list[dict], *extra: s
             "--run-root", str(root), "--attempt", attempt_id, *extra]
 
 
+def _record(root: Path, attempt_id: str, *, excluded: list[str], reason: str | None, proceed: bool) -> dict:
+    """The decision of the human, recorded the way ``submit --stage scope`` does it."""
+    from tools import scope_pause
+
+    answer = {"decision": "continue"} if proceed else {"decision": "exclude", "excluded": excluded, "reason": reason}
+    return scope_pause.commit_decision(root, attempt_id, scope_pause.prepare_decision(root, attempt_id, answer))
+
+
+def _submit_scope(capsys: pytest.CaptureFixture[str], root: Path, answer: object) -> tuple[int, dict]:
+    slot = root / "incoming" / "scope.json"
+    slot.parent.mkdir(exist_ok=True)
+    slot.write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
+    return _api(capsys, ["submit", "--run-root", str(root), "--stage", "scope"])
+
+
 def _api(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, dict]:
     code = api.main(argv)
     return code, json.loads(capsys.readouterr().out)
@@ -155,56 +170,53 @@ def test_the_manifest_schema_takes_no_pause() -> None:
         assert (found == []) is ok, (extra, found)
 
 
-def test_plan_batches_without_an_answer_is_scope_pending_with_a_fix_and_a_draft(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_plan_batches_without_an_answer_is_scope_pending_and_the_fix_names_the_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
     code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
     assert code == 2 and payload["code"] == "SCOPE_PENDING", payload
-    assert "SREQ-batch-a-001" in payload["message"] and "--exclude" in payload["fix"] and "--continue" in payload["fix"]
-    draft = (root / "questions-for-analyst.md").read_text(encoding="utf-8")  # the same builder as the report, the marker's warnings only
-    assert "REQ-1" in draft and "как проверить оплату?" in draft
+    assert "SREQ-batch-a-001" in payload["message"] and "prepare --stage scope" in payload["fix"] and "--continue" not in payload["fix"]
 
 
-def test_plan_batches_with_exclude_records_the_answer_and_the_plan_names_the_requirement(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_plan_batches_after_an_exclusion_names_the_requirement_and_a_conflict_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools import scope_pause
 
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--exclude", "SREQ-batch-a-001", "--reason", "нет стенда с картами"))
+    code, payload = _submit_scope(capsys, root, {"decision": "exclude", "excluded": ["SREQ-batch-a-001"], "reason": "нет стенда с картами"})
+    assert code == 0, payload
+    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
     assert code == 0, payload
     plan = json.loads((root / "tmp" / "plan.json").read_text(encoding="utf-8"))
     assert plan["out_of_scope"] == [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда с картами"}]
     assert [batch["owned_source_requirement_ids"] for batch in plan["batches"]] == [["SREQ-batch-a-002"]]
     decision = scope_pause.read_decision(root, attempt_id)
     assert decision["decision"] == "exclude" and decision["excluded"] == plan["out_of_scope"]
-    # the answer is a run artifact: a later plan-batches without flags takes it, the same answer again changes nothing
-    code, _payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
-    assert code == 0 and json.loads((root / "tmp" / "plan.json").read_text(encoding="utf-8"))["out_of_scope"] == plan["out_of_scope"]
-    code, _payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--exclude", "SREQ-batch-a-001", "--reason", "нет стенда с картами"))
-    assert code == 0
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--continue"))
+    code, payload = _submit_scope(capsys, root, {"decision": "continue"})
     assert code == 2 and payload["code"] == "SCOPE_DECISION_CONFLICT", payload
 
 
-def test_plan_batches_with_continue_plans_every_requirement(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_plan_batches_after_continue_plans_every_requirement(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--continue"))
+    assert _submit_scope(capsys, root, {"decision": "continue"})[0] == 0
+    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
     assert code == 0, payload
     plan = json.loads((root / "tmp" / "plan.json").read_text(encoding="utf-8"))
     assert "out_of_scope" not in plan and plan["batches"][0]["owned_source_requirement_ids"] == ["SREQ-batch-a-001", "SREQ-batch-a-002"]
 
 
-@pytest.mark.parametrize("extra, code_name", [
-    (("--exclude", "SREQ-9999", "--reason", "нет"), "SCOPE_UNKNOWN_REQUIREMENT"),
-    (("--exclude", "SREQ-batch-a-001"), "SCOPE_REASON_REQUIRED"),
-    (("--exclude", "SREQ-batch-a-001", "--exclude", "SREQ-batch-a-002", "--reason", "всё"), "SCOPE_EMPTY"),
-    (("--exclude", "SREQ-batch-a-001", "--reason", "нет", "--continue"), "SCOPE_ANSWER_INVALID"),
+@pytest.mark.parametrize("answer, code_name", [
+    ({"decision": "exclude", "excluded": ["SREQ-9999"], "reason": "нет"}, "SCOPE_UNKNOWN_REQUIREMENT"),
+    ({"decision": "exclude", "excluded": ["SREQ-batch-a-001"], "reason": " "}, "SCOPE_REASON_REQUIRED"),
+    ({"decision": "exclude", "excluded": ["SREQ-batch-a-001", "SREQ-batch-a-002"], "reason": "всё"}, "SCOPE_EMPTY"),
+    ({"decision": "continue", "reason": "нет"}, "SCOPE_ANSWER_INVALID"),
 ])
-def test_a_wrong_answer_is_refused_and_nothing_is_recorded(tmp_path: Path, capsys: pytest.CaptureFixture[str], extra: tuple, code_name: str) -> None:
+def test_a_wrong_answer_is_refused_and_nothing_is_recorded(tmp_path: Path, capsys: pytest.CaptureFixture[str], answer: dict, code_name: str) -> None:
     from tools import scope_pause
 
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, *extra))
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
+    code, payload = _submit_scope(capsys, root, answer)
     assert code == 2 and payload["code"] == code_name, payload
     assert scope_pause.read_decision(root, attempt_id) is None
+
 
 
 def test_the_published_plan_must_carry_the_answer(tmp_path: Path) -> None:
@@ -218,7 +230,7 @@ def test_the_published_plan_must_carry_the_answer(tmp_path: Path) -> None:
     plain = dict(plan_batches(_marker_rows(), evidence))
     with pytest.raises(ValueError, match="SCOPE_PENDING"):
         pilot_state.publish_generator_input(root, attempt_id, "plan", plain)
-    scope_pause.record_decision(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _record(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
     with pytest.raises(ValueError, match="SCOPE_PLAN_MISMATCH"):  # a plan that keeps what the human excluded
         pilot_state.publish_generator_input(root, attempt_id, "plan", plain)
     carrying = dict(plan_batches(_marker_rows(), evidence, out_of_scope=scope_pause.out_of_scope(scope_pause.read_decision(root, attempt_id))))
@@ -232,7 +244,7 @@ def test_the_published_plan_after_continue_has_no_out_of_scope(tmp_path: Path) -
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
     plain = dict(plan_batches(_marker_rows(), {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]}))
-    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    _record(root, attempt_id, excluded=[], reason=None, proceed=True)
     assert pilot_state.publish_generator_input(root, attempt_id, "plan", plain)["digest"] == plain["digest"]
 
 
@@ -242,9 +254,9 @@ def test_status_shows_the_pause_with_the_gaps(tmp_path: Path) -> None:
 
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     paused = _durable_status(tmp_path, root, stage="status")
-    assert (paused["state"], paused["waiting_for"], paused["next"]["verb"]) == ("scope_pause", "human", "plan-batches"), paused
+    assert (paused["state"], paused["waiting_for"], paused["next"]) == ("scope_pause", "human", {"verb": "prepare", "stage": "scope"}), paused
     assert paused["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-batch-a-001"] and paused["scope_gaps"][0]["question"]
-    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    _record(root, attempt_id, excluded=[], reason=None, proceed=True)
     answered = _durable_status(tmp_path, root, stage="status")
     assert (answered["state"], answered["waiting_for"]) == ("generator", "agent") and "scope_gaps" not in answered, answered
 
@@ -252,7 +264,7 @@ def test_status_shows_the_pause_with_the_gaps(tmp_path: Path) -> None:
 def test_the_skill_names_the_answer_commands_of_the_pause() -> None:
     skill = (Path(__file__).resolve().parents[1] / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
     assert "state: scope_pause" in skill and "`scope_gaps`" in skill
-    assert "plan-batches --exclude" in skill and "--continue" in skill and "--no-pause" in skill
+    assert "prepare --stage scope" in skill and "submit --stage scope" in skill and "--no-pause" in skill
 
 
 def test_the_merge_of_the_parts_leaves_the_draft_questions(tmp_path: Path) -> None:
@@ -287,7 +299,7 @@ def test_the_reviewer_and_compatibility_checks_take_the_plan_of_the_run(tmp_path
     marker_rows = _marker_rows()
     assert scope_pause.marker_requirements_in_scope(marker_rows, root, attempt_id) == marker_rows  # no plan yet
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
-    scope_pause.record_decision(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _record(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
     plan = plan_batches(marker_rows, {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]},
                         out_of_scope=scope_pause.out_of_scope(scope_pause.read_decision(root, attempt_id)))
     pilot_state.publish_generator_input(root, attempt_id, "plan", dict(plan))
@@ -301,7 +313,7 @@ def test_the_report_names_the_excluded_requirements_with_the_reason(tmp_path: Pa
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     report, _warnings = build_report(root.parent.parent, root.name)
     assert report["scope"] == {"gaps": 1, "answer": "пауза не снималась: ответа человека нет", "out_of_scope": []}
-    scope_pause.record_decision(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда с картами", proceed=False)
+    _record(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда с картами", proceed=False)
     report, _warnings = build_report(root.parent.parent, root.name)
     assert report["scope"] == {"gaps": 1, "answer": "исключены",
                                "out_of_scope": [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда с картами"}]}
@@ -325,7 +337,7 @@ def test_a_requirement_lost_without_an_out_of_scope_entry_is_refused(tmp_path: P
 
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
-    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    _record(root, attempt_id, excluded=[], reason=None, proceed=True)
     evidence = {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]}
     lost = dict(plan_batches(_marker_rows()[:1], evidence))  # the second requirement is nowhere
     with pytest.raises(ValueError, match="SCOPE_PLAN_MISMATCH.*SREQ-batch-a-002"):
@@ -424,8 +436,8 @@ def test_the_fix_table_holds_the_scope_decision_code() -> None:
 def test_an_exclusion_on_a_marker_without_gaps_is_named_in_the_report(tmp_path: Path, capsys) -> None:
     from tools.run_report import build_report, render_markdown
 
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path, warnings=["док — общее замечание без четырёх полей"])
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--exclude", "SREQ-batch-a-001", "--reason", "не в этом релизе"))
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path, warnings=["док — общее замечание без четырёх полей"])
+    code, payload = _submit_scope(capsys, root, {"decision": "exclude", "excluded": ["SREQ-batch-a-001"], "reason": "не в этом релизе"})
     assert code == 0, payload
     report, _warnings = build_report(root.parent.parent, root.name)
     assert report["scope"] == {"gaps": 0, "answer": "исключены", "out_of_scope": [{"source_requirement_id": "SREQ-batch-a-001", "reason": "не в этом релизе"}]}
@@ -439,7 +451,7 @@ def test_a_continue_decision_on_a_marker_without_gaps_adds_no_section(tmp_path: 
     from tools.run_report import build_report, render_markdown
 
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path, warnings=["док — общее замечание"])
-    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    _record(root, attempt_id, excluded=[], reason=None, proceed=True)
     report, _warnings = build_report(root.parent.parent, root.name)
     assert report["scope"] is None and "Охват после разметки" not in render_markdown(report)
 
@@ -451,7 +463,7 @@ def _published_plan(tmp_path: Path, **decision):
     from tools import scope_pause
 
     root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    scope_pause.record_decision(root, attempt_id, **decision)
+    _record(root, attempt_id, **decision)
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
     evidence = {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]}
     plan = dict(plan_batches(_marker_rows(), evidence, out_of_scope=scope_pause.out_of_scope(scope_pause.read_decision(root, attempt_id))))
@@ -523,7 +535,7 @@ def test_before_the_plan_the_decision_file_still_serves_the_pause(tmp_path: Path
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     assert scope_pause.published_scope(root, attempt_id) is None  # no plan: nothing to compare with
     assert scope_pause.scope_state(root, attempt_id)["pending"] is True
-    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    _record(root, attempt_id, excluded=[], reason=None, proceed=True)
     assert scope_pause.scope_state(root, attempt_id)["pending"] is False
 
 

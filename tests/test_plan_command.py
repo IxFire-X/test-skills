@@ -94,5 +94,8 @@ def test_the_pause_after_the_marker_stops_plan_before_it_publishes_anything(tmp_
     assert code == 2 and refused["code"] == "SCOPE_PENDING", refused
     assert journal_minus_refusals(root) == before
     assert_no_refusal_event(root, before)  # the pause of the human is routine (tools.api._record_refusal): a SCOPE_PENDING stop is no refusal and adds no event
-    code, answered = _api(capsys, _plan_argv(root, attempt_id, files, "--continue"))
+    from tests.test_scope_pause import _submit_scope
+
+    assert _submit_scope(capsys, root, {"decision": "continue"})[0] == 0  # the human answers on the stage `scope`, then the plan goes
+    code, answered = _api(capsys, _plan_argv(root, attempt_id, files))
     assert code == 0, answered

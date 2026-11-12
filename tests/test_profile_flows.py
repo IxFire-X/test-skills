@@ -169,13 +169,19 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
     code, published = _api(pack, "publish-generator-input", *flags, "--kind", "header", "--value", str(tmp / "header.json"))
     assert code == 0, published
     if gap:  # the pause after the marker: status says so, the plan is refused until the human answers
-        status = _status(pack, project, run_root.name, "scope_pause", "plan-batches", "human")
-        assert status["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-0001"], status
+        status = _status(pack, project, run_root.name, "scope_pause", "prepare", "human")
+        assert status["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-0001"] and status["next"]["stage"] == "scope", status
         code, refused = _api(pack, "plan", *plan_files)
-        assert code == 2 and refused["code"] == "SCOPE_PENDING" and "--continue" in refused["fix"], refused
+        assert code == 2 and refused["code"] == "SCOPE_PENDING" and "prepare --stage scope" in refused["fix"], refused
+        code, asked = _api(pack, "prepare", "--run-root", str(run_root), "--stage", "scope")
+        assert code == 0 and asked["result"]["answer_slot"] == str(run_root / "incoming" / "scope.json"), asked
+        _put(Path(asked["result"]["answer_slot"]), {"decision": "continue"})
+        _status(pack, project, run_root.name, "scope_pause", "submit", "agent")
+        code, taken = _api(pack, "submit", "--run-root", str(run_root), "--stage", "scope")
+        assert code == 0 and taken["result"]["decision"] == "continue", taken
     if not gap:  # the plan is published by `tools.api plan` (SKILL §3), not named by its inner step plan-batches
         _status(pack, project, run_root.name, "generator", "plan")
-    code, planned = _api(pack, "plan", *plan_files, *(["--continue"] if gap else []))
+    code, planned = _api(pack, "plan", *plan_files)
     assert code == 0, planned
     plan = json.loads((tmp / "plan.json").read_bytes())
     assert len(plan["batches"]) == requirements, planned["notes"]

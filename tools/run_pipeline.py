@@ -188,7 +188,8 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
         if note:
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
-    result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None}))
+    result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None,
+                                 "scope_answer": Path((scope or {}).get("answer_slot", "")).is_file()}))
     result.update(scope or {})
     if result["state"] == "marker":  # the id of the step, the slot and the size: from the plan of the marker
         from tools.stage_steps import marker_status
@@ -226,10 +227,9 @@ def _scope_pause(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
         return None
     if not scope["pending"]:
         return None
-    gaps = scope["gaps"]
-    rows = [{"source_requirement_ids": row["source_requirement_ids"], "requirement": row["requirement"], "missing": row["missing"],
-             "blocks": row["blocks"], "question": row["question"]} for row in gaps[:scope_pause.LISTED]]
-    return {"scope_gaps": rows, **({"scope_gaps_not_listed": len(gaps) - len(rows)} if len(gaps) > len(rows) else {})}
+    from tools.stage_steps import slot
+
+    return {**scope_pause.gap_summary(scope["gaps"]), "answer_slot": str(slot(run_root, "scope"))}
 
 
 def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:

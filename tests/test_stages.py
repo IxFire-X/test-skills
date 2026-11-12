@@ -28,7 +28,8 @@ def _shape(result: dict) -> tuple:
     ("after the scan the marker is next", "context-marker response", {}, ("marker", "agent", "prepare", "context-marker")),
     ("marker in parts: the next part is asked", "context-marker parts merge", {}, ("marker", "agent", "prepare", "context-marker")),
     ("the marker answered: the plan of the batches", "generator fragments", {}, ("generator", "agent", "plan", "tc-generator")),
-    ("the marker has gaps: the human answers", "generator fragments", {"scope_pause": True}, ("scope_pause", "human", "plan-batches", None)),
+    ("the marker has gaps: the human answers", "generator fragments", {"scope_pause": True}, ("scope_pause", "human", "prepare", "scope")),
+    ("the human's answer lies in the slot", "generator fragments", {"scope_pause": True, "scope_answer": True}, ("scope_pause", "agent", "submit", "scope")),
     ("a batch answered, not the last", "remaining fragments or assembled candidate", {}, ("generator", "agent", "model-request", "tc-generator")),
     ("the last batch answered: the assembly", "assembly of the candidate", {}, ("generator", "agent", "assemble", "tc-generator")),
     ("the candidate is built: the review opens", "canonical reviewer package and boundary", {}, ("review", "agent", "review-open", "tc-reviewer")),
@@ -155,4 +156,4 @@ def test_the_answers_come_from_the_closed_lists() -> None:
     for expected in [*sorted(_artifacts_set_by_the_status()), None]:
         result = _next(expected)
         assert result["state"] in stages.STAGES and result["waiting_for"] in {"agent", "model", "human"}
-        assert result["next"]["verb"] in stages.VERBS and result["next"]["stage"] in {None, *stages.ROLES}
+        assert result["next"]["verb"] in stages.VERBS and result["next"]["stage"] in {None, "scope", *stages.ROLES}

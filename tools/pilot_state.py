@@ -5530,12 +5530,11 @@ class PlanPublished(tuple):
 
 def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], requirements: list[dict[str, Any]], grouping: Mapping[str, Any],
                  project: Path, input_files: list[Path], context_receipt: Any, imported: Mapping[str, Any] | None,
-                 out_of_scope: Any = None, before_check: Any = None) -> PlanPublished:
+                 out_of_scope: Any = None) -> PlanPublished:
     """``tools.api plan`` — what ``publish-generator-input --kind header``, ``plan-batches`` and ``publish-generator-input
     --kind plan`` do, in that order, with their events and files, in one call.  The grouping needs no ``header_digest``: it is the
     self-digest of the header; a grouping that names another is GENERATOR_INPUT_HEADER.  The plan is built before anything is published,
-    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was. ``before_check`` (the record
-    of the human's scope answer) runs once the inputs have been parsed into a plan and before the plan is checked against the answer."""
+    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was."""
     from tools.batch_assembly import plan_batches_for_project
 
     item = dict(header)
@@ -5554,8 +5553,6 @@ def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], req
     _root = _run_root(run_root)[1]
     from tools.scope_pause import check_plan
 
-    if before_check is not None:
-        before_check()
     state = derive_state(_root)
     check_plan(_root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(_root, attempt_id, item_plan, expected, state)

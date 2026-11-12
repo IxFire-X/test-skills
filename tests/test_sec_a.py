@@ -133,12 +133,11 @@ def _builders():
     return {
         "scan": lambda bad: run_pipeline._scan_command(Path("project"), {"docs": [bad]}),
         "fix": lambda bad: run_pipeline._exact_fix("python -m tools.run_pipeline status --project <project>", Path(bad), Path("run"), "a" * 32),
-        "scope": lambda bad: scope_pause.pending_fix(Path(bad), "a" * 32, []),
         "self-review": lambda bad: ready._self_review_scan(Path(bad), [], "cases-only-v1", None),
     }
 
 
-@pytest.mark.parametrize("name", ["scan", "fix", "scope", "self-review"])
+@pytest.mark.parametrize("name", ["scan", "fix", "self-review"])
 def test_a_value_that_cannot_be_printed_is_refused_in_a_command_the_agent_runs(name: str) -> None:
     with pytest.raises(HostStop) as refused:
         _builders()[name]("a$b")

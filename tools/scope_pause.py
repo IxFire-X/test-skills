@@ -1,8 +1,8 @@
 """The pause after the context marker — what the human decides before the batches are planned.
 
 The marker keeps its gaps as four-field warnings (``context-artifact-contract.md``).  Requirements without an observable
-channel get a case with a blocker — on the 02.11 run 17 of 40.  After the marker the human answers once: «исключи <SREQ>»
-(``plan-batches --exclude <id> --reason <text>``) or «продолжай» (``plan-batches --continue``).  The answer is a run
+channel get a case with a blocker — on the 02.11 run 17 of 40.  After the marker the human answers once: «исключи <SREQ>» or «продолжай» —
+the agent puts the words in ``incoming/scope.json`` and ``submit --stage scope`` takes them.  The answer is a run
 artifact (``scope-decision.json``, published like any run artifact); a plan without the answer is refused with
 ``SCOPE_PENDING``.  ``scan --no-pause`` (kept in the scan request of the manifest) lifts the stop.
 
@@ -24,6 +24,7 @@ DECISION_BATCH = "scope-decision-v1"  # the events of the decision carry it
 REASON_LIMIT = 200  # the reason is the human's text and goes into the report: a line, not a document
 LISTED = 20  # the gaps `status` lists inline; the whole list is the draft questions-for-analyst.md
 _SEPARATOR = " — "
+FORMS = '{"decision": "exclude", "excluded": ["SREQ-…"], "reason": "<слова человека>"} или {"decision": "continue"}'  # the two answers of the slot
 
 
 class ScopePending(ValueError):
@@ -171,13 +172,45 @@ def scope_state(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
             "known": marker is not None}
 
 
-def pending_fix(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any]]) -> str:
-    from tools.run_pipeline import printed
-
+def pending_fix() -> str:
     return ("покажи человеку требования ниже (полный текст вопросов — questions-for-analyst.md в каталоге прогона) и спроси: "
-            "«исключить какие-то из них или продолжать как есть?»; ответ передай: `python -m tools.api plan-batches ... "
-            f"--run-root {printed(root)} --attempt {attempt_id} --exclude <SREQ-id> [--exclude …] --reason \"<текст человека>\"` "
-            "или `--continue`; прогон без остановки — начни его с `scan --no-pause`")
+            "«исключить какие-то из них или продолжать как есть?»; ответ человека принимает стадия scope: `prepare --stage scope`, затем `submit --stage scope`; "
+            "прогон без остановки — начни его с `scan --no-pause`")
+
+
+def recorded(decision: Mapping[str, Any], **flags: Any) -> dict[str, Any]:
+    """What stands as the human's decision, for him to see (``decision`` and ``excluded``)."""
+    return {**flags, "decision": decision["decision"], "excluded": decision["excluded"]}
+
+
+def _refuse_after_plan(root: Path, attempt_id: str) -> None:
+    """The decision is taken before the plan of the batches: the published plan carries the scope, another one is a new run."""
+    if plan_of(root, attempt_id) is not None:
+        raise ScopeRefused("SCOPE_DECISION_CONFLICT", "план пачек уже опубликован без этого решения; fix: другое решение — новый прогон (scan --new-run)")
+
+
+def ask(root: Path, attempt_id: str, step: Mapping[str, Any]) -> dict[str, Any]:
+    """``prepare --stage scope``: the decision that stands, or the draft of the questions, the gaps and the two forms of the answer."""
+    if step["done"]:
+        return recorded(step["decision"], answered=True)
+    _refuse_after_plan(root, attempt_id)
+    draft = write_draft(root, attempt_id)
+    return {**({"questions_draft": str(draft)} if draft else {}), **gap_summary(step["gaps"]), "answers": FORMS}
+
+
+def take(root: Path, attempt_id: str, answer: Any, dry_run: bool) -> dict[str, Any]:
+    """``submit --stage scope``: check the words of the human and record them (``dry_run``: check only)."""
+    _refuse_after_plan(root, attempt_id)
+    value = prepare_decision(root, attempt_id, answer)
+    if not dry_run:
+        commit_decision(root, attempt_id, value)
+    return recorded(value, **{"dry_run": True} if dry_run else {"answered": True})
+
+
+def gap_summary(gaps: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The gaps as ``status`` and ``prepare --stage scope`` list them — not more than ``LISTED``; the whole list is the draft."""
+    rows = [{key: row[key] for key in ("source_requirement_ids", "requirement", "missing", "blocks", "question")} for row in gaps[:LISTED]]
+    return {"scope_gaps": rows, **({"scope_gaps_not_listed": len(gaps) - len(rows)} if len(gaps) > len(rows) else {})}
 
 
 def pending_message(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any]]) -> str:
@@ -185,7 +218,7 @@ def pending_message(root: Path, attempt_id: str, gaps: Sequence[Mapping[str, Any
     unbound = (f" (файл {DECISION_NAME} лежит в прогоне без событий журнала — решением не считается)" if decision_file_unbound(root, attempt_id) else "")
     more = f" (и ещё {len(gaps) - LISTED})" if len(gaps) > LISTED else ""
     return (f"SCOPE_PENDING: разметка оставила {len(gaps)} требований без наблюдаемого канала или другого пробела; "
-            f"человек ещё не решил, исключать ли их — {'; '.join(named)}{more}{unbound}; fix: {pending_fix(root, attempt_id, gaps)}")
+            f"человек ещё не решил, исключать ли их — {'; '.join(named)}{more}{unbound}; fix: {pending_fix()}")
 
 
 def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> Path | None:
@@ -205,31 +238,32 @@ def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
     return target
 
 
-def prepare_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
-    """Every check of the human's answer, nothing written — the value ``commit_decision`` publishes.  The callers that
-    still have inputs to parse (``plan``, ``plan-batches``) prepare first and commit after those inputs passed, so a refused input
-    leaves no decision behind (another decision after it would be SCOPE_DECISION_CONFLICT → a new run)."""
+def prepare_decision(run_root: Path, attempt_id: str, answer: Any) -> dict[str, Any]:
+    """Every check of the human's answer (``incoming/scope.json``), nothing written — the value ``commit_decision`` publishes.  Exactly two
+    forms (``FORMS``); the form is checked before anything else."""
     from tools import pilot_state
 
+    exclude = isinstance(answer, Mapping) and answer.get("decision") == "exclude"
+    excluded = answer.get("excluded") if exclude else None
+    if not (isinstance(answer, Mapping) and (answer == {"decision": "continue"} or exclude and set(answer) == {"decision", "excluded", "reason"}
+            and isinstance(answer["reason"], str) and isinstance(excluded, list) and bool(excluded) and all(isinstance(item, str) for item in excluded))):
+        raise ScopeRefused("SCOPE_ANSWER_INVALID", f"ответ человека не в одной из двух форм; fix: файл ответа — {FORMS}; исправь файл и повтори submit --stage scope")
     root = Path(run_root).resolve()
-    if bool(excluded) == proceed:
-        raise ScopeRefused("SCOPE_ANSWER_INVALID", "дай ровно один ответ человека: --exclude <SREQ-id> --reason <текст> или --continue; "
-                           "fix: повтори plan-batches с одним из двух")
     state = pilot_state.derive_state(root)
     marker = _marker(root, state, attempt_id)
     if marker is None:
         raise ScopeRefused("SCOPE_NO_MARKER", "ответа разметки (context-marker:baseline) ещё нет: нечего исключать; "
                            "fix: сначала разметка и слияние частей")
-    if excluded:
+    if exclude:
         known = {str(row["source_requirement_id"]) for row in requirements_of(marker)}
         unknown = sorted(set(excluded) - known)
         if unknown:
             raise ScopeRefused("SCOPE_UNKNOWN_REQUIREMENT", f"в разметке нет требований {', '.join(unknown)}; fix: SREQ-id из списка status "
                                "или из ответа context-marker:baseline")
-        text = " ".join(str(reason or "").split())
+        text = " ".join(answer["reason"].split())
         if not text:
-            raise ScopeRefused("SCOPE_REASON_REQUIRED", "исключение без причины: --reason <текст человека>; fix: повтори с --reason")
-        if len(excluded) == len(known):
+            raise ScopeRefused("SCOPE_REASON_REQUIRED", "исключение без причины: reason — слова человека; fix: допиши reason в файле ответа и повтори")
+        if len(set(excluded)) == len(known):
             raise ScopeRefused("SCOPE_EMPTY", "исключены все требования — кейсам нечего покрывать; fix: оставь хотя бы одно или закрой прогон")
         value: dict[str, Any] = {"schema_version": "1.0.0", "kind": "scope-decision", "decision": "exclude",
                                  "excluded": [{"source_requirement_id": item, "reason": text[:REASON_LIMIT]} for item in sorted(set(excluded))]}
@@ -252,12 +286,6 @@ def commit_decision(run_root: Path, attempt_id: str, value: Mapping[str, Any]) -
     published = pilot_state.bind_bytes(root, attempt_id, root / "artifacts" / attempt_id / DECISION_NAME, data,
                                        digest="sha256:" + hashlib.sha256(data).hexdigest(), batch_id=DECISION_BATCH, label="scope decision")
     return {**value, "path": published["path"], "digest": published["digest"]}
-
-
-def record_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
-    """Publish the human's answer as the run artifact ``scope-decision.json``; the same answer again changes nothing, another
-    one is refused (the decision is evidence — a different scope is a new run)."""
-    return commit_decision(run_root, attempt_id, prepare_decision(run_root, attempt_id, excluded=excluded, reason=reason, proceed=proceed))
 
 
 def out_of_scope(decision: Mapping[str, Any] | None) -> list[dict[str, str]]:

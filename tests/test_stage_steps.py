@@ -210,3 +210,210 @@ def test_a_reuse_is_answered_from_the_source_run_and_never_from_the_slot(tmp_pat
     code, again = _call(capsys, "submit", run_root, BASELINE)
     [answer] = [row for row in pilot_state.derive_state(run_root)["events"] if row["event_type"] == "MODEL_RESPONSE_RECEIVED"]
     assert code == 0 and again["result"]["answered"] is True and answer["artifact_digest"] == digest
+
+
+# ---- the pause after the marker: the human's answer in incoming/scope.json, taken by `submit --stage scope` ----
+
+SCOPE = "scope"
+EXCLUDE = {"decision": "exclude", "excluded": ["SREQ-batch-a-001"], "reason": "нет стенда"}
+CONTINUE = {"decision": "continue"}
+
+
+def _paused(tmp_path: Path) -> tuple[Path, str]:
+    from tests.test_scope_pause import _paused_run
+
+    root, attempt_id, *_ = _paused_run(tmp_path)
+    return root, attempt_id
+
+
+def _decision(root: Path, attempt_id: str) -> dict | None:
+    from tools import scope_pause
+
+    return scope_pause.read_decision(root, attempt_id)
+
+
+def test_prepare_scope_prints_the_gaps_the_slot_and_the_two_forms_and_writes_the_draft(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt = _paused(tmp_path)
+    code, out = _call(capsys, "prepare", root, SCOPE)
+    result = out["result"]
+    assert code == 0 and result["answer_slot"] == str(stage_steps.slot(root, SCOPE)) and (root / "incoming").is_dir()
+    assert result["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-batch-a-001"] and result["questions_draft"] == str(root / "questions-for-analyst.md")
+    assert '"exclude"' in result["answers"] and '"continue"' in result["answers"] and (root / "questions-for-analyst.md").is_file()
+
+
+def test_a_repeated_prepare_scope_changes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt = _paused(tmp_path)
+    _code, first = _call(capsys, "prepare", root, SCOPE)
+    before = (_events(root), (root / "questions-for-analyst.md").read_bytes())
+    code, again = _call(capsys, "prepare", root, SCOPE)
+    assert code == 0 and again == first and (_events(root), (root / "questions-for-analyst.md").read_bytes()) == before
+
+
+def test_submit_scope_records_an_exclusion(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, EXCLUDE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and out["result"]["answered"] is True
+    assert _decision(root, attempt_id)["excluded"] == [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда"}]
+
+
+def test_submit_scope_records_a_continue(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, CONTINUE)
+    code, _out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and _decision(root, attempt_id)["decision"] == "continue"
+
+
+def test_submit_scope_without_a_file_records_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "ANSWER_FILE_UNREADABLE" and _decision(root, attempt_id) is None
+
+
+@pytest.mark.parametrize("answer", [{**CONTINUE, "reason": "x"}, {**EXCLUDE, "extra": 1}, {**EXCLUDE, "excluded": []},
+                                    {**EXCLUDE, "excluded": "SREQ-batch-a-001"}, {"decision": "exclude", "excluded": ["SREQ-batch-a-001"]}, ["continue"]])
+def test_submit_scope_refuses_a_wrong_form_with_both_forms_in_the_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str], answer: object) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, answer)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "SCOPE_ANSWER_INVALID" and '"exclude"' in out["fix"] and '"continue"' in out["fix"]
+    assert _decision(root, attempt_id) is None
+
+
+def test_submit_scope_refuses_a_slot_that_is_a_link(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    target = tmp_path / "elsewhere.json"
+    target.write_text(json.dumps(CONTINUE), encoding="utf-8")
+    try:
+        stage_steps.slot(root, SCOPE).symlink_to(target)
+    except OSError:
+        pytest.skip("no symbolic links here")
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "INPUT_OUTSIDE_PROJECT" and _decision(root, attempt_id) is None
+
+
+def test_a_dry_run_of_submit_scope_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, EXCLUDE)
+    tree = {path.relative_to(root): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
+    code, out = _call(capsys, "submit", root, SCOPE, "--dry-run")
+    assert code == 0 and out["result"]["dry_run"] is True and _decision(root, attempt_id) is None
+    assert {path.relative_to(root): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()} == tree
+
+
+def test_the_same_answer_again_changes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, EXCLUDE)
+    _call(capsys, "submit", root, SCOPE)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and out["result"]["answered"] is True and _events(root) == before
+
+
+def test_another_answer_after_the_recorded_one_is_a_conflict(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, EXCLUDE)
+    _call(capsys, "submit", root, SCOPE)
+    _put(root, SCOPE, CONTINUE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "SCOPE_DECISION_CONFLICT" and _decision(root, attempt_id)["decision"] == "exclude"
+
+
+def test_the_stage_scope_waits_for_the_marker(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, *_ = _run(tmp_path, files=1)
+    for command in ("prepare", "submit"):
+        assert _call(capsys, command, root, SCOPE)[1]["code"] == "STAGE_UNKNOWN"
+
+
+def test_prepare_scope_without_gaps_has_no_draft_and_names_the_slot(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _paused_run
+
+    root, *_ = _paused_run(tmp_path, warnings=[])
+    code, out = _call(capsys, "prepare", root, SCOPE)
+    assert code == 0 and "questions_draft" not in out["result"] and out["result"]["answer_slot"] == str(stage_steps.slot(root, SCOPE))
+    assert not (root / "questions-for-analyst.md").exists()
+
+
+def test_a_requirement_is_excluded_on_a_marker_without_gaps(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _paused_run
+
+    root, attempt_id, *_ = _paused_run(tmp_path, warnings=[])
+    _put(root, SCOPE, EXCLUDE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and _decision(root, attempt_id)["decision"] == "exclude"
+
+
+def test_a_requirement_is_excluded_on_a_run_without_pause(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import scope_pause
+
+    root, attempt_id = _paused(tmp_path)
+    monkeypatch.setattr(scope_pause, "_no_pause", lambda _root: True)
+    _put(root, SCOPE, EXCLUDE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and _decision(root, attempt_id)["decision"] == "exclude"
+
+
+def test_no_decision_is_taken_after_the_plan_is_published(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _marker_rows, _paused_run
+    from tools.batch_assembly import plan_batches
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path, warnings=[])
+    header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
+    plan = dict(plan_batches(_marker_rows(), {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]}))
+    pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
+    _put(root, SCOPE, EXCLUDE)
+    before = _events(root)
+    for command in ("submit", "prepare"):
+        code, out = _call(capsys, command, root, SCOPE)
+        assert code == 2 and out["code"] == "SCOPE_DECISION_CONFLICT" and "scan --new-run" in out["fix"]
+    assert _events(root) == before and _decision(root, attempt_id) is None
+
+
+def test_status_follows_the_pause_before_prepare_with_the_file_and_after_submit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt = _paused(tmp_path)
+    paused = _status(root)
+    assert (paused["state"], paused["waiting_for"], paused["next"]) == ("scope_pause", "human", {"verb": "prepare", "stage": SCOPE}), paused
+    assert paused["answer_slot"] == str(stage_steps.slot(root, SCOPE)) and paused["scope_gaps"]
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, CONTINUE)
+    assert _status(root)["next"] == {"verb": "submit", "stage": SCOPE}
+    _call(capsys, "submit", root, SCOPE)
+    answered = _status(root)
+    assert answered["state"] == "generator" and "scope_gaps" not in answered
+
+
+def test_a_recorded_decision_stands_without_the_file_and_is_printed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, EXCLUDE)
+    _call(capsys, "submit", root, SCOPE)
+    stage_steps.slot(root, SCOPE).unlink()
+    before = _events(root)
+    shown = {"stage": SCOPE, "answered": True, "decision": "exclude", "excluded": [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда"}]}
+    for command in ("submit", "prepare"):
+        code, out = _call(capsys, command, root, SCOPE)
+        assert code == 0 and out["result"] == shown and _events(root) == before
+
+
+def test_the_same_requirement_twice_does_not_exclude_them_all(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _paused(tmp_path)
+    _call(capsys, "prepare", root, SCOPE)
+    _put(root, SCOPE, {**EXCLUDE, "excluded": ["SREQ-batch-a-001", "SREQ-batch-a-001"]})
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and [row["source_requirement_id"] for row in _decision(root, attempt_id)["excluded"]] == ["SREQ-batch-a-001"]
+
+
+def test_a_decision_checked_without_a_marker_is_a_refusal_not_an_exception(tmp_path: Path) -> None:
+    from tools import scope_pause
+
+    root, attempt_id, *_ = _run(tmp_path, files=1)
+    with pytest.raises(scope_pause.ScopeRefused, match="SCOPE_NO_MARKER"):
+        scope_pause.prepare_decision(root, attempt_id, CONTINUE)
