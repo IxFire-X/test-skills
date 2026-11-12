@@ -55,7 +55,7 @@ def _audit_source(trace: Any) -> dict[str, Any]:
     return {"document_id": "TCDOC-invalid", "revision": 1, "source_digest": "sha256:" + "0" * 64}
 
 
-def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
+def _internal(trace: Any, require_execution: bool, subtraction: bool | None = None) -> list[dict[str, str]]:
     from tools.schema_validation import classify_version, schema_diagnostics
     from tools.build_trace_document import project_declared_order
     from tools.run_tests import validate_process_evidence
@@ -73,9 +73,14 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         requirements.add(row["requirement_id"])
         requirement_order.append(row["requirement_id"])
     cases: dict[str, Mapping[str, Any]] = {}
+    # a subtraction successor (r2 of a ТРЕБУЕТ ДОРАБОТКИ answer) keeps the display_order of its cases: strictly increasing, with holes; r1 is contiguous.
+    # Whether it is one is the document's (a parent); a trace alone has only its revision.
+    holes = trace["source"]["revision"] >= 2 and subtraction is not False
+    previous = 0
     for index, row in enumerate(trace["test_cases"]):
-        if row["case_id"] in cases or row["display_order"] != index + 1:
+        if row["case_id"] in cases or (row["display_order"] <= previous if holes else row["display_order"] != index + 1):
             rows.append(_diag(f"/test_cases/{index}", "TRACE_CASE_OWNERSHIP"))
+        previous = row["display_order"]
         try:
             expected_requirements = project_declared_order(requirement_order, row["requirement_ids"])
         except ValueError:
@@ -262,7 +267,9 @@ def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, a
     supplied = (document is not None, automation is not None, autotest_review is not None, run_result is not None)
     # The audit always enforces the branch's exact obligation; this flag preserves the
     # public CLI spelling without forcing a fabricated run for BLOCKED/MANUAL_ONLY.
-    rows = _internal(trace, require_execution) + _exclusion_rows(trace, document if document is not None else canonical)
+    reference = document if document is not None else canonical
+    subtraction = reference.get("parent_sha256") is not None if isinstance(reference, Mapping) else None
+    rows = _internal(trace, require_execution, subtraction) + _exclusion_rows(trace, reference)
     if any(supplied) and not (document is not None and automation is not None and autotest_review is not None):
         rows.append(_diag("", "TRACE_EXTERNAL_SET", "External trace inputs must be supplied as a complete branch."))
     elif document is not None and automation is not None and autotest_review is not None:
