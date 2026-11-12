@@ -58,7 +58,7 @@ def test_the_declared_network_of_every_skill_is_none() -> None:
             assert permissions["network"] == "none" and permissions["external_delivery"] == "none" and permissions["dependencies"] == "none", path
         else:
             assert permissions["network"] == "нет" and permissions["external_delivery"] == "нет" and "pip агент не запускает" in permissions["dependencies"]
-            assert "--output-dir: <run>/published" in permissions["write"]
+            assert "каталог публикации: <run>/published" in permissions["write"]
 
 
 ROLE_BLOCK_LIMIT = 230  # bytes: a role file is counted whole into the step input (step_size), the campaign budget test has ~300 B of slack

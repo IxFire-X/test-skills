@@ -303,7 +303,7 @@ def test_status_after_the_cut_leads_to_the_select_and_the_repeat_closes_the_revi
     out = capsys.readouterr().out
     assert code in {0, 1, 3}, out
     status = json.loads(out[out.index("{"):])
-    assert status["state"] == "review" and status["next"]["verb"] == "review-select", status
+    assert status["state"] == "review" and status["next"]["verb"] == "submit", status
     code, closed = _main(capsys, _select_argv(run, verdict))
     assert code == 0 and closed["result"]["status"] == "EFFECTIVE_SELECTED", closed
     other = _generated_run(tmp_path / "uncut")
@@ -331,7 +331,7 @@ def test_status_between_the_recorded_answer_and_the_select_says_review_select(tm
     assert code == 0, answered
     status = _status(capsys, run)
     assert not any("effective-canonicals" in str(row.get("path")) for row in status.get("evidence_errors") or []), status.get("evidence_errors")
-    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "review-select", status
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "submit", status
     code, effective = _main(capsys, ["read-effective", *_flags(run)])
     assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
 
@@ -348,7 +348,7 @@ def test_a_closed_ledger_cut_before_the_effective_canonical_says_not_yet(tmp_pat
     code, effective = _main(capsys, ["read-effective", *_flags(run)])
     assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
     status = _status(capsys, run)
-    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "review-select", status
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "submit", status
 
 
 def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_not_yet_and_the_repeat_closes_it(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -369,7 +369,7 @@ def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_
     code, effective = _main(capsys, ["read-effective", *_flags(run)])
     assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
     status = _status(capsys, run)
-    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "review-select", status
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "submit", status
     code, again = _main(capsys, _select_argv(run, answer))
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
     assert sorted(str(path.relative_to(_bundles(run))) for path in Path(_bundles(run)).rglob("*") if path.is_file()) == written  # no second bundle

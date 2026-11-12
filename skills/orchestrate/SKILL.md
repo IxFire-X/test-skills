@@ -3,7 +3,7 @@ name: orchestrate
 description: Использовать, когда пользователь просит тест-кейсы приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
 permissions:
   read: "файлы проекта по inventory с исключениями; --docs, --reference и --cases только внутри проекта"
-  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir: <run>/published"
+  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации: <run>/published"
   network: "нет"
   external_delivery: "нет"
   dependencies: "пакет ничего не устанавливает; pip агент не запускает"
@@ -100,7 +100,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    их одним вызовом (`--dry-run` — без записи).
    Пачки делит код по оценке ответа и окну `limits.step_window_bytes`; `notes` и `context` вывода покажи человеку как есть.
 4. **Генератор.** `status`: `next` — `prepare` или `submit`, `stage: tc-generator:<batch>`; пачки строго по очереди (`STAGE_WAITS` — предыдущая не принята). `prepare` генератору получает
-   `--model-id` и `--invocation-id` той сессии, которая пишет кейсы (как у `review-open`: от этой метки зависит независимость ревью); входы берёт
+   `--model-id` и `--invocation-id` той сессии, которая пишет кейсы (как у `prepare` ревью: от этой метки зависит независимость ревью); входы берёт
    из журнала (capabilities прошлых пачек публикует сам) и один раз печатает `nonce_note`: вставь «Контрольное слово: <nonce>» в начало задачи генератору (в ответ и файлы
    слово не копируй). **Фрагмент** — голый объект без конверта `artifacts`, образец — [fragment-sample.md](references/fragment-sample.md), схема — `schemas/candidate-fragment.schema.json`;
    `context_receipt` и digest-поля ставит код, не пиши их (неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Кладёшь его в `answer_slot`; `submit --dry-run` проверяет фрагмент без записи. Отказ — ошибка ответа: единственный повтор с
@@ -109,34 +109,26 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    `MANUAL_SHARE_HIGH` — скажи человеку: большинство шагов ручные, автотестов по ним не будет, контрольных ошибок ревью может не быть — смотри отчёт. Проверь полноту по исходному документу; недоказанное — gap,
    не `FULL`-обещание. Human-facing поля — на русском, technical tokens exact; условия работы над тестами (заглушки, режим запуска)
    в предусловия, шаги и ожидания не пишутся — ревьюер вернёт весь набор. Потолка на число требований и кейсов нет.
-6. `review-open` из §4 записывает кандидата сам; файлов до вердикта нет. HTML/CSV никогда не входят в model input.
+6. `prepare` ревью (§4) записывает кандидата сам; файлов до вердикта нет. HTML/CSV никогда не входят в model input.
 
 ## 4. Выполни одно authoritative canonical review
 
-Ревью — две команды и ревьюер между ними:
+Ревью — те же `prepare` и `submit`, ревьюер между ними:
 
-1. `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <метка ревьюера> --invocation-id <id ревьюера>
-   --fresh-context yes|no` — до вызова модели: публикует кандидата (если ещё нет), строит пакет и границу, пишет `REVIEW_REQUESTED` и запрос
-   ревьюера. Повтор ничего не меняет; другой ревьюер — `REVIEW_ALREADY_OPEN`. `next_step` вывода — следующая команда.
-2. `tc-reviewer` в fresh invocation; ответ — файл `<run>/tmp/reviewer-answer.json`. Кандидата он читает видом `tools.review_view`
-   (`review-views/<sha>.md`), не полным JSON; размер шага — `step_size --role tc-reviewer --step tc-reviewer:canonical`.
-3. `tools.api review-select --run-root <run> --attempt <id> --output-dir <dir> --verdict <файл>` — записывает ответ, закрывает сессию,
-   выбирает ревизию. Отказ называет ошибку и ничего не пишет: единственный повтор стадии (`--transport-attempts 2`). Без `--verdict`
-   берётся последняя ревизия журнала. `review-select --dry-run` — только при сомнении в ответе.
+1. `status` называет `prepare --stage tc-reviewer:canonical`; флаги: `--invocation-id <метка сессии ревьюера>` и `--fresh-context yes|no`. `yes` — честное
+   заявление: ревьюер отдельный субагент или вызов без истории генерации; метка обязательна и не равна метке генератора (`REVIEW_INVOCATION_REQUIRED`,
+   `INDEPENDENCE_UNVERIFIED`). `no` — ревью в той же сессии, метка не нужна; допустимо только в прогоне, принявшем SELF (§1). `prepare` строит пакет, границу
+   и запрос ревьюера, печатает `answer_slot`, `reviewer_view`, `for_human`; повтор ничего не меняет, другой ревьюер — `REVIEW_ALREADY_OPEN`.
+2. `tc-reviewer` в fresh invocation читает `reviewer_view` (не полный JSON) и пишет ответ в `answer_slot`; файлы проекта сверх пакета он называет
+   ключом `evidence: ["путь", …]` верхнего уровня файла. Карту канареек не читай и ревьюеру не показывай; роль, канарейки, бюджет — [review.md](references/review.md).
+3. `submit --stage tc-reviewer:canonical` проверяет ответ до записи, записывает его, выбирает ревизию и кладёт набор в `<run>/published`. Отказ ничего не пишет —
+   единственный повтор (`--transport-attempts 2`); `--dry-run` — только проверки. Ревью не довести до вердикта — `submit --abort REVIEW_CONTEXT_LIMIT` или
+   `REVIEW_UNUSABLE`, затем `finish`.
 
-**`--output-dir`** — один каталог на всё ревью: `<run>/published` или ниже (только итог: принятый набор с CSV, `*.REJECTED.*` или `*.UNREVIEWED.*` без CSV). Тот же
-путь — в `review-open`, `review-select --run-root <run> --attempt <id> --output-dir <dir>` и `review-publish --run-root <run> --attempt <id> --output-dir <dir>`; иначе — `OUTPUT_DIR_OUTSIDE_RUN`. `--fresh-context yes` — честное
-заявление: ревьюер отдельный субагент или вызов без истории генерации; `no` допустим только в прогоне, принявшем SELF (§1) — там флаг можно
-опустить; иначе `FRESH_CONTEXT_REQUIRED` или `INDEPENDENCE_UNVERIFIED`. Бюджет сессии, `distinct_invocations` и `evidence_digest` считает
-код; бюджет меньше пакета — `REVIEW_CONTEXT_LIMIT` сразу.
-
-**Ревьюер.** `INDEPENDENT` — свежая сессия (`for_human`) или субагент, `SELF` — та же; команды, канарейки, кардинальность сессии, бюджет и `review-abort` —
-[review.md](references/review.md). Карту канареек не читай и ревьюеру не показывай.
-
-`ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает один complete successor revision 2 (`successor_edits` — точные правки
-человеческих полей, revision 2 строит код). Любая смысловая, частичная или третья правка — `REWORK/PARTIAL`. Без host isolation evidence
-записывай `independence_unverified` и ветку не принимай. При отказе или terminal pre-verdict abort закрой отрицательную ветку через `finish`
-с исходной причиной и `accepted=false`.
+Скажи человеку по `outcome` ответа `submit`: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые лежат отдельно
+(`*.REJECTED-CASES.*`, в Zephyr не импортировать), пробелы покрытия — в итоге; если `status` называет `prepare tc-generator:rework-1`, отклонённые кейсы идут на доработку
+один раз — `finish` до неё не зови. `REWORK` — набор отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай
+(`independence_unverified`).
 
 ## 5. Закрой попытку
 

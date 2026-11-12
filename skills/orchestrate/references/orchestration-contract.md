@@ -24,9 +24,9 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api prepare` / `tools.api submit --stage plan` строит и публикует header и plan из журнала | independent plan и current receipt без truncation |
 | Генерация | `tools.api prepare` / `tools.api submit` для `tc-generator:<batch>`, пачки по очереди; с пачки 2 capabilities прошлых пачек публикует `prepare` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
-| Сборка | последний `tools.api submit` (до записи ответа), `tools.api review-publish` | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
-| Canonical review | `tools.api review-open` (пакет и запрос проверяющего записаны до его вызова); вызов `tc-reviewer`; `tools.api review-select --verdict <ответ>`; при нужде `tools.api review-evidence`, `tools.api review-abort`, `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
-| Выбор | `review-select` (последняя команда ревью), затем `tools.api read-effective` | immutable selected document и receipt |
+| Сборка | последний `tools.api submit` (до записи ответа); кандидата записывает `prepare` ревью | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
+| Canonical review | `tools.api prepare --stage tc-reviewer:canonical` (пакет и запрос проверяющего записаны до его вызова); вызов `tc-reviewer`; `tools.api submit --stage tc-reviewer:canonical` (`evidence` — ключ ответа, `--abort` — отказ от ревью) | complete package, отдельный reviewer, exact boundary/ledger |
+| Выбор | тот же `submit` (выбор и публикация набора в `<run>/published`) | immutable selected document и receipt |
 | Закрытие | `tools.run_pipeline finish` | trace/finalization/terminal |
 | Ход/resume | `tools.run_pipeline status --project <path> --run <id>` | last confirmed stage, next artifact, stop reason, evidence paths и сохранённые warnings; чтение не запускает recovery |
 
@@ -69,7 +69,7 @@ Inventory учитывает файлы выбранного модуля, paren
    `CANDIDATE_PUBLISHED` stage `assembly`. Файлов в `published/` до вердикта нет.
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
-   candidate digest получает `REVIEW_REQUESTED` (его пишет `tools.api review-open`) до reviewer `MODEL_REQUESTED`;
+   candidate digest получает `REVIEW_REQUESTED` (его пишет `prepare` ревью) до reviewer `MODEL_REQUESTED`;
 8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
 9. Перейди к trace/finalization: pre-finalization trace -> finalization receipt/readback -> terminal result ->

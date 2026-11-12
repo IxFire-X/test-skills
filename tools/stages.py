@@ -10,7 +10,7 @@ STAGES = ("scan", "marker", "scope_pause", "generator", "review", "automation", 
 ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 # The verb is the command of the step by its one name (flags and paths are gone): ``prepare`` and ``submit`` for the stages that went over to
 # them (the marker, V2), the old command of the others until their packages; V5 drops the old ones.
-VERBS = ("scan", "prepare", "submit", "model-request", "model-response", "review-open", "review-select",
+VERBS = ("scan", "prepare", "submit", "model-request", "model-response",
          "open-automation-boundary", "materialize", "ingest", "finish", "report", None)
 _ROLE_OF_STATE = {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer", "automation": "tc-to-autotest",
                   "automation_review": "autotest-reviewer"}
@@ -21,8 +21,8 @@ _TABLE = {
     "module selection, inventory and profile baseline": ("scan", "scan"), "authorized context": ("scan", "scan"),
     "context-marker response": ("marker", "prepare"), "context-marker parts merge": ("marker", "prepare"),
     "generator fragments": ("generator", "prepare"), "remaining fragments or assembled candidate": ("generator", "prepare"),
-    "canonical reviewer package and boundary": ("review", "review-open"), "reviewer evidence or verdict": ("review", "review-select"),
-    "reviewer ledger and effective selection or negative closure": ("review", "review-select"), "effective canonical": ("review", "review-select"),
+    "canonical reviewer package and boundary": ("review", "prepare"), "reviewer evidence or verdict": ("review", "submit"),
+    "reviewer ledger and effective selection or negative closure": ("review", "submit"), "effective canonical": ("review", "submit"),
     "negative branch trace and finalization": ("closure", "finish"),
     "rework fragment": ("generator", "prepare"), "rework answered": ("closure", "finish"),
     "automation artifact": ("automation", "model-request"), "automation revision": ("automation", "model-request"),

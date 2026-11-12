@@ -97,10 +97,8 @@ def test_the_same_directory_with_other_files_stays_a_receipt_refusal(tmp_path: P
     assert [row["code"] for row in refused.value.diagnostics] == ["ORCHESTRATION_RECEIPT"]
 
 
-def test_the_orchestrate_skill_names_the_output_dir_of_select() -> None:
+def test_the_orchestrate_skill_names_the_directory_of_the_set_and_no_flag_for_it() -> None:
     text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    # FaT-U5: review-select takes the --output-dir review-publish published to
-    # PT: one paragraph names the one directory of the whole review (`<run>/published`) for review-open, review-select and review-publish
+    # V4: the set of the review goes to `<run>/published` by itself — the agent names no directory
     flat = " ".join(text.split())
-    assert "**`--output-dir`** — один каталог на всё ревью" in flat and "`<run>/published`" in flat
-    assert "review-publish --run-root <run> --attempt <id> --output-dir <dir>" in flat and "review-select --run-root <run> --attempt <id> --output-dir <dir>" in flat
+    assert "кладёт набор в `<run>/published`" in flat and "--output-dir" not in flat.split("## 4.", 1)[1].split("## 5.", 1)[0]

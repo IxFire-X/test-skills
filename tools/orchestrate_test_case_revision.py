@@ -611,13 +611,14 @@ def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]
 
 
 @_closure_cached
-def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str]) -> dict[str, Any]:
+def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str], *, dry_run: bool = False, again_ok: bool = False) -> dict[str, Any]:
     """One C-lite evidence pair for the open reviewer session.
 
     The named project files of the attempt inventory become one context receipt (the one way to publish evidence now that
     publish-evidence is removed);
     the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
     with the cumulative package digest, and the WAITING ledger is published again.
+    ``dry_run`` checks and writes nothing; ``again_ok``: the same files given before are no duplicate (a repeated ``submit``).
     """
     from tools.pilot_state import derive_state, publish_context_selection, read_reviewer_session_ledger
     from tools.project_inventory import ContextSelectionError, read_inventory_receipt, select_context_batches
@@ -653,6 +654,8 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     selected = batches[0]["receipt"]
     digests = [event["provided_digest"] for event in provided]
     if pending is not None:
+        if dry_run:
+            return {}
         if selected["digest"] != pending["provided_digest"]:
             from tools.pilot_state import ReviewLedgerUnbound
 
@@ -660,8 +663,12 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
                                       "fix: повтори review-evidence с теми же --path, что в прошлый раз (он допишет события); иные файлы — после этого")
         receipt = publish_context_selection(Path(run_root), attempt_id, selected)  # the same receipt again: nothing new
         return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
+    if again_ok and selected["digest"] in digests:
+        return {}
     if selected["digest"] in package["context_receipt_digests"] or selected["digest"] in digests:
         raise ValueError("REVIEWER_EVIDENCE_DUPLICATE: these files were already given to the reviewer")
+    if dry_run:
+        return {}
     receipt = publish_context_selection(Path(run_root), attempt_id, selected)
     request_digest = "sha256:" + hashlib.sha256(canonical_bytes({"project_paths": paths, "byte_budget": remaining})).hexdigest()
     digests.append(receipt["digest"])
@@ -1211,7 +1218,7 @@ def _resolve_fresh_context(run_root: Path, fresh_context: bool | None) -> bool:
 
 def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path, csv_profile: str = _PROFILE,
                      model_id: str | None = None, invocation_id: str | None = None, fresh_context: bool | None = None,
-                     session_start: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                     session_start: Mapping[str, Any] | None = None, cycle: bool = False) -> dict[str, Any]:
     """``tools.api review-open --model-id --invocation-id [--fresh-context]`` — everything before the reviewer's call, in the
     events of the nine commands and their order: the candidate published (assemble → validate-canonical → review-publish, when it
     is not yet), the session start, the package and the boundary, REVIEW_REQUESTED, MODEL_REQUESTED.  It records and computes; the
@@ -1224,12 +1231,12 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
     if session_start is not None:  # the open-session of the nine: the session start is the agent's file
         return review_step("open", run_root, attempt_id, files=files, output_dir=output_dir, csv_profile=csv_profile, session_start=session_start)
     missing = [flag for flag, value in (("--model-id", model_id), ("--invocation-id", invocation_id)) if value is None]
-    if missing:
+    if missing and not cycle:
         raise ReviewRefused("INVALID_ARGUMENT", f"review-open без {' и '.join(missing)}; fix: review-open --model-id <метка модели ревьюера> "
                             "--invocation-id <id вызова ревьюера> --fresh-context yes|no — id тот же, что у вызова ревьюера")
     # the line the agent runs next is made first: a path no shell takes as it is stops the opening before anything is written (COMMAND_NOT_PRINTABLE)
-    select_command = (f"tools.api review-select --run-root {printed(run_root)} --attempt {attempt_id} --output-dir {printed(output_dir)} "
-                      "--verdict <файл ответа ревьюера>")
+    select_command = None if cycle else (f"tools.api review-select --run-root {printed(run_root)} --attempt {attempt_id} --output-dir {printed(output_dir)} "
+                                         "--verdict <файл ответа ревьюера>")
     with closure_cache(), inventory_cache():
         _require_open_attempt(run_root, attempt_id)
         fresh = _resolve_fresh_context(run_root, fresh_context)
@@ -1281,12 +1288,86 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
             "package_binding": package, "reviewer_session_boundary": boundary, "review_requested": dict(requested),
             "model_request": dict(request), "reviewer_view": str(view["path"]),
             "canaries": {"seeded": view["canaries"], "note": "канарейки — сигнал качества ревью, не защита; классы и кейсы здесь не печатаются"},
-            "next_step": f"ревьюер читает пакет и отвечает; затем {select_command}",
-            "for_human": human_instruction(run_root, view["path"], select_command, fresh)}
+            **({} if cycle else {"next_step": f"ревьюер читает пакет и отвечает; затем {select_command}"}),
+            "for_human": review_for_human(run_root, view["path"], fresh) if cycle else human_instruction(run_root, view["path"], select_command, fresh)}
         if published is not None:
             result.update(candidate_bundle_receipt=published["candidate_bundle_receipt"], questions_for_analyst=published["questions_for_analyst"],
                           warnings=published["warnings"])
         return result
+
+
+def _generator_label(run_root: Path, attempt_id: str) -> str:
+    """The label of the generator's session: the request of its first batch — what the reviewer's label is compared with."""
+    from tools.pilot_state import derive_state, read_model_request
+
+    first = next((event for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"
+                  and str(event.get("stage_instance_id")).startswith("tc-generator:BATCH-")), None)
+    if first is None:
+        raise ReviewRefused("REVIEWER_PROTOCOL", "у генератора нет запроса; fix: сначала `status` — стадии генератора")
+    return str(read_model_request(Path(run_root), attempt_id, first["stage_instance_id"], str(first["artifact_digest"]))["invocation_id"])
+
+
+def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invocation_id: str | None, fresh_context: bool | None) -> dict[str, Any]:
+    """``prepare --stage tc-reviewer:canonical``: the whole opening of the review of ``review_open_step`` into ``<run>/published``.  The label is the
+    host's: ``--fresh-context yes`` names the reviewer's session or is refused; a session that says «the same» (``no``) takes the generator's label —
+    that is the truth, and the comparison of the labels counts it as SELF.  SELF, where the run did not admit it, is refused before anything is written."""
+    from tools.pilot_state import IndependenceUnverified, self_review_accepted
+
+    fresh = _resolve_fresh_context(run_root, fresh_context)
+    if fresh and invocation_id is None:
+        raise ReviewRefused("REVIEW_INVOCATION_REQUIRED", "--fresh-context yes без --invocation-id: независимость заявляет хост, назвав сессию ревьюера; "
+                            "fix: --invocation-id <метка сессии ревьюера> (не метка генератора) или --fresh-context no, если ревью в той же сессии")
+    generator = _generator_label(run_root, attempt_id)
+    label = invocation_id or generator
+    if not (fresh and label != generator) and not self_review_accepted(Path(run_root)):
+        raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора, а прогон не принял SELF; fix: вызови ревьюера отдельной сессией "
+                                     "и назови её --invocation-id; только если человек согласен на ревью в той же сессии, повтори scan с --accept-self-review")
+    return review_open_step(run_root, attempt_id, files={}, output_dir=Path(run_root) / "published", model_id=model_id, invocation_id=label,
+                            fresh_context=fresh, cycle=True)
+
+
+def review_for_human(run_root: Path, view: Path | str, fresh: bool) -> str:
+    """What a person does to have the review made: INDEPENDENT (``fresh``) in a new session, SELF in this one; the answer goes to the slot.  Printed text only."""
+    from tools.stage_steps import slot
+
+    answer, run_id = slot(Path(run_root), REVIEW_STAGE), Path(run_root).name
+    codeword = "В ответе поле codeword_seen: контрольное слово из задачи генератора, если оно есть в контексте сессии, иначе null."
+    if not fresh:
+        return (f"Ревью кейсов в этой же сессии (SELF; результат не называется независимым): прочти вид кейсов {view}, проверь кейсы по требованиям "
+                f"и запиши ответ в {answer}. {codeword} Затем `submit` этой стадии.")
+    return ("Ревью кейсов в свежей сессии (руками): открой новую сессию GigaCode или выполни /clear — в ней не должно быть истории генерации; "
+            f"вставь «проведи ревью test-skills {run_id}»: модель прочтёт вид кейсов {view} и запишет ответ в {answer}. {codeword} "
+            "Вернись в рабочую сессию — `submit` этой стадии.")
+
+
+def select_review(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] | None = None, session: Mapping[str, Any] | None = None,
+                  dry_run: bool = False) -> dict[str, Any]:
+    """``submit``'s selection: the session closed with the recorded answer (``review``: the answer of a dry run, not recorded yet; ``session``: an aborted one),
+    the ledger, the set in ``<run>/published``; what the agent is told of it.  The same call again finishes what a refusal left (nothing is written twice)."""
+    from tools.pilot_state import closure_cache
+    from tools.project_inventory import inventory_cache
+
+    with closure_cache(), inventory_cache():
+        _require_open_attempt(run_root, attempt_id)
+        session = session if session is not None else _last_reviewer_session(run_root, attempt_id, review)
+        published = Path(run_root) / "published"
+        selected = review_step("select", run_root, attempt_id, files={}, output_dir=published, reviewer_session=session, review=review, dry_run=dry_run)
+        selected = {**selected, **_canary_report(run_root, attempt_id, review)}
+        answer = review if review is not None else journal_review_artifact(run_root, attempt_id, session)
+        report = (_plain(answer or {}).get("artifacts") or {}).get("validation_report") or {}
+        outcome = "ABORTED" if not report else answer_outcome(run_root, attempt_id, report)["kind"] if report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ" else "ACCEPTED_WHOLE"
+        isolation = _plain(session)["host_isolation"]
+        told = {key: selected[key] for key in ("status", "effective_source", "review_canaries", "codeword", "review_warnings")}
+        told.update(outcome=outcome, independence="verified" if isolation["fresh_context"] and isolation["distinct_invocations"] and selected["codeword"]["state"] != "named"
+                    else "independence_unverified")
+        if dry_run:
+            return {**told, "would_publish": {"reviewer_ledger": {"status": _plain(session).get("status")}, "effective_source": selected["effective_source"]}}
+        return {**told, "files": sorted(path.name for path in published.iterdir()) if published.is_dir() else []}
+
+
+def abort_review(run_root: Path, attempt_id: str, reason: str, dry_run: bool) -> dict[str, Any]:
+    """``submit --abort``: the review that cannot end in a verdict is closed; ``finish`` follows."""
+    return select_review(run_root, attempt_id, session=abort_reviewer_session(run_root, attempt_id, reason), dry_run=dry_run)
 
 
 def human_instruction(run_root: Path, view: Path | str, select_command: str, fresh: bool = True) -> str:

@@ -22,7 +22,7 @@ def slot(root: Path, stage: str) -> Path:
     return Path(root) / SLOT_DIR / (stage.replace(":", "-") + ".json")
 
 
-def _marker_accepted(root: Path) -> Mapping[str, Any]:
+def _marker_accepted(root: Path, _stage: str) -> Mapping[str, Any]:
     """The last part answered: the merge by code is the one more step of that call."""
     if context_marker_parts.plan(root)["next"] != "merge":
         return {}
@@ -109,7 +109,7 @@ def _candidate(root: Path, document: Mapping[str, Any], receipt: Mapping[str, An
                           "warnings": sorted({*(row["code"] for row in receipt["warnings"]), *([share["code"]] if share else [])}), **({"manual_share": share} if share else {})}}
 
 
-def _assemble(root: Path, stage: str, value: Mapping[str, Any]) -> dict[str, Any] | None:
+def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, _extra: Any) -> dict[str, Any] | None:
     """Before the write of the last answer of the generator: the candidate of all the batches — a refusal leaves the answer unwritten, so the one retry is
     still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``)."""
     state = pilot_state.derive_state(root)
@@ -121,7 +121,7 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any]) -> dict[str, Any
     return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
 
 
-def _generator_accepted(root: Path) -> Mapping[str, Any]:
+def _generator_accepted(root: Path, _stage: str) -> Mapping[str, Any]:
     """Every batch answered: the candidate the journal gives (a repeated ``submit`` of the last batch says it again)."""
     from tools.orchestrate_test_case_revision import journal_assembly
 
@@ -130,11 +130,46 @@ def _generator_accepted(root: Path) -> Mapping[str, Any]:
     return _candidate(root, *journal_assembly(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))[:2])
 
 
+
+def _reviewer_steps(root: Path) -> list[dict[str, Any]]:
+    """The review of the candidate once every batch of the generator is answered.  The row is a family: a later round is one more step with its own ``open``."""
+    state = pilot_state.derive_state(root)
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    batches = [step for step in _generator_steps(root) if step["stage"] != REWORK_STAGE]
+    if not batches or not all(step["done"] for step in batches):
+        return []
+    from tools.orchestrate_test_case_revision import REVIEW_STAGE, abort_review, open_review
+
+    return [{"stage": REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")), "extra": "evidence",
+             "open": lambda model_id, invocation_id, fresh: open_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
+             "abort": lambda reason, dry_run: abort_review(root, attempt_id, reason, dry_run)}]
+
+
+def _reviewer_accepted(root: Path, _stage: str) -> Mapping[str, Any]:
+    """The answer is recorded: the selection by the journal — what a refusal left is finished by the repeat."""
+    from tools.orchestrate_test_case_revision import select_review
+
+    return select_review(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))
+
+
+def _reviewer_check(root: Path, stage: str, value: Mapping[str, Any], dry_run: bool, evidence: Any) -> dict[str, Any] | None:
+    """After every check of the answer, before its write: the evidence it names (a refusal leaves the answer unwritten; the same files again are no duplicate);
+    a dry run says what the selection would publish."""
+    from tools.orchestrate_test_case_revision import provide_reviewer_evidence, select_review
+
+    attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
+    if evidence is not None:
+        if not isinstance(evidence, list) or not all(isinstance(path, str) for path in evidence):
+            raise ValueError("REVIEW_EVIDENCE_INVALID: evidence — список путей внутри проекта; fix: evidence: [\"src/файл.py\", …] или без ключа")
+        provide_reviewer_evidence(root, attempt_id, evidence, dry_run=dry_run, again_ok=True)
+    return select_review(root, attempt_id, review=value, dry_run=True) if dry_run else None
+
 STEPS: dict[str, tuple[Callable, Callable, Callable | None]] = {
     "context-marker": (lambda root: context_marker_parts.plan(root)["parts"], _marker_accepted, None),
     "tc-generator": (_generator_steps, _generator_accepted, _assemble),
-    "scope": (_scope_steps, lambda root: {}, None),
-    "plan": (_plan_steps, lambda root: {}, None),
+    "tc-reviewer": (_reviewer_steps, _reviewer_accepted, _reviewer_check),
+    "scope": (_scope_steps, lambda root, _stage: {}, None),
+    "plan": (_plan_steps, lambda root, _stage: {}, None),
 }
 
 
@@ -159,7 +194,7 @@ def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], 
 def _accepted(root: Path, stage: str) -> Mapping[str, Any]:
     if stage == REWORK_STAGE:
         return {"rework": {"answered": True}}
-    return STEPS[stage.split(":", 1)[0]][1](root)
+    return STEPS[stage.split(":", 1)[0]][1](root, stage)
 
 
 def _budget(root: Path, step: Mapping[str, Any], found: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -188,10 +223,11 @@ def _refuse_unready(stage: str, step: Mapping[str, Any]) -> None:
         raise ValueError(f"STAGE_WAITS: {stage}: {step['waits']}; fix: сначала prepare и submit этой стадии")
 
 
-def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocation_id: str | None = None, reuse_from: str | None = None) -> dict[str, Any]:
+def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocation_id: str | None = None, reuse_from: str | None = None,
+            fresh_context: bool | None = None) -> dict[str, Any]:
     """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run.
     ``invocation_id`` is the host's label of the session that does the work (the review compares it with the reviewer's: same label, no independence);
-    without it the code's label."""
+    without it the code's label; ``fresh_context`` is the host's statement for a step that opens a session (the review)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
     if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
         return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
@@ -207,6 +243,8 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocati
     _refuse_unready(stage, step)
     if reuse_from is None:
         _refuse_linked_inbox(root)
+    opened = step["open"](model_id, invocation_id, fresh_context) if "open" in step else {}  # the session is opened (its request is a part of that) or recognised again
+    state = pilot_state.derive_state(root) if opened else state
     requested = _events(state, attempt_id, stage, "MODEL_REQUESTED")
     if not requested and "before" in step:
         step["before"]()
@@ -225,13 +263,18 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocati
     word = {key: request[key] for key in ("nonce", "nonce_note") if key in request}  # the control word is shown once, by the call that wrote the request
     if requested and stage.startswith("tc-generator:BATCH-"):
         word = {"nonce_note": pilot_state.codeword_lost_note(root, state, attempt_id, stage).strip()}
+    told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "questions_for_analyst", "warnings") if key in opened}
     return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": step_size.compact_inputs(root, stage, found)["files_summary"],
-            "budget": _budget(root, step, found), **word}
+            "budget": _budget(root, step, found), **word, **told}
 
 
-def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1) -> dict[str, Any]:
+def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1, abort: str | None = None) -> dict[str, Any]:
     """Take the answer of ``stage`` from its slot and record it; ``load(path, project)`` reads the file strictly (``api._load_answer``)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
+    if abort is not None:  # a step that can end without an answer says how
+        if "abort" not in step:
+            raise ValueError(f"STAGE_NO_ABORT: {stage} не прерывается; fix: --abort только у ревью (REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE)")
+        return {"stage": stage, **step["abort"](abort, dry_run)}
     if "direct" in step:  # a recorded answer stands without a file; where the step rechecks, a file there is checked again
         if step["done"] and not (step.get("recheck") and slot(root, stage).is_file()):
             return {"stage": stage, **step["direct"][0](root, step)}
@@ -243,8 +286,10 @@ def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_
         raise ValueError(f"STAGE_NOT_PREPARED: {stage} has no request yet; fix: prepare --stage {stage}, затем модель, затем submit")
     answer = load(str(slot(root, stage)), project)
     check, told = STEPS[stage.split(":", 1)[0]][2], {}
-    published = pilot_state.publish_model_stage_artifact(root, attempt_id, stage, answer.value, transport_attempts=transport_attempts, raw_bytes=answer.raw_bytes,
-                                                         dry_run=dry_run, before_write=(lambda value: told.update(check(root, stage, value) or {})) if check else None)
+    key = step.get("extra")  # a key of the slot that is not part of the answer (the evidence of the review): taken out before the answer is checked
+    value, extra = ({k: v for k, v in answer.value.items() if k != key}, answer.value.get(key)) if key and isinstance(answer.value, Mapping) else (answer.value, None)
+    published = pilot_state.publish_model_stage_artifact(root, attempt_id, stage, value, transport_attempts=transport_attempts, raw_bytes=answer.raw_bytes,
+                                                         dry_run=dry_run, before_write=(lambda value: told.update(check(root, stage, value, dry_run, extra) or {})) if check else None)
     return {**{key: value for key, value in published.items() if key != "artifact"}, **(told or ({} if dry_run else _accepted(root, stage)))}
 
 

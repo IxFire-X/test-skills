@@ -191,11 +191,11 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None,
                                  "scope_answer": Path((scope or {}).get("answer_slot", "")).is_file()}))
     result.update(scope or {})
-    if result["state"] in ("marker", "generator"):  # the id of the step, the slot and the size: from the steps of the stage
+    if result["state"] in ("marker", "generator", "review"):  # the id of the step, the slot and the size: from the steps of the stage
         from tools.stage_steps import stage_status
 
         try:
-            result.update(stage_status(Path(run_root), "context-marker" if result["state"] == "marker" else "tc-generator"))
+            result.update(stage_status(Path(run_root), {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer"}[result["state"]]))
         except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
             pass
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
@@ -454,6 +454,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             "evidence_path": str(root / "events" / f"{assembly['seq']:010d}.json"),
         }))
     ledger_events = [row for row in events if row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") == "reviewer-ledger-v1"]
+    aborted = False  # a review closed without a verdict leaves its request without an answer for good: nothing waits for it
     if ledger_events:
         digest = ledger_events[-1]["artifact_digest"]
         path = f"reviewer-session-ledgers/{attempt_id}/{digest[7:]}.json"
@@ -462,7 +463,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             lifecycle = pilot.reviewer_lifecycle_projection(ledger)
             next_artifact = "reviewer evidence or verdict" if lifecycle["waiting"] else "effective canonical"
             if lifecycle["pre_verdict_abort"] or lifecycle["authoritative_verdict"] == "REJECTED":
-                next_artifact = "negative branch trace and finalization"
+                next_artifact, aborted = "negative branch trace and finalization", lifecycle["pre_verdict_abort"]
             record(digest, "canonical-review:" + ledger["status"], next_artifact, path, stop_reason=lifecycle["abort_reason"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
@@ -524,7 +525,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             unreadable(str(path.relative_to(root)))
     if confirmed:
         result.update(max(confirmed, key=lambda row: row[0])[1])
-    pending = [row for row in events if row["event_type"] == "MODEL_REQUESTED" and not any(response.get("stage_instance_id") == row.get("stage_instance_id") for response in responses)]
+    pending = [row for row in events if row["event_type"] == "MODEL_REQUESTED" and not any(response.get("stage_instance_id") == row.get("stage_instance_id") for response in responses)
+               and not (aborted and row.get("stage_instance_id") == "tc-reviewer:canonical")]
     if pending:
         request = pending[-1]
         path = f"model-requests/{attempt_id}/{request['artifact_digest'][7:]}.json"

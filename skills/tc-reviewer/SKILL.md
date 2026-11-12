@@ -46,7 +46,7 @@ and finalization predicates.
 
 ## Control errors, codeword, fresh session (P7)
 
-The view may hold control errors put in by code: report what contradicts the requirements as usual; never look for them in `<run>`. Beside `warnings` give `codeword_seen`: the word of «Контрольное слово: …» from the generator's task if it is in your context, else `null`. «проведи ревью test-skills <run_id>»: read `.pilot-runs/<run_id>/review-views/<sha>.md` (no `.autotest`), write the answer to `.pilot-runs/<run_id>/tmp/reviewer-answer.json`.
+The view may hold control errors put in by code: report what contradicts the requirements as usual; never look for them in `<run>`. Beside `warnings` give `codeword_seen`: the word of «Контрольное слово: …» from the generator's task if it is in your context, else `null`. «проведи ревью test-skills <run_id>»: read `.pilot-runs/<run_id>/review-views/<sha>.md` (no `.autotest`), write the answer to `.pilot-runs/<run_id>/incoming/tc-reviewer-canonical.json` (project files beyond the package: a top-level key `evidence: ["path", …]` of that file).
 
 ## Stop conditions
 

@@ -34,7 +34,7 @@ def _with_words(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 def _every_file(run: dict) -> bytes:
     return b"".join(path.read_bytes() for base in (run["run_root"], run["project"] / "bundles") if base.exists()
-                    for path in sorted(base.rglob("*")) if path.is_file())
+                    for path in sorted(base.rglob("*")) if path.is_file() and path != run["run_root"] / "incoming" / "tc-reviewer-canonical.json")  # that slot is the reviewer's own file, as it wrote it
 
 
 def test_the_generator_request_gives_a_nonce_and_keeps_its_sha256_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICE_COMMANDS = {
     "complete-review": "closing command of the review of nine commands; exists only where the old CLI is (execution_gate.legacy_available()); the texts teach review-open / review-select",
     "session-start": "opening command of the review of nine commands; exists only where the old CLI is (execution_gate.legacy_available()); the texts teach review-open",
+    **{name: "old command of the review: V4b removes it; the texts teach prepare / submit --stage tc-reviewer:canonical"
+       for name in ("read-ledger", "review-abort", "review-evidence", "review-publish")},
 }
 
 

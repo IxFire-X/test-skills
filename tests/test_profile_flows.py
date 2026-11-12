@@ -198,8 +198,8 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
 # ---- the cases part of a path, in both profiles: the answers of the generator → assemble → the review → the effective canonical ----
 
 def _cases_to_effective(pack: Path, run: dict) -> dict:
-    """The generator batch by batch (``prepare``, the fragment in the slot, ``submit``; the last one assembles), ``review-open``, ``review-select``,
-    ``read-effective``: the effective canonical of the run.  No file of the candidate is on the disk when the review opens."""
+    """The generator batch by batch (``prepare``, the fragment in the slot, ``submit``; the last one assembles), the review the same way (``prepare``, the answer
+    in the slot, ``submit``), ``read-effective``: the effective canonical of the run.  No file of the candidate is on the disk when the review opens."""
     from tests.test_review_two_commands import _bundles, _flags, _verdict
 
     flags, tmp = _flags(run), run["tmp"]
@@ -217,12 +217,14 @@ def _cases_to_effective(pack: Path, run: dict) -> dict:
         assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
         assert ("candidate" in answered["result"]) == (index == last), answered
     assert answered["result"]["candidate"]["document_digest"].startswith("sha256:") and not list(run["run_root"].rglob("candidate*.json"))
-    _status(pack, run["project"], run["run_root"].name, "review", "review-open")  # the last answer assembled it: the review takes it from the journal
-    code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",
-                        "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
+    stage = "tc-reviewer:canonical"
+    _status(pack, run["project"], run["run_root"].name, "review", "prepare")  # the last answer assembled it: the review takes it from the journal
+    code, opened = _api(pack, "prepare", "--run-root", str(run["run_root"]), "--stage", stage, "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
     assert code == 0 and opened["status"] == "ok", opened
-    _status(pack, run["project"], run["run_root"].name, "review", "model-response", "model")  # the request of the reviewer is the one open step
-    code, selected = _api(pack, "review-select", *flags, "--output-dir", _bundles(run), "--verdict", _verdict(run))
+    status = _status(pack, run["project"], run["run_root"].name, "review", "submit", "model")  # the request of the reviewer is the one open step
+    assert status["next"]["stage"] == stage and status["answer_slot"] == opened["result"]["answer_slot"], status
+    Path(opened["result"]["answer_slot"]).write_bytes(Path(_verdict(run)).read_bytes())
+    code, selected = _api(pack, "submit", "--run-root", str(run["run_root"]), "--stage", stage)
     assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", ("CO1: the answer of the reviewer", selected)
     code, effective = _api(pack, "read-effective", *flags)
     assert code == 0, effective

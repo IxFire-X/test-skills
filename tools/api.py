@@ -146,11 +146,11 @@ def _cmd_read_model_artifact(a):
 
 
 def _cmd_prepare(a):
-    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from)
+    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from, fresh_context=a.fresh_context)
 
 
 def _cmd_submit(a):
-    return stage_steps.submit(a.run_root, a.stage, _load_answer, dry_run=a.dry_run, transport_attempts=a.transport_attempts)
+    return stage_steps.submit(a.run_root, a.stage, _load_answer, dry_run=a.dry_run, transport_attempts=a.transport_attempts, abort=a.abort)
 
 
 def _cmd_validate_canonical(a):
@@ -295,8 +295,8 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None),
     "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--invocation-id", str, None),
-                                                 ("--reuse-from", str, None)), None),
-    "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag")), None),
+                                                 ("--reuse-from", str, None), ("--fresh-context", _yes_no, None)), None),
+    "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag"), ("--abort", str, None)), None),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None),
     "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),

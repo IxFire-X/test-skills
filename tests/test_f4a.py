@@ -64,7 +64,7 @@ def test_the_out_text_matches_what_main_prints_with_out(tmp_path: Path) -> None:
 def test_the_map_of_calls_and_how_to_use_describe_the_review_of_two_commands() -> None:
     rows = [row for row in CONTRACT.read_text(encoding="utf-8").splitlines() if row.startswith("| ") and ("Ревью" in row or "review" in row.lower())]
     table = "\n".join(rows)
-    assert "`tools.api review-open`" in table and "`tools.api review-select --verdict <ответ>`" in table
+    assert "`tools.api prepare --stage tc-reviewer:canonical`" in table and "`tools.api submit --stage tc-reviewer:canonical`" in table
     for old in ("session-start", "review-requested", "complete-review"):
         assert old not in table, old
     how = _flat(ROOT / "HOW-TO-USE.md")
@@ -117,7 +117,7 @@ def test_the_skill_asks_for_one_step_size_call_per_batch_and_names_the_key_of_ea
     assert "один вызов размера на пачку" in text
     assert "`files_summary`" in text and "input_files_summary" not in text  # V0: one key for both commands
     assert "`tools.api step-inputs`" in text and "`step_size`" in text
-    assert "`review-select --dry-run` — только при сомнении" in text
+    assert "`--dry-run` — только проверки" in text
     assert "оба" not in text.split("один вызов размера на пачку", 1)[1][:200]  # not «step-inputs and step_size»
 
 

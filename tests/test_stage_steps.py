@@ -573,7 +573,7 @@ def test_the_last_batch_assembles_the_candidate_the_review_reads(tmp_path: Path,
     expected, expected_receipt = assemble_candidate(json.loads(Path(run["header"]).read_bytes()), json.loads(Path(run["plan"]).read_bytes()), run["values"])
     assert code == 0 and out["result"]["candidate"]["document_digest"] == receipt["document_digest"] == expected_receipt["document_digest"]
     assert canonical_bytes(candidate) == canonical_bytes(expected) and out["result"]["candidate"]["assembly_receipt_digest"] == receipt["digest"]
-    assert not list(run["root"].rglob("candidate*.json")) and _status(run["root"])["next"] == {"verb": "review-open", "stage": "tc-reviewer"}
+    assert not list(run["root"].rglob("candidate*.json")) and _status(run["root"])["next"] == {"verb": "prepare", "stage": "tc-reviewer:canonical"}
     code, again = _call(capsys, "submit", run["root"], run["stages"][1])  # the recorded answer stands; the candidate is said again
     assert code == 0 and again["result"]["candidate"] == out["result"]["candidate"]
 

@@ -45,13 +45,11 @@ def _flags(run: dict) -> tuple[Path, str]:
 
 
 def _open(run: dict, monkeypatch: pytest.MonkeyPatch, seed: bool = True, invocation: str = "reviewer-subagent-1", fresh: bool = True) -> dict:
-    from tools import review_canaries
-    from tools.orchestrate_test_case_revision import review_open_step
+    from tools import review_canaries, stage_steps
 
     if seed:
         monkeypatch.setattr(review_canaries, "seed", _fake_seed)
-    return review_open_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["run_root"] / "published", model_id="model-reviewer",
-                            invocation_id=invocation, fresh_context=fresh)
+    return stage_steps.prepare(run["run_root"], "tc-reviewer:canonical", invocation_id=invocation, fresh_context=fresh)
 
 
 def _candidate(run: dict) -> dict:
@@ -80,9 +78,12 @@ def _finding(severity: str, related: list[str], message: str = "Контроль
 
 
 def _select(run: dict, answer: dict, **extra) -> dict:
-    from tools.orchestrate_test_case_revision import review_select_step
+    from tools import api, stage_steps
 
-    return review_select_step(run["run_root"], run["attempt_id"], files={}, output_dir=run["run_root"] / "published", verdict=answer, **extra)
+    slot = stage_steps.slot(run["run_root"], "tc-reviewer:canonical")
+    slot.parent.mkdir(exist_ok=True)
+    slot.write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
+    return stage_steps.submit(run["run_root"], "tc-reviewer:canonical", api._load_answer, **extra)
 
 
 def _events(run_root: Path) -> list[dict]:
