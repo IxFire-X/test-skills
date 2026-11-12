@@ -20,6 +20,8 @@ ENTRY_POINTS = [
     ("tools.orchestrate_test_case_revision", "orchestrate_revision"),
     ("tools.generated_delta", "materialize_delta"),
     ("tools.finalize_attempt", "finalize_attempt"),
+    ("tools.exec_commands", "cmd_materialize"),
+    ("tools.exec_commands", "cmd_ingest"),
 ]
 
 
@@ -175,3 +177,31 @@ def test_a_forged_copy_during_finish_gives_one_error_json_and_code_2(tmp_path: P
     lines = [line for line in out.out.splitlines() if line.strip()]
     answer = json.loads(out.out)
     assert answer["status"] == "error" and out.out.count('"status"') == 1, lines
+
+
+def test_a_copy_forged_during_ingest_gives_the_error_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The same for ``ingest``: it prints inside its body, so its answer is held until the final full check; the success is never printed before the error."""
+    import json
+
+    from tests.test_exec_prepares import _project
+    from tests.test_p4_ingest import _human_run, _materialize
+    from tools import pilot_state
+    from tools.run_pipeline import main
+
+    project, run_root, _attempt_id = _project(tmp_path)
+    assert _human_run(project, _materialize(project, run_root, capsys)).returncode == 0
+    copy, forged, derive = run_root / "events" / "0000000002.json", {"done": False}, pilot_state._derive_state
+
+    def derive_then_forge(root):
+        state = derive(root)
+        if not forged["done"] and pilot_state._CLOSURE_CACHE.get() is not None:
+            forged["done"] = True
+            copy.write_bytes(copy.read_bytes().replace(b'"seq":2', b'"seq":2 '))
+        return state
+
+    monkeypatch.setattr(pilot_state, "_derive_state", derive_then_forge)
+    capsys.readouterr()
+    code = main(["ingest", "--project", str(project), "--run", run_root.name, "--module", "python-pytest"])
+    out = capsys.readouterr()
+    assert forged["done"] and code == 2 and "Traceback" not in out.out + out.err
+    assert json.loads(out.out)["status"] == "error" and out.out.count('"status"') == 1, out.out

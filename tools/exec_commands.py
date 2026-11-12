@@ -5,8 +5,11 @@ it, ``ingest`` takes the reports; ``exec`` only answers that it was replaced.  T
 from __future__ import annotations
 
 import ast
+import contextlib
 import dataclasses
+import functools
 import hashlib
+import io
 import os
 import stat
 import sys
@@ -34,6 +37,21 @@ from tools.execution_core import (
     process_evidence_row as _core_process_row,
 )
 from tools.run_tests import ProcessOutcome
+
+
+def _one_closure(command: Any) -> Any:
+    """One ``closure_cache()`` for a command: the journal is checked once, not on every read; what the command prints is let out after the final full check."""
+    @functools.wraps(command)
+    def wrapper(args: Any) -> int:
+        from tools.pilot_state import closure_cache
+
+        held = io.StringIO()
+        with contextlib.redirect_stdout(held), closure_cache():
+            code = command(args)
+        sys.stdout.write(held.getvalue())
+        return code
+    wrapper.__closure_cached__ = True
+    return wrapper
 
 
 def _resolve_host_context(
@@ -721,6 +739,7 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
     return 0
 
 
+@_one_closure
 def cmd_materialize(args: Any) -> int:
     """The accepted tests into the project, then the command a human runs — nothing is started."""
     from tools.execution_adapters import request_digest
@@ -967,6 +986,7 @@ def _printed_time(root: Path, attempt_id: str) -> str:
     return datetime.fromtimestamp(os.stat(path).st_mtime_ns / 1_000_000_000, timezone.utc).isoformat()
 
 
+@_one_closure
 def cmd_ingest(args: Any) -> int:
     """The reports of a run a human made of the printed command, held against the attempt — or the human's statement that there are none."""
     from tools.execution_adapters import request_digest
