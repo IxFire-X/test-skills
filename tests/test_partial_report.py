@@ -58,3 +58,8 @@ def test_a_review_in_the_same_session_is_named_so_and_a_run_without_an_answer_ha
 def test_no_gap_line_says_there_is_none() -> None:
     text = _lines(_acceptance(coverage_gaps=[]))
     assert "Пробелов покрытия нет" in text and "## Пробелы покрытия" not in text
+
+
+@pytest.mark.parametrize("accepted, words", [(1, "1 кейс"), (2, "2 кейса"), (5, "5 кейсов"), (11, "11 кейсов"), (21, "21 кейс"), (54, "54 кейса")])
+def test_the_number_of_cases_of_the_import_file_is_declined_as_in_the_line_of_the_outcome(accepted: int, words: str) -> None:
+    assert f"- Набор для импорта в Zephyr: published/TCDOC-x.r2.zephyr-scale.csv ({words})" in _lines(_acceptance(accepted=accepted, generated=accepted + 1))

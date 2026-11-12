@@ -430,3 +430,125 @@ def partial_is_bound(candidate: dict[str, Any], report: dict[str, Any], canaries
     if reason is not None or not isinstance(effective, dict):
         return False
     return effective == candidate if not rejected else not check_subtraction(candidate, effective, [*rejected, *dragged])
+
+
+# --- the rework: the cases of r1 the reviewer rejected go back once to the generator; the code builds r3 and checks it ---------------
+
+DEFAULT_REWORK_ROUNDS = 0  # ``.skillsrc`` limits.rework_rounds (0 | 1): 0 is V6 (nothing goes back); the code knows no second round
+REWORK_INSTANCE, REWORK_VIEW = "rework-1", "rework-view-v1"
+REWORK_STAGE = "tc-generator:" + REWORK_INSTANCE
+REWORK_TEXT_MAX, REWORK_FINDINGS_MAX = 2000, 10  # what one blocking finding of the reviewer may carry into the generator's view
+_CASE_IDENTITY = ("case_id", "requirement_ids", "display_order", "param_group")
+
+
+def rework_request(candidate: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
+    """What the generator of the rework reads: the rejected cases as the reviewer saw them (r1) and the blocking findings that rejected each (code, text,
+    the ids of that case) — a function of r1 and the outcome.  The texts are the reviewer's: a view is data, each finding cut at ``REWORK_TEXT_MAX``."""
+    owners = _owners(candidate)
+    return {"view": REWORK_VIEW, "cases": [case for case in candidate["test_cases"] if case["case_id"] in outcome["rejected"]],
+            "findings": {case_id: [{"code": finding.get("code"), "message": str(finding.get("message"))[:REWORK_TEXT_MAX],
+                                    "related_ids": [item for item in finding.get("related_ids") or [] if owners.get(item) == case_id]}
+                                   for finding in findings[:REWORK_FINDINGS_MAX]] for case_id, findings in outcome["said"].items()}}
+
+
+def _refuse(code: str, message: str) -> SelectionError:
+    return SelectionError([_diagnostic("/test_cases", code, message)])
+
+
+def _regroup(candidate: dict[str, Any], outcome: dict[str, Any], passed: Sequence[str]) -> tuple[set[str], set[str]]:
+    """``(back, dropped)``: the one rule of the groups after the rework.  A group that left r2 whole (every variant rejected or taken out with them) is a group
+    again only with two live variants — those of ``passed`` and the ones taken out with it; its variants come back (r1's bytes), else the passed ones with it stay out."""
+    groups: dict[str, list[str]] = {}
+    for case in candidate["test_cases"]:
+        if "param_group" in case:
+            groups.setdefault(case["param_group"], []).append(case["case_id"])
+    kept = {case["case_id"] for case in outcome["effective"]["test_cases"]}
+    back, dropped = set(), set()
+    for members in groups.values():
+        if not kept & set(members):
+            alive = {item for item in members if item in passed or item in outcome["with_group"]}
+            (back if len(alive) >= 2 else dropped).update(alive)
+    return back, dropped
+
+
+def check_rework(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any) -> dict[str, Any]:
+    """r3 = r2 plus the answer's cases at r1's places, or ``SelectionError``: the answer is exactly the rejected cases (no other, none missing, none twice), each
+    keeps its ``case_id``, ``requirement_ids``, ``display_order`` and ``param_group``, every other case is r2's byte for byte, and r3 passes the validator."""
+    from tools.canonical_document import validate_canonical_document
+
+    r2, rejected = outcome["effective"], outcome["rejected"]
+    if (not isinstance(answer, dict) or set(answer) != {"schema_version", "status", "batch_id", "test_cases"} or answer["schema_version"] != "1.0.0"
+            or answer["status"] != "COMPLETE" or answer["batch_id"] != REWORK_INSTANCE or not isinstance(answer["test_cases"], list)
+            or any(not isinstance(case, dict) or not isinstance(case.get("case_id"), str) for case in answer["test_cases"])):
+        raise _refuse("REWORK_ANSWER_FORM", "the answer is {schema_version: 1.0.0, status: COMPLETE, batch_id: rework-1, test_cases: [the reworked cases]}")
+    given = [case.get("case_id") for case in answer["test_cases"]]
+    kept = {case["case_id"]: case for case in r2["test_cases"]}
+    if set(kept) & set(given):
+        raise _refuse("REWORK_FOREIGN_CASE_CHANGED", "the answer holds a case the review accepted: " + ", ".join(sorted(set(kept) & set(given))))
+    if sorted(map(str, given)) != sorted(rejected):
+        raise _refuse("REWORK_CASE_SET", f"the answer must hold exactly the rejected cases {rejected}, it holds {given}")
+    before = {case["case_id"]: case for case in candidate["test_cases"]}
+    for case in answer["test_cases"]:
+        if any(case.get(key) != before[case["case_id"]].get(key) or (key in case) != (key in before[case["case_id"]]) for key in _CASE_IDENTITY):
+            raise _refuse("REWORK_CASE_IDENTITY", f"{case['case_id']}: case_id, requirement_ids, display_order and param_group stay as the reviewer saw them")
+    by_id = {case["case_id"]: case for case in answer["test_cases"]}
+    back = _regroup(candidate, outcome, rejected)[0]  # the variants taken out with their group come back beside the reworked ones, as when every case passes
+    r3 = copy.deepcopy(r2)
+    r3["revision"], r3["parent_sha256"] = r2["revision"] + 1, document_sha256(r2)
+    r3["test_cases"] = [copy.deepcopy(by_id[item] if item in by_id else kept[item] if item in kept else before[item]) for item in before if item in kept or item in by_id or item in back]
+    if any(case["case_id"] not in by_id and case["case_id"] not in back and canonical_bytes(case) != canonical_bytes(kept[case["case_id"]]) for case in r3["test_cases"]):
+        raise _refuse("REWORK_FOREIGN_CASE_CHANGED", "a case outside the answer is not r2's byte for byte")
+    rows = validate_canonical_document(r3)
+    if rows:
+        raise SelectionError([_diagnostic(row["path"], "REWORK_INVALID", f"{row['code']}: {row['message']}") for row in rows[:5]])
+    return r3
+
+
+def _second_round(report: dict[str, Any], r3: dict[str, Any], reworked: set[str]) -> tuple[set[str], dict[str, list[Any]], int]:
+    """``(rejected, said, ignored)`` of the review of the reworked cases only: a blocking finding rejects the reworked cases it names; one that names none
+    rejects them all; one that names only other cases is ``ignored`` (what the first round accepted the second cannot reject)."""
+    if report.get("verdict") == "ПРИНЯТО":
+        return set(), {}, 0
+    owners, rejected, said, ignored = _owners(r3), set(), {}, 0
+    blocking = [finding for finding in report.get("findings") or [] if finding.get("severity") == "BLOCKING"]
+    for finding in blocking:
+        related = [item for item in finding.get("related_ids") or [] if item in owners]
+        named = {owners[item] for item in related} & reworked
+        if not named and related:
+            ignored += 1
+            continue
+        for case_id in named or reworked:
+            said.setdefault(case_id, []).append(finding)
+        rejected |= named or reworked
+    return (rejected, said, ignored) if blocking else (set(reworked), {}, 0)  # sent back with nothing that blocks: no case passes
+
+
+def rework_final(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any, report: dict[str, Any], successor: Any = None) -> dict[str, Any]:
+    """The set after the second round, a function of r1, the first outcome (``PARTIAL``), the generator's answer and the review of the reworked cases only:
+    r2 plus the reworked cases that passed and the variants of a group that came back with them (r1's bytes) — r3; r2 itself when none passed.
+    ``SelectionError`` for an answer or a review the code refuses; the set is validated again here, before anyone publishes it."""
+    from tools.canonical_document import validate_canonical_document
+
+    if report.get("verdict") == "AUTO_FIX_APPLIED" or successor is not None:
+        raise _refuse("REWORK_REVIEW_FIX", "the review of the reworked cases accepts or rejects them: no successor, no edits")
+    r2, r3 = outcome["effective"], check_rework(candidate, outcome, answer)
+    reworked = {case["case_id"]: case for case in answer["test_cases"]}
+    out, said, ignored = _second_round(report, r3, set(reworked))
+    passed = [item for item in reworked if item not in out]
+    back, dropped = _regroup(candidate, outcome, passed)
+    final = [item for item in passed if item not in dropped]
+    out_with_group = [item for item in [*outcome["with_group"], *dropped] if item not in back]  # taken out with a group: nobody rejected them in the second round
+    result = {"kind": "NONE" if not final else "ALL" if len(final) == len(reworked) and not out_with_group else "PARTIAL",
+              "ignored": ignored, "said": said, "reworked": reworked, "accepted_after": final, "effective": r2,
+              "rejected": [item for item in reworked if item not in passed], "with_group": [case["case_id"] for case in candidate["test_cases"] if case["case_id"] in out_with_group]}
+    if final:
+        pick = {case["case_id"]: reworked.get(case["case_id"], case) for case in candidate["test_cases"] if case["case_id"] in [*final, *back]}
+        effective = copy.deepcopy(r2)
+        effective["revision"], effective["parent_sha256"] = r2["revision"] + 1, document_sha256(r2)
+        old = {case["case_id"]: case for case in r2["test_cases"]}
+        effective["test_cases"] = [copy.deepcopy(pick.get(case["case_id"]) or old[case["case_id"]]) for case in candidate["test_cases"] if case["case_id"] in pick or case["case_id"] in old]
+        rows = validate_canonical_document(effective)
+        if rows:
+            raise SelectionError([_diagnostic(row["path"], "REWORK_FINAL_INVALID", f"{row['code']}: {row['message']}") for row in rows[:5]])
+        result["effective"] = effective
+    return result

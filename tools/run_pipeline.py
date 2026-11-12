@@ -431,7 +431,9 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             }[stage_id.split(":", 1)[0]]
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
                 next_artifact = "context-marker parts merge"  # the remaining parts, then the merge by code
-            if stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
+            if stage_id == "tc-generator:rework-1":
+                next_artifact = "rework answered"  # nobody reviews the rework before V7b: finish publishes r2
+            elif stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
                 next_artifact = "canonical reviewer package and boundary"  # the last answer assembled the candidate; review-open publishes it from the journal
             if stage_id.startswith("autotest-reviewer:"):
                 from tools.finalize_attempt import automation_next
@@ -467,6 +469,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     named_receipts = 0
     # These readers are read-only; the similarly named recovery helpers may write events.
     for kind, next_artifact in (
+        ("rework-round", "rework fragment"),
         ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
         ("execution-inputs", "materialization"), ("generated-delta", "materialization command"),
         ("materialization-command", "human run report"), ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
@@ -1839,6 +1842,10 @@ def cmd_finish(args: Any) -> int:
         _print({"status": "ok", "stage": "finish", "run_id": run["manifest"]["run_id"], "left": _leave(project, root, attempt_id),
                 "message": "прогон оставлен до ревью кейсов; простой scan того же запроса начнёт новый", "next_run": closed["next_run"]})
         return 0
+    from tools.orchestrate_test_case_revision import close_pending_rework
+
+    if not executed:
+        close_pending_rework(root, attempt_id)  # the first review sent cases back and the rework is not over: r2 and the rejected cases are published now, once
     try:
         closed = (finalize_durable_execution_attempt(root, attempt_id) if executed
                   else finalize_durable_branch_attempt(root, attempt_id, abandon))

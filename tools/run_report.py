@@ -375,7 +375,7 @@ def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                       and first_generator is not None and event["seq"] < first_generator["seq"]), None)
     review_request = _find(ordered, "REVIEW_REQUESTED", "tc-reviewer:")
     review_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "tc-reviewer:", last=True)
-    last_candidate = _find(ordered, "CANDIDATE_PUBLISHED", "tc-generator:", last=True)
+    last_candidate = _find(ordered, "CANDIDATE_PUBLISHED", "tc-generator:BATCH-", last=True)
     rows: list[dict[str, Any]] = []
 
     def phase(name: str, start: Mapping[str, Any] | None, end: Mapping[str, Any] | None, batch: str | None = None) -> None:
@@ -933,7 +933,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "requirements": requirements,
             "source_requirements": requirements if requirements is not None else source_count,
             "canonical_requirements": canonical_count, "canon_basis": canon_basis,
-            "batches": len({event.get("stage_instance_id") for event in responses if str(event.get("stage_instance_id")).startswith("tc-generator:")}),
+            "batches": len({event.get("stage_instance_id") for event in responses if str(event.get("stage_instance_id")).startswith("tc-generator:BATCH-")}),
             "cases": cases, "review_verdict": evidence.get("authoritative_verdict"),
             "automation": evidence.get("automation_accepted"),
             "execution": execution.get("verdict") or terminal.get("verification"),
@@ -1091,11 +1091,17 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     acc = report.get("acceptance")
     if not acc:
         return []
-    total, accepted, removed = acc["generated"], acc["accepted"], acc["removed"]
+    total, accepted, removed, rework = acc["generated"], acc["accepted"], acc["removed"], acc.get("rework")
+    left = total - accepted  # the cases not in the set
     if acc["outcome"] == "ACCEPTED_WHOLE":
-        head = f"**ПРИНЯТ: {total} из {total} кейсов.**"
+        after = f" ({rework['accepted']} — после доработки)" if rework and rework["accepted"] else ""
+        head = f"**ПРИНЯТ: {total} из {total} кейсов{after}.**"
     elif acc["outcome"] == "PARTIAL":
-        head = f"**ПРИНЯТ ЧАСТИЧНО: {accepted} из {total} кейсов.** {removed} {plural(removed, 'кейс не дорабатывался', 'кейса не дорабатывались', 'кейсов не дорабатывались')}."
+        state = rework["state"] if rework else ""
+        words = {"reviewed": ("кейс не прошёл ревью после доработки и в набор не вошёл", "кейса не прошли ревью после доработки и в набор не вошли", "кейсов не прошли ревью после доработки и в набор не вошли")}.get(
+            state, ("кейс не дорабатывался", "кейса не дорабатывались", "кейсов не дорабатывались"))
+        said = f"Доработка {left} {'кейса' if left % 10 == 1 and left % 100 != 11 else 'кейсов'} не завершена." if state == "unfinished" else f"{left} {plural(left, *words)}."
+        head = f"**ПРИНЯТ ЧАСТИЧНО: {accepted} из {total} кейсов.** {said}"
     elif acc["reason"] == "OVER_SHARE":
         head = f"**ТРЕБУЕТ ДОРАБОТКИ:** отклонено {removed} из {total} кейсов — больше допустимого ({acc['share']} %)."
     else:
@@ -1108,11 +1114,16 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if acc["outcome"] != "PARTIAL":
         return lines
     gaps, files = acc["coverage_gaps"], acc["files"]
-    lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {accepted} |", f"| Не принято (вынесено отдельно) | {removed} |", "",
-              f"Ревью: {'независимое (INDEPENDENT)' if report.get('reviewer_isolation_state') == 'verified' else 'в той же сессии (SELF)'}, 1 круг: весь набор.",
+    rework = rework if rework and rework["state"] != "not_started" else None  # nothing was sent back: the three rows of V6
+    first = rework["accepted_first"] if rework else accepted
+    lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {first} |",
+              *([f"| Отклонено и отправлено на доработку | {rework['sent']} |", f"| Принято после доработки | {rework['accepted']} |"] if rework else []),
+              f"| Не принято (вынесено отдельно) | {left} |", "",
+              f"Ревью: {'независимое (INDEPENDENT)' if report.get('reviewer_isolation_state') == 'verified' else 'в той же сессии (SELF)'}, "
+              + ("2 круга: весь набор, затем только доработанный кейс." if rework and rework["state"] == "reviewed" else "1 круг: весь набор."),
               (f"Пробелы покрытия: {len(gaps)} {plural(len(gaps), 'требование осталось', 'требования остались', 'требований остались')} без принятого кейса — см. «Пробелы покрытия»." if gaps
                else "Пробелов покрытия нет: у каждого требования остался принятый кейс."), "",
-              "Файлы для работы:", f"- Набор для импорта в Zephyr: {files['csv']} ({accepted} кейсов)", f"- Набор для чтения: {files['set']}",
+              "Файлы для работы:", f"- Набор для импорта в Zephyr: {files['csv']} ({accepted} {plural(accepted, 'кейс', 'кейса', 'кейсов')})", f"- Набор для чтения: {files['set']}",
               f"- Не принятые кейсы — не импортировать: {files['rejected']}", "- Вопросы аналитику: questions-for-analyst.md", ""]
     if gaps:
         lines += ["## Пробелы покрытия", "", "| Требование | Почему нет кейса | Что сказал ревьюер |", "|---|---|---|",

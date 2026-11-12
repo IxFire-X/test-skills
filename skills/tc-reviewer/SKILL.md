@@ -42,6 +42,7 @@ and finalization predicates.
    Return `AUTO_FIX_APPLIED` only when the edits give one complete valid revision 2 keeping the source/canonical/case mappings and identity graph.
    Give the successor as `artifacts.successor_edits`, not as a document: `[{correction_id, case_id, field, step_id?, expectation_id?, index?, old, new}]`, `field` one of `title`, `objective`, `precondition` (`index`), `action`, `test_data` (`step_id`), `expectation` (`step_id`, `expectation_id`); `old` is the exact current text, `new` replaces it as is, `correction_id` names a `MECHANICAL` correction. Code builds revision 2 from the candidate; `python -m tools.review_edits --candidate <r1.json> --edits <file>` checks the edits and prints the `effective` reference — copy it, never compute a digest.
 4. A destructive, partial, or semantic-choice correction requires `ТРЕБУЕТ ДОРАБОТКИ`; it never selects a partial patch. Revision 3 and a second authoritative verdict are forbidden.
+5. Every `BLOCKING` finding of `ТРЕБУЕТ ДОРАБОТКИ` names the cases it is about in `related_ids` (the case id, or the id of its step or expectation): the code takes out exactly those cases. A blocking finding that names no case rejects the whole set.
 
 ## Control errors, codeword, fresh session (P7)
 

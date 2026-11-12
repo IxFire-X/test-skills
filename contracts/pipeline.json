@@ -71,6 +71,7 @@
     {"path": "generator-headers/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "generator-header", "registry_id": "canonical_header"},
     {"path": "reference-cases/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "reference-cases"},
     {"path": "review-canaries/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "review-canaries"},
+    {"path": "rework-rounds/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "rework-round"},
     {"path": "imported-cases/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "imported-cases"},
     {"path": "imported-cases/<attempt>.<batch>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "imported-cases-<batch>"},
     {"path": "prior-capabilities/<attempt>.<batch>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:_receipt_target", "kind": "prior-capabilities-<batch>"},

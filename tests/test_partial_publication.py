@@ -160,3 +160,23 @@ def test_the_warnings_of_the_projections_survive_a_partial_bundle() -> None:
     document["metadata"]["documentation"] = []
     effective, partial = _partial(document, _real(document, 1))
     assert any(item.startswith("MISSING_DOCUMENTATION") for item in build_bundle(effective, PROFILE, partial=partial).warnings)
+
+
+def test_two_rejected_variants_of_one_group_are_named_apart_everywhere_and_a_single_case_keeps_its_number() -> None:
+    from tools.publish_test_case_bundle import gap_rows
+
+    document = _grouped()
+    ids = _group_ids(document)  # three variants of one section: two rejected, the third goes out with them
+    effective, partial = _partial(document, [_finding("BLOCKING", ids[:2])])
+    labels = [row["label"] for row in partial["rejected"]]
+    assert labels == ["1 (вариант 1)", "1 (вариант 2)", "1 (вариант 3)"]
+    header = _markdown(effective, partial)
+    assert "ТК-1 (вариант 1)" in header and "ТК-1 (вариант 2)" in header
+    both = _rejected_files(document, [_finding("BLOCKING", ids[:2])])["md"]
+    headings = [line.split(". ", 1)[0] for line in both.splitlines() if line.startswith("## ТК-")]
+    assert headings == ["## ТК-1 (вариант 1)", "## ТК-1 (вариант 2)", "## ТК-1 (вариант 3)"]
+    one = _partial(document, [_finding("BLOCKING", ids[1:2])])[1]
+    assert one["rejected"][0]["label"] == 1  # one variant out alone keeps the number of its section
+    plain = r1_document()
+    assert _partial(plain, _real(plain, 3))[1]["rejected"][0]["label"] == 3  # a single case stays «ТК-n»
+    assert all("ТК-1 (вариант" in cell for _req, cell, _said in gap_rows(partial)) or not partial["gaps"]

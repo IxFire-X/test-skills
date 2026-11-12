@@ -28,6 +28,7 @@ from typing import Any, Iterable, Mapping
 
 from tools.json_cli import JsonArgumentParser, cli_error
 from tools.output_guard import OutputRefused, input_file, project_path, run_name
+from tools.revision_selection import REWORK_STAGE, REWORK_VIEW
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -437,6 +438,16 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     unresolved: list[dict[str, str]] = []
     contexts: list[str] = []
     for position, digest in enumerate(digests):
+        if stage == REWORK_STAGE and position < 2:  # the answer of the reviewer and r1 are read as one view of the rejected cases, built by the code from the journal
+            if position == 0:
+                from tools.orchestrate_test_case_revision import rework_basis
+                from tools.revision_selection import rework_request
+
+                basis = rework_basis(root, attempt_id)
+                data, target = _compact(rework_request(basis["candidate"], basis["outcome"])), rework_view_path(root, digest)
+                _write_view(project, root, target, data, write_views)
+                files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": REWORK_VIEW})
+            continue
         if position in views:
             files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
         elif digest == journal.inventory_digest:  # the model reads the projection of the inventory, not the receipt
@@ -468,6 +479,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             bindings.append({"digest": digest, "carrier": str(carrier), "key": key, "bytes": 0 if read else size})
         else:
             unresolved.append({"digest": digest, "reason": "not-in-journal"})
+    if stage == REWORK_STAGE:  # the text of the rework: a file of the role that no other batch reads
+        text = PACK / "skills" / "tc-generator" / "rework.md"
+        files.append({"digest": "", "path": str(text), "bytes": text.stat().st_size, "basis": "роль доработки"})
     if stage == "tc-to-autotest:r2":
         for basis, source, event_type in (("r1", "tc-to-autotest:r1", "CANDIDATE_PUBLISHED"), ("ревью r1", "autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")):
             answer = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id
@@ -504,6 +518,10 @@ PLAN_VIEW = "plan-view-v1"
 
 def inventory_view_path(root: Path, inventory_digest: str) -> Path:
     return Path(root) / "review-views" / (str(inventory_digest).removeprefix("sha256:") + ".inventory-view.json")
+
+
+def rework_view_path(root: Path, answer_digest: str) -> Path:
+    return Path(root) / "review-views" / (str(answer_digest).removeprefix("sha256:") + ".rework-view.json")
 
 
 def plan_view_path(root: Path, plan_digest: str) -> Path:

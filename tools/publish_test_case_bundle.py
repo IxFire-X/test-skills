@@ -353,18 +353,31 @@ def plural(number: int, one: str, few: str, many: str) -> str:
     return one if number % 10 == 1 and number % 100 != 11 else few if number % 10 in (2, 3, 4) and number % 100 not in (12, 13, 14) else many
 
 
-def partial_context(candidate: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
+def partial_context(candidate: dict[str, Any], outcome: dict[str, Any], rework: dict[str, Any] | None = None) -> dict[str, Any]:
     """What the files and the report of a ``PARTIAL`` outcome say, a function of the reviewer's set r1 and the outcome (nothing is stored):
-    the numbers of r1, the cases taken out with what the reviewer said of them, and the requirements left without a case."""
+    the numbers of r1, the cases taken out with what the reviewer said of them, and the requirements left without a case.  ``rework`` — what became of
+    the rework: ``{"state": "not_started" | "unfinished"}`` or ``{"state": "reviewed", "final": rework_final(...)}`` (the cases not accepted are shown in the
+    last reworked version, with the findings of both rounds)."""
     from tools.revision_selection import coverage_gaps
 
+    final = (rework or {}).get("final")
+    if final:
+        outcome = {**outcome, "rejected": [*final["rejected"]], "with_group": final["with_group"], "effective": final["effective"]}
     labels, out = section_labels(candidate), {*outcome["rejected"], *outcome["with_group"]}
-    rejected = [{"case_id": case["case_id"], "label": labels[case["case_id"]], "title": case["title"], "requirements": case["requirement_ids"],
-                 "said": [[row["code"], row["message"]] for row in outcome["said"].get(case["case_id"], [])], "with_group": case["case_id"] in outcome["with_group"]}
+    variants: dict[str, list[str]] = {}
+    for case in candidate["test_cases"]:
+        if "param_group" in case:
+            variants.setdefault(case["param_group"], []).append(case["case_id"])
+    # the variants of a group share one section number: when two or more of them are out, each is named by its place in the group, «42 (вариант 2)»
+    named = {item: f"{labels[item]} (вариант {place})" for ids in variants.values() if len(out & set(ids)) > 1 for place, item in enumerate(ids, 1) if item in out}
+    rejected = [{"case_id": case["case_id"], "label": named.get(case["case_id"], labels[case["case_id"]]), "title": case["title"], "requirements": case["requirement_ids"],
+                 "said": [[row["code"], row["message"]] for row in outcome["said"].get(case["case_id"], [])], "with_group": case["case_id"] in outcome["with_group"],
+                 **({"said2": [[row["code"], row["message"]] for row in final["said"].get(case["case_id"], [])]} if final and case["case_id"] in final["reworked"] else {})}
                 for case in candidate["test_cases"] if case["case_id"] in out]
     gaps = [{"requirement": item, "labels": [row["label"] for row in rejected if item in row["requirements"]],
              "said": list(dict.fromkeys(text for row in rejected if item in row["requirements"] for _code, text in row["said"]))} for item in coverage_gaps(outcome["effective"])]
     return {"total": len(candidate["test_cases"]), "kept": len(outcome["effective"]["test_cases"]), "labels": labels, "rejected": rejected, "gaps": gaps,
+            "rework": (rework or {}).get("state"), "versions": final["reworked"] if final else {}, "revision": outcome["effective"]["revision"],
             "file": f"{candidate['document_id']}.r{outcome['effective']['revision']}.REJECTED-CASES.md"}
 
 
@@ -381,7 +394,7 @@ def _partial_header(partial: dict[str, Any]) -> tuple[str, str]:
 
 
 def gap_rows(partial: dict[str, Any]) -> list[tuple[str, str, str]]:
-    return [(row["requirement"], "Его покрывали только отклонённые кейсы: " + ", ".join(f"ТК-{label}" for label in row["labels"]), "; ".join(" ".join(text.split()) for text in row["said"]) or "—")
+    return [(row["requirement"], "Его покрывали только отклонённые кейсы: " + ", ".join(f"ТК-{label}" for label in row["labels"]) + ("; отклонён дважды" if partial["rework"] == "reviewed" else ""), "; ".join(" ".join(text.split()) for text in row["said"]) or "—")
             for row in partial["gaps"]]
 
 
@@ -410,21 +423,28 @@ def _partial_markdown(page: bytes, partial: dict[str, Any]) -> bytes:
     return (head + f"\n\n> **{bold}** {escape_inline(rest)}\n\n" + tail + section).encode("utf-8")
 
 
+REJECTED_WHY = {"not_started": "; доработка не запускалась.", "unfinished": "; доработка не завершена.", "reviewed": " после одного круга доработки."}  # the words of the intro, by what became of the rework
+
+
 def rejected_cases(candidate: dict[str, Any], partial: dict[str, Any], run_id: str) -> tuple[dict[str, Any], dict[str, Any], str]:
     """``(document, extras, intro)`` of ``*.rN.REJECTED-CASES``: the rejected cases of r1 as a set of their own (a variant of a group stands alone, so its
     ``param_group`` is left out of this copy) with the numbers of r1 and, under each, its requirements and what the reviewer said."""
     ids = {row["case_id"] for row in partial["rejected"]}
     shown = copy.deepcopy(candidate)
-    shown["revision"], shown["parent_sha256"] = candidate["revision"] + 1, document_sha256(candidate)
-    shown["test_cases"] = [{key: value for key, value in case.items() if key != "param_group"} for case in shown["test_cases"] if case["case_id"] in ids]
+    shown["revision"], shown["parent_sha256"] = partial["revision"], document_sha256(candidate)
+    shown["test_cases"] = [{key: value for key, value in partial["versions"].get(case["case_id"], case).items() if key != "param_group"}
+                           for case in shown["test_cases"] if case["case_id"] in ids]
     notes: dict[str, list[tuple[str, str]]] = {}
     for row in partial["rejected"]:
         alone = [gap["requirement"] for gap in partial["gaps"] if gap["requirement"] in row["requirements"]]
+        rounds = [(f"Замечание ревьюера (круг {number}, блокирующее, {code}):" if "said2" in row else f"Замечание ревьюера (блокирующее, {code}):", text)
+                  for number, said in ((1, row["said"]), (2, row.get("said2", []))) for code, text in said]
         notes[row["case_id"]] = [*([("Без другого принятого кейса:", ", ".join(alone) + ".")] if alone else []),
                                  *([("Вынесен вместе с группой параметров:", "в ней остался один вариант, а группа из одного кейса невозможна.")] if row["with_group"] else []),
-                                 *((f"Замечание ревьюера (блокирующее, {code}):", text) for code, text in row["said"])]
+                                 *rounds]
     subject = candidate["metadata"]["subject"]
     name = subject["name"] if subject["kind"] != "http_endpoint" else f"{subject['method']} {subject['path']}"
-    intro = (f"Прогон {run_id[:8]}…, набор «{name}». Эти кейсы не прошли ревью; доработка не запускалась. "
+    why = REJECTED_WHY[partial["rework"] or "not_started"]
+    intro = (f"Прогон {run_id[:8]}…, набор «{name}». Эти кейсы не прошли ревью{why} "
              "Их можно доработать вручную или запросить новый прогон для этих требований.")
-    return shown, {"labels": partial["labels"], "notes": notes}, intro
+    return shown, {"labels": {**partial["labels"], **{row["case_id"]: row["label"] for row in partial["rejected"]}}, "notes": notes}, intro

@@ -20,8 +20,8 @@ from tools.fixes import FIXES
 from tools import output_guard
 from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, partial_context, planned_receipt, publish_bundle, rejected_cases, status_payloads, verify_bundle
-from tools.revision_selection import (DEFAULT_REJECT_SHARE, SelectionError, candidate_rows, review_outcome, reviewer_verdict_is_bound,
-                                      select_effective_document, validate_review_decision)
+from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_STAGE, SelectionError, candidate_rows, check_rework, review_outcome,
+                                      reviewer_verdict_is_bound, select_effective_document, validate_review_decision)
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -442,7 +442,7 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     candidate = journal_assembly(Path(run_root), attempt_id)[0]
     total = len(candidate["test_cases"])
     summary: dict[str, Any] = {"verdict_given": report.get("verdict"), "outcome": "ACCEPTED_WHOLE", "reason": None, "generated": total, "accepted": total, "removed": 0,
-                               "rejected_by_findings": 0, "rejected_with_group": 0, "coverage_gaps": [], "rejected_cases": [], "files": None}
+                               "rejected_by_findings": 0, "rejected_with_group": 0, "coverage_gaps": [], "rejected_cases": [], "files": None, "rework": None}
     if report.get("verdict") != "ТРЕБУЕТ ДОРАБОТКИ":
         return summary
     share = reject_share(run_root, attempt_id)
@@ -452,13 +452,102 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     summary.update(outcome=outcome["kind"], reason=outcome["reason"], share=share, removed=outcome["removed"], rejected_by_findings=len(outcome["rejected"]),
                    rejected_with_group=len(outcome["with_group"]), accepted=0 if outcome["kind"] == "REWORK" else total - outcome["removed"])
     if outcome["kind"] == "PARTIAL":
-        partial, name = partial_context(candidate, outcome), f"published/{candidate['document_id']}.r2"
+        state = rework_state(run_root, attempt_id)
+        partial = partial_context(candidate, outcome, {"state": state} if state else None)
+        name = f"published/{candidate['document_id']}.r{partial['revision']}"
+        if state:  # the first review sent cases back for a rework: what became of it
+            summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": 0, "accepted_first": total - outcome["removed"]}
         codes = lambda rows: sorted({code for row in rows for code, _text in row["said"]})  # noqa: E731  (the report carries codes, never the reviewer's texts: they are in the set's files)
         summary.update(coverage_gaps=[{"requirement": gap["requirement"], "labels": gap["labels"], "codes": codes(row for row in partial["rejected"] if gap["requirement"] in row["requirements"])}
                                       for gap in partial["gaps"]],
                        rejected_cases=[{"case_id": row["case_id"], "label": row["label"], "with_group": row["with_group"], "codes": codes([row])} for row in partial["rejected"]],
                        files={"csv": f"{name}.zephyr-scale.csv", "set": f"{name}.html, .md", "rejected": f"{name}.REJECTED-CASES.html, .md"})
     return summary
+
+
+def rework_rounds(run_root: Path, attempt_id: str) -> int:
+    """``.skillsrc`` ``limits.rework_rounds`` (0 or 1) of the limits the run froze at scan; ``DEFAULT_REWORK_ROUNDS`` when none.  Read at the first select only:
+    what it decided stands in the journal (the receipt ``rework-round``), a later edit of the file changes nothing."""
+    from tools.pilot_state import derive_state, run_root_of
+    from tools.step_size import run_limits, whole_limit
+
+    project, root = run_root_of(Path(run_root))
+    value = whole_limit(run_limits(project, root, derive_state(root), attempt_id)[0].get("rework_rounds"))
+    return DEFAULT_REWORK_ROUNDS if value is None else min(max(value, 0), 1)
+
+
+def rework_basis(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """What the rework of the attempt is made of, from the journal: r1, the recorded answer of the reviewer and its digest, the first outcome (``PARTIAL`` — nothing
+    here depends on the live ``limits``) and the context receipts of the batches that hold the rejected cases.  ``REWORK_NOT_PENDING`` where the first review sent nothing back."""
+    from tools.pilot_state import derive_state, rework_round_if_present
+    from tools.review_canaries import recorded_answer, verify
+
+    receipt = rework_round_if_present(Path(run_root), attempt_id)
+    candidate, _assembly, fragments = journal_assembly(Path(run_root), attempt_id)
+    report = (((recorded_answer(run_root, attempt_id) or {}).get("artifacts")) or {}).get("validation_report")
+    outcome = review_outcome(candidate, _plain(report), verify(run_root, attempt_id) or (), 100) if isinstance(report, Mapping) else None
+    if (receipt is None or outcome is None or outcome["kind"] != "PARTIAL" or receipt["candidate_digest"] != document_sha256(candidate)
+            or receipt["report_digest"] != "sha256:" + hashlib.sha256(canonical_bytes(_plain(report))).hexdigest()):  # the receipt is of this candidate and of this answer
+        raise ValueError("REWORK_NOT_PENDING: the first review of this attempt did not send cases back for a rework; fix: `status` names the next step")
+    digest = next(str(event["artifact_digest"]) for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
+                  and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == REVIEW_STAGE)
+    contexts = list(dict.fromkeys(str(item["context_receipt_digest"]) for item in fragments if any(case["case_id"] in outcome["rejected"] for case in item["test_cases"])))
+    return {"candidate": candidate, "report": _plain(report), "outcome": outcome, "answer_digest": digest, "contexts": contexts}
+
+
+def check_rework_answer(run_root: Path, attempt_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    """The check of the generator's answer of the rework before it is written: ``check_rework`` over the journal, a refusal with its code and the way out."""
+    from tools.batch_assembly import BatchAssemblyError
+
+    basis = rework_basis(run_root, attempt_id)
+    try:
+        r3 = check_rework(basis["candidate"], basis["outcome"], _plain(value))
+    except SelectionError as error:
+        rows = [{"path": row["path"], "code": row["code"], "message": row["message"], "fix": REWORK_FIX} for row in error.diagnostics]
+        raise BatchAssemblyError(rows[0]["code"], rows[0]["message"], rows, REWORK_FIX) from None
+    return {"rework": {"cases": len(value["test_cases"]), "set": len(r3["test_cases"])}}
+
+
+REWORK_FIX = ("ответ — {schema_version: \"1.0.0\", status: \"COMPLETE\", batch_id: \"rework-1\", test_cases: [...]} с ровно отклонёнными кейсами; у каждого те же case_id, "
+              "requirement_ids, display_order и param_group, что в виде; исправь ответ и отдай единственным повтором стадии (--transport-attempts 2), ничего не записано")
+
+
+def rework_asked(run_root: Path, attempt_id: str) -> bool:
+    """Whether the request of the rework is in the journal (the generator was asked: whatever became of the answer)."""
+    from tools.pilot_state import derive_state
+
+    return any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == REWORK_STAGE
+               for event in derive_state(Path(run_root))["events"])
+
+
+def rework_state(run_root: Path, attempt_id: str) -> str | None:
+    """What became of the rework of a run whose first review sent cases back: ``None`` (it did not), ``not_started`` (nobody asked the generator) or
+    ``unfinished`` (asked: answered or not, nobody reviewed it)."""
+    from tools.pilot_state import rework_round_if_present
+
+    if rework_round_if_present(Path(run_root), attempt_id) is None:
+        return None
+    return "unfinished" if rework_asked(run_root, attempt_id) else "not_started"
+
+
+def close_pending_rework(run_root: Path, attempt_id: str) -> list[str]:
+    """``finish`` of a run whose first review sent cases back and whose rework did not come to its review (not asked, refused twice, answered, nobody reviewed it):
+    the set is r2, the rejected cases are in ``REJECTED-CASES`` as r1 had them with the reviewer's words — a rework nobody reviewed is not shown — and the
+    effective canonical is published, once.  Nothing happens for a run that is not waiting for the rework (or already published)."""
+    from tools.pilot_state import publish_effective_canonical, read_effective_canonical_if_present, read_reviewer_session_ledger, rework_round_if_present
+
+    if rework_round_if_present(Path(run_root), attempt_id) is None or read_effective_canonical_if_present(Path(run_root), attempt_id) is not None:
+        return []
+    basis = rework_basis(run_root, attempt_id)
+    candidate, effective = basis["candidate"], basis["outcome"]["effective"]
+    partial, published = partial_context(candidate, basis["outcome"], {"state": rework_state(run_root, attempt_id)}), Path(run_root) / "published"
+    receipt = publish_bundle(effective, published, _PROFILE, partial=partial)
+    if verify_bundle(effective, published, _PROFILE, partial=partial) != receipt:
+        raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
+    shown, extras, intro = rejected_cases(candidate, partial, Path(run_root).name)
+    files = write_status_files(run_root, shown, published, _PROFILE, "REJECTED-CASES", extras=extras, intro=intro)
+    publish_effective_canonical(Path(run_root), attempt_id, effective, _receipt_value(receipt), str(read_reviewer_session_ledger(Path(run_root), attempt_id)["digest"]))
+    return files
 
 
 _VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}
@@ -917,6 +1006,13 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     )
     if not facts["acceptance_eligible"]:
         raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag("/reviewer_session", "INDEPENDENCE_UNVERIFIED")], candidate_receipt)
+    if second and verdict == "ТРЕБУЕТ ДОРАБОТКИ" and rework_rounds(run_root, attempt_id) == 1:  # the rejected cases go back once: the set is published when the rework is over
+        if not dry_run:
+            from tools.pilot_state import publish_rework_round
+
+            publish_rework_round(Path(run_root), attempt_id, document_sha256(candidate_value), "sha256:" + hashlib.sha256(canonical_bytes(report)).hexdigest())
+        return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK_PENDING",
+                                   _freeze({"reviewer_session_digest": facts["reviewer_session_digest"]}), ())
     successor_receipt = None
     if effective is not None and not dry_run:  # the accepted set — the files of the bundle, the import CSV among them — is written now
         try:

@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
 from tools.project_inventory import read_inventory_receipt
+from tools.revision_selection import REWORK_STAGE
 
 SLOT_DIR = "incoming"
 
@@ -77,7 +78,17 @@ def _generator_steps(root: Path) -> list[dict[str, Any]]:
         if steps and not steps[-1]["done"]:
             step["waits"] = f"ждёт принятого ответа {steps[-1]['stage']}"
         steps.append(step)
-    return steps
+    rework = _rework_step(root, attempt_id, REWORK_STAGE in done)
+    return [*steps, *([rework] if rework else [])]
+
+
+def _rework_step(root: Path, attempt_id: str, answered: bool) -> dict[str, Any] | None:
+    """The rework of the rejected cases: a step while the first review waits for it (its receipt is in the journal) and the set is not published."""
+    from tools.pilot_state import read_effective_canonical_if_present, rework_round_if_present
+
+    if rework_round_if_present(root, attempt_id) is None or read_effective_canonical_if_present(root, attempt_id) is not None:
+        return None
+    return {"stage": REWORK_STAGE, "input_digests": [], "done": answered, "invocation": "tc-generator-rework-1"}
 
 
 def _manual_share(root: Path, document: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -114,7 +125,7 @@ def _generator_accepted(root: Path) -> Mapping[str, Any]:
     """Every batch answered: the candidate the journal gives (a repeated ``submit`` of the last batch says it again)."""
     from tools.orchestrate_test_case_revision import journal_assembly
 
-    if not all(step["done"] for step in _generator_steps(root)):
+    if not all(step["done"] for step in _generator_steps(root) if step["stage"] != REWORK_STAGE):
         return {}
     return _candidate(root, *journal_assembly(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))[:2])
 
@@ -146,6 +157,8 @@ def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], 
 
 
 def _accepted(root: Path, stage: str) -> Mapping[str, Any]:
+    if stage == REWORK_STAGE:
+        return {"rework": {"answered": True}}
     return STEPS[stage.split(":", 1)[0]][1](root)
 
 
@@ -210,7 +223,7 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocati
         confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)
     found = step_size.stage_inputs(root, stage)
     word = {key: request[key] for key in ("nonce", "nonce_note") if key in request}  # the control word is shown once, by the call that wrote the request
-    if requested and stage.startswith("tc-generator:"):
+    if requested and stage.startswith("tc-generator:BATCH-"):
         word = {"nonce_note": pilot_state.codeword_lost_note(root, state, attempt_id, stage).strip()}
     return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": step_size.compact_inputs(root, stage, found)["files_summary"],
             "budget": _budget(root, step, found), **word}

@@ -31,8 +31,10 @@ _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
+    r"^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:(?:BATCH-[a-z0-9-]+|rework-1)|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
 )
+REWORK_BATCH = "rework-round-v1"  # the mark of the events of the receipt ``rework-round``: the first review sent cases back and the code waits for the rework
+_REWORK_STAGE = "tc-generator:rework-1"
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _MODEL_STAGE_REGISTRY = {
     "context-marker": ("generator", "context-marker-v1"),
@@ -490,6 +492,7 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
     assembled: set[str] = set()
     review_requests: set[tuple[str, str]] = set()
     context_selected: set[str] = set()
+    rework_marked: set[str] = set()  # the attempts whose first review sent cases back (V7: the receipt ``rework-round``)
     for event in events:
         event_type = event["event_type"]
         attempt_id = event.get("attempt_id")
@@ -575,14 +578,15 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                         raise ValueError("model request requires selected context")
                     if stage.startswith("tc-generator:") and (
                         (attempt_id, "context-marker:baseline") not in model_responses
-                        or attempt_id in assembled
+                        or attempt_id in assembled and not (stage == _REWORK_STAGE and attempt_id in rework_marked)
+                        or stage == _REWORK_STAGE and attempt_id not in rework_marked
                     ):
                         raise ValueError("generator request is outside canonical assembly lifecycle")
                     if stage.startswith(("tc-reviewer:", "autotest-reviewer:")) and key not in review_requests:
                         raise ValueError("review model request requires review request")
                     model_requests.add(key)
                 elif event_type == "MODEL_RESPONSE_RECEIVED":
-                    if key not in model_requests or key in model_responses or stage.startswith("tc-generator:") and attempt_id in assembled:
+                    if key not in model_requests or key in model_responses or stage.startswith("tc-generator:BATCH-") and attempt_id in assembled:
                         raise ValueError("model response requires one request")
                     model_responses.add(key)
                     model_response_digests[key] = str(event.get("artifact_digest"))
@@ -600,7 +604,7 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                         not stage.startswith(("tc-generator:", "tc-to-autotest:"))
                         or key not in model_responses
                         or key in candidate_stages
-                        or stage.startswith("tc-generator:") and attempt_id in assembled
+                        or stage.startswith("tc-generator:BATCH-") and attempt_id in assembled
                         or model_response_digests.get(key) != event.get("artifact_digest")
                     ):
                         raise ValueError("candidate publication requires model response")
@@ -616,6 +620,8 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                     review_requests.add(key)
             elif event_type == "CONTEXT_SELECTED":
                 context_selected.add(attempt_id)
+            elif event_type == "ARTIFACT_READ_BACK" and event.get("batch_id") == REWORK_BATCH:
+                rework_marked.add(attempt_id)
 
 
 def _pending_event_path(root: Path, seq: int) -> Path:
@@ -2018,7 +2024,10 @@ def _validate_model_request_predecessors(
     attempt_id = str(attempt["attempt_id"])
     events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
     cutoff = request_seq if request_seq is not None else state["events"][-1]["seq"] + 1
-    if stage == "tc-generator":
+    if stage_instance_id == _REWORK_STAGE:  # the rework is asked for after the first review sent cases back (its receipt is in the journal before the request)
+        if not any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("batch_id") == REWORK_BATCH and event["seq"] < cutoff for event in events):
+            raise ValueError("tc-generator:rework-1 is requested only after the first review sent cases back")
+    elif stage == "tc-generator":
         from tools.project_inventory import read_execution_baseline
 
         markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
@@ -2062,7 +2071,7 @@ def _is_context_selection(root: Path, attempt_id: str, digest: str) -> bool:
 
 
 def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
-    if request["stage"] != "tc-generator":
+    if request["stage"] != "tc-generator" or request.get("stage_instance_id") == _REWORK_STAGE:
         return
     inputs = request["input_digests"]
     context = read_context_selection(root, attempt_id, inputs[1])
@@ -2221,7 +2230,7 @@ def publish_model_request(
         if reuse_from is not None:
             extra["reuse"] = _reuse_source(project, root, attempt, stage_instance_id, inputs, role_policy, pack, reuse_from)
     nonce = None
-    if stage == "tc-generator":  # the control word of the generator's task — the run keeps its sha256 only
+    if stage_instance_id.startswith("tc-generator:BATCH-"):  # the control word of the generator's task — the run keeps its sha256 only
         from tools.review_canaries import nonce_digest
 
         nonce = secrets.token_hex(6)
@@ -2403,6 +2412,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
         schema_name = "context-marker-output.schema.json"
         if value.get("stage") != "context-marker":
             raise ValueError("invalid context-marker artifact")
+    elif stage_instance_id == _REWORK_STAGE:
+        return  # its form and its cases are checked against the journal (``check_rework_answer``): no schema stands for the cases alone
     elif stage_instance_id.startswith("tc-generator:"):
         schema_name = "candidate-fragment.schema.json"
         batch_id = stage_instance_id.split(":", 1)[1]
@@ -2600,7 +2611,7 @@ def _publish_model_stage_artifact(
     filled: list[str] = []
     normalized: list[str] = []
     mechanics: list[str] = []
-    if stage_instance_id.startswith("tc-generator:"):  # the order of requirement_ids and categories is the code's work, as in the check of a fragment
+    if stage_instance_id.startswith("tc-generator:BATCH-"):  # the order of requirement_ids and categories is the code's work, as in the check of a fragment
         from tools.batch_assembly import fill_fragment_mechanics, normalize_fragment
 
         value, normalized = normalize_fragment(value)
@@ -2612,7 +2623,7 @@ def _publish_model_stage_artifact(
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):  # a reused answer is passed as it is
-            if (stage_instance_id.startswith("tc-generator:") and isinstance(value, dict) and value.get("status") == "COMPLETE"
+            if (stage_instance_id.startswith("tc-generator:BATCH-") and isinstance(value, dict) and value.get("status") == "COMPLETE"
                     and value.get("context_receipt") in (None, "")):
                 # the context receipt of the batch — by the digest the published plan binds to this batch (never the digest the answer
                 # names: a different one is the refusal of the digest binding)
@@ -2681,7 +2692,11 @@ def _publish_model_stage_artifact(
             "документа подряд, внутри документа по номеру строки как числу (…md:4 раньше …md:12); отдай исправленный ответ единственным повтором стадии (--transport-attempts 2), "
             "ничего не записано")
     _validate_model_stage_artifact(stage_instance_id, value)
-    if stage_instance_id.startswith("tc-generator:"):
+    if stage_instance_id == _REWORK_STAGE:
+        from tools.orchestrate_test_case_revision import check_rework_answer
+
+        check_rework_answer(root, attempt_id, value)  # the cases are exactly the rejected ones, r3 is valid: a refusal leaves the answer unwritten and the one retry
+    if stage_instance_id.startswith("tc-generator:BATCH-"):
         from tools.batch_assembly import BatchAssemblyError, require_batch_coverage, validate_fragment
 
         try:
@@ -3260,7 +3275,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries", "rework-round": "rework-rounds"}
     if kind.startswith(_SKELETON_KIND):  # the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -3621,6 +3636,15 @@ def _validate_factual_receipt(
                        for event in state["events"])
         ):
             raise ValueError("invalid review-canaries receipt")
+    elif kind == "rework-round":  # the first review sent cases back and the code waits for their rework: bound to the candidate and the answer of the reviewer
+        digests = ("candidate_digest", "report_digest")
+        if (
+            set(receipt) != common | {*digests, "rounds"}
+            or not identity_matches
+            or receipt.get("rounds") != 1
+            or any(not _DIGEST.fullmatch(str(receipt.get(name, ""))) for name in digests)
+        ):
+            raise ValueError("invalid rework-round receipt")
     elif kind in _GENERATOR_INPUT_KINDS.values():  # the plan or the header with its one self-digest
         field = next(name for name, value in _GENERATOR_INPUT_KINDS.items() if value == kind)
         value = receipt.get(field)
@@ -4404,7 +4428,7 @@ def read_attempt_receipt(
 _RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-boundaries", "effective-canonicals", "automation-review-boundaries",
                     "execution-inputs", "materialization-ownership", "generated-deltas", "materialization-commands", "execution-receipts", "resume-validations", "execution-traces",
                     "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "review-canaries",
-                    "imported-cases", "prior-capabilities")
+                    "imported-cases", "prior-capabilities", "rework-rounds")
 
 
 def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> list[str]:
@@ -5022,6 +5046,25 @@ def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] |
         return read_attempt_receipt(run_root, attempt_id, "reference-cases", "ARTIFACT_READ_BACK")["record"]["reference"]
     except (ValueError, OSError, KeyError):
         return None
+
+
+def publish_rework_round(run_root: Path, attempt_id: str, candidate_digest: str, report_digest: str) -> Mapping[str, Any]:
+    """The first review sent cases back and ``limits.rework_rounds`` is 1: the one fact that the set waits for the rework (and so is not published yet).
+    Written once, after the ledger is complete; the live ``.skillsrc`` is not read again."""
+    return publish_bound(run_root, attempt_id, "rework-round", {"rounds": 1, "candidate_digest": candidate_digest, "report_digest": report_digest}, batch_id=REWORK_BATCH)
+
+
+def rework_round_if_present(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
+    """The receipt ``rework-round`` read back, or None where the review did not send cases back for a rework."""
+    project, root = _run_root(run_root)
+    target = _receipt_target(root, attempt_id, "rework-round")
+    try:
+        raw = read_confined_bytes(project, root, target)
+    except OutputConfinementError as error:
+        raise ValueError("unsafe rework-round path") from error
+    return None if raw is None else read_attempt_receipt(root, attempt_id, "rework-round", "ARTIFACT_READ_BACK")["record"]
+
+
 _PRIOR_KIND = "prior-capabilities-"  # + batch_id — the fifth tc-generator input from batch 2
 _SKELETON_KIND = "imported-cases-"  # + batch_id — the skeleton of the batch, its last tc-generator input
 
@@ -5626,6 +5669,17 @@ def _expected_model_inputs(
     None — the journal does not fix them here (context-marker, or a predecessor is missing: the existing checks name it)."""
     stage, _, instance = stage_instance_id.partition(":")
     attempt_id = str(attempt["attempt_id"])
+    if stage_instance_id == _REWORK_STAGE:  # the answer of the reviewer, r1 and the context receipts of the batches that hold the rejected cases: all from the journal
+        from tools.orchestrate_test_case_revision import rework_basis
+
+        try:
+            basis = rework_basis(root, attempt_id)
+        except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
+            raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id} is asked for only after the first review sent cases back for a rework ({error}); fix: `status` names the next step") from error
+        from tools.canonical_document import document_sha256
+
+        return [(basis["answer_digest"], "ответ tc-reviewer:canonical журнала"), (document_sha256(basis["candidate"]), "кандидат r1 журнала"),
+                *((digest, "context_receipt_digest пачки с отклонённым кейсом") for digest in basis["contexts"])]
     if stage == "tc-generator":
         markers = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:baseline"]
@@ -5765,7 +5819,9 @@ def _response_bindings(
         return _read_model_stage_artifact_with_state(project, root, state, attempt_id, stage_id, str(events[-1]["artifact_digest"]))["artifact"]
 
     try:
-        if stage == "tc-generator":
+        if stage_instance_id == _REWORK_STAGE:
+            pass  # the answer holds cases only: nothing in it is a digest the journal fixes
+        elif stage == "tc-generator":
             inputs = request["input_digests"]
             try:  # further context receipts of the published plan shift plan and header
                 more = len(_plan_contexts(_generator_input(project, root, state, attempt_id, "plan"))) - 1

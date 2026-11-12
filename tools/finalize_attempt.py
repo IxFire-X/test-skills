@@ -167,11 +167,14 @@ def disposition_receipt(delta: Mapping[str, Any] | None, *, verification: str) -
 
 
 def _partial_acceptance(run_root: Path, attempt_id: str, effective: Mapping[str, Any] | None) -> bool:
-    """The effective canonical is r2 of a ``ТРЕБУЕТ ДОРАБОТКИ`` answer: cases were sent back and the code subtracted them (derived, nothing stored)."""
+    """The effective canonical of a ``ТРЕБУЕТ ДОРАБОТКИ`` answer is a later revision with fewer cases than r1: cases were sent back and stayed out (derived, nothing stored).
+    A set whose reworked cases all passed has every case of r1: it is accepted."""
+    from tools.orchestrate_test_case_revision import journal_assembly
     from tools.review_canaries import recorded_answer
 
     report = ((recorded_answer(run_root, attempt_id) or {}).get("artifacts") or {}).get("validation_report") or {}
-    return effective is not None and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ" and effective["document"]["revision"] == 2
+    return (effective is not None and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ" and effective["document"]["revision"] >= 2
+            and len(effective["document"]["test_cases"]) < len(journal_assembly(run_root, attempt_id)[0]["test_cases"]))
 
 
 def effective_canonical_required(reviewer: Mapping[str, Any]) -> bool:

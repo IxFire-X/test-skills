@@ -82,6 +82,7 @@
                      "step_output_warn_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000, "description": "FaT-O: an answer of one model call above it is the warning STEP_OUTPUT_LARGE, only measured; default 128000"},
                      "step_window_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000, "description": "FaT-BO: the model window in bytes; tc-generator batches split when input + expected answer exceed 0.85 of it; 0 turns the split off; default 1000000"},
                      "review_reject_share": {"type": "integer", "minimum": 0, "maximum": 50, "description": "V6: percent of the cases a review may take out of a set (blocking findings of real cases); more rejects the whole set; default 20"},
+                     "rework_rounds": {"type": "integer", "minimum": 0, "maximum": 1, "description": "V7: how many times the cases the review rejected go back to the generator (0 - never, they are only taken out; 1 - once, then they are reviewed again); more than one round is not known to the code"},
                      "generator_context": {"enum": ["all", "own"], "description": "FaT-P3: the context a tc-generator batch reads; all (default) - the receipts of the plan; own - not implemented yet (the plan refuses it)"}}
     },
     "v2_project": {
