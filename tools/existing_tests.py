@@ -298,7 +298,7 @@ def hint_line(case_ids: list[str]) -> str | None:
 
 def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]], root: Path | None = None) -> dict[str, Any]:
     """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files. With ``root`` the inventory
-    is that run's; without it (plan-batches knows only the project) the first run whose own journal froze that digest.
+    is that run's; without it (the plan knows only the project) the first run whose own journal froze that digest.
 
     For the context receipts of one plan (one inventory) the one map of all their files — the HTTP keys of the
     tests do not depend on the context, so a map per receipt would repeat them."""

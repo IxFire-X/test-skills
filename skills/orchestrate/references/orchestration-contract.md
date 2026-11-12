@@ -22,7 +22,7 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Целостность | `tools.doctor --root <pack-root>` | manifest и registered bytes; не readiness |
 | Подготовка | `tools.run_pipeline scan --project <path> --profile <profile> --docs <path>` (повтори `--docs` для всех входов) | run, inventory, baseline, context receipts; при нескольких modules нужен exact `--module <ID>` |
 | Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
-| Батчи | receipts выбора контекста публикует `scan`; `tools.api publish-generator-input` (header, plan), `tools.api plan-batches` | independent plan и current receipt без truncation |
+| Батчи | receipts выбора контекста публикует `scan`; `tools.api prepare` / `tools.api submit --stage plan` строит и публикует header и plan из журнала | independent plan и current receipt без truncation |
 | Генерация | `tools.api prepare` / `tools.api submit` для `tc-generator:<batch>`, пачки по очереди; с пачки 2 capabilities прошлых пачек публикует `prepare` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
 | Сборка | последний `tools.api submit` (до записи ответа), `tools.api review-publish` | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
 | Canonical review | `tools.api review-open` (пакет и запрос проверяющего записаны до его вызова); вызов `tc-reviewer`; `tools.api review-select --verdict <ответ>`; при нужде `tools.api review-evidence`, `tools.api review-abort`, `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |

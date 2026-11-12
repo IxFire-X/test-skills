@@ -21,7 +21,7 @@ NOT_DRIVEN = {
     "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework",
 }
 # What a successful answer may carry besides {status, command, result}; nothing else is an answer of tools.api.
-OPTIONAL_OK_KEYS = {"dry_run", "deprecated", "notes"}
+OPTIONAL_OK_KEYS = {"dry_run", "deprecated"}
 OUT_KEYS = {"out", "bytes", "sha256"}
 REFUSAL_KEYS = {"status", "command", "code", "message", "fix", "next"}  # error_envelope + the command; diagnostics when the refusal has a list
 

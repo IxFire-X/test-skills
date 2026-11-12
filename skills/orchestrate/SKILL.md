@@ -84,7 +84,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 на пачку; список без замера — `tools.api step-inputs`, замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `submit` с теми же флагами принимает его
 (`--dry-run` — проверка без записи; `--transport-attempts 2` — единственный повтор). Остальные стадии — `model-request --stage <stage> --model-id <id> --invocation-id <id>` и
 `model-response --stage <stage> --artifact <ответ.json>`: `model-response` печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`),
-не тело; тело — `read-model-artifact`; `--out` ему не нужен: с `--out` в stdout только `out`, `bytes`, `sha256`, квитанция — в файле. `--input-file` плана — абсолютный путь.
+не тело; тело — `read-model-artifact`; `--out` ему не нужен: с `--out` в stdout только `out`, `bytes`, `sha256`, квитанция — в файле.
 
 1. **Разметка.** `status`: `next` — `prepare` или `submit`, `stage` (`context-marker:baseline`; частями — `:requirements`, затем `:batch-NNN`).
    `tools.api prepare --run-root <run> --stage <id>` печатает `read` (файлы модели), `answer_slot`, `budget`; ответ модели — как есть в
@@ -94,10 +94,10 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    `prepare --stage scope` печатает пробелы, `answer_slot`, формы ответа. Остановись: покажи человеку
    список, спроси: исключить или продолжать; его слова — в `answer_slot`
    (`{"decision":"exclude","excluded":["SREQ-…"],"reason":"<слова>"}` или `{"decision":"continue"}`), затем `submit --stage scope` (исключить можно и без пробелов, до плана). Без ответа
-   `plan` отказывает `SCOPE_PENDING`. Решение за человеком; другое — новый прогон. `scan --no-pause` просит человек, ты его не добавляешь.
-3. **План пачек.** Header — `tools.api publish-generator-input --kind header --value <f>`; `tools.api plan --header <f> --requirements <f>
-   --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f> --run-root <run> --attempt <id> --out-plan
-   <run>/tmp/plan.json --out-published <run>/tmp/published.json` строит и публикует план (формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan)).
+   `submit --stage plan` отказывает `SCOPE_PENDING`. Решение за человеком; другое — новый прогон. `scan --no-pause` просит человек, ты его не добавляешь.
+3. **План пачек.** `status`: `next` — `prepare` или `submit`, `stage: plan`. `prepare --stage plan` печатает `answer_slot`, форму и счётчики; в слот —
+   `{"subject": "<название предмета проверки по-русски>"}` и ничего больше: header, план и скелеты код строит из журнала, `submit --stage plan` публикует
+   их одним вызовом (`--dry-run` — без записи).
    Пачки делит код по оценке ответа и окну `limits.step_window_bytes`; `notes` и `context` вывода покажи человеку как есть.
 4. **Генератор.** `status`: `next` — `prepare` или `submit`, `stage: tc-generator:<batch>`; пачки строго по очереди (`STAGE_WAITS` — предыдущая не принята). `prepare` генератору получает
    `--model-id` и `--invocation-id` той сессии, которая пишет кейсы (как у `review-open`: от этой метки зависит независимость ревью); входы берёт

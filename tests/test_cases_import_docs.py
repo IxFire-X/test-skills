@@ -105,7 +105,7 @@ def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         import_requirements(root, attempt_id)
     _request_requirements(root, attempt_id)
     answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", _answer())
-    assert api.main(["cases-import", "--run-root", str(root), "--attempt", attempt_id]) == 0
+    pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the first act of `submit --stage plan`
     [part] = [row for row in context_marker_parts.plan(root)["parts"] if row["stage"] == "context-marker:batch-001"]
     pilot_state.publish_model_request(root, attempt_id, "context-marker:batch-001", model_id="model-context", invocation_id="part-1",
                                       input_digests=part["input_digests"])
@@ -284,7 +284,7 @@ def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypat
     answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", {
         "schema_version": "5.0.0", "stage": "context-marker", "warnings": [],
         "artifacts": {"analytics_documentation": {"requirements": rows, "case_links": links}, "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}})
-    assert api.main(["cases-import", "--run-root", str(root), "--attempt", attempt_id]) == 0
+    pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the first act of `submit --stage plan`
     value = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer["content_digest"])["artifact"]
     for part in [row for row in context_marker_parts.plan(root)["parts"] if row["stage"].startswith("context-marker:batch-")]:
         pilot_state.publish_model_request(root, attempt_id, part["stage"], model_id="model-context", invocation_id=part["stage"][-3:],

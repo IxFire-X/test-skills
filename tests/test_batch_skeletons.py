@@ -52,7 +52,7 @@ def test_the_last_input_of_a_batch_is_its_skeleton_not_the_whole_import(run: dic
     four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
     code, refused = _generator_request(run, *four, run["imported"]["digest"])
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and _skeleton(run, 0) in refused["message"], refused
-    assert "batch_skeletons" in refused["message"]
+    assert "submit --stage plan" in refused["message"]
     code, requested = _generator_request(run, *four, _skeleton(run, 0))
     assert code == 0, requested
 

@@ -30,16 +30,16 @@ def _paused_run(tmp_path: Path, warnings: list[str] | None = None):
     return root, attempt_id, baseline, receipts
 
 
-def _plan_arguments(root: Path, attempt_id: str, receipts: list[dict], *extra: str) -> list[str]:
-    tmp = root / "tmp"
-    tmp.mkdir(exist_ok=True)
-    (tmp / "req.json").write_text(json.dumps(_marker_rows(), ensure_ascii=False), encoding="utf-8")
-    (tmp / "grouping.json").write_text(json.dumps({"header_digest": "sha256:" + "c" * 64, "context_receipt_digest": receipts[0]["digest"]}), encoding="utf-8")
-    (tmp / "context.json").write_text(json.dumps(receipts[0], ensure_ascii=False), encoding="utf-8")
-    (tmp / "marker.json").write_text("{}", encoding="utf-8")
-    return ["plan-batches", "--requirements", str(tmp / "req.json"), "--grouping", str(tmp / "grouping.json"), "--project", str(root.parent.parent),
-            "--input-file", str(tmp / "marker.json"), "--context-receipt", str(tmp / "context.json"), "--out", str(tmp / "plan.json"),
-            "--run-root", str(root), "--attempt", attempt_id, *extra]
+def _submit_plan(capsys: pytest.CaptureFixture[str], root: Path) -> tuple[int, dict]:
+    """The plan of the batches the way the agent asks for it: the subject in the slot, ``submit --stage plan``."""
+    slot = root / "incoming" / "plan.json"
+    slot.parent.mkdir(exist_ok=True)
+    slot.write_text(json.dumps({"subject": "Оплата и возврат"}, ensure_ascii=False), encoding="utf-8")
+    return _api(capsys, ["submit", "--run-root", str(root), "--stage", "plan"])
+
+
+def _published_plan_of(root: Path, attempt_id: str) -> dict:
+    return dict(pilot_state.generator_input(root.parents[1], root, pilot_state.derive_state(root), attempt_id, "plan"))
 
 
 def _record(root: Path, attempt_id: str, *, excluded: list[str], reason: str | None, proceed: bool) -> dict:
@@ -170,22 +170,22 @@ def test_the_manifest_schema_takes_no_pause() -> None:
         assert (found == []) is ok, (extra, found)
 
 
-def test_plan_batches_without_an_answer_is_scope_pending_and_the_fix_names_the_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
+def test_the_plan_without_an_answer_is_scope_pending_and_the_fix_names_the_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, *_ = _paused_run(tmp_path)
+    code, payload = _submit_plan(capsys, root)
     assert code == 2 and payload["code"] == "SCOPE_PENDING", payload
     assert "SREQ-batch-a-001" in payload["message"] and "prepare --stage scope" in payload["fix"] and "--continue" not in payload["fix"]
 
 
-def test_plan_batches_after_an_exclusion_names_the_requirement_and_a_conflict_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_plan_after_an_exclusion_names_the_requirement_and_a_conflict_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools import scope_pause
 
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     code, payload = _submit_scope(capsys, root, {"decision": "exclude", "excluded": ["SREQ-batch-a-001"], "reason": "нет стенда с картами"})
     assert code == 0, payload
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
+    code, payload = _submit_plan(capsys, root)
     assert code == 0, payload
-    plan = json.loads((root / "tmp" / "plan.json").read_text(encoding="utf-8"))
+    plan = _published_plan_of(root, attempt_id)
     assert plan["out_of_scope"] == [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда с картами"}]
     assert [batch["owned_source_requirement_ids"] for batch in plan["batches"]] == [["SREQ-batch-a-002"]]
     decision = scope_pause.read_decision(root, attempt_id)
@@ -194,12 +194,12 @@ def test_plan_batches_after_an_exclusion_names_the_requirement_and_a_conflict_is
     assert code == 2 and payload["code"] == "SCOPE_DECISION_CONFLICT", payload
 
 
-def test_plan_batches_after_continue_plans_every_requirement(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+def test_the_plan_after_continue_plans_every_requirement(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
     assert _submit_scope(capsys, root, {"decision": "continue"})[0] == 0
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
+    code, payload = _submit_plan(capsys, root)
     assert code == 0, payload
-    plan = json.loads((root / "tmp" / "plan.json").read_text(encoding="utf-8"))
+    plan = _published_plan_of(root, attempt_id)
     assert "out_of_scope" not in plan and plan["batches"][0]["owned_source_requirement_ids"] == ["SREQ-batch-a-001", "SREQ-batch-a-002"]
 
 
@@ -220,7 +220,7 @@ def test_a_wrong_answer_is_refused_and_nothing_is_recorded(tmp_path: Path, capsy
 
 
 def test_the_published_plan_must_carry_the_answer(tmp_path: Path) -> None:
-    """Whoever skips plan-batches and its refusal meets the same one at publish-generator-input."""
+    """The checks of the plan stand in the function that publishes it, whoever builds the plan."""
     from tools import scope_pause
     from tools.batch_assembly import plan_batches
 

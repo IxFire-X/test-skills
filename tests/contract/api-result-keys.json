@@ -12,16 +12,6 @@
    "role_policy"
   ],
   "automation-digest": "string",
-  "cases-import": [
-   "artifact",
-   "byte_count",
-   "content_digest",
-   "imported",
-   "output_basis",
-   "output_bytes",
-   "path",
-   "warning"
-  ],
   "complete-review": [
    "boundary_digest",
    "context_budget_bytes",
@@ -61,36 +51,9 @@
    "path",
    "warning"
   ],
-  "plan": {
-   "plan": [
-    "batches",
-    "context_receipt_digest",
-    "digest",
-    "header_digest",
-    "schema_version",
-    "source_requirements"
-   ],
-   "published": [
-    "header",
-    "plan"
-   ]
-  },
-  "plan-batches": [
-   "batches",
-   "context_receipt_digest",
-   "digest",
-   "header_digest",
-   "schema_version",
-   "source_requirements"
-  ],
   "prepare": [
    "answered",
    "stage"
-  ],
-  "publish-generator-input": [
-   "digest",
-   "kind",
-   "path"
   ],
   "read-effective": [
    "attempt_id",

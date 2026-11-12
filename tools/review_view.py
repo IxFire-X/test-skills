@@ -206,7 +206,7 @@ def end_to_end_hint(document: Mapping[str, Any], groups: Mapping[str, str | None
                     batches: Iterable[Iterable[str]] | None = None) -> dict[str, Any] | None:
     """``CV_NO_END_TO_END`` when the requirements form two or more process groups and no case links two of them.
 
-    *groups* — ``batch_assembly.requirement_groups`` (the rule plan-batches cuts by); a requirement without a group counts
+    *groups* — ``batch_assembly.requirement_groups`` (the rule the plan cuts by); a requirement without a group counts
     for none.  A group every case cites (the common constraints of the document) is not a step of a process and is left
     out.  *batches* — the owned source requirements of each batch: a case cites only its batch, so when no batch holds two
     groups there is no hint (the plan notes say the path cannot cross batches).  A hint, not a verdict."""
@@ -272,7 +272,7 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def run_context_note(root: Path, attempt_id: str) -> str | None:
-    """With more than one context batch, which of them the generator saw — the line of plan-batches; None with one
+    """With more than one context batch, which of them the generator saw — the line of the plan; None with one
     context batch (the view keeps its bytes) or before a plan."""
     from tools.batch_assembly import context_digests, context_note
     from tools.pilot_state import derive_state, read_context_selection

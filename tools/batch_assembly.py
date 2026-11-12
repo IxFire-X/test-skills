@@ -120,7 +120,7 @@ _HEADING = re.compile(r"#{1,2}\s+(\S.*)")
 
 
 class BatchPlan(dict):
-    """The plan itself (schema bytes unchanged) plus ``notes``: the lines plan-batches prints about the split."""
+    """The plan itself (schema bytes unchanged) plus ``notes``: the lines ``submit --stage plan`` prints about the split."""
 
     notes: list[str]
 
@@ -418,7 +418,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
                              input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
                              imported: Mapping[str, Any] | None = None,
                              out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
-    """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
+    """The plan of ``submit --stage plan``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipts, the map of existing project tests, the skeleton of an
     import and the tc-generator role), the documents of the receipts.
 
@@ -441,7 +441,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
                                      "context_receipt_digests to the grouping with every digest, the lowest batch_index first")
         _validate_context_receipt(receipt, str(receipt["digest"]))
     if sorted(str(receipt["digest"]) for receipt in receipts) != sorted(given) or len(receipts) != len(given):
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "plan-batches needs every context receipt of the grouping, "
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "the plan needs every context receipt of the grouping, "
                                  "one --context-receipt each: " + ", ".join(given))
     if len(receipts) > 1:
         receipts.sort(key=lambda receipt: int(receipt["batch_index"]))
@@ -486,7 +486,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
 
 
 def context_note(receipts: list[Mapping[str, Any]], taken: int) -> str:
-    """Which context batches every generator batch sees — for the plan-batches output and the reviewer view."""
+    """Which context batches every generator batch sees — for the output of the plan and the reviewer view."""
     seen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken])
     total = sum(int(receipt["byte_count"]) for receipt in receipts)
     line = f"контекст: генератор видит {taken} из {len(receipts)} батчей контекста ({seen} из {total} Б)"
@@ -521,7 +521,7 @@ def _context_documents(project: Path, context_receipt: dict[str, Any]) -> tuple[
 
 
 def requirement_groups(source_requirements: list[dict[str, Any]], project: Path, context_receipt: dict[str, Any]) -> dict[str, str | None]:
-    """The group of every source requirement exactly as plan-batches cuts batches (one rule for both): the
+    """The group of every source requirement exactly as the plan cuts batches (one rule for both): the
     ``.skillsrc`` ID pattern group, else the letter prefix, else the document section; None — no group."""
     project = Path(project).resolve()
     return _group_keys(_source_requirements(source_requirements), _grouping_pattern(project), _context_documents(project, context_receipt)[1])[0]
@@ -530,8 +530,7 @@ def requirement_groups(source_requirements: list[dict[str, Any]], project: Path,
 def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(plan, dict):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "plan must be an object")
-    _schema_valid(plan, _PLAN_SCHEMA, "batch plan",
-                  "--plan — сам план: файл, который команда plan записала по --out-plan (не обёртка публикации из batch-plans/ в журнале прогона)")
+    _schema_valid(plan, _PLAN_SCHEMA, "batch plan")
     _self_digest_valid(plan, "plan")
     batches = plan.get("batches")
     if not isinstance(batches, list) or not batches:

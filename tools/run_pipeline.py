@@ -992,6 +992,15 @@ def _scan_request(args: Any) -> dict[str, Any]:
     }
 
 
+def relative_to_project(project: Path, raw: Any) -> str:
+    """A path as the person typed it (relative or absolute), as the path inside the project with posix separators — the form the context and the inventory know."""
+    path = Path(str(raw))
+    try:
+        return (path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix()
+    except (OSError, ValueError):
+        return str(raw).replace("\\", "/")
+
+
 def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
     """The same request: the module (resolved by .skillsrc when not given), the --docs paths, the requested profile, the
     --reference and the --cases CSV; a request without --cases (and every journal of an earlier version) has ``None``."""
@@ -1004,15 +1013,8 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
             module = modules[0].get("id") if len(modules) == 1 else None
         except Exception:  # an unreadable .skillsrc: the scan itself will say so
             module = None
-    def relative(raw: Any) -> str:
-        path = Path(str(raw))
-        try:
-            return (path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix()
-        except (OSError, ValueError):
-            return str(raw).replace("\\", "/")
-
-    docs = [relative(raw) for raw in request.get("docs") or []]
-    cases = relative(request["cases"]) if request.get("cases") else None
+    docs = [relative_to_project(project, raw) for raw in request.get("docs") or []]
+    cases = relative_to_project(project, request["cases"]) if request.get("cases") else None
     return module, tuple(sorted(docs)), request.get("profile"), request.get("reference"), cases
 
 

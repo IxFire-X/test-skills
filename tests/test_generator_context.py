@@ -41,16 +41,12 @@ def test_the_schema_knows_only_all_and_own(tmp_path: Path) -> None:
         load_skillsrc(_project(tmp_path / "b", {"generator_context": "some"}) / ".skillsrc")
 
 
-def test_own_is_refused_by_plan_batches_with_a_code_and_a_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.step_size import GeneratorContextNotImplemented
+def test_own_is_refused_by_the_plan_with_a_code_and_a_fix(tmp_path: Path) -> None:
+    from tools.json_cli import error_envelope
+    from tools.step_size import GeneratorContextNotImplemented, require_generator_context_all
 
-    project = _project(tmp_path, {"generator_context": "own"})
-    run_tmp = project / ".pilot-runs" / "run1" / "tmp"
-    run_tmp.mkdir(parents=True)
-    for name, value in (("req.json", []), ("grouping.json", {}), ("context.json", {})):
-        (run_tmp / name).write_text(json.dumps(value), encoding="utf-8")
-    code = api.main(["plan-batches", "--requirements", str(run_tmp / "req.json"), "--grouping", str(run_tmp / "grouping.json"),
-                     "--project", str(project), "--input-file", str(run_tmp / "req.json"), "--context-receipt", str(run_tmp / "context.json")])
-    payload = json.loads(capsys.readouterr().out)
-    assert code == 2 and payload["code"] == GeneratorContextNotImplemented.code == "GENERATOR_CONTEXT_NOT_IMPLEMENTED", payload
+    with pytest.raises(GeneratorContextNotImplemented) as refused:
+        require_generator_context_all(_project(tmp_path, {"generator_context": "own"}))
+    payload = error_envelope(refused.value)
+    assert payload["code"] == GeneratorContextNotImplemented.code == "GENERATOR_CONTEXT_NOT_IMPLEMENTED", payload
     assert "all" in payload["fix"] and "plan-new" in payload["fix"]

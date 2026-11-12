@@ -1,4 +1,4 @@
-"""FaT-E2E: the end-to-end case hint (CV_NO_END_TO_END) and the one rule of requirement groups shared with plan-batches."""
+"""FaT-E2E: the end-to-end case hint (CV_NO_END_TO_END) and the one rule of requirement groups shared with the plan of the batches."""
 from __future__ import annotations
 
 import hashlib

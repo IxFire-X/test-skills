@@ -4,7 +4,7 @@
   the same call again finishes the opening, nothing written twice;
 - 7.3: review-select --verdict when the session is already closed (aborted or completed) and no answer is recorded — REVIEW_CLOSED before
   anything is written;
-- 7.4: tools.api plan refused by the checks of the plan leaves the journal as it was (the header is not published first);
+- 7.4: the plan (``submit --stage plan``) publishes the header, then the plan, when the checks pass;
 - 7.5: the mixed path (old open, then review-select --verdict without a request) points to review-open."""
 
 from __future__ import annotations
@@ -136,28 +136,11 @@ def test_the_closed_review_does_not_refuse_the_answer_it_already_has(tmp_path: P
 
 # 7.4 --------------------------------------------------------------------------------------
 
-def test_plan_refused_by_the_checks_of_the_plan_leaves_the_journal_as_it_was(tmp_path: Path, capsys) -> None:
-    from tests.test_plan_command import _files, _plan_argv
-    from tests.test_scope_pause import _paused_run
-
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
-    root, attempt_id, _b, _receipts = _paused_run(tmp_path / "a", warnings=[])
-    _other_root, _other_attempt, _ob, foreign = _paused_run(tmp_path / "b", warnings=[])
-    files = _files(root, foreign, None)  # the context receipt of another run
-    before = journal_minus_refusals(root)
-    code, refused = _main(capsys, _plan_argv(root, attempt_id, files))
-    assert code == 2, refused
-    assert journal_minus_refusals(root) == before, f"refused {refused.get('code')} but the journal grew"
-    assert_refused_once(root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-
-
 def test_plan_still_publishes_header_then_plan_when_the_checks_pass(tmp_path: Path, capsys) -> None:
-    from tests.test_plan_command import _files, _plan_argv
-    from tests.test_scope_pause import _paused_run
+    from tests.test_scope_pause import _paused_run, _submit_plan
 
-    root, attempt_id, _b, receipts = _paused_run(tmp_path, warnings=[])
-    code, done = _main(capsys, _plan_argv(root, attempt_id, _files(root, receipts, None)))
+    root, *_ = _paused_run(tmp_path, warnings=[])
+    code, done = _submit_plan(capsys, root)
     assert code == 0, done
 
 

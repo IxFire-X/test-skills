@@ -98,7 +98,7 @@ def test_cases_import_answers_the_requirements_part_by_code_one_source_requireme
     run_root = Path(scan["run_root"])
     assert context_marker_parts.plan(run_root)["mode"] == "parts"  # an import always marks the code apart from the cases
 
-    assert api.main(["cases-import", "--run-root", str(run_root), "--attempt", scan["attempt_id"]]) == 0
+    assert api.main(["prepare", "--run-root", str(run_root), "--stage", "context-marker:requirements"]) == 0
     state = derive_state(run_root)
     answered = [event for event in state["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
     assert [event["stage_instance_id"] for event in answered] == ["context-marker:requirements"]
@@ -116,7 +116,7 @@ def test_cases_import_answers_the_requirements_part_by_code_one_source_requireme
     report, _rows = build_report(project, run_root.name)
     [row] = [row for row in report["model_calls"] if row["stage"] == "context-marker:requirements"]
     assert row["by"] == "code"
-    assert api.main(["cases-import", "--run-root", str(run_root), "--attempt", scan["attempt_id"]]) == 0  # again: nothing new
+    assert api.main(["prepare", "--run-root", str(run_root), "--stage", "context-marker:requirements"]) == 0  # again: nothing new
     assert len([event for event in derive_state(run_root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]) == 1
 
 
@@ -155,7 +155,7 @@ def _manual_fragment(plan: dict, context: dict, imported: dict, index: int) -> d
 
 
 def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str = CSV, **plan_options) -> dict:
-    """scan --cases → cases-import → the code part of the marker → merge → header and plan published."""
+    """scan --cases → the requirements answered by code (prepare) → the code part of the marker → merge → header and plan published."""
     from tests.test_batch_assembly import _header
     from tools import api, context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
@@ -164,7 +164,7 @@ def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str
     project = _project(tmp_path, csv_text)
     _code, scan = _scan(project, monkeypatch)
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
-    assert api.main(["cases-import", "--run-root", str(root), "--attempt", attempt_id]) == 0
+    assert api.main(["prepare", "--run-root", str(root), "--stage", "context-marker:requirements"]) == 0
     state = pilot_state.derive_state(root)
     requirements_answer = next(event["artifact_digest"] for event in state["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED")
     answer = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", requirements_answer)["artifact"]
@@ -220,7 +220,7 @@ def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_check
     four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
     code, refused = _generator_request(run, *four)
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and _skeleton(run) in refused["message"], refused
-    assert "publish-generator-input --kind plan" in refused["message"]
+    assert "submit --stage plan" in refused["message"]
     code, requested = _generator_request(run, *four, _skeleton(run))
     assert code == 0, requested
 
@@ -281,7 +281,7 @@ def test_the_skills_name_the_import_steps() -> None:
     orchestrate = "\n".join((root / "skills" / "orchestrate" / name).read_text(encoding="utf-8") for name in ("SKILL.md", "references/import.md"))
     assert "imported" in generator and "IMPORT_HUMAN_FIELD_CHANGED" in generator
     assert "Импорт" in reviewer
-    assert "tools.api cases-import --run-root" in orchestrate and "--imported" in orchestrate and "scan --cases" in orchestrate
+    assert "prepare --stage context-marker:requirements" in orchestrate and "submit --stage plan" in orchestrate and "scan --cases" in orchestrate
 
 
 GENERATED = """import pytest
@@ -346,7 +346,7 @@ def _automation(document: dict, bundle_digest: str) -> dict:
 
 @pytest.mark.slow
 def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """e2e of stage 1, by commands: scan --cases → cases-import → marker parts → plan → generator with the skeleton →
+    """e2e of stage 1, by commands: scan --cases → prepare (the code answers) → marker parts → plan → generator with the skeleton →
     assemble → publish r1 → reviewer session → accepted review → select (effective) → tc-to-autotest → accepted static
     review → materialize, a run of the printed command and ingest of the pytest mini project."""
     from tests.test_automation_revision_budget import durable_boundary, host_evidence, review

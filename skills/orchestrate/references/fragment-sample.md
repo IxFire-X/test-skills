@@ -59,31 +59,6 @@
 За тобой: `case_id`, `requirement_ids`, `capability_id`, тексты, значения, `output_id` у `http_body`/`http_status`; ссылка `step_output` — полным id шага
 по этой схеме (`"step_id": "STEP-B1-003-02"`).
 
-## Входы `plan`
-
-Три файла, которые агент собирает до `tools.api plan` (значения в `<…>` — из ответа разметки и вывода scan). `digest` у header код дописывает сам.
-
-`--header` — заголовок канонического документа:
-
-```json
-{"schema_version": "1.1.0", "document_id": "TCDOC-<имя>", "revision": 1, "parent_sha256": null, "content_locale": "ru-RU",
- "metadata": {"subject": {"kind": "generic", "name": "<предмет>"}, "documentation": ["<документ требований>"], "project": "<проект>",
-              "author": "controller", "date": "<ГГГГ-ММ-ДД>"}}
-```
-
-`--requirements` — **голый массив** — поле `artifacts.analytics_documentation.requirements` ответа разметки (не весь ответ, и поля `source_requirements` в нём нет);
-`display_order` — 1..N подряд, `provenance` — `путь:строка` (так их читает проверка порядка):
-
-```json
-[{"source_requirement_id": "SREQ-0001", "display_order": 1, "text": "<текст>", "provenance": ["<путь:строка-строка>"], "digest": "sha256:<64 hex>"}]
-```
-
-`--grouping` — digest квитанций контекста; оба поля вместе, даже когда квитанция одна (`header_digest` код ставит сам):
-
-```json
-{"context_receipt_digest": "sha256:<квитанция с наименьшим batch_index>", "context_receipt_digests": ["sha256:<она же, первой>", "sha256:<остальные по batch_index>"]}
-```
-
 ## Три проверки, которые слабеют первыми
 
 Каждое ожидание — только то, что выражают операторы схемы (`equals`, `contains` — строка в строке, `greater_*`, `length_equals`, …) над

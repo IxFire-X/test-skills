@@ -92,7 +92,7 @@ def test_step_size_refuses_a_file_outside_the_project(tmp_path: Path, capsys: py
 def test_an_api_json_input_outside_the_project_of_the_run_is_refused(tmp_path: Path, value: str, capsys: pytest.CaptureFixture[str]) -> None:
     project, run_root, attempt_id = _run(tmp_path / "p")
     path = value.format(outside=_outside(tmp_path), project=project)
-    for argv in (["publish-generator-input", "--run-root", str(run_root), "--attempt", attempt_id, "--kind", "header", "--value", path],
+    for argv in (["validate-canonical", "--run-root", str(run_root), "--document", path],
                  ["model-response", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", path]):
         code, refused = _api(argv, capsys)
         assert code == 2 and refused["code"] == "INPUT_OUTSIDE_PROJECT" and refused["fix"], (argv[0], refused)
@@ -215,8 +215,7 @@ def test_a_document_path_on_a_share_from_a_file_is_refused_by_scan_before_it_tou
 
 
 UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required ones local
-    "api": ["plan-batches", "--requirements", "r.json", "--grouping", "g.json", "--input-file", "r.json", "--context-receipt", "c.json",
-            "--project", "//pg1-no-such-host.invalid/share"],
+    "api": ["validate-canonical", "--document", "//pg1-no-such-host.invalid/share/d.json"],
     "autotest_hints": ["--automation", SHARE + r"\a.json"],
     "build_context": ["--project", SHARE, "--docs", "x.md"],
     "ci_gate": ["--root", SHARE],

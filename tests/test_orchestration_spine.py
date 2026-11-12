@@ -71,7 +71,7 @@ def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_wr
     published = pilot_state.publish_model_stage_artifact(root, attempt["attempt_id"], "context-marker:baseline", marker)
     before = _tree(root)
     status = _durable_status(tmp_path, root, stage="status")
-    assert status["state"] == "generator" and status["next"]["verb"] == "plan"
+    assert status["state"] == "generator" and status["next"] == {"verb": "prepare", "stage": "plan"}
     assert status["warnings"] == [gap]
     assert status["warning_evidence_path"] == str(root / published["path"])
     assert _tree(root) == before

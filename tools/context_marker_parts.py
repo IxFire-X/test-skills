@@ -27,10 +27,7 @@ def _attempt(root: Path) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
 
 
 def _receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> list[Mapping[str, Any]]:
-    digests = [str(event["artifact_digest"]) for event in state["events"]
-               if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
-    receipts = [pilot_state.read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(digests)]
-    return sorted(receipts, key=lambda receipt: int(receipt["batch_index"]))
+    return pilot_state.context_receipts(root, attempt_id, state)
 
 
 def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
@@ -41,7 +38,6 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     from tools.project_inventory import read_execution_baseline
-    from tools.run_pipeline import printed
     from tools.step_size import role_files, step_budget
 
     root = Path(root).resolve()
@@ -77,7 +73,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
         if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (with --docs the model)
-            parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}")
+            parts[0].update(fits=True, hint=None, by_code=True)
         for receipt in receipts:
             part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},

@@ -20,76 +20,6 @@ SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
 AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation", "runner-compat")
 
 
-# ---- plan: the inputs ------------------------------------------------------------------------------------------------
-
-def _sample_blocks() -> list:
-    text = SAMPLE.read_text(encoding="utf-8")
-    return [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S)]
-
-
-def test_the_sample_forms_of_the_plan_inputs_are_what_the_code_takes() -> None:
-    from tests.test_batch_assembly import _header
-    from tools import batch_assembly
-
-    _fragment, _case, header, requirements, grouping = _sample_blocks()
-    real = _header()
-    assert set(header) == set(real) and set(header["metadata"]) == set(real["metadata"]) and set(header["metadata"]["subject"]) == set(real["metadata"]["subject"])
-    digest = "sha256:" + "a" * 64
-    filled = json.loads(json.dumps(requirements).replace("<64 hex>", "b" * 64))
-    assert isinstance(filled, list) and batch_assembly._source_requirements([{**row, "text": "текст", "provenance": ["docs/feature.md:1-1"], "digest": digest}
-                                                                              for row in filled])
-    assert set(grouping) == {"context_receipt_digest", "context_receipt_digests"}
-    assert batch_assembly._evidence_digests({"header_digest": digest, **{key: (digest if key == "context_receipt_digest" else [digest]) for key in grouping}})[1] == digest
-    assert "`header_digest` код ставит сам" in SAMPLE.read_text(encoding="utf-8")
-
-
-def test_the_skill_points_at_the_forms_and_the_heading_exists() -> None:
-    skill = " ".join((ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8").split())
-    assert "формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan)" in skill
-    assert re.search(r"^## Входы `plan`$", SAMPLE.read_text(encoding="utf-8"), re.M)
-
-
-def _grouping(digest: str, **extra) -> dict:
-    return {"header_digest": digest, **extra}
-
-
-@pytest.mark.parametrize(("case", "field", "code"), [
-    ("whole marker answer as requirements", "--requirements", "BATCH_PARTITION_CONFLICT"),
-    ("no context_receipt_digest", "--grouping", "BATCH_SEMANTIC_CONFLICT"),
-    ("digests list does not start with the digest", "--grouping", "BATCH_PARTITION_CONFLICT"),
-])
-def test_a_refusal_about_the_shape_of_plan_inputs_names_the_command_the_input_and_the_reason(case: str, field: str, code: str) -> None:
-    from tests.test_batch_assembly import _requirements
-    from tools import api, batch_assembly
-    from tools.json_cli import error_envelope
-
-    digest = "sha256:" + "a" * 64
-    other = "sha256:" + "b" * 64
-    calls = {
-        "whole marker answer as requirements": lambda: batch_assembly.plan_batches({"source_requirements": _requirements()}, _grouping(digest, context_receipt_digest=digest),
-                                                                                  window_bytes=10_000, input_bytes=1000),
-        "no context_receipt_digest": lambda: batch_assembly.plan_batches(_requirements(), _grouping(digest), window_bytes=10_000, input_bytes=1000),
-        "digests list does not start with the digest": lambda: batch_assembly.plan_batches(
-            _requirements(), _grouping(digest, context_receipt_digest=digest, context_receipt_digests=[other, digest]), window_bytes=10_000, input_bytes=1000),
-    }
-    with pytest.raises(batch_assembly.BatchAssemblyError) as refused:
-        api._plan_inputs("plan", calls[case])
-    envelope = error_envelope(refused.value)
-    assert envelope["code"] == code and envelope["fix"].startswith(f"plan: {field}"), envelope
-    assert "фрагмент" not in envelope["fix"] and refused.value.detail in envelope["fix"], envelope  # not the fix of a batch fragment
-
-
-def test_other_refusals_of_plan_keep_their_table_fix() -> None:
-    from tools import api, batch_assembly
-
-    def refuse():
-        raise batch_assembly.BatchAssemblyError("BATCH_PARTITION_CONFLICT", "out_of_scope leaves no source requirement to plan")
-
-    with pytest.raises(batch_assembly.BatchAssemblyError) as refused:
-        api._plan_inputs("plan", refuse)
-    assert not getattr(refused.value, "fix", None) or "--requirements" not in refused.value.fix
-
-
 # ---- <run>/tmp is made by the scan -------------------------------------------------------------------------------------
 
 def test_the_run_has_its_tmp_directory_from_the_start_and_out_writes_there(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -174,7 +104,7 @@ def test_the_help_of_the_cases_only_pack_lists_no_command_of_automation(cases_on
         assert command not in listing, command
         refused = _run_api(cases_only_pack, command, "--help")
         assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr, command
-    for kept in ("prepare", "submit", "review-open", "review-select", "plan"):  # F4b: the three commands of the nine are not commands of this delivery
+    for kept in ("prepare", "submit", "review-open", "review-select"):  # F4b: the three commands of the nine are not commands of this delivery
         assert _run_api(cases_only_pack, kept, "--help").returncode == 0, kept
 
 

@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from tools import batch_assembly, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
 from tools.project_inventory import read_inventory_receipt
 
 SLOT_DIR = "incoming"
@@ -34,9 +34,23 @@ def _scope_steps(root: Path) -> list[dict[str, Any]]:
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
     scope = scope_pause.scope_state(root, attempt_id, state)
-    return [{"stage": "scope", "waiting_for": "human", "done": scope["decision"] is not None, **scope,
+    return [{"stage": "scope", "waiting_for": "human", "done": scope["decision"] is not None, "recheck": True, **scope,
              "direct": (lambda root, step: scope_pause.ask(root, attempt_id, step), lambda root, value, dry_run: scope_pause.take(root, attempt_id, value, dry_run))}
             ] if scope["known"] else []
+
+
+def _plan_steps(root: Path) -> list[dict[str, Any]]:
+    """The plan of the batches once the marker is answered (``direct`` too: no request of a model): the agent names the subject, the header, the plan and the
+    skeletons come from the journal.  Published — the step stands as done and its slot is not read again."""
+    state = pilot_state.derive_state(root)
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    done = pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id) is not None
+    marked = any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == "context-marker:baseline"
+                 for event in state["events"])  # the answer is there, readable or not: a changed context file is the plan's refusal, not an unknown stage
+    return [{"stage": "plan", "waiting_for": "agent", "done": done,
+             "direct": (lambda root, step: pilot_state.plan_ask(root, attempt_id, step["done"]),
+                        lambda root, value, dry_run: pilot_state.publish_plan(root, attempt_id, value, dry_run))}
+            ] if marked else []
 
 
 MANUAL_SHARE_WARN = 0.5  # a candidate of a project with code whose manual steps are over this share: the reviewer's check is not measured
@@ -109,6 +123,7 @@ STEPS: dict[str, tuple[Callable, Callable, Callable | None]] = {
     "context-marker": (lambda root: context_marker_parts.plan(root)["parts"], _marker_accepted, None),
     "tc-generator": (_generator_steps, _generator_accepted, _assemble),
     "scope": (_scope_steps, lambda root: {}, None),
+    "plan": (_plan_steps, lambda root: {}, None),
 }
 
 
@@ -156,8 +171,6 @@ def _refuse_linked_inbox(root: Path) -> None:
 
 
 def _refuse_unready(stage: str, step: Mapping[str, Any]) -> None:
-    if "by_code" in step:
-        raise ValueError(f"STAGE_BY_CODE: {stage} отвечает код, не модель; fix: {step['by_code']}")
     if "waits" in step:
         raise ValueError(f"STAGE_WAITS: {stage}: {step['waits']}; fix: сначала prepare и submit этой стадии")
 
@@ -167,6 +180,8 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocati
     ``invocation_id`` is the host's label of the session that does the work (the review compares it with the reviewer's: same label, no independence);
     without it the code's label."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
+    if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
+        return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
         if not step["done"]:
             _refuse_linked_inbox(root)
@@ -204,8 +219,8 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocati
 def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1) -> dict[str, Any]:
     """Take the answer of ``stage`` from its slot and record it; ``load(path, project)`` reads the file strictly (``api._load_answer``)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
-    if "direct" in step:  # a recorded answer stands without a file; with a file the step checks it again
-        if step["done"] and not slot(root, stage).is_file():
+    if "direct" in step:  # a recorded answer stands without a file; where the step rechecks, a file there is checked again
+        if step["done"] and not (step.get("recheck") and slot(root, stage).is_file()):
             return {"stage": stage, **step["direct"][0](root, step)}
         return {"stage": stage, **step["direct"][1](root, load(str(slot(root, stage)), project).value, dry_run)}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):  # the recorded answer stands: the slot is not read again
@@ -224,12 +239,12 @@ def stage_status(root: Path, family: str) -> dict[str, Any]:
     """What ``status`` says of the marker or the generator: the next verb and the id of the step, who waits, the slot and the size.  Only reads."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    parts = STEPS[family][0](root)
-    if not parts:  # the generator before its plan: the command of the plan says it
+    parts = STEPS[family][0](root) or STEPS["plan"][0](root)  # the generator before its plan: the step of the plan
+    if not parts:
         return {}
     pending = [part for part in parts if not part["done"]]
     asked = next((part for part in pending if _events(state, attempt_id, part["stage"], "MODEL_REQUESTED")), None)
     step = asked or (pending[0] if pending else parts[-1])  # every part of the marker answered, the merge not: submit repeats it
-    verb = "submit" if asked or not pending else "cases-import" if "by_code" in step else "prepare"
+    verb = "submit" if asked or not pending or ("direct" in step and slot(root, step["stage"]).is_file()) else "prepare"
     return {"next": {"verb": verb, "stage": step["stage"]}, "waiting_for": "model" if asked else "agent",
-            **({"budget": _budget(root, step)} if "bytes" in step or asked else {}), **({} if verb == "cases-import" else {"answer_slot": str(slot(root, step["stage"]))})}
+            **({"budget": _budget(root, step)} if "bytes" in step or asked else {}), **({} if "by_code" in step else {"answer_slot": str(slot(root, step["stage"]))})}

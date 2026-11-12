@@ -36,7 +36,6 @@ IDENTIFIERS = {"attempt_id": "hex id of the attempt", "stage": "name from the cl
                "path.name": "run directory: 32 hex"}
 # (file, expression) -> why this value is not a command argument or is checked on the line before
 SPECIFIC = {
-    ("api.py", "project"): "the text of a refusal that names the flag the person typed, not a command to run",
     ("module_ids.py", "given"): "MODULE_ID_LEGACY is raised only when the value is the old hex form of the id (legacy_warning)",
     ("module_ids.py", "current"): "id made by module_id_for: [A-Za-z0-9_/-] or hex",
     ("ready.py", "target"): "the text of the STOP row for the --target the person typed, not a command to run",

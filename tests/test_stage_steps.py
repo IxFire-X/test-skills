@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -648,3 +649,274 @@ def test_the_same_label_for_the_generator_and_the_reviewer_is_no_independence(tm
                      "--model-id", "model-reviewer", "--invocation-id", "host-session-7", "--fresh-context", "yes"])
     opened = json.loads(capsys.readouterr().out)
     assert code == 0 and opened["result"]["reviewer_session_boundary"]["host_isolation"]["distinct_invocations"] is False, opened
+
+
+# ---- the plan of the batches: ``prepare`` / ``submit --stage plan`` — the agent names the subject, the journal gives the rest ----------------
+
+PLAN = "plan"
+SUBJECT = {"subject": "Оплата и возврат заказа"}
+
+
+def _plannable(tmp_path: Path, warnings: list[str] | None = None) -> tuple[Path, str, list[dict]]:
+    """A run whose marker is answered (two requirements, no gaps by default) and whose context is selected; no plan yet."""
+    from tests.test_scope_pause import _paused_run
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path, warnings=[] if warnings is None else warnings)
+    return root, attempt_id, receipts
+
+
+def _published(root: Path, attempt_id: str, kind: str) -> dict:
+    return dict(pilot_state.generator_input(root.parents[1], root, pilot_state.derive_state(root), attempt_id, kind))
+
+
+def test_prepare_plan_makes_the_inbox_and_names_the_slot_the_form_and_the_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt, _receipts = _plannable(tmp_path)
+    code, out = _call(capsys, "prepare", root, PLAN)
+    result = out["result"]
+    assert code == 0 and result["answer_slot"] == str(stage_steps.slot(root, PLAN)) and (root / "incoming").is_dir()
+    assert result["answer"] == {"subject": "<название предмета проверки по-русски>"} and result["requirements"] == 2 and result["context_receipts"] == 1
+
+
+def test_a_repeated_prepare_plan_changes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt, _receipts = _plannable(tmp_path)
+    _code, first = _call(capsys, "prepare", root, PLAN)
+    before = _events(root)
+    code, again = _call(capsys, "prepare", root, PLAN)
+    assert code == 0 and again == first and _events(root) == before
+
+
+def test_submit_plan_publishes_the_header_and_the_plan_of_the_journal_in_one_call(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _marker_rows
+    from tools.batch_assembly import plan_batches_for_project
+
+    root, attempt_id, receipts = _plannable(tmp_path)
+    _call(capsys, "prepare", root, PLAN)
+    _put(root, PLAN, SUBJECT)
+    code, out = _call(capsys, "submit", root, PLAN)
+    header, plan = _published(root, attempt_id, "header"), _published(root, attempt_id, "plan")
+    batch = plan["batches"][0]
+    assert code == 0 and out["result"]["plan"]["digest"] == plan["digest"] and out["result"]["plan"]["batches"][0]["stage"] == f"tc-generator:{batch['batch_id']}"
+    created = next(row for row in pilot_state.derive_state(root)["events"] if row["event_type"] == "RUN_CREATED")
+    assert header["document_id"] == "TCDOC-run" and header["metadata"] == {"subject": {"kind": "generic", "name": SUBJECT["subject"]}, "documentation": [],
+                                                                          "project": tmp_path.name, "author": "controller", "date": created["observed_at"][:10]}
+    schema = json.loads((Path(__file__).resolve().parents[1] / "schemas" / "canonical-test-document.schema.json").read_text(encoding="utf-8"))
+    version = re.search(r"(\d+\.\d+\.\d+)$", schema["title"]).group(1)  # the header is the version of the canonical document
+    assert (header["schema_version"], header["revision"], header["parent_sha256"], header["content_locale"]) == (version, 1, None, "ru-RU")
+    evidence = {"header_digest": header["digest"], "context_receipt_digest": receipts[0]["digest"], "context_receipt_digests": [receipts[0]["digest"]]}
+    digest = next(row["artifact_digest"] for row in pilot_state.derive_state(root)["events"] if row.get("stage_instance_id") == BASELINE and row["event_type"] == "MODEL_RESPONSE_RECEIVED")
+    answer = root / pilot_state.read_model_stage_artifact(root, attempt_id, BASELINE, digest)["path"]  # the file of the marker answer: its size is measured
+    expected = plan_batches_for_project(_marker_rows(), evidence, tmp_path, [answer], receipts, None, None)
+    assert plan["source_requirements"] == expected["source_requirements"] and [row["owned_source_requirement_ids"] for row in plan["batches"]] == [
+        row["owned_source_requirement_ids"] for row in expected["batches"]]
+
+
+@pytest.mark.parametrize("docs, module, wanted", [(["docs/Cart Checkout.md"], ".", "TCDOC-cart-checkout"), (["docs/Требования.md"], "python-pytest", "TCDOC-python-pytest"),
+                                                  (["docs/!!!.md"], ".", "TCDOC-run"), (["a/Спец.md", "b/ok.md"], "m", "TCDOC-m"), (["docs/ok.md", "x.md"], ".", "TCDOC-ok"),
+                                                  (["docs/" + "d" * 200 + ".md"], ".", "TCDOC-" + "d" * 80), ([], ".", "TCDOC-run"), (["docs/a.b.md#Раздел"], ".", "TCDOC-a.b")])
+def test_the_document_id_is_a_slug_that_is_never_empty(docs: list[str], module: str, wanted: str) -> None:
+    import re
+
+    found = pilot_state.header_document_id(docs, module)
+    assert found == wanted and re.fullmatch(r"TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?", found)
+
+
+def test_submit_plan_before_the_marker_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, *_ = _run(tmp_path, files=1)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "STAGE_UNKNOWN"
+
+
+def test_submit_plan_with_gaps_and_no_decision_is_pending_and_names_the_scope_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import GAP
+
+    root, _attempt, _receipts = _plannable(tmp_path, warnings=[GAP])
+    _put(root, PLAN, SUBJECT)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "SCOPE_PENDING" and "prepare --stage scope" in out["fix"] and _events(root) == before
+
+
+def test_submit_plan_carries_the_recorded_exclusion(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _record
+
+    root, attempt_id, _receipts = _plannable(tmp_path)
+    _record(root, attempt_id, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _put(root, PLAN, SUBJECT)
+    code, _out = _call(capsys, "submit", root, PLAN)
+    plan = _published(root, attempt_id, "plan")
+    assert code == 0 and plan["out_of_scope"] == [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда"}] and len(plan["source_requirements"]) == 1
+
+
+@pytest.mark.parametrize("answer", [{}, {"subject": ""}, {"subject": "  "}, {"subject": 7}, {"subject": ["a"]}, {"subject": "a\nb"}, {"subject": "я" * 201},
+                                    {**SUBJECT, "document_id": "TCDOC-x"}, [SUBJECT], "Оплата"])
+def test_submit_plan_refuses_a_wrong_form_with_the_form_in_the_fix_and_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str], answer: object) -> None:
+    root, *_ = _plannable(tmp_path)
+    _put(root, PLAN, answer)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "PLAN_ANSWER_INVALID" and '"subject"' in out["fix"] and _events(root) == before
+
+
+def test_submit_plan_refuses_a_slot_that_is_a_link(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, *_ = _plannable(tmp_path)
+    _call(capsys, "prepare", root, PLAN)
+    target = tmp_path / "elsewhere.json"
+    target.write_text(json.dumps(SUBJECT), encoding="utf-8")
+    try:
+        stage_steps.slot(root, PLAN).symlink_to(target)
+    except OSError:
+        pytest.skip("no symbolic links here")
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "INPUT_OUTSIDE_PROJECT" and _events(root) == before
+
+
+def _tree_of(root: Path) -> dict[str, int]:
+    return {path.relative_to(root).as_posix(): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
+
+
+def test_a_dry_run_of_submit_plan_checks_and_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id, _receipts = _plannable(tmp_path)
+    _call(capsys, "prepare", root, PLAN)
+    _put(root, PLAN, SUBJECT)
+    before = (_events(root), _tree_of(root))
+    code, out = _call(capsys, "submit", root, PLAN, "--dry-run")
+    assert code == 0 and out["dry_run"] is True and out["result"]["plan"]["batches"]
+    assert (_events(root), _tree_of(root)) == before
+    with pytest.raises(pilot_state.ModelInputsMismatch):
+        _published(root, attempt_id, "plan")
+
+
+def test_after_the_plan_is_published_a_repeat_answers_and_never_reads_the_slot(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id, _receipts = _plannable(tmp_path)
+    _put(root, PLAN, SUBJECT)
+    _call(capsys, "submit", root, PLAN)
+    plan, header, before = _published(root, attempt_id, "plan"), _published(root, attempt_id, "header"), _events(root)
+    stage_steps.slot(root, PLAN).write_text("not json", encoding="utf-8")
+    for command in ("submit", "prepare"):
+        code, out = _call(capsys, command, root, PLAN)
+        assert code == 0 and out["result"]["answered"] is True and out["result"]["plan"]["digest"] == plan["digest"]
+    assert _events(root) == before and _published(root, attempt_id, "plan") == plan and _published(root, attempt_id, "header") == header
+
+
+def test_a_decision_after_the_plan_is_still_refused_by_the_plan_of_the_journal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt, _receipts = _plannable(tmp_path)
+    _put(root, PLAN, SUBJECT)
+    _call(capsys, "submit", root, PLAN)
+    _put(root, SCOPE, EXCLUDE)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "SCOPE_DECISION_CONFLICT"
+
+
+def test_a_context_file_changed_after_the_scan_is_refused_at_submit_plan(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _attempt, _receipts = _plannable(tmp_path)
+    (tmp_path / "src" / "part0.py").write_text("# changed\n", encoding="utf-8")
+    _put(root, PLAN, SUBJECT)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "CONTEXT_DRIFTED" and _events(root) == before
+
+
+def test_the_status_names_prepare_then_submit_of_the_plan_then_the_first_batch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id, _receipts = _plannable(tmp_path)
+    first = _status(root)
+    assert (first["state"], first["waiting_for"], first["next"]) == ("generator", "agent", {"verb": "prepare", "stage": PLAN})
+    assert first["answer_slot"] == str(stage_steps.slot(root, PLAN))
+    _put(root, PLAN, SUBJECT)
+    assert _status(root)["next"] == {"verb": "submit", "stage": PLAN}
+    _call(capsys, "submit", root, PLAN)
+    batch_id = _published(root, attempt_id, "plan")["batches"][0]["batch_id"]
+    assert _status(root)["next"] == {"verb": "prepare", "stage": f"tc-generator:{batch_id}"}
+
+
+def test_a_project_that_asks_for_the_own_context_is_refused_at_submit_plan(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_generator_context import _project
+
+    root, *_ = _plannable(tmp_path)
+    (tmp_path / ".skillsrc").write_bytes((_project(tmp_path / "other", {"generator_context": "own"}) / ".skillsrc").read_bytes())
+    _put(root, PLAN, SUBJECT)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 2 and out["code"] == "GENERATOR_CONTEXT_NOT_IMPLEMENTED" and _events(root) == before
+
+
+def test_no_command_plans_the_batches_or_imports_the_cases_by_files_of_the_agent() -> None:
+    assert not {"plan", "plan-batches", "publish-generator-input", "cases-import"} & set(api.COMMANDS)
+
+
+# ---- the import of ready cases on the agent's path: ``prepare`` answers the requirements by code, ``submit --stage plan`` publishes the skeletons ----
+
+PART = "context-marker:batch-001"
+
+
+def _import_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], **flags) -> tuple[Path, str]:
+    from tests.test_cases_import import _project, _scan
+
+    _code, scan = _scan(_project(tmp_path), monkeypatch, **flags)
+    capsys.readouterr()
+    return Path(scan["run_root"]), scan["attempt_id"]
+
+
+def _answer_the_part(capsys: pytest.CaptureFixture[str], root: Path, attempt_id: str) -> None:
+    """The marker part of the code: the model's answer is the requirements answer with the sources of the code."""
+    digest = next(row["artifact_digest"] for row in pilot_state.derive_state(root)["events"]
+                  if row.get("stage_instance_id") == REQUIREMENTS and row["event_type"] == "MODEL_RESPONSE_RECEIVED")
+    answer = pilot_state.read_model_stage_artifact(root, attempt_id, REQUIREMENTS, digest)["artifact"]
+    assert _call(capsys, "prepare", root, PART)[0] == 0
+    _put(root, PART, {**answer, "artifacts": {**answer["artifacts"], "source_code_and_diff": {"sources": ["src/sample.py — combine склеивает два значения"]}}})
+    assert _call(capsys, "submit", root, PART)[0] == 0
+
+
+def _skeletons(root: Path, attempt_id: str) -> list[bool]:
+    plan = _published(root, attempt_id, "plan")
+    return [(root / "imported-cases" / f"{attempt_id}.{row['batch_id']}.json").is_file() for row in plan["batches"]]
+
+
+def test_an_import_without_documents_goes_by_prepare_and_submit_to_a_plan_with_a_skeleton_for_each_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    root, attempt_id = _import_run(tmp_path, monkeypatch, capsys)
+    assert _status(root)["next"] == {"verb": "prepare", "stage": REQUIREMENTS} and "answer_slot" not in _status(root)
+    code, out = _call(capsys, "prepare", root, REQUIREMENTS)  # the code answers: the request, the answer and the skeleton are one transition
+    assert code == 0 and out["result"]["imported"]["cases"] == 2 and "artifact" not in out["result"]
+    _answer_the_part(capsys, root, attempt_id)
+    _put(root, PLAN, SUBJECT)
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 0 and out["result"]["plan"]["batches"], out
+    assert _skeletons(root, attempt_id) == [True] * len(out["result"]["plan"]["batches"])
+    header = _published(root, attempt_id, "header")
+    assert header["metadata"]["documentation"] == ["cases/zephyr.csv"] and header["document_id"] == "TCDOC-zephyr"  # the CSV is the document of the run
+    first = out["result"]["plan"]["batches"][0]["stage"]
+    code, prepared = _call(capsys, "prepare", root, first)
+    assert code == 0 and prepared["result"]["request_digest"], prepared
+
+
+def test_an_import_with_documents_publishes_the_skeleton_at_submit_plan_and_a_dry_run_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_cases_import_docs import _answer
+
+    docs = str((tmp_path / "project" / "docs" / "req.md").resolve())  # typed as an absolute path: the header names the document relative to the project
+    root, attempt_id = _import_run(tmp_path, monkeypatch, capsys, docs=[docs])
+    assert _call(capsys, "prepare", root, REQUIREMENTS)[0] == 0
+    _put(root, REQUIREMENTS, _answer())  # the model's answer, with the links of the cases
+    assert _call(capsys, "submit", root, REQUIREMENTS)[0] == 0
+    _answer_the_part(capsys, root, attempt_id)
+    assert not list((root / "imported-cases").glob("*")) if (root / "imported-cases").exists() else True  # no skeleton before the plan
+    _put(root, PLAN, SUBJECT)
+    code, out = _call(capsys, "submit", root, PLAN, "--dry-run")
+    assert code == 0 and out["result"]["plan"]["batches"]
+    assert not list((root / "imported-cases").glob("*")) if (root / "imported-cases").exists() else True  # a dry run publishes no skeleton
+    code, out = _call(capsys, "submit", root, PLAN)
+    assert code == 0 and list((root / "imported-cases").glob(f"{attempt_id}.json")) and all(_skeletons(root, attempt_id))
+    header = _published(root, attempt_id, "header")
+    assert header["metadata"]["documentation"] == ["docs/req.md"] and header["document_id"] == "TCDOC-req", header  # nothing absolute in the header
+
+
+def test_an_import_with_documents_refuses_an_answer_without_the_links_of_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_cases_import_docs import _answer
+
+    root, _attempt_id = _import_run(tmp_path, monkeypatch, capsys, docs=["docs/req.md"])
+    assert _call(capsys, "prepare", root, REQUIREMENTS)[0] == 0
+    _put(root, REQUIREMENTS, _answer(None))
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, REQUIREMENTS)
+    assert code == 2 and out["code"] == "IMPORT_CASE_LINKS" and _events(root) == before

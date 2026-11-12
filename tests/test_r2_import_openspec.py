@@ -1,5 +1,5 @@
 """FaT-R2 (audit 2, 🔴): an import (``scan --cases``, no ``--docs``) on a project with OpenSpec in its context — the
-requirements code builds from the CSV are its cases, never reconciled with OpenSpec; cases-import checks its answer
+requirements code builds from the CSV are its cases, never reconciled with OpenSpec; the import by code checks its answer
 before it writes the request, and a refusal has a code."""
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def test_an_import_on_a_project_with_openspec_marks_and_merges(tmp_path: Path, m
     from tools import api, context_marker_parts, pilot_state
 
     root, attempt_id = _openspec_run(tmp_path, monkeypatch)
-    assert api.main(["cases-import", "--run-root", str(root), "--attempt", attempt_id]) == 0
+    assert api.main(["prepare", "--run-root", str(root), "--stage", "context-marker:requirements"]) == 0
     answer = next(event["artifact_digest"] for event in pilot_state.derive_state(root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED")
     value = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)["artifact"]
     for part in [row for row in context_marker_parts.plan(root)["parts"] if row["stage"].startswith("context-marker:batch-")]:

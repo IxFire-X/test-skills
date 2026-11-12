@@ -36,7 +36,7 @@ def _request(root: Path, attempt_id: str, stage: str, digests: list[str]) -> Non
 
 
 def test_published_generator_inputs_are_found(tmp_path: Path) -> None:
-    """FaT-DG: plan and header from publish-generator-input are found by their one digest."""
+    """FaT-DG: plan and header of the published inputs are found by their one digest."""
     from tools.step_size import request_files
 
     root, attempt_id, _baseline, receipts, marker, *_rest = _generator_run(tmp_path)

@@ -17,14 +17,14 @@ def _sha_file(path: str) -> str:
 
 
 def _publish_inputs(run: dict) -> tuple[str, str]:
-    run_args = ("--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
+    """The header and the plan of the fixture published the way ``submit --stage plan`` publishes what it built (the function that stayed)."""
+    from tools import pilot_state
+
     header = json.loads(Path(run["header"]).read_bytes())
     header.pop("digest", None)
-    code, published_header = _api("publish-generator-input", *run_args, "--kind", "header", "--value", _put(run["tmp"] / "header-raw.json", header))
-    assert code == 0, published_header
-    code, published_plan = _api("publish-generator-input", *run_args, "--kind", "plan", "--value", run["plan"])
-    assert code == 0, published_plan
-    return published_plan["result"]["digest"], published_header["result"]["digest"]
+    published_header = pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "header", header)
+    published_plan = pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "plan", json.loads(Path(run["plan"]).read_bytes()))
+    return published_plan["digest"], published_header["digest"]
 
 
 def _generator_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, transport: str = "") -> tuple[int, dict]:
@@ -39,14 +39,9 @@ def test_one_digest_for_plan_and_header(tmp_path: Path) -> None:
     plan_digest, header_digest = _publish_inputs(run)
     plan = json.loads(Path(run["plan"]).read_bytes())
     assert plan_digest == plan["digest"] and header_digest == plan["header_digest"]
-    # the same value again changes nothing; a bytes digest put into the value is refused with the right one
+    # the same value again changes nothing
     before = _journal(run["run_root"])
     assert _publish_inputs(run) == (plan_digest, header_digest) and _journal(run["run_root"]) == before
-    header = json.loads(Path(run["header"]).read_bytes())
-    header["digest"] = _sha_file(run["header"])
-    code, refused = _api("publish-generator-input", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "header",
-                         "--value", _put(run["tmp"] / "header-bytes.json", header))
-    assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_DIGEST") and header_digest in refused["message"], refused
 
 
 def test_commons_lang_b1a27c0b_bytes_digest_of_the_header(tmp_path: Path) -> None:
@@ -56,7 +51,7 @@ def test_commons_lang_b1a27c0b_bytes_digest_of_the_header(tmp_path: Path) -> Non
     before = _journal(run["run_root"])
     code, refused = _generator_request(run, batch, plan_digest, _sha_file(run["header"]))
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH", refused
-    assert "вход 4" in refused["message"] and header_digest in refused["message"] and "publish-generator-input --kind header" in refused["message"], refused
+    assert "вход 4" in refused["message"] and header_digest in refused["message"] and "submit --stage plan" in refused["message"], refused
     assert "вход 3" not in refused["message"] and _journal(run["run_root"]) == before
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, requested = _generator_request(run, batch, plan_digest, header_digest)
@@ -80,7 +75,7 @@ def test_a_request_before_the_plan_is_published_names_the_command(tmp_path: Path
     plan = json.loads(Path(run["plan"]).read_bytes())
     batch = json.loads(Path(run["fragments"][0]).read_bytes())["batch_id"]
     code, refused = _generator_request(run, batch, plan["digest"], plan["header_digest"])
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "publish-generator-input --kind plan" in refused["message"], refused
+    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "submit --stage plan" in refused["message"], refused
 
 
 def _uncovered(fragment: dict) -> dict:
@@ -186,7 +181,7 @@ def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_
 
 
 def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monkeypatch) -> None:
-    """A run whose generator request was published without publish-generator-input (the old flow) reads as before."""
+    """A run whose generator request was published without the published plan and header (the old flow) reads as before."""
     from tools import pilot_state
 
     run = _generated_run(tmp_path, generated=False)
@@ -227,48 +222,17 @@ def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tm
     assert code == 0, answered
 
 
-def _publish(run: dict, kind: str, value: dict) -> tuple[int, dict]:
-    return _api("publish-generator-input", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", kind,
-                "--value", _put(run["tmp"] / f"{kind}-try.json", value))
-
-
-def test_a_plan_before_its_header_is_refused(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, generated=False)
-    before = _journal(run["run_root"])
-    code, refused = _publish(run, "plan", json.loads(Path(run["plan"]).read_bytes()))
-    assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_ORDER") and "--kind header" in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-
-
-def test_a_plan_with_another_header_digest_is_refused_with_the_published_one(tmp_path: Path) -> None:
-    from tools.batch_assembly import with_digest
-
-    run = _generated_run(tmp_path, generated=False)
-    header = json.loads(Path(run["header"]).read_bytes())
-    code, published = _publish(run, "header", header)
-    assert code == 0, published
-    plan = {key: item for key, item in json.loads(Path(run["plan"]).read_bytes()).items() if key != "digest"}
-    plan["batches"] = [dict(row, header_digest="sha256:" + "4" * 64) for row in plan["batches"]]
-    before = _journal(run["run_root"])
-    code, refused = _publish(run, "plan", with_digest(plan))
-    assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_HEADER") and published["result"]["digest"] in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, ok = _publish(run, "plan", json.loads(Path(run["plan"]).read_bytes()))  # the right plan still goes: no conflict was written
-    assert code == 0, ok
-
-
 def test_a_plan_with_a_context_that_is_not_of_the_attempt_is_refused(tmp_path: Path) -> None:
+    from tools import pilot_state
     from tools.batch_assembly import with_digest
 
     run = _generated_run(tmp_path, generated=False)
-    assert _publish(run, "header", json.loads(Path(run["header"]).read_bytes()))[0] == 0
+    header = {key: item for key, item in json.loads(Path(run["header"]).read_bytes()).items() if key != "digest"}
+    pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "header", header)
     plan = {key: item for key, item in json.loads(Path(run["plan"]).read_bytes()).items() if key != "digest"}
     plan["batches"] = [dict(row, context_receipt_digest="sha256:" + "5" * 64) for row in plan["batches"]]
     before = _journal(run["run_root"])
-    code, refused = _publish(run, "plan", with_digest(plan))
     context = json.loads(Path(run["context"]).read_bytes())["digest"]
-    assert code == 2 and refused["message"].startswith("GENERATOR_INPUT_CONTEXT") and context in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
+    with pytest.raises(ValueError, match="GENERATOR_INPUT_CONTEXT") as refused:
+        pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "plan", with_digest(plan))
+    assert context in str(refused.value) and _journal(run["run_root"]) == before

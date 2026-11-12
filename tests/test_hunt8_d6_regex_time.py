@@ -134,7 +134,7 @@ def test_control_canonical_validation_of_a_1mb_field_with_a_non_blank_character_
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------
-# project text: the requirement documents (--docs, plan-batches)
+# project text: the requirement documents (--docs, the plan of the batches)
 # ----------------------------------------------------------------------------------------------------------------------------------------------------
 
 def test_markdown_heading_with_50k_blanks_inside_is_not_quadratic() -> None:

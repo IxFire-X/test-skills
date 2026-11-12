@@ -5,7 +5,7 @@ every command runs in a copy of the files of the profile (``pack_registry.profil
 by the test (the marker, the fragments, the verdicts) and the run of the tests is the human's (``human_run``).
 
 - ``cases-only``: ``ready``, ``scan``, the marker (``prepare`` / ``submit``), the pause on a
-  gap, ``publish-generator-input``, ``plan``, the answers of the generator by batches (``prepare`` / ``submit``, the last one assembles),
+  gap, the plan of the batches (``prepare`` / ``submit --stage plan``), the answers of the generator by batches (``prepare`` / ``submit``, the last one assembles),
   ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
   the first ``model-response`` refused ``MODE_B_NOT_IN_PACKAGE``);
 - ``mode-b``: the same cases part, then the review of the automation by the commands of the text (``references/mode-b.md`` §5) —
@@ -157,37 +157,40 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
     _put(Path(prepared["result"]["answer_slot"]), marker)
     code, answered = _api(pack, "submit", "--run-root", str(run_root), "--stage", "context-marker:baseline")
     assert code == 0, answered
-    header = {"schema_version": "1.1.0", "document_id": "TCDOC-fixture", "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
-              "metadata": {"subject": {"kind": "generic", "name": "Фикстура"}, "documentation": ["docs/requirements.md"], "project": "fixture",
-                           "author": "controller", "date": "2026-11-10"}}
     context_path = Path(scanned["evidence_path"])
     context = json.loads(context_path.read_bytes())
-    plan_files = ("--header", _put(tmp / "header.json", header), "--requirements", _put(tmp / "requirements.json", source),
-                  "--grouping", _put(tmp / "grouping.json", {"context_receipt_digest": context["digest"], "context_receipt_digests": [context["digest"]]}),
-                  "--project", str(project), "--input-file", str(run_root / answered["result"]["path"]), "--context-receipt", str(context_path), *flags,
-                  "--out-plan", str(tmp / "plan.json"), "--out-published", str(tmp / "published.json"))
-    code, published = _api(pack, "publish-generator-input", *flags, "--kind", "header", "--value", str(tmp / "header.json"))
-    assert code == 0, published
+    plan_slot = run_root / "incoming" / "plan.json"
     if gap:  # the pause after the marker: status says so, the plan is refused until the human answers
         status = _status(pack, project, run_root.name, "scope_pause", "prepare", "human")
         assert status["scope_gaps"][0]["source_requirement_ids"] == ["SREQ-0001"] and status["next"]["stage"] == "scope", status
-        code, refused = _api(pack, "plan", *plan_files)
+        _put(plan_slot, {"subject": "Фикстура"})
+        code, refused = _api(pack, "submit", "--run-root", str(run_root), "--stage", "plan")
         assert code == 2 and refused["code"] == "SCOPE_PENDING" and "prepare --stage scope" in refused["fix"], refused
+        plan_slot.unlink()
         code, asked = _api(pack, "prepare", "--run-root", str(run_root), "--stage", "scope")
         assert code == 0 and asked["result"]["answer_slot"] == str(run_root / "incoming" / "scope.json"), asked
         _put(Path(asked["result"]["answer_slot"]), {"decision": "continue"})
         _status(pack, project, run_root.name, "scope_pause", "submit", "agent")
         code, taken = _api(pack, "submit", "--run-root", str(run_root), "--stage", "scope")
         assert code == 0 and taken["result"]["decision"] == "continue", taken
-    if not gap:  # the plan is published by `tools.api plan` (SKILL §3), not named by its inner step plan-batches
-        _status(pack, project, run_root.name, "generator", "plan")
-    code, planned = _api(pack, "plan", *plan_files)
-    assert code == 0, planned
-    plan = json.loads((tmp / "plan.json").read_bytes())
-    assert len(plan["batches"]) == requirements, planned["notes"]
+    assert _status(pack, project, run_root.name, "generator", "prepare")["next"]["stage"] == "plan"  # the plan: the subject in the slot, nothing else from the agent
+    code, asked = _api(pack, "prepare", "--run-root", str(run_root), "--stage", "plan")
+    assert code == 0 and asked["result"]["answer_slot"] == str(plan_slot) and asked["result"]["requirements"] == requirements, asked
+    _put(plan_slot, {"subject": "Фикстура"})
+    assert _status(pack, project, run_root.name, "generator", "submit")["next"] == {"verb": "submit", "stage": "plan"}
+    code, planned = _api(pack, "submit", "--run-root", str(run_root), "--stage", "plan")
+    assert code == 0 and len(planned["result"]["plan"]["batches"]) == requirements, planned
+    code, receipt = _api(pack, "read-receipt", *flags, "--kind", "batch-plan", "--event", "ARTIFACT_READ_BACK")
+    assert code == 0, receipt
+    plan = receipt["result"]["record"]["plan"]
+    code, receipt = _api(pack, "read-receipt", *flags, "--kind", "generator-header", "--event", "ARTIFACT_READ_BACK")
+    assert code == 0, receipt
+    header = receipt["result"]["record"]["header"]
+    assert header["metadata"]["subject"]["name"] == "Фикстура" and header["metadata"]["documentation"] == ["docs/requirements.md"], header
+    assert len(plan["batches"]) == requirements, planned["result"]["notes"]
     make = _automated if profile == "local-pilot-v1" else (lambda fragment: fragment)
     fragments = [_put(tmp / f"fragment-{index}.json", make(_fragment(plan, context, index))) for index in range(len(plan["batches"]))]
-    return {"run_root": run_root, "attempt_id": attempt, "project": project, "tmp": tmp, "header": str(tmp / "header.json"), "plan": str(tmp / "plan.json"),
+    return {"run_root": run_root, "attempt_id": attempt, "project": project, "tmp": tmp, "header": _put(tmp / "header.json", header), "plan": _put(tmp / "plan.json", plan),
             "fragments": fragments, "context": str(context_path), "marker_digest": answered["result"]["content_digest"],
             "pack_before": before[0], "project_before": before[1]}
 

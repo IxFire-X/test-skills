@@ -1,5 +1,5 @@
 """FaT-H4a (hunt 4.1): the plan reads a prefix, in batch_index order, of every context receipt of the attempt; a skipped or
-misordered receipt is refused with the missing digest, and plan-batches says which grouping field is missing."""
+misordered receipt is refused with the missing digest, and the plan says which grouping field is missing."""
 from __future__ import annotations
 
 import pytest
@@ -13,7 +13,6 @@ def test_a_plan_that_skips_a_context_receipt_is_refused_with_the_skipped_digest(
         _generator_journal(three, [receipts[0], receipts[2]])
     message = str(refused.value)
     assert f"position 2 must be {receipts[1]['digest']} (batch_index {receipts[1]['batch_index']})" in message, message
-    assert "fix: put every digest in the grouping context_receipt_digests" in message
 
 
 def test_a_plan_that_starts_after_the_first_context_receipt_is_refused(three) -> None:

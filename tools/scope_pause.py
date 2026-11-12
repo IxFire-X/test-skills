@@ -313,13 +313,13 @@ def check_plan(run_root: Path, attempt_id: str, plan: Mapping[str, Any], state: 
             str(row.get("source_requirement_id")) for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping)}
         if wanted != covered:
             raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план теряет требования разметки без записи в out_of_scope: {sorted(wanted - covered) or 'нет'}, "
-                               f"лишние: {sorted(covered - wanted) or 'нет'}; fix: пересобери план командой plan-batches из всех требований разметки")
+                               f"лишние: {sorted(covered - wanted) or 'нет'}; fix: повтори `submit --stage plan` — план строит код из всех требований разметки")
     expected = sorted(row["source_requirement_id"] for row in out_of_scope(scope["decision"]))
     listed = plan.get("out_of_scope") if isinstance(plan, Mapping) else None
     given = sorted(str(row.get("source_requirement_id")) for row in listed or [] if isinstance(row, Mapping))
     if given != expected:
         raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план называет вне охвата {given or 'ничего'}, решение человека — {expected or 'без исключений'}; "
-                           "fix: пересобери план командой plan-batches с --run-root и --attempt этого прогона")
+                           "fix: повтори `submit --stage plan` — план строит код из записанного решения человека")
 
 
 def plan_of(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:

@@ -115,7 +115,7 @@ class GeneratorContextNotImplemented(ValueError):
 def generator_context(project: Path) -> str:
     """``.skillsrc`` ``limits.generator_context`` — ``all`` (default: every generator batch reads the context receipts
     of its plan) or ``own``.  ``own`` (the receipts of the batch's own group plus an index of the others) waits for a
-    measurement on a project with known defects and a definition of «own group»; ``plan-batches`` refuses it with a code."""
+    measurement on a project with known defects and a definition of «own group»; the plan refuses it with a code."""
     path = Path(project) / ".skillsrc"
     if not path.is_file():
         return "all"

@@ -17,9 +17,8 @@ pytestmark = pytest.mark.contract
     (ValueError("invalid factual receipt"), {"code": "INPUT_INVALID", "message": "invalid factual receipt", "fix": fix_for("INPUT_INVALID")}),
     (ValueError("UNLISTED_REFUSAL: the plan digest is not its self-digest"),
      {"code": "UNLISTED_REFUSAL", "message": "UNLISTED_REFUSAL: the plan digest is not its self-digest"}),
-    (ValueError("GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input"),
-     {"code": "GENERATOR_INPUT_ORDER", "message": "GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input",
-      "fix": "first tools.api publish-generator-input"}),
+    (ValueError("STAGE_NOT_PREPARED: the stage has no request yet; fix: prepare --stage x"),
+     {"code": "STAGE_NOT_PREPARED", "message": "STAGE_NOT_PREPARED: the stage has no request yet; fix: prepare --stage x", "fix": "prepare --stage x"}),
     (KeyError("missing"), {"code": "KeyError", "message": "'missing'"}),
 ])
 def test_the_code_is_the_error_s_own_then_its_prefix_then_its_type(error: Exception, fields: dict) -> None:

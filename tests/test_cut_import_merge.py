@@ -1,4 +1,4 @@
-"""F2 (A2-2, A2-4, arch review 3): cases-import, the merge of the marker parts (merge_parts) and the batch skeletons of a plan cut between two writes —
+"""F2 (A2-2, A2-4, arch review 3): the import by code (``prepare``), the merge of the marker parts (merge_parts) and the batch skeletons of a plan cut between two writes —
 the same command again finishes the work."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from tests.test_cut_review import _crash_event, _crash_nth, _events
 
 
 def _import_argv(root: Path, attempt_id: str) -> list[str]:
-    return ["cases-import", "--run-root", str(root), "--attempt", attempt_id]
+    return ["prepare", "--run-root", str(root), "--stage", "context-marker:requirements"]
 
 
 def _stage_events(root: Path, stage: str) -> list[str]:
@@ -21,7 +21,7 @@ def _stage_events(root: Path, stage: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
-# cases-import (no --docs): imported-cases receipt + pair, model request file + MODEL_REQUESTED, answer file + MODEL_RESPONSE_RECEIVED
+# the import by code (no --docs): imported-cases receipt + pair, model request file + MODEL_REQUESTED, answer file + MODEL_RESPONSE_RECEIVED
 # --------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("point", ["skeleton-file-written", "skeleton-published", "request-written", "answer-file-written"])
@@ -83,7 +83,7 @@ def test_merge_cut_between_the_request_and_the_answer(tmp_path: Path, monkeypatc
 
 
 # --------------------------------------------------------------------------------------
-# publish-generator-input --kind plan of a --cases run: the plan receipt + pair, then one skeleton receipt + pair per batch
+# the publication of the plan (``submit --stage plan``: the function ``publish_generator_input``) of a --cases run: the plan receipt + pair, then one skeleton receipt + pair per batch
 # --------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("point", ["skeleton-file-written", "skeleton-published"])
@@ -113,15 +113,14 @@ def test_plan_of_an_import_cut_between_a_skeleton_file_and_its_events(tmp_path: 
     header = pilot_state.publish_generator_input(root, attempt_id, "header", _header())
     plan = plan_batches(answer["artifacts"]["analytics_documentation"]["requirements"],
                         {"header_digest": header["digest"], "context_receipt_digest": context["digest"]})
-    argv = ["publish-generator-input", "--run-root", str(root), "--attempt", attempt_id, "--kind", "plan", "--value", _put(root / "tmp" / "plan.json", plan)]
     # in this call: the plan's own pair first (#1), then the skeleton of the first batch (#2)
     with monkeypatch.context() as broken:
         _crash_event(broken, "ARTIFACT_PUBLISHED" if point == "skeleton-file-written" else "ARTIFACT_READ_BACK", None, 2)
-        code, first = _main(capsys, argv)
-        assert code == 2, first
+        with pytest.raises(Exception):
+            pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
     assert any((root / "imported-cases").glob(f"{attempt_id}.BATCH-*.json")), "the cut left the skeleton file"
-    code, again = _main(capsys, argv)
-    assert code == 0 and again["result"]["kind"] == "plan" and again["result"].get("batch_skeletons"), f"{point}: {again}"
+    again = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
+    assert again["kind"] == "plan" and again.get("batch_skeletons"), f"{point}: {again}"
 
 
 

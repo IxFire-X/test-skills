@@ -13,7 +13,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from tools.schema_engine import Draft202012Validator, FormatChecker
@@ -2389,7 +2389,7 @@ def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence
 
 def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     """The checks of an answer that need no journal — the requirement order and the schema of the stage — for code
-    that builds an answer itself (cases-import), before it writes the request."""
+    that builds an answer itself (the import of cases), before it writes the request."""
     misplaced = _requirement_order_rows(stage_instance_id, value)
     if misplaced:
         raise ValueError(f"SOURCE_REQUIREMENT_ORDER: {stage_instance_id}: {misplaced}")
@@ -5080,8 +5080,8 @@ def _imported_cases(project: Path, root: Path, state: Mapping[str, Any], attempt
     try:
         return _read_attempt_receipt_with_state(project, root, state, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     except (ValueError, OSError, KeyError) as error:
-        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the cases of the import are not published; fix: tools.api cases-import "
-                                  f"--run-root <run> --attempt {attempt_id}") from error
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the cases of the import are not published; fix: prepare --stage "
+                                  "context-marker:requirements") from error
 
 
 def _batch_skeleton_value(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str) -> Mapping[str, Any]:
@@ -5396,8 +5396,8 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             rows = []
             made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
             if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
-                rows.append({"stage": "context-marker:requirements", "by": "cases-import",
-                             "command": f"python -m tools.api cases-import --run-root {printed(root)} --attempt {attempt_id}"})
+                rows.append({"stage": "context-marker:requirements", "by": "code",
+                             "command": f"python -m tools.api prepare --run-root {printed(root)} --stage context-marker:requirements"})
             for stage in model_stages:  # the reuse answers each stage from the source run itself; the merge of the parts follows by code
                 rows.append({"stage": stage, "response_digest": source["stages"][stage][1],
                              "command": f"python -m tools.api prepare --run-root {printed(root)} --stage {stage} --reuse-from {path.name}"})
@@ -5440,18 +5440,24 @@ def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
     )
 
 
+def context_receipts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The context receipts of the attempt in batch_index order."""
+    digests = dict.fromkeys(str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")
+    try:
+        return sorted((read_context_selection(root, attempt_id, digest) for digest in digests), key=lambda receipt: int(receipt["batch_index"]))
+    except ValueError as error:  # the receipts are the attempt's: one that does not read back is a changed file of the context
+        raise ValueError("CONTEXT_DRIFTED: a context receipt of the attempt does not match the files of the context any more; fix: `run_pipeline status` shows "
+                         "drift.changed — restore those files, or start the run again with `scan --new-run`") from error
+
+
 @closure_cached
-def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], header_digest: str, state: Mapping[str, Any]) -> None:
-    """The checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
-    attempt, the receipts are a prefix in batch_index order.  They write nothing, so ``tools.api plan`` can run them before it
-    publishes the header and a refusal leaves the journal as it was."""
+def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], state: Mapping[str, Any]) -> None:
+    """The checks a plan must pass before it is published — its batches bind context receipts of the attempt, the receipts are a prefix in
+    batch_index order.  They write nothing, so ``publish_plan`` can run them before it publishes the header and a refusal leaves the journal as it was."""
     unfinished = context_incomplete(root, attempt_id, state)
     if unfinished is not None:
         raise ValueError(scan_incomplete_message(*unfinished))
     for row in item["batches"]:
-        if row["header_digest"] != header_digest:
-            raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
-                             f"header is {header_digest}; fix: put {header_digest} as header_digest in the grouping and rerun plan-batches")
         for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # and the list
             try:
                 read_context_selection(root, attempt_id, context)
@@ -5466,49 +5472,28 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], he
                                  f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'}") from error
     # the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
     # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
-    ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(
-        str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")),
-        key=lambda receipt: int(receipt["batch_index"]))
+    ordered = context_receipts(root, attempt_id, state)
     contexts, prefix = _plan_contexts(item), [str(receipt["digest"]) for receipt in ordered]
     if contexts != prefix[:len(contexts)]:
         index = next(index for index, (given, wanted) in enumerate(zip(contexts, prefix)) if given != wanted)
         raise ValueError(
             f"GENERATOR_INPUT_CONTEXT: the plan reads the context receipts {', '.join(contexts)}; position {index + 1} must be "
             f"{prefix[index]} (batch_index {ordered[index]['batch_index']}) — the plan takes the receipts of the attempt in batch_index "
-            f"order from the first, none skipped: {', '.join(prefix)}; fix: put every digest in the grouping context_receipt_digests "
-            "(the lowest batch_index first, also as context_receipt_digest), one --context-receipt each, and rerun plan-batches")
+            f"order from the first, none skipped: {', '.join(prefix)}")
 
 
 def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: Mapping[str, Any]) -> dict[str, Any]:
-    """Publish the batch plan or the generator header of the attempt with its one digest — the self-digest.
-
-    A value without ``digest`` gets it here; a ``digest`` that is not the self-digest (the sha256 of the file bytes,
-    say) is refused with the right one. One plan and one header per attempt; the same value again changes nothing."""
-    if kind not in _GENERATOR_INPUT_KINDS or not isinstance(value, Mapping):
-        raise ValueError("GENERATOR_INPUT_INVALID: --kind is plan or header, --value a JSON object")
-    item = dict(value)
-    expected = _generator_input_digest(item)
-    if "digest" not in item:
-        item["digest"] = expected
-    elif item["digest"] != expected:
-        raise ValueError(f"GENERATOR_INPUT_DIGEST: the {kind} digest {item['digest']} is not its self-digest {expected} "
-                         "(the sha256 of the file bytes is not the digest); drop the field or put this value")
-    if kind == "plan" and not _plan_batches_listed(item):
-        raise ValueError("GENERATOR_INPUT_INVALID: the plan lists no batches; build it with tools.api plan-batches")
+    """Publish the batch plan or the generator header of the attempt with its one digest — the self-digest.  One plan and one header per
+    attempt; the same value again changes nothing.  A plan the generator request would refuse is refused before anything is written."""
+    item = {**value, "digest": _generator_input_digest(value)}
     receipt_kind = _GENERATOR_INPUT_KINDS[kind]
     project, root = _run_root(run_root)
-    if kind == "plan":  # a plan the generator request would refuse is refused now, while another plan is still possible
+    if kind == "plan":
         state = derive_state(root)
         from tools.scope_pause import check_plan
 
         check_plan(root, attempt_id, item, state)  # the pause after the marker — the plan carries the human's answer
-        try:
-            header = _generator_input(project, root, state, attempt_id, "header")
-        except ModelInputsMismatch as error:
-            raise ValueError("GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input "
-                             "--kind header --value <file>, build the plan with its result.digest, then publish the plan") from error
-        _check_plan_against(root, attempt_id, item, str(header["digest"]), state)
-
+        _check_plan_against(root, attempt_id, item, state)
     try:
         prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, receipt_kind, "ARTIFACT_READ_BACK")["record"][kind]
     except (ValueError, OSError, KeyError):
@@ -5518,59 +5503,101 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
                          "another one needs a new run (scan --new-run)")
     publish_bound(run_root, attempt_id, receipt_kind, {kind: item})
     skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # the last input of each batch
+    context = None
     if kind == "plan":  # which context batches of the attempt the generator sees — the line of the reviewer view
         from tools.review_view import run_context_note
 
         try:  # a hint, never a stop — as in the reviewer view
             context = run_context_note(root, attempt_id)
         except (KeyError, OSError, ValueError, TypeError):
-            context = None
-    else:
-        context = None
+            pass
     return {"kind": kind, "digest": item["digest"],
             "path": str(_receipt_target(root, attempt_id, receipt_kind).relative_to(root)).replace("\\", "/"),
             **({"batch_skeletons": skeletons} if skeletons else {}), **({"context": context} if context else {})}
 
 
-class PlanPublished(tuple):
-    """``(plan, published)`` of :func:`publish_plan` — a tuple for the two ``--out-…`` files, with the notes ``plan-batches`` prints."""
-
-    notes: list[str] = []
+PLAN_FORM = {"subject": "<название предмета проверки по-русски>"}
 
 
-def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], requirements: list[dict[str, Any]], grouping: Mapping[str, Any],
-                 project: Path, input_files: list[Path], context_receipt: Any, imported: Mapping[str, Any] | None,
-                 out_of_scope: Any = None) -> PlanPublished:
-    """``tools.api plan`` — what ``publish-generator-input --kind header``, ``plan-batches`` and ``publish-generator-input
-    --kind plan`` do, in that order, with their events and files, in one call.  The grouping needs no ``header_digest``: it is the
-    self-digest of the header; a grouping that names another is GENERATOR_INPUT_HEADER.  The plan is built before anything is published,
-    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was."""
+def header_document_id(docs: Sequence[str], module: str) -> str:
+    """``TCDOC-`` and the slug of the name of the first document (without its section and extension), else of the module, else ``run``:
+    lower case, ``[a-z0-9_.-]``, at most 80 signs — a name in Cyrillic has no slug of its own."""
+    def slug(text: str) -> str:
+        return re.sub(r"[^a-z0-9_.-]+", "-", text.lower()).strip("-._")[:80].strip("-._")
+
+    first = PurePosixPath(str(docs[0]).split("#", 1)[0].replace("\\", "/")).stem if docs else ""
+    return "TCDOC-" + (slug(first) or slug(module) or "run")
+
+
+def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
+    """What the plan is built from — the journal's: the requirements of the answered marker (and the file of that answer, measured for the batch
+    window), the context receipts, the exclusions the human recorded."""
+    from tools.scope_pause import out_of_scope, scope_state
+
+    receipts = context_receipts(root, attempt_id, state)  # first: a changed file of the context makes the answer of the marker unreadable too
+    answer = next(event for event in reversed(state["events"]) if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                  and event.get("stage_instance_id") == "context-marker:baseline")
+    read = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", str(answer["artifact_digest"]))
+    return {"requirements": read["artifact"]["artifacts"]["analytics_documentation"]["requirements"], "answer": root / read["path"], "receipts": receipts,
+            "out_of_scope": out_of_scope(scope_state(root, attempt_id, state)["decision"]) or None}
+
+
+def plan_view(plan: Mapping[str, Any]) -> dict[str, Any]:
+    return {"digest": plan["digest"], "batches": [{"stage": f"tc-generator:{row['batch_id']}", "batch_id": row["batch_id"], "namespace": row["namespace"],
+                                                  "requirements": len(row["owned_source_requirement_ids"])} for row in plan["batches"]]}
+
+
+def plan_ask(root: Path, attempt_id: str, done: bool) -> dict[str, Any]:
+    """``prepare --stage plan``: the plan that stands, or the form of the one answer and what the plan will be built from."""
+    state = derive_state(root)
+    if done:
+        return {"answered": True, "plan": plan_view(_generator_input(root.parents[1], root, state, attempt_id, "plan"))}
+    found = plan_inputs(root, attempt_id, state)
+    return {"answer": PLAN_FORM, "requirements": len(found["requirements"]), "out_of_scope": len(found["out_of_scope"] or []), "context_receipts": len(found["receipts"])}
+
+
+def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = False) -> dict[str, Any]:
+    """``submit --stage plan``: the header and the plan of the batches built from the journal and the subject the agent named, every check before
+    anything is written (``dry_run`` stops there), then the skeleton of an import, the header, the plan and the skeletons of its batches."""
     from tools.batch_assembly import plan_batches_for_project
-
-    item = dict(header)
-    expected = _generator_input_digest(item)
-    evidence = dict(grouping)
-    if evidence.get("header_digest") in (None, ""):
-        evidence["header_digest"] = expected
-    elif evidence["header_digest"] != expected:
-        raise ValueError(f"GENERATOR_INPUT_HEADER: header_digest of the grouping is {evidence['header_digest']}, the header's own is {expected}; "
-                         f"fix: удали header_digest из grouping — код поставит digest заголовка ({expected}) сам")
-    plan = plan_batches_for_project(requirements, evidence, project, input_files, context_receipt, imported, out_of_scope)
-    item_plan = dict(plan)
-    item_plan.setdefault("digest", _generator_input_digest(item_plan))
-    if not _plan_batches_listed(item_plan):
-        raise ValueError("GENERATOR_INPUT_INVALID: the plan lists no batches; build it with tools.api plan-batches")
-    _root = _run_root(run_root)[1]
+    from tools.cases_import import cases_path, run_skeleton
+    from tools.doc_sections import resolve_spec
+    from tools.run_pipeline import relative_to_project
     from tools.scope_pause import check_plan
+    from tools.step_size import require_generator_context_all
 
-    state = derive_state(_root)
-    check_plan(_root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
-    _check_plan_against(_root, attempt_id, item_plan, expected, state)
-    published_header = publish_generator_input(run_root, attempt_id, "header", item)
-    published_plan = publish_generator_input(run_root, attempt_id, "plan", dict(plan))
-    result = PlanPublished((dict(plan), {"header": published_header, "plan": published_plan}))
-    result.notes = list(plan.notes)
-    return result
+    subject = answer.get("subject") if isinstance(answer, Mapping) and set(answer) == {"subject"} else None
+    if not (isinstance(subject, str) and subject.strip() and len(subject) <= 200 and not re.search(r"[\x00-\x1f\x7f-\x9f]", subject)):
+        raise ValueError("PLAN_ANSWER_INVALID: ответ — один ключ subject, непустая строка до 200 знаков без управляющих символов")
+    project, root = _run_root(run_root)
+    require_generator_context_all(project)  # limits.generator_context: own is not implemented yet
+    state = derive_state(root)
+    unfinished = context_incomplete(root, attempt_id, state)
+    if unfinished is not None:
+        raise ValueError(scan_incomplete_message(*unfinished))
+    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    found = plan_inputs(root, attempt_id, state)
+    request = read_run(root)["manifest"].get("scan_request") or {}  # the paths as typed: the header names them as the scan does, inside the project (``relative_to_project``)
+    docs = list(dict.fromkeys(relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in request.get("docs") or []))
+    docs = docs or ([relative_to_project(project.resolve(), request["cases"])] if request.get("cases") else [])  # an import without documents: its CSV is the document of the run
+    header = {"schema_version": "1.1.0", "document_id": header_document_id(docs, str(attempt.get("module"))), "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
+              "metadata": {"subject": {"kind": "generic", "name": subject.strip()}, "documentation": docs, "project": project.name, "author": "controller",
+                           "date": str(state["events"][0]["observed_at"])[:10]}}  # the date of the run: the journal's, so a repeat gives the same bytes
+    header_digest = _generator_input_digest(header)
+    receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
+    plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
+                                    project, [found["answer"]], found["receipts"], run_skeleton(root, attempt), found["out_of_scope"])
+    item_plan = {**plan, "digest": _generator_input_digest(plan)}
+    check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
+    _check_plan_against(root, attempt_id, item_plan, state)
+    shown = {"plan": plan_view(item_plan), "header": {"digest": header_digest}, "notes": list(plan.notes)}
+    if dry_run:
+        return shown
+    if cases_path(root):  # the skeleton of an import with documents is published by the plan
+        publish_imported_cases(run_root, attempt_id)
+    publish_generator_input(run_root, attempt_id, "header", header)
+    published = publish_generator_input(run_root, attempt_id, "plan", dict(plan))
+    return {**shown, **({"context": published["context"]} if "context" in published else {})}
 
 
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
@@ -5586,8 +5613,8 @@ def _generator_input(project: Path, root: Path, state: Mapping[str, Any], attemp
         return _read_attempt_receipt_with_state(project, root, state, attempt_id, _GENERATOR_INPUT_KINDS[kind], "ARTIFACT_READ_BACK")["record"][kind]
     except (ValueError, OSError, KeyError) as error:
         raise ModelInputsMismatch(
-            f"MODEL_INPUTS_MISMATCH: the {kind} of this attempt is not published; fix: tools.api publish-generator-input "
-            f"--kind {kind} --value <file>, its result.digest is the input"
+            f"MODEL_INPUTS_MISMATCH: the {kind} of this attempt is not published; fix: submit --stage plan "
+            "(prepare --stage plan names the answer)"
         ) from error
 
 
@@ -5610,14 +5637,14 @@ def _expected_model_inputs(
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {instance} is not a batch of the published plan {plan['digest']}")
         if batch["header_digest"] != header["digest"]:
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the plan binds the header {batch['header_digest']}, the published header is "
-                                      f"{header['digest']}; the plan is built from the header digest of publish-generator-input")
+                                      f"{header['digest']}; the plan is built by submit --stage plan with the header digest")
         expected = [
             (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
             (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
             # the further context receipts of the plan, in its order
             *((context, f"context_receipt_digests[{index}] опубликованного плана") for index, context in enumerate(_plan_contexts(plan)) if index),
-            (str(plan["digest"]), "result.digest команды publish-generator-input --kind plan"),
-            (str(header["digest"]), "result.digest команды publish-generator-input --kind header"),
+            (str(plan["digest"]), "digest плана (submit --stage plan)"),
+            (str(header["digest"]), "digest header (submit --stage plan)"),
         ]
         if _batch_ordinal(batch) > 1:  # from batch 2 the capabilities of the accepted earlier batches
             prior = _prior_capabilities_value(project, root, state, attempt_id, instance)
@@ -5633,10 +5660,9 @@ def _expected_model_inputs(
                 skeleton = _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + instance, "ARTIFACT_READ_BACK")["record"]["imported"]
             except (ValueError, OSError, KeyError) as error:
                 raise ModelInputsMismatch(
-                    f"MODEL_INPUTS_MISMATCH: скелет пачки {instance} не опубликован; fix: повтори tools.api publish-generator-input --kind plan "
-                    "тем же планом — он опубликует скелеты пачек (batch_skeletons)"
+                    f"MODEL_INPUTS_MISMATCH: скелет пачки {instance} не опубликован; fix: повтори submit --stage plan — он опубликует скелеты пачек"
                 ) from error
-            expected.append((str(skeleton["digest"]), f"batch_skeletons[{instance}] — результат команды publish-generator-input --kind plan"))
+            expected.append((str(skeleton["digest"]), f"скелет пачки {instance} (submit --stage plan)"))
         return expected
     try:
         if stage == "tc-reviewer":

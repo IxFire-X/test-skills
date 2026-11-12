@@ -76,7 +76,6 @@ FIXES: dict[str, str] = {
     "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
     "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: tools.api review-select --verdict <файл ответа ревьюера> записывает его и "
                                  "выбирает ревизию; ревьюера ещё не вызывали — " + REVIEW_CHAIN,
-    "GENERATOR_INPUT_HEADER": "удали header_digest из grouping — команда plan поставит digest заголовка сама",
     # --- the model stages of the journal ---
     "MODEL_REQUEST_INVALID": "model-request --stage <стадия>:<экземпляр>; стадии: " + _STAGES + "; --attempt — attempt_id этого "
                              "прогона (run_pipeline status); --input-digest на каждый вход стадии по порядку",
@@ -108,8 +107,8 @@ FIXES: dict[str, str] = {
     "IMPORT_CASE_LINKS": "в ответе context-marker:requirements у каждой строки-кейса CSV ровно одна связь case_links: row — номер "
                          "строки кейса, source_requirement_ids — SREQ этого ответа, пустой список только с reason; отдай исправленный "
                          "ответ единственным повтором стадии (--transport-attempts 2), ничего не записано",
-    "IMPORT_LINKS_NOT_ANSWERED": "при --docs требования и связи кейсов размечает модель: сначала model-request и model-response "
-                                 "context-marker:requirements, потом cases-import",
+    "IMPORT_LINKS_NOT_ANSWERED": "при --docs требования и связи кейсов размечает модель: сначала prepare и submit --stage "
+                                 "context-marker:requirements, потом submit --stage plan",
     "IMPORT_CSV_V4": "выгрузите кейсы в профиле v5 (по умолчанию) или экспортом из Zephyr — в Test Data должен быть текст человека",
     "ZEPHYR_CSV_COLUMNS": "нужен экспорт тест-кейсов Zephyr Scale в CSV с колонками шаблона; лишние колонки уберите из выгрузки",
     "ZEPHYR_CSV_ROWS": "заполните названные ячейки CSV: у кейса Name и хотя бы один шаг, у каждого шага Step и Expected Result — "
@@ -119,7 +118,7 @@ FIXES: dict[str, str] = {
     "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
     "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
-    "IMPORT_NOT_CASES_RUN": "cases-import — для прогона scan --cases; у этого прогона требования размечает модель",
+    "IMPORT_NOT_CASES_RUN": "импорт — для прогона scan --cases; у этого прогона требования размечает модель",
     "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
     "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
                                    "ячейки CSV и повторите scan --cases --new-run",
@@ -279,13 +278,10 @@ FIXES: dict[str, str] = {
     "PUBLICATION_UNKNOWN": "исход записи в журнал неизвестен: повтори ту же команду с теми же входами один раз, затем `status` — он покажет, что записано",
     "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и --attempt (`status` называет попытку) и входные файлы команды; "
                      "повтори с исправленными аргументами",
-    "GENERATOR_INPUT_INVALID": "`publish-generator-input` берёт `--kind plan|header` и `--value` — JSON-объект; план без пачек не публикуется: "
-                               "построй его `tools.api plan` или `plan-batches`",
-    "GENERATOR_INPUT_DIGEST": "digest во входе не равен его self-digest: не правь план и header руками, опубликуй заново файл, который построил код; "
-                              "`result.digest` публикации — единственный digest входа",
+    "PLAN_ANSWER_INVALID": 'файл `incoming/plan.json` — один JSON-объект {"subject": "<название предмета проверки по-русски>"}: непустая строка до 200 знаков '
+                           "без управляющих символов, других ключей нет; исправь файл и повтори `submit --stage plan`",
     "GENERATOR_INPUT_CONFLICT": "у попытки уже есть другой такой вход (скелет, capabilities, план или header): продолжай с опубликованным, "
                                 "`status` покажет следующий шаг; другое содержимое — новый прогон (`scan --new-run`)",
-    "GENERATOR_INPUT_ORDER": "header публикуется раньше плана: `tools.api publish-generator-input --kind header --value <f>`, затем план",
     "REVIEWER_SESSION_CLOSED": "сессия ревью закрыта: вердикт в неё не добавить; `review-select` без --verdict выберет по записанному, "
                                "новое ревью — новый прогон (`scan --new-run`)",
     "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (`review-evidence --path <путь в проекте>`) или закрой сессию "

@@ -1,7 +1,7 @@
 """Ready test cases from a Zephyr CSV (``scan --cases``) become the source of a run.
 
-The CSV is the requirement document of the run.  ``tools.api cases-import`` answers the marker step
-``context-marker:requirements`` by code, not by a model: one source requirement per case, its text the case objective
+The CSV is the requirement document of the run.  ``prepare --stage context-marker:requirements`` answers that marker step
+by code, not by a model: one source requirement per case, its text the case objective
 (else its name) as written, provenance ``<csv>#строка N``, digest the sha256 of the CSV bytes; the journal records the
 step with the model id ``controller:cases-import``.  A CSV exported by the package in profile v4 carries the machine
 model in Test Data and is refused: machine text never becomes a human field.
@@ -380,9 +380,8 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     state = pilot_state.derive_state(root)
     attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
     stage = "context-marker:requirements"
-    if docs_run(root):  # the model answered the requirements and the links; code publishes the skeleton only
-        requirements_answer(root, attempt_id)
-        return {"imported": pilot_state.publish_imported_cases(root, attempt_id)}
+    if docs_run(root):  # with documents the model answers the requirements and the links, never the code
+        raise CasesImportError("IMPORT_LINKS_NOT_ANSWERED", "с --docs требования и связи отвечает модель")
     answered = [event for event in state["events"] if event.get("attempt_id") == attempt_id
                 and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == stage]
     if answered:

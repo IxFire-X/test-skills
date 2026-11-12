@@ -1,4 +1,4 @@
-"""FaT-SK → FaT-SKB (hunt 3, 3.4): a tc-generator batch of an import reads the skeleton of its own cases only, so plan-batches
+"""FaT-SK → FaT-SKB (hunt 3, 3.4): a tc-generator batch of an import reads the skeleton of its own cases only, so the plan
 puts no whole skeleton into the step input of every batch — the skeleton bytes of each case join the share of its batch."""
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ def test_the_share_of_a_batch_includes_the_skeleton_bytes_of_its_cases(run: dict
     assert estimate == sum(_human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case)) for case in cases)
 
 
-def test_plan_batches_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import api
+def test_the_plan_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path) -> None:
+    from tools.batch_assembly import plan_batches_for_project
 
     files = {}
     for name, value in (("req", run["requirements"]), ("grouping", {"header_digest": run["header_digest"],
@@ -69,10 +69,9 @@ def test_plan_batches_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path,
         files[name] = run["root"] / "tmp" / f"{name}.json"  # SEC-A: inside the project of --project
         files[name].parent.mkdir(exist_ok=True)
         files[name].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    assert api.main(["plan-batches", "--requirements", str(files["req"]), "--grouping", str(files["grouping"]),
-                     "--project", str(run["project"]), "--input-file", str(files["req"]), "--context-receipt", str(files["context"]),
-                     "--imported", str(run["receipt_path"])]) == 0
-    assert "её часть скелета импорта" in capsys.readouterr().out
+    plan = plan_batches_for_project(run["requirements"], json.loads(files["grouping"].read_text(encoding="utf-8")), run["project"], [files["req"]],
+                                    json.loads(files["context"].read_text(encoding="utf-8")), json.loads(Path(run["receipt_path"]).read_text(encoding="utf-8")), None)
+    assert any("её часть скелета импорта" in note for note in plan.notes)
 
 
 def test_step_inputs_of_a_batch_read_the_skeleton_of_that_batch(run: dict) -> None:

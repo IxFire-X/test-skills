@@ -216,15 +216,12 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
     (run_tmp / "grouping.json").write_text(json.dumps({"header_digest": "sha256:" + "c" * 64, "context_receipt_digest": receipt["digest"]}), encoding="utf-8")
     (run_tmp / "context.json").write_text(json.dumps(receipt, ensure_ascii=False), encoding="utf-8")
 
-    code = api.main(["plan-batches", "--requirements", str(run_tmp / "req.json"), "--grouping", str(run_tmp / "grouping.json"),
-                     "--project", str(project), "--input-file", str(marker), "--context-receipt", str(run_tmp / "context.json"),
-                     "--out", str(run_tmp / "plan.json"), "--run-root", str(run_tmp.parent)])
-    payload = json.loads(capsys.readouterr().out)
+    from tools.batch_assembly import plan_batches_for_project
 
-    assert code == 0 and payload["status"] == "ok", payload
-    plan = json.loads((run_tmp / "plan.json").read_text(encoding="utf-8"))
+    plan = plan_batches_for_project(requirements, {"header_digest": "sha256:" + "c" * 64, "context_receipt_digest": receipt["digest"]}, project, [marker], receipt, None, None)
+
     assert [batch["owned_source_requirement_ids"] for batch in plan["batches"]] == [["SREQ-0001"], ["SREQ-0002"]]
-    assert any("пачек 2" in note for note in payload["notes"])
+    assert any("пачек 2" in note for note in plan.notes)
 
 
 def _three_batch_fragments():

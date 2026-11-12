@@ -74,7 +74,7 @@ def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsy
     from tools import api
 
     assert set(api.COMMANDS) >= {
-        "model-request", "model-response", "read-model-artifact", "prepare", "submit", "plan-batches", "publish-generator-input",
+        "model-request", "model-response", "read-model-artifact", "prepare", "submit",
         "validate-canonical", "read-ledger",
         "read-effective", "open-automation-boundary", "read-receipt", "automation-digest", "relations-digest",
         "validate-automation", "runner-compat",
@@ -198,7 +198,7 @@ def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, caps
 
 
 def test_the_removed_digest_commands_are_gone_everywhere() -> None:
-    """FaT-DG: plan and header have one digest from publish-generator-input; the two old commands are gone."""
+    """FaT-DG: the two old digest commands are gone."""
     from tools import api
 
     removed = ("with" + "-digest", "publish" + "-artifact")
@@ -206,19 +206,6 @@ def test_the_removed_digest_commands_are_gone_everywhere() -> None:
     offenders = [str(path.relative_to(ROOT)) for path in [*DOCS, *sorted((ROOT / "tests").glob("*.py"))]
                  if any(name in path.read_text(encoding="utf-8") for name in removed)]
     assert offenders == []
-
-
-def test_publish_generator_input_returns_the_one_self_digest(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import pilot_state
-    from tools.batch_assembly import with_digest
-
-    root, attempt_id, _digests = _marker_run(tmp_path)
-    header = {"kind": "header", "title": "Заголовок"}
-    source = tmp_path / "header.json"
-    source.write_bytes(json.dumps(header, ensure_ascii=False, indent=2).encode("utf-8"))
-    code, published = _api(["publish-generator-input", "--run-root", str(root), "--attempt", attempt_id, "--kind", "header", "--value", str(source)], capsys)
-    assert code == 0 and published["result"]["digest"] == with_digest(header)["digest"], published
-    assert published["result"] == _plain(pilot_state.publish_generator_input(root, attempt_id, "header", header))
 
 
 def test_the_automation_readers_match_the_direct_calls(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -347,7 +334,7 @@ def test_each_command_calls_exactly_one_package_function() -> None:
     modules = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "tools"
                for alias in node.names}
     # F6: the two modules of mode B are not imported by api — their four handlers reach them through the gate, one call each
-    assert {"pilot_state", "batch_assembly", "canonical_document", "execution_gate"} <= modules
+    assert {"pilot_state", "canonical_document", "execution_gate"} <= modules
     assert not {"automation_validation", "run_tests"} & modules
     handlers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name.startswith("_cmd_")]
     from tools import api

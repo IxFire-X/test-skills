@@ -1,7 +1,7 @@
 """F2 (A1-2, arch review 3): the baseline of an attempt is the file the journal froze, not any file with the right name.
 
 ``frozen_baseline(run, attempt)`` — the file ``baselines/<attempt.baseline_digest>.json`` whose own digest is that digest and on which
-the journal wrote EXECUTION_BASELINE_FROZEN — the one reader of the seven that read it by name only (cases-import, status/finish drift,
+the journal wrote EXECUTION_BASELINE_FROZEN — the one reader of the seven that read it by name only (the import by code, status/finish drift,
 the exclusions of the scan, step sizes, the marker reuse hint, the marker parts, the review inputs)."""
 
 from __future__ import annotations
@@ -116,6 +116,6 @@ def test_cases_import_refuses_a_forged_baseline_before_it_publishes_anything(tmp
     value["digest"] = _digest(value)
     path.write_bytes(_canonical_bytes(value))
     before = _journal(root)
-    code, refused = _main(capsys, ["cases-import", "--run-root", str(root), "--attempt", attempt_id])
+    code, refused = _main(capsys, ["prepare", "--run-root", str(root), "--stage", "context-marker:requirements"])
     assert code == 2 and refused["code"] == "BASELINE_UNBOUND" and refused["fix"], refused
     assert _journal(root) == before and not list((root / "imported-cases").glob("*")) if (root / "imported-cases").exists() else True

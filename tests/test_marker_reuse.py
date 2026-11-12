@@ -254,6 +254,6 @@ def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(pilot_state, "_marker_base", lambda source: inputs)
     reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     first, *rest = reuse["stages"]
-    assert first == {"stage": "context-marker:requirements", "by": "cases-import",
-                     "command": f'python -m tools.api cases-import --run-root "{run_root}" --attempt {attempt_id}'}
+    assert first == {"stage": "context-marker:requirements", "by": "code",
+                     "command": f'python -m tools.api prepare --run-root "{run_root}" --stage context-marker:requirements'}
     assert [row["stage"] for row in rest] == ["context-marker:batch-001", "context-marker:batch-002"]

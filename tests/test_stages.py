@@ -27,7 +27,7 @@ def _shape(result: dict) -> tuple:
 @pytest.mark.parametrize(("name", "expected", "facts", "shape"), [
     ("after the scan the marker is next", "context-marker response", {}, ("marker", "agent", "prepare", "context-marker")),
     ("marker in parts: the next part is asked", "context-marker parts merge", {}, ("marker", "agent", "prepare", "context-marker")),
-    ("the marker answered: the plan of the batches", "generator fragments", {}, ("generator", "agent", "plan", "tc-generator")),
+    ("the marker answered: the plan of the batches", "generator fragments", {}, ("generator", "agent", "prepare", "tc-generator")),
     ("the marker has gaps: the human answers", "generator fragments", {"scope_pause": True}, ("scope_pause", "human", "prepare", "scope")),
     ("the human's answer lies in the slot", "generator fragments", {"scope_pause": True, "scope_answer": True}, ("scope_pause", "agent", "submit", "scope")),
     ("a batch answered, not the last", "remaining fragments or assembled candidate", {}, ("generator", "agent", "prepare", "tc-generator")),

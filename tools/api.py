@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import batch_assembly, canonical_document, cases_import, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, stage_steps, step_size
+from tools import canonical_document, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, stage_steps, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -54,15 +54,10 @@ def _json(path: str) -> _JsonFile:
 
 
 def _input_project(args: argparse.Namespace) -> Path | None:
-    """The project an input file must be in — strictly the anchor: the project of ``--run-root`` (a path that is no run is refused),
-    else ``--project``; None — no anchor at all, the file lies in a run (``output_guard.input_file``)."""
+    """The project an input file must be in — strictly the anchor: the project of ``--run-root`` (a path that is no run is refused);
+    None — no anchor at all, the file lies in a run (``output_guard.input_file``)."""
     run_root = getattr(args, "run_root", None)
-    if run_root is not None:
-        return output_guard.existing_run(run_root)[0]
-    project = getattr(args, "project", None)
-    if project is not None and not output_guard.local_path_text(str(project)):  # by its text, before _inside resolves it
-        raise output_guard.OutputRefused(output_guard.IN_CODE, f"--project {project}: not a local directory (UNC or device)", output_guard.IN_FIX)
-    return Path(project) if project is not None else None
+    return output_guard.existing_run(run_root)[0] if run_root is not None else None
 
 
 def _read_inputs(args: argparse.Namespace) -> None:
@@ -89,8 +84,6 @@ def _read_inputs(args: argparse.Namespace) -> None:
             setattr(args, name, read(flag, value))
         elif isinstance(value, list) and any(isinstance(item, _JsonFile) for item in value):
             setattr(args, name, [read(flag, item) if isinstance(item, _JsonFile) else item for item in value])
-    if isinstance(getattr(args, "input_file", None), list):  # the files a planning command measures: judged before it looks at them
-        args.input_file = [output_guard.input_file(item, project()) for item in args.input_file]
     for name in ("artifact", "verdict"):  # the answer file: its refusal has its code and fix and a line in refusals.jsonl
         if isinstance(getattr(args, name, None), str):
             setattr(args, name, _load_answer(getattr(args, name), project()))
@@ -158,77 +151,6 @@ def _cmd_prepare(a):
 
 def _cmd_submit(a):
     return stage_steps.submit(a.run_root, a.stage, _load_answer, dry_run=a.dry_run, transport_attempts=a.transport_attempts)
-
-
-def _cmd_cases_import(a):
-    return cases_import.import_requirements(a.run_root, a.attempt)
-
-
-_PLAN_REQUIREMENTS_FIX = ("{command}: --requirements — голый JSON-массив source requirements (поле `artifacts.analytics_documentation.requirements` ответа разметки, не весь ответ); "
-                          "у каждого `source_requirement_id` (SREQ-…), `display_order` (1..N подряд), `text`, `provenance` (список строк) и `digest`; "
-                          "не прошло: {detail}")
-_PLAN_GROUPING_FIX = ("{command}: --grouping — объект `context_receipt_digest` (digest квитанции с наименьшим batch_index) и `context_receipt_digests` "
-                      "(digest всех квитанций попытки, этот первым; даже если квитанция одна — оба поля вместе); `header_digest` в `plan` код ставит сам; "
-                      "не прошло: {detail}")
-
-
-def _plan_inputs(command: str, call):
-    """PT2: a refusal about the shape of the inputs of ``plan`` / ``plan-batches`` names the command and the input that failed — the
-    table's fix of the same codes is about a fragment of a batch."""
-    try:
-        return call()
-    except batch_assembly.BatchAssemblyError as error:
-        detail = str(error.detail)
-        if "; fix:" in detail:
-            raise
-        if detail.startswith(("source requirements must be", "source requirement IDs", "source requirement SREQ", "source requirement display_order")) or (
-                detail.startswith("source requirement ") and "lacks exact provenance" in detail):
-            template = _PLAN_REQUIREMENTS_FIX
-        elif detail.startswith(("grouping evidence must be", "grouping context_receipt_digest", "missing header_digest", "missing context_receipt_digest",
-                                "plan-batches needs every context receipt")):
-            template = _PLAN_GROUPING_FIX
-        else:
-            raise
-        raise batch_assembly.BatchAssemblyError(error.code, detail, getattr(error, "diagnostics", ()), template.format(command=command, detail=detail)) from None
-
-
-def _cmd_plan_batches(a):
-    imported = a.imported if isinstance(a.imported, dict) else None  # the receipt or its value; its bytes
-    # one --context-receipt per context batch of the attempt; one is the receipt itself, as before
-    contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
-    out_of_scope = _scope_answer(a)
-    return _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
-                                                                                         imported, out_of_scope))
-
-
-def _scope_answer(a):
-    """The pause after the marker. With --run-root and --attempt the plan is bound to the human's answer (``submit --stage scope`` records it):
-    a recorded one is used as it is, none (and gaps in the marker) is SCOPE_PENDING. Without them nothing is checked here;
-    publish-generator-input checks the plan against the answer anyway."""
-    from tools import scope_pause
-
-    step_size.require_generator_context_all(a.project)  # limits.generator_context: own is not implemented yet
-    if a.run_root is None or a.attempt is None:
-        return None
-    root = Path(a.run_root).resolve()
-    scope = scope_pause.scope_state(root, a.attempt)
-    if scope["pending"]:
-        raise scope_pause.ScopePending(scope_pause.pending_message(root, a.attempt, scope["gaps"]))
-    return scope_pause.out_of_scope(scope["decision"]) or None
-
-
-def _cmd_plan(a):
-    """The header, the plan of the batches and their publication in one command (one package function, ``pilot_state.publish_plan``);
-    the pause after the marker answers first, before anything is published."""
-    contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
-    imported = a.imported if isinstance(a.imported, dict) else None
-    answer = _scope_answer(a)
-    return _plan_inputs("plan", lambda: pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file,
-                                                                 contexts, imported, answer))
-
-
-def _cmd_publish_generator_input(a):
-    return pilot_state.publish_generator_input(a.run_root, a.attempt, a.kind, a.value)
 
 
 def _cmd_validate_canonical(a):
@@ -366,52 +288,43 @@ def _not_runnable(result: Any) -> bool:
     return getattr(result, "status", None) != "READY"
 
 
-# name: (handler, options, invalid-when, named parts of a tuple result)
-COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
-    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional")), None, ()),
-    "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None, ()),
-    "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
-    "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
+# name: (handler, options, invalid-when)
+COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
+    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional")), None),
+    "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None),
+    "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None),
+    "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None),
     "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--invocation-id", str, None),
-                                                 ("--reuse-from", str, None)), None, ()),
-    "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
-    "cases-import": (_cmd_cases_import, RUN, None, ()),
-    "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
-                                         ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
-                                         ("--run-root", Path, None), ("--attempt", str, None)), None, ()),
-    # header + plan-batches + publish of both in one command
-    "plan": (_cmd_plan, (("--header", _json), ("--requirements", _json), ("--grouping", _json), ("--project", Path),
-                         ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
-                         "--run-root", "--attempt"), None, ("plan", "published")),
-    "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
-    "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
-    "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
+                                                 ("--reuse-from", str, None)), None),
+    "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag")), None),
+    "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics),
+    "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None),
     "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),
-                                           ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None, ()),
+                                           ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None),
     # the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
     "review-publish": (_cmd_review_publish, (*RUN, ("--candidate", _json, None), ("--output-dir", Path),
-                                             ("--csv-profile", str, PROFILE)), None, ()),
+                                             ("--csv-profile", str, PROFILE)), None),
     # review-open [--model-id --invocation-id --fresh-context] opens the whole review; review-select [--verdict] [--dry-run] closes it
     "review-open": (_cmd_review_open, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
                                        ("--session-start", _json, None), ("--model-id", str, None), ("--invocation-id", str, None),
-                                       ("--fresh-context", _yes_no, None)), None, ()),
+                                       ("--fresh-context", _yes_no, None)), None),
     "review-select": (_cmd_review_select, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
                                            ("--reviewer-session", _json, None), ("--review", _json, None), ("--verdict", str, None),
-                                           ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
-    "complete-review": (_cmd_complete_review, RUN, None, ()),
-    "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
-    "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None, ()),
-    "read-effective": (_cmd_read_effective, RUN, None, ()),
+                                           ("--transport-attempts", int, 1), ("--dry-run", "flag")), None),
+    "complete-review": (_cmd_complete_review, RUN, None),
+    "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None),
+    "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None),
+    "read-effective": (_cmd_read_effective, RUN, None),
     "automation-boundary-facts": (_cmd_automation_boundary_facts, (*RUN, ("--revision", int), ("--fresh-context", _yes_no),
-                                                                     "--reviewer-invocation-id"), None, ()),
-    "open-automation-boundary": (_cmd_open_automation_boundary, (*RUN, ("--facts", _json)), None, ()),
-    "read-receipt": (_cmd_read_receipt, (*RUN, "--kind", "--event"), None, ()),
-    "automation-digest": (_cmd_automation_digest, (("--automation", _json),), None, ()),
-    "relations-digest": (_cmd_relations_digest, (("--relations", _json),), None, ()),
-    "validate-automation": (_cmd_validate_automation, (("--automation", _json), ("--canonical", _json)), _diagnostics, ()),
+                                                                     "--reviewer-invocation-id"), None),
+    "open-automation-boundary": (_cmd_open_automation_boundary, (*RUN, ("--facts", _json)), None),
+    "read-receipt": (_cmd_read_receipt, (*RUN, "--kind", "--event"), None),
+    "automation-digest": (_cmd_automation_digest, (("--automation", _json),), None),
+    "relations-digest": (_cmd_relations_digest, (("--relations", _json),), None),
+    "validate-automation": (_cmd_validate_automation, (("--automation", _json), ("--canonical", _json)), _diagnostics),
     "runner-compat": (_cmd_runner_compat, (("--module-root", Path), ("--language", str), ("--canonical", _json), ("--automation", _json),
-                                           ("--materialized", "flag")), _not_runnable, ()),
-    "step-inputs": (_cmd_step_inputs, ("--run-root", "--stage"), None, ()),
+                                           ("--materialized", "flag")), _not_runnable),
+    "step-inputs": (_cmd_step_inputs, ("--run-root", "--stage"), None),
 }
 
 
@@ -432,15 +345,14 @@ if not execution_gate.legacy_available():
     _LEGACY_REVIEW_FLAGS = frozenset(("--candidate", "--candidate-receipt", "--assembly-receipt", "--inventory-receipt", "--context-receipt",
                                       "--context-marker-output", "--generator-fragment", "--csv-profile"))
     for _name in ("review-publish", "review-open", "review-select"):
-        _function, _specs, _check, _parts = COMMANDS[_name]
-        COMMANDS[_name] = (_function, tuple(spec for spec in _specs if (spec if isinstance(spec, str) else spec[0]) not in _LEGACY_REVIEW_FLAGS),
-                           _check, _parts)
+        _function, _specs, _check = COMMANDS[_name]
+        COMMANDS[_name] = (_function, tuple(spec for spec in _specs if (spec if isinstance(spec, str) else spec[0]) not in _LEGACY_REVIEW_FLAGS), _check)
 
 
 def _parser() -> JsonArgumentParser:
     parser = JsonArgumentParser(prog="python -m tools.api", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, (_handler, options, _invalid, parts) in COMMANDS.items():
+    for name, (_handler, options, _invalid) in COMMANDS.items():
         command = sub.add_parser(name)
         for option in options:
             flag, *rest = option if isinstance(option, tuple) else (option,)
@@ -457,11 +369,7 @@ def _parser() -> JsonArgumentParser:
                 command.add_argument(flag, dest=dest, type=rest[0], default=rest[1])
             else:
                 command.add_argument(flag, dest=dest, type=(rest[0] if rest else (Path if flag == "--run-root" else str)), required=True)
-        if parts:
-            for part in parts:
-                command.add_argument(f"--out-{part}", dest=f"out_{part}", required=True)
-        else:
-            command.add_argument("--out", default=None)
+        command.add_argument("--out", default=None)
         if not any(action.dest == "run_root" for action in command._actions):
             # an --out file is confined to <run>/tmp/: a command that has no run of its own takes the run for that check only
             command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="the run: --out writes into its tmp/; the refusals of the command are journaled there")
@@ -515,7 +423,7 @@ def _deprecated(args: argparse.Namespace) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    handler, _options, invalid, parts = COMMANDS[args.command]
+    handler, _options, invalid = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))
     try:
         if args.command == "review-open":  # before the guards below — the flag is refused for what it is
@@ -526,8 +434,7 @@ def main(argv: list[str] | None = None) -> int:
             _refuse_canonical_review_request(args)
         _read_inputs(args)
         run_root = getattr(args, "run_root", None)
-        targets = {part: _out_target(getattr(args, f"out_{part}"), run_root) for part in parts}
-        out = _out_target(args.out, run_root) if not parts and args.out is not None else None
+        out = _out_target(args.out, run_root) if args.out is not None else None
         if getattr(args, "output_dir", None) is not None:  # the publication directory: inside the project of the run, never in .git
             output_guard.run_output_directory(args.output_dir, run_root)
         result = handler(args)
@@ -546,11 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     deprecated = _deprecated(args)
     if deprecated is not None:
         payload["deprecated"] = deprecated
-    if getattr(result, "notes", None):  # plan-batches says how and why it split
-        payload["notes"] = list(result.notes)
-    if parts:
-        payload["out"] = {part: _write(targets[part], plain(value), run_root) for part, value in zip(parts, result, strict=True)}
-    elif out is not None:
+    if out is not None:
         payload.update(_write(out, plain(result), run_root))
     else:
         payload["result"] = plain(result)

@@ -22,79 +22,12 @@ def _flat(path: Path) -> str:
     return " ".join(path.read_text(encoding="utf-8").split())
 
 
-def _plan_section() -> str:
-    text = SAMPLE.read_text(encoding="utf-8")
-    return text.split("## Входы `plan`", 1)[1].split("\n## ", 1)[0]
-
-
-def _plan_blocks() -> list:
-    return [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", _plan_section(), re.S)]
-
-
-def _real_marker() -> dict:
-    from tests.test_api_cli import _marker_value
-
-    return _marker_value()
-
-
-def _walk(value, path: str):
-    for part in path.split("."):
-        value = value[part]
-    return value
-
-
-# ---- A5-6: the requirements of the plan come from the field the marker answer has ---------------------------------------
-
-
-def test_the_fix_of_plan_and_the_sample_name_a_path_the_marker_answer_has() -> None:
-    from tools import api
-
-    marker = _real_marker()
-    for name, text in (("_PLAN_REQUIREMENTS_FIX", api._PLAN_REQUIREMENTS_FIX), ("fragment-sample.md", _plan_section())):
-        paths = re.findall(r"artifacts(?:\.[a-z_]+)+", text)
-        assert paths, name
-        for path in paths:
-            assert isinstance(_walk(marker, path), list), (name, path)
-        assert "`source_requirements` ответа разметки" not in text, name  # the marker answer has no such field
-    assert "source_requirements" not in marker and "source_requirements" not in marker["artifacts"]["analytics_documentation"]
-
-
-def test_the_requirement_row_of_the_sample_has_the_fields_of_a_row_of_the_marker_answer() -> None:
-    marker = _real_marker()
-    real = _walk(marker, "artifacts.analytics_documentation.requirements")[0]
-    _header, requirements, _grouping = _plan_blocks()
-    assert set(requirements[0]) == set(real)
-
-
-def test_the_provenance_of_the_sample_is_the_form_the_order_check_reads() -> None:
+def test_the_order_check_reads_the_provenance_as_path_and_line_not_as_a_fragment() -> None:
     from tools.pilot_state import _PROVENANCE_LINE
 
-    _header, requirements, _grouping = _plan_blocks()
-    placeholder = requirements[0]["provenance"][0]
-    assert "#L" not in placeholder and placeholder.startswith("<путь:строка"), placeholder
     for filled in ("docs/feature.md:4", "docs/feature.md:4-7"):
         assert _PROVENANCE_LINE.match(filled)
     assert not _PROVENANCE_LINE.match("docs/feature.md#L4-L7")  # the form PT2 gave: the order check skips it without a word
-    assert "#L" not in SAMPLE.read_text(encoding="utf-8")
-
-
-def test_the_header_of_the_sample_is_the_version_of_the_canonical_document() -> None:
-    schema = json.loads((ROOT / "schemas" / "canonical-test-document.schema.json").read_text(encoding="utf-8"))
-    version = re.search(r"(\d+\.\d+\.\d+)$", schema["title"]).group(1)
-    header, _requirements, _grouping = _plan_blocks()
-    assert header["schema_version"] == version == "1.1.0"
-
-
-def test_the_requirements_of_the_sample_filled_pass_the_marker_schema_and_the_plan() -> None:
-    from tests.test_marker_parts import _marker
-    from tools import batch_assembly
-    from tools.schema_validation import schema_diagnostics
-
-    _header, requirements, _grouping = _plan_blocks()
-    filled = [{**row, "text": "текст", "provenance": ["docs/feature.md:4-7"], "digest": "sha256:" + "b" * 64} for row in requirements]
-    marker = _marker(["src/part0.py — наблюдение"], requirements=filled)
-    assert schema_diagnostics(marker, ROOT / "schemas" / "context-marker-output.schema.json", ROOT) == []
-    assert batch_assembly._source_requirements(_walk(marker, "artifacts.analytics_documentation.requirements"))
 
 
 # ---- A5-1 = 8.7: model-response prints a receipt; --out leaves only the file ---------------------------------------------

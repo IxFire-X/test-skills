@@ -18,7 +18,7 @@ def test_a_new_run_without_publish_generator_input_is_refused_at_model_request(t
     root, attempt_id, _baseline, receipts, marker, plan, header, _plan_path, _header_path = _generator_run(tmp_path)
     inputs = [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]] if given else []
     before = sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
-    with pytest.raises(pilot_state.ModelInputsMismatch, match="MODEL_INPUTS_MISMATCH.*fix: tools.api publish-generator-input"):
+    with pytest.raises(pilot_state.ModelInputsMismatch, match="MODEL_INPUTS_MISMATCH.*fix: submit --stage plan"):
         pilot_state.publish_model_request(root, attempt_id, "tc-generator:BATCH-fixture", model_id="g", invocation_id="gen", input_digests=inputs)
     assert sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file()) == before
 

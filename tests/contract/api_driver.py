@@ -45,8 +45,6 @@ class Observed:
             self.refusals.append((command, payload))
         elif "result" in payload:
             self.results.setdefault(command, shape(payload["result"]))
-        elif isinstance(payload.get("out"), dict):  # the commands with named parts (plan) answer {out: {part: file}}
-            self.results.setdefault(command, {part: shape(json.loads(Path(row["out"]).read_bytes())) for part, row in sorted(payload["out"].items())})
         elif isinstance(payload.get("out"), str):  # --out: the result is in the file, the line holds {out, bytes, sha256}
             self.results.setdefault(command, shape(json.loads(Path(payload["out"]).read_bytes())))
 
@@ -77,7 +75,6 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
     from tests import test_review_requested as rr
     from tests.test_batch_journal import _prior, _response, _run, _second_request
     from tests.test_digest_traps import _generator_request
-    from tests.test_f3_scan_finish import _plan_argv
     from tests.test_review_two_commands import _bundles, _flags, _open, _select_verdict, _verdict
 
     with recording(monkeypatch) as observed:
@@ -97,16 +94,12 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         assert code == 0, prior
         assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
 
-        # (1b) plan and plan-batches on a run that has no plan yet
+        # (1b) the plan of the batches on a run that has none yet: prepare, the subject in the slot, submit
         fresh = rr._generated_run(tmp_path / "plan", generated=False)
-        code, planned = rr._api(*_plan_argv(fresh))
+        assert rr._api("prepare", "--run-root", str(fresh["run_root"]), "--stage", "plan")[0] == 0
+        rr._put(fresh["run_root"] / "incoming" / "plan.json", {"subject": "Предмет"})
+        code, planned = rr._api("submit", "--run-root", str(fresh["run_root"]), "--stage", "plan")
         assert code == 0, planned
-        context = json.loads(Path(fresh["context"]).read_bytes())
-        grouping = rr._put(fresh["tmp"] / "grouping-b.json", {"header_digest": context["digest"], "context_receipt_digest": context["digest"],
-                                                              "context_receipt_digests": [context["digest"]]})
-        code, batches = rr._api("plan-batches", "--requirements", str(fresh["tmp"] / "requirements.json"), "--grouping", grouping,
-                                "--project", str(fresh["project"]), "--input-file", fresh["marker"], "--context-receipt", fresh["context"])
-        assert code == 0, batches
 
         # (2) the review in two commands, then what reads its result; the assembled candidate is checked
         run = rr._generated_run(tmp_path / "review")
@@ -143,7 +136,7 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         from tests.test_cases_import import _scan
 
         _code, scanned = _scan(csv_project(tmp_path / "csv"), monkeypatch)
-        code, imported = direct(["cases-import", "--run-root", scanned["run_root"], "--attempt", scanned["attempt_id"]])
+        code, imported = direct(["prepare", "--run-root", scanned["run_root"], "--stage", "context-marker:requirements"])
         assert code == 0, imported
 
         # (6) mode B: the digests and validators of the automation, the runner check, the boundary of the autotest review

@@ -431,10 +431,10 @@ def test_the_fix_of_a_canonical_order_says_the_code_lays_it_out() -> None:
 
 
 def test_a_scope_pause_is_not_a_refusal_of_the_journal(tmp_path: Path, capsys) -> None:
-    from tests.test_scope_pause import _api, _paused_run, _plan_arguments
+    from tests.test_scope_pause import _paused_run, _submit_plan
 
-    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
-    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
+    root, *_ = _paused_run(tmp_path)
+    code, payload = _submit_plan(capsys, root)
     assert code == 2 and payload["code"] == "SCOPE_PENDING", payload
     assert not (root / "refusals.jsonl").exists()  # the pause is routine; the report shows it, not the refusals
 

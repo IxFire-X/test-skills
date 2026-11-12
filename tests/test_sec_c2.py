@@ -80,9 +80,8 @@ def test_the_path_flags_of_every_parser_are_the_registered_ones() -> None:
 # the file flags of the commands of ``tools.api``, read by ``_read_inputs`` (``output_guard.input_file``) or judged by their text and
 # anchor (``--project``, ``--run-root``, ``--output-dir``: ``output_guard.existing_run`` / ``run_output_directory``)
 _API_FILE_FLAGS = {"--assembly-receipt", "--automation", "--candidate", "--candidate-receipt", "--canonical", "--context-marker-output",
-                   "--context-receipt", "--document", "--facts", "--generator-fragment", "--grouping", "--header",
-                   "--imported", "--input-file", "--inventory-receipt", "--module-root", "--output-dir",
-                   "--project", "--relations", "--requirements", "--review", "--reviewer-session", "--run-root", "--session-start", "--value"}
+                   "--context-receipt", "--document", "--facts", "--generator-fragment",
+                   "--inventory-receipt", "--module-root", "--output-dir", "--relations", "--review", "--reviewer-session", "--session-start"}
 
 
 def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:
@@ -195,18 +194,6 @@ def test_h2_a_generated_file_path_of_the_automation_is_judged_before_it_is_sized
     artifact = {"artifacts": {"generated_files": [{"path": value}]}}
     with recorded(monkeypatch) as calls:
         _runner_input_size(tmp_path, artifact, True)
-    assert calls == []
-
-
-@pytest.mark.parametrize("value", HOSTILE)
-def test_h3_an_input_file_of_a_planning_command_is_judged_before_it_is_looked_at(tmp_path, monkeypatch, value) -> None:
-    import argparse
-
-    from tools import api, output_guard
-
-    args = argparse.Namespace(project=tmp_path, run_root=None, input_file=[Path(value)])
-    with recorded(monkeypatch) as calls, pytest.raises(output_guard.OutputRefused):
-        api._read_inputs(args)  # the planning commands look at the files (is_file, stat) afterwards: refused here, before that
     assert calls == []
 
 

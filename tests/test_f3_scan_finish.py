@@ -178,22 +178,11 @@ def test_abandon_on_a_closed_cases_only_attempt_points_to_report_not_ingest(tmp_
 
 # --- 8.6: the drift of a context file --------------------------------------------------------------------------------
 
-def _plan_argv(run: dict) -> list[str]:
-    from tests.test_batch_assembly import _requirements
-
-    tmp = run["tmp"]
-    context = json.loads(Path(run["context"]).read_bytes())
-    grouping = _put(tmp / "grouping.json", {"context_receipt_digest": context["digest"], "context_receipt_digests": [context["digest"]]})
-    requirements = _put(tmp / "requirements.json", _requirements())
-    return ["plan", "--header", run["header"], "--requirements", requirements, "--grouping", grouping, "--project", str(run["project"]),
-            "--input-file", run["marker"], "--context-receipt", run["context"], *_flags(run),
-            "--out-plan", str(tmp / "plan-out.json"), "--out-published", str(tmp / "published.json")]
-
-
 def test_plan_after_a_context_file_drift_names_the_drift(tmp_path: Path, capsys) -> None:
     run = _generated_run(tmp_path, generated=False)
     (run["project"] / "src" / "evidence.py").write_text("value = 2\n", encoding="utf-8")
-    code, refused = _main(capsys, _plan_argv(run))
+    _put(run["run_root"] / "incoming" / "plan.json", {"subject": "Предмет"})
+    code, refused = _main(capsys, ["submit", "--run-root", str(run["run_root"]), "--stage", "plan"])
     assert code == 2, refused
     assert refused["code"] == "CONTEXT_DRIFTED" and "scan --new-run" in str(refused.get("fix")), refused
     assert "not a context receipt" not in refused["message"], refused["message"]
