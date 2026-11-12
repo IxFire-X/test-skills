@@ -1,10 +1,8 @@
-"""F4b: one entry into the review, the envelope of every CLI, no deepcopy of scalars.
+"""F4b: the envelope of every CLI, no deepcopy of scalars; the delivery of cases has no mode-B command.
 
-- A3-2: the delivery of cases has one way into the review (``tools.api review-open`` → ``review-select``): the old CLI
-  ``tools.orchestrate_test_case_revision`` lives in ``tools/review_legacy.py`` (not in that delivery), and ``session-start``,
-  ``review-requested``, ``complete-review`` are not commands there; the build of development keeps all of them;
-- A5-5: ``MODEL_OUTPUT_TRUNCATED`` of ``--artifact`` / ``--verdict`` is a refusal with its code and fix, recorded in
-  ``refusals.jsonl`` — not ``INVALID_ARGUMENT`` with «check the flags»;
+- A3-2: ``review-requested`` is not a command of the cases delivery (the review of the cases goes by ``prepare`` / ``submit``);
+- A5-5: ``MODEL_OUTPUT_TRUNCATED`` of ``--artifact`` and of the answer in the slot of the review is a refusal with its code and fix,
+  recorded in ``refusals.jsonl`` — not ``INVALID_ARGUMENT`` with «check the flags»;
 - A5-9: ``step_size``, ``review_view``, ``review_edits`` refuse with ``code`` and ``fix``;
 - O-9: ``_plain`` leaves a scalar as it is."""
 from __future__ import annotations
@@ -19,9 +17,9 @@ import pytest
 
 from tests.test_pack_profile import copy_profile
 from tests.test_review_requested import _api, _generated_run
+from tests.test_review_two_commands import _open, _select_verdict
 
 ROOT = Path(__file__).resolve().parents[1]
-LEGACY_COMMANDS = ("session-start", "review-requested", "complete-review")
 
 
 @pytest.fixture(scope="module")
@@ -39,60 +37,13 @@ def _last_json(done: subprocess.CompletedProcess) -> dict:
 
 # ---- A3-2 -------------------------------------------------------------------------------------------------------------
 
-def test_the_old_review_cli_is_not_in_the_cases_only_delivery(cases_only_pack: Path) -> None:
-    assert not (cases_only_pack / "tools" / "review_legacy.py").exists()
-    from tools import pack_registry
-
-    assert "tools/review_legacy.py" in pack_registry.CASES_ONLY_EXCLUDED_FILES
-
-
-@pytest.mark.parametrize("command", LEGACY_COMMANDS)
-def test_the_three_commands_of_the_nine_are_not_commands_of_the_cases_only_delivery(cases_only_pack: Path, command: str) -> None:
+def test_review_requested_is_not_a_command_of_the_cases_only_delivery(cases_only_pack: Path) -> None:
     listing = _run(cases_only_pack, "tools.api", "--help").stdout
-    assert command not in listing
-    refused = _run(cases_only_pack, "tools.api", command, "--help")
+    assert "review-requested" not in listing
+    refused = _run(cases_only_pack, "tools.api", "review-requested", "--help")
     assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr
-    assert _run(cases_only_pack, "tools.api", "review-open", "--help").returncode == 0
-    assert _run(cases_only_pack, "tools.api", "review-select", "--help").returncode == 0
-
-
-def test_the_old_cli_refuses_with_its_code_and_the_way_in_the_cases_only_delivery(cases_only_pack: Path) -> None:
-    done = _run(cases_only_pack, "tools.orchestrate_test_case_revision", "publish", "--candidate", "c.json", "--output-dir", "o",
-                "--run-root", "r", "--attempt-id", "a" * 32)
-    printed = _last_json(done)
-    assert done.returncode == 2 and printed["code"] == "COMMAND_NOT_IN_PACKAGE", printed
-    assert "review-open" in printed["fix"] and "review-select" in printed["fix"] and "Traceback" not in done.stderr
-
-
-def test_a_flag_of_the_old_path_in_the_cases_only_delivery_is_a_refusal_with_the_way_in_not_a_traceback(cases_only_pack: Path, tmp_path: Path) -> None:
-    start = tmp_path / "start.json"
-    start.write_text("{}", encoding="utf-8")
-    ids = ["--run-root", str(tmp_path / "run"), "--attempt", "a" * 32, "--output-dir", str(tmp_path / "out")]
-    for argv in (["review-open", *ids, "--session-start", str(start)], ["review-select", *ids, "--reviewer-session", str(start)],
-                 ["review-select", *ids, "--review", str(start)]):
-        done = _run(cases_only_pack, "tools.api", *argv)
-        printed = _last_json(done)
-        assert done.returncode == 2 and printed["code"] == "LEGACY_REVIEW_NOT_IN_PACKAGE", (argv, printed)
-        assert "review-open" in printed["fix"] and "review-select" in printed["fix"] and "Traceback" not in done.stderr
-
-
-def test_the_development_build_keeps_the_old_path() -> None:
-    from tools import api, execution_gate, orchestrate_test_case_revision as revision
-
-    assert execution_gate.legacy_available() is True and (ROOT / "tools" / "review_legacy.py").is_file()
-    assert set(LEGACY_COMMANDS) <= set(api.COMMANDS)
-    done = subprocess.run([sys.executable, "-m", "tools.orchestrate_test_case_revision", "--help"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
-                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-    assert done.returncode == 0 and "publish" in done.stdout and "open-session" in done.stdout
-    assert callable(revision.main)
-
-
-def test_the_gate_loads_only_names_of_its_closed_list() -> None:
-    from tools import execution_gate
-
-    assert execution_gate.LEGACY_MODULES == ("review_legacy",)
-    with pytest.raises(ValueError):
-        execution_gate.load_legacy("pilot_state")
+    assert _run(cases_only_pack, "tools.api", "prepare", "--help").returncode == 0
+    assert _run(cases_only_pack, "tools.api", "submit", "--help").returncode == 0
 
 
 # ---- A5-5 -------------------------------------------------------------------------------------------------------------
@@ -103,18 +54,24 @@ def _truncated(tmp_path: Path) -> str:
     return str(path)
 
 
-@pytest.mark.parametrize(("command", "flag", "extra"), [("model-response", "--artifact", ["--stage", "context-marker:baseline"]),
-                                                       ("review-select", "--verdict", ["--output-dir", "out"])])
-def test_a_truncated_answer_is_a_refusal_with_its_code_its_fix_and_a_line_in_the_refusals(tmp_path: Path, command: str, flag: str, extra: list[str]) -> None:
+def test_a_truncated_answer_is_a_refusal_with_its_code_its_fix_and_a_line_in_the_refusals(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
-    ids = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"]]
-    if "--output-dir" in extra:
-        extra = ["--output-dir", str(run["run_root"] / "published")]
-    code, printed = _api(command, *ids, *extra, flag, _truncated(run["tmp"]))  # SEC-A: the answer lies in the run
+    code, printed = _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "context-marker:baseline",
+                         "--artifact", _truncated(run["tmp"]))  # SEC-A: the answer lies in the run
     assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED", printed
     assert printed["fix"] and "флаги" not in printed["fix"] and "--help" not in printed["fix"]
     lines = [json.loads(row) for row in (run["run_root"] / "refusals.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert any(row["code"] == "MODEL_OUTPUT_TRUNCATED" and row["command"] == command for row in lines), lines
+    assert any(row["code"] == "MODEL_OUTPUT_TRUNCATED" and row["command"] == "model-response" for row in lines), lines
+
+
+def test_a_truncated_answer_of_the_review_is_refused_by_submit_with_its_code_and_a_line(tmp_path: Path) -> None:
+    run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0
+    code, printed = _select_verdict(run, _truncated(run["tmp"]))
+    assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED", printed
+    assert printed["fix"] and "флаги" not in printed["fix"] and "--help" not in printed["fix"]
+    lines = [json.loads(row) for row in (run["run_root"] / "refusals.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(row["code"] == "MODEL_OUTPUT_TRUNCATED" and row["command"] == "submit" for row in lines), lines
 
 
 def test_a_missing_or_broken_answer_file_has_a_code_and_a_fix_too(tmp_path: Path) -> None:
@@ -130,9 +87,9 @@ def test_a_missing_or_broken_answer_file_has_a_code_and_a_fix_too(tmp_path: Path
 
 def test_a_dry_run_leaves_no_refusal_line(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0
     before = (run["run_root"] / "refusals.jsonl").read_bytes() if (run["run_root"] / "refusals.jsonl").exists() else b""
-    code, printed = _api("review-select", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["run_root"] / "published"),
-                         "--verdict", _truncated(run["tmp"]), "--dry-run")
+    code, printed = _select_verdict(run, _truncated(run["tmp"]), "--dry-run")
     assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED"
     after = (run["run_root"] / "refusals.jsonl").read_bytes() if (run["run_root"] / "refusals.jsonl").exists() else b""
     assert after == before

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _generated_run, _put
-from tests.test_review_two_commands import _api, _bundles, _flags, _open, _select_verdict, _verdict
+from tests.test_review_requested import _api, _generated_run
+from tests.test_review_two_commands import _bundles, _cycle, _flags, _open, _select_verdict, _verdict
 
 
 def _files(run: dict, pattern: str) -> list[Path]:
@@ -27,7 +27,7 @@ def _rejected_run(tmp_path: Path, message: str | None = None) -> dict:
     return run
 
 
-def test_review_publish_writes_no_import_csv_before_the_verdict(tmp_path: Path) -> None:
+def test_prepare_writes_no_import_csv_before_the_verdict(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     assert _files(run, "*.csv") == [] and _files(run, "*.json") == []
@@ -64,11 +64,8 @@ def test_a_run_closed_without_a_verdict_leaves_an_unreviewed_file_and_no_csv(tmp
 
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
-    code, aborted = _api("review-abort", *_flags(run), "--reason", "REVIEW_UNUSABLE")
+    code, aborted = _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")
     assert code == 0, aborted
-    session = _put(run["tmp"] / "session.json", {key: aborted[key] for key in aborted if key not in {"status", "stage"}} if "events" in aborted else aborted["result"])
-    code, selected = _api("review-select", *_flags(run), "--output-dir", _bundles(run), "--reviewer-session", session)
-    assert code == 0, selected
     capsys.readouterr()
     _code, closed = _run(capsys, "finish", run["project"], run["run_root"])
     assert len(closed["unreviewed_files"]) == 2, closed  # the closure itself is negative (exit 1): nothing was reviewed
@@ -77,22 +74,19 @@ def test_a_run_closed_without_a_verdict_leaves_an_unreviewed_file_and_no_csv(tmp
     assert "<body><div" in _files(run, "*.UNREVIEWED.html")[0].read_text(encoding="utf-8")
 
 
-def test_select_again_after_the_set_was_written_but_not_journaled_finishes_the_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_again_after_the_set_was_written_but_not_journaled_finishes_the_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import pilot_state
-    from tools.orchestrate_test_case_revision import OrchestrationError, review_select_step
 
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
-    raw = Path(_verdict(run)).read_bytes()
-    select = lambda: review_select_step(run["run_root"], run["attempt_id"], files={}, output_dir=Path(_bundles(run)),
-                                        verdict=json.loads(raw), verdict_bytes=len(raw))
+    answer = _verdict(run)
     with monkeypatch.context() as patch:
         patch.setattr(pilot_state, "publish_effective_canonical", lambda *a, **k: (_ for _ in ()).throw(ValueError("crash")))
-        with pytest.raises(OrchestrationError):
-            select()
+        assert _select_verdict(run, answer)[0] == 2
     written = {path.name: path.read_bytes() for path in _files(run, "*.*")}
     assert any(name.endswith(".zephyr-scale.csv") for name in written)
-    assert select()["status"] == "EFFECTIVE_SELECTED"
+    code, again = _select_verdict(run, answer)
+    assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
     assert {path.name: path.read_bytes() for path in _files(run, "*.*") if path.name in written} == written
     assert _api("read-effective", *_flags(run))[1]["result"]["document_digest"]
 

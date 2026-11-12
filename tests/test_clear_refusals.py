@@ -2,8 +2,7 @@
 
 (а) scan --module with a module root instead of its id: MODULE_UNKNOWN with the ids and their roots;
 (б) finish after the canonical reviewer answered but before select: the select command of this run;
-(в) select with another --output-dir than publish: both directories, not only «Orchestration failed.»;
-(г) the orchestrate SKILL names the --output-dir of select as the directory of publish.
+(в) the orchestrate SKILL names the directory of the set (``<run>/published``) and no flag for it.
 """
 from __future__ import annotations
 
@@ -54,27 +53,6 @@ def test_finish_after_the_review_answer_but_before_select_names_select(tmp_path:
     # FaT-O12b: tools.api review-select takes the package inputs and the reviewer answer from the journal
     assert "tools.api review-select" in fix and f"--attempt {attempt_id}" in fix and "orchestrate_test_case_revision" not in fix
     assert str(run_root) in fix and "complete-review" not in fix and "--reviewer-session" not in fix and "--generator-fragment" not in fix  # CO1: commands of the delivery
-
-
-def test_select_with_another_output_dir_names_the_directory_of_publish(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools.orchestrate_test_case_revision import OrchestrationError, orchestrate_revision
-
-    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
-    document = automated_document()
-    published = run_root / "bundle"
-    session, package, review, receipt = _reviewer_protocol_inputs(document, run_root, attempt_id, bundle_root=published)
-    other = run_root / "elsewhere"
-    with pytest.raises(OrchestrationError) as refused:
-        orchestrate_revision(document, receipt, package, session, review, other, run_root=run_root, attempt_id=attempt_id)
-    assert refused.value.code == "ORCHESTRATION_RECEIPT"
-    [row] = refused.value.diagnostics
-    assert row["code"] == "ORCHESTRATION_OUTPUT_DIR" and str(other.resolve()) in row["message"]
-    from tools.run_pipeline import command_token
-
-    assert f"--output-dir {command_token(str(published.resolve()))}" in row["message"]
 
 
 def test_the_same_directory_with_other_files_stays_a_receipt_refusal(tmp_path: Path) -> None:

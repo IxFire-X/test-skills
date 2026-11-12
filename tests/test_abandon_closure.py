@@ -2,7 +2,7 @@
 
 Tier A: an automation chain that cannot go on (the one retry spent, a revision that does not assemble) closes with
 `finish --abandon <code>`.  Tier B (D2): a canonical review that cannot end in a verdict closes with
-`review-abort --reason REVIEW_UNUSABLE` and select.  D3: materialize tells a repeatable I/O failure of the preparation from a
+`submit --stage tc-reviewer:canonical --abort REVIEW_UNUSABLE`.  D3: materialize tells a repeatable I/O failure of the preparation from a
 final one.  `--abandon` is refused wherever another command closes the attempt (ABANDON_NOT_NEEDED)."""
 
 from __future__ import annotations
@@ -98,22 +98,16 @@ def test_abandon_is_refused_where_finish_or_ingest_closes(tmp_path: Path, capsys
 
 @pytest.mark.slow
 def test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_review_requested import _generated_run, _open_session, _review, _select
+    from tests.test_review_requested import _generated_run
+    from tests.test_review_two_commands import _cycle, _open
 
     run = _generated_run(tmp_path)
-    candidate, _boundary = _open_session(run)
-    assert _review(run, candidate)[0] == 0  # the request is out; the answer twice failed its check
+    assert _open(run)[0] == 0  # the request is out; the answer twice failed its check
     code, refused = _run(capsys, "finish", run["project"], run["run_root"])
     assert code == 2 and refused["reason"] == "FINISH_FACT_UNDETERMINED", refused
     assert "<код>" not in refused["fix"] and "REVIEW_CONTEXT_LIMIT" in refused["fix"], refused
-    argv = _command(refused["fix"], "--reason REVIEW_UNUSABLE")
-    assert run["attempt_id"] in argv and "<" not in " ".join(argv), argv
-
-    code, aborted = _main(capsys, argv)
-    assert code == 0, aborted
-    code, selected = _select(run, None)
-    assert code == 0 and selected["facts"]["attempt_state"] == "TERMINAL", selected
-    assert selected["facts"]["reason_code"] == "REVIEW_UNUSABLE" and selected["facts"]["accepted"] is False, selected
+    code, aborted = _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")
+    assert code == 0 and aborted["result"]["outcome"] == "ABORTED" and aborted["result"]["status"] == "REVIEW_UNUSABLE", aborted
     _code, closed = _run(capsys, "finish", run["project"], run["run_root"])  # the fix ends with finish
     assert closed["status"] == "ok" and closed["reason_code"] == "REVIEW_UNUSABLE" and closed["accepted"] is False, closed
     _scan_not_blocked(run["run_root"])

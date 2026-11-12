@@ -255,24 +255,6 @@ def test_a_link_at_the_questions_path_is_a_conflict_even_to_the_same_bytes(tmp_p
     assert (cases / "questions-for-analyst.md").is_symlink() and elsewhere.read_bytes() == Path(written).read_bytes()
 
 
-def test_publication_puts_the_questions_beside_the_case_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    import tools.orchestrate_test_case_revision as revision
-
-    run_root = _finished_run(tmp_path)
-    cases = run_root / "published"  # SEC-A: --output-dir is <run>/published
-    cases.mkdir()
-    candidate = tmp_path / "candidate.json"
-    candidate.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(revision, "publish_unreviewed_candidate", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(revision, "_receipt_json", lambda _receipt: None)
-    code = revision.main(["publish", "--candidate", str(candidate), "--output-dir", str(cases), "--run-root", str(run_root), "--attempt-id", "a" * 32])
-    out = json.loads(capsys.readouterr().out)
-    # FaT-U5: the old command name still works and says it is renamed
-    assert code == 0 and out["status"] == "published" and out["warnings"] == [{"code": "COMMAND_RENAMED", "message": "tools.api review-publish"}]
-    assert out["questions_for_analyst"] == str((cases / "questions-for-analyst.md").resolve())
-    assert (cases / "questions-for-analyst.md").is_file()
-
-
 def test_status_and_a_second_report_still_work_after_the_report(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.run_pipeline import main
 

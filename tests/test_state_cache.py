@@ -26,11 +26,12 @@ def test_a_new_event_inside_a_closure_is_seen(tmp_path: Path) -> None:
     from tools import pilot_state
 
     run = _generated_run(tmp_path)
-    flags = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["run_root"] / "published")]
+    from tests.test_review_two_commands import _open
+
     with pilot_state.closure_cache():
         before = pilot_state.derive_state(run["run_root"])
-        code, published = _api("review-publish", *flags)  # another process appends events to the journal
-        assert code == 0, published
+        code, opened = _open(run)  # another process appends events to the journal
+        assert code == 0, opened
         after = pilot_state.derive_state(run["run_root"])
     assert len(after["events"]) > len(before["events"]) and after == pilot_state.derive_state(run["run_root"])
 

@@ -12,21 +12,6 @@
    "role_policy"
   ],
   "automation-digest": "string",
-  "complete-review": [
-   "boundary_digest",
-   "context_budget_bytes",
-   "digest",
-   "events",
-   "generator_invocation_id",
-   "generator_role",
-   "host_isolation",
-   "package_binding",
-   "reviewer_invocation_id",
-   "reviewer_role",
-   "schema_version",
-   "session_id",
-   "status"
-  ],
   "model-request": [
    "attempt_id",
    "digest",
@@ -96,46 +81,6 @@
    "record"
   ],
   "relations-digest": "string",
-  "review-abort": [
-   "boundary_digest",
-   "context_budget_bytes",
-   "digest",
-   "events",
-   "generator_invocation_id",
-   "generator_role",
-   "host_isolation",
-   "package_binding",
-   "reviewer_invocation_id",
-   "reviewer_role",
-   "schema_version",
-   "session_id",
-   "status"
-  ],
-  "review-evidence": [
-   "evidence_receipt",
-   "reviewer_session_digest"
-  ],
-  "review-open": [
-   "canaries",
-   "candidate_bundle_receipt",
-   "for_human",
-   "model_request",
-   "next_step",
-   "package_binding",
-   "questions_for_analyst",
-   "review_requested",
-   "reviewer_session_boundary",
-   "reviewer_view",
-   "warnings"
-  ],
-  "review-publish": [
-   "candidate_bundle_receipt",
-   "candidate_publication_status",
-   "idempotent",
-   "questions_for_analyst",
-   "status",
-   "warnings"
-  ],
   "review-requested": [
    "actor",
    "artifact_digest",
@@ -149,46 +94,12 @@
    "seq",
    "stage_instance_id"
   ],
-  "review-select": [
-   "candidate_bundle_receipt",
-   "codeword",
-   "diagnostics",
-   "effective_bundle_receipt",
-   "effective_source",
-   "facts",
-   "review_canaries",
-   "review_warnings",
-   "status",
-   "successor_bundle_receipt"
-  ],
-  "review-select --dry-run": [
-   "candidate_bundle_receipt",
-   "codeword",
-   "diagnostics",
-   "effective_bundle_receipt",
-   "effective_source",
-   "facts",
-   "review_canaries",
-   "review_warnings",
-   "status",
-   "successor_bundle_receipt",
-   "would_publish"
-  ],
   "runner-compat": [
    "bindings",
    "diagnostics",
    "required_pairs",
    "status",
    "verified_file_digests"
-  ],
-  "session-start": [
-   "context_budget_bytes",
-   "generator_invocation_id",
-   "generator_role",
-   "host_isolation",
-   "reviewer_invocation_id",
-   "reviewer_role",
-   "session_id"
   ],
   "step-inputs": [
    "attempt_id",
@@ -202,10 +113,31 @@
    "answered",
    "stage"
   ],
+  "submit --dry-run": [
+   "codeword",
+   "content_digest",
+   "dry_run",
+   "effective_source",
+   "filled",
+   "independence",
+   "normalized",
+   "outcome",
+   "review_canaries",
+   "review_warnings",
+   "status",
+   "would_publish"
+  ],
   "validate-automation": "array",
   "validate-canonical": "array"
  },
  "not_driven": {
-  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework"
+  "complete-review": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework",
+  "review-abort": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "review-evidence": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "review-open": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "review-publish": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "review-select": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
+  "session-start": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line"
  }
 }

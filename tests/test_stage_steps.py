@@ -639,18 +639,6 @@ def test_the_invocation_label_of_the_host_goes_into_the_request(tmp_path: Path, 
     assert request["invocation_id"] == "host-session-7"
 
 
-def test_the_same_label_for_the_generator_and_the_reviewer_is_no_independence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    run = _generator(tmp_path)
-    for index in range(2):
-        assert _call(capsys, "prepare", run["root"], run["stages"][index], "--invocation-id", "host-session-7")[0] == 0
-        _put(run["root"], run["stages"][index], run["values"][index])
-        assert _call(capsys, "submit", run["root"], run["stages"][index])[0] == 0
-    code = api.main(["review-open", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["root"] / "published"),
-                     "--model-id", "model-reviewer", "--invocation-id", "host-session-7", "--fresh-context", "yes"])
-    opened = json.loads(capsys.readouterr().out)
-    assert code == 0 and opened["result"]["reviewer_session_boundary"]["host_isolation"]["distinct_invocations"] is False, opened
-
-
 # ---- the plan of the batches: ``prepare`` / ``submit --stage plan`` — the agent names the subject, the journal gives the rest ----------------
 
 PLAN = "plan"

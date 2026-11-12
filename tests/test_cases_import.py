@@ -347,11 +347,12 @@ def _automation(document: dict, bundle_digest: str) -> dict:
 @pytest.mark.slow
 def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """e2e of stage 1, by commands: scan --cases → prepare (the code answers) → marker parts → plan → generator with the skeleton →
-    assemble → publish r1 → reviewer session → accepted review → select (effective) → tc-to-autotest → accepted static
+    prepare of the review → accepted review → submit (effective) → tc-to-autotest → accepted static
     review → materialize, a run of the printed command and ingest of the pytest mini project."""
     from tests.test_automation_revision_budget import durable_boundary, host_evidence, review
     from tests.p4_flow import flow_args, human_run
-    from tests.test_review_requested import _api, _complete, _open_session, _put, _review, _review_answer, _reviewer_request, _select
+    from tests.test_review_requested import _api, _put
+    from tests.test_review_two_commands import _candidate_file, _open, _select_verdict, _verdict
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import (append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt,
                                    read_model_stage_artifact, read_terminal_result)
@@ -371,20 +372,13 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
                   "header": _put(tmp / "header.json", run["header"]), "plan": _put(tmp / "plan.json", run["plan"]),
                   "fragments": [str(tmp / "fragment.json")], "inventory": _put(tmp / "inventory.json", inventory),
                   "context": _put(tmp / "context.json", run["context"]), "marker": _put(tmp / "marker.json", marker)}
-    candidate, boundary = _open_session(review_run, "command")
+    assert _open(review_run)[0] == 0
+    _candidate_file(review_run)
     document = json.loads((tmp / "candidate.json").read_text(encoding="utf-8"))
     assert [(case["title"], [step["test_data"] for step in case["steps"]]) for case in document["test_cases"]] == [
         (case["title"], [step["test_data"] for step in case["steps"]]) for case in run["imported"]["cases"]]  # the human fields of the CSV
-    assert _review(review_run, candidate)[0] == 0
-    code, requested = _reviewer_request(review_run, boundary)
-    assert code == 0, requested
-    code, answered = _api("model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "tc-reviewer:canonical",
-                          "--artifact", _review_answer(review_run))
-    assert code == 0, answered
-    code, completed = _complete(review_run)
-    assert code == 0, completed
-    code, selected = _select(review_run, str(tmp / "review.json"))
-    assert code == 0 and selected["effective_bundle_receipt"] is not None, selected
+    code, selected = _select_verdict(review_run, _verdict(review_run))
+    assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", selected
     code, effective = _api("read-effective", "--run-root", str(root), "--attempt", attempt_id)
     assert code == 0, effective
 

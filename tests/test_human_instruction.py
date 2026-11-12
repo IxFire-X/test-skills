@@ -1,4 +1,4 @@
-"""RV: the instruction `review-open` gives the person has two branches — INDEPENDENT asks for a fresh session, SELF does not."""
+"""RV: the instruction `prepare` of the review gives the person has two branches — INDEPENDENT asks for a fresh session, SELF does not."""
 
 from __future__ import annotations
 

@@ -200,7 +200,7 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
 def _cases_to_effective(pack: Path, run: dict) -> dict:
     """The generator batch by batch (``prepare``, the fragment in the slot, ``submit``; the last one assembles), the review the same way (``prepare``, the answer
     in the slot, ``submit``), ``read-effective``: the effective canonical of the run.  No file of the candidate is on the disk when the review opens."""
-    from tests.test_review_two_commands import _bundles, _flags, _verdict
+    from tests.test_review_two_commands import _flags, _verdict
 
     flags, tmp = _flags(run), run["tmp"]
     plan = json.loads(Path(run["plan"]).read_bytes())

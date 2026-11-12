@@ -75,7 +75,8 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
     from tests import test_review_requested as rr
     from tests.test_batch_journal import _prior, _response, _run, _second_request
     from tests.test_digest_traps import _generator_request
-    from tests.test_review_two_commands import _bundles, _flags, _open, _select_verdict, _verdict
+    from tests.test_cut_review import _evidence_verdict
+    from tests.test_review_two_commands import _candidate_file, _flags, _slot, _verdict
 
     with recording(monkeypatch) as observed:
         # (1) the generator: inputs, request, answer, the capabilities of the earlier batch, the plan
@@ -101,30 +102,35 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         code, planned = rr._api("submit", "--run-root", str(fresh["run_root"]), "--stage", "plan")
         assert code == 0, planned
 
-        # (2) the review in two commands, then what reads its result; the assembled candidate is checked
+        # (2) the review on the cycle (prepare, the answer in the slot, submit), then what reads its result; the assembled candidate is checked
+        def review(run: dict, verb: str, *extra: str) -> tuple[int, dict]:
+            flags = ("--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes") if verb == "prepare" else ()
+            return rr._api(verb, "--run-root", str(run["run_root"]), "--stage", "tc-reviewer:canonical", *flags, *extra)
+
         run = rr._generated_run(tmp_path / "review")
-        rr._assembled(run)  # the files of the nine commands; the generator step itself writes none
+        _candidate_file(run)
         assert rr._api("validate-canonical", "--document", str(run["tmp"] / "candidate.json"))[0] in (0, 1)
-        assert _open(run)[0] == 0
-        verdict = _verdict(run)
-        assert rr._api("review-publish", *_flags(run), "--output-dir", _bundles(run))[0] == 0
-        assert _select_verdict(run, verdict, "--dry-run")[0] == 0
-        assert _select_verdict(run, verdict)[0] == 0
+        assert review(run, "prepare")[0] == 0
+        _slot(run, _verdict(run))
+        assert review(run, "submit", "--dry-run")[0] == 0
+        assert review(run, "submit")[0] == 0
         assert rr._api("read-effective", *_flags(run))[0] == 0
-        assert rr._api("read-ledger", *_flags(run))[0] == 0
+        assert rr._api("read-ledger", *_flags(run))[0] == 0  # V4b-C: the command goes away with its line here
+        assert rr._review(run, rr._digest_of(run["tmp"] / "candidate.json"))[0] == 0  # the same digest again: the recorded request
         assert rr._api("read-receipt", *_flags(run), "--kind", "reviewer-session-boundary", "--event", "ARTIFACT_READ_BACK")[0] == 0
 
-        # (3) the review of the nine commands (the old way), with evidence asked for
-        reviewed, _digest = rr._reviewed(tmp_path / "legacy", evidence=("src/extra.py",), start="command")
-        assert reviewed
+        # (3) a review with evidence asked for in the slot
+        evidence = rr._generated_run(tmp_path / "evidence")
+        assert review(evidence, "prepare")[0] == 0
+        _slot(evidence, _evidence_verdict(evidence, "src/extra.py"))
+        assert review(evidence, "submit")[0] == 0
 
         # (4) a review opened and abandoned
         run = rr._generated_run(tmp_path / "abort")
-        assert _open(run)[0] == 0
-        code, aborted = rr._api("review-abort", *_flags(run), "--reason", "REVIEW_UNUSABLE")
+        assert review(run, "prepare")[0] == 0
+        code, aborted = review(run, "submit", "--abort", "REVIEW_UNUSABLE")
         assert code == 0, aborted
         shutil.rmtree(tmp_path / "abort", ignore_errors=True)
-        assert rr._complete(reviewed)[0] == 0  # the run of (3) after its selection: the old closing command
 
         def direct(argv: list[str]) -> tuple[int, dict]:
             code, payload = call_in_process(argv)

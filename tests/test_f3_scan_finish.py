@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_review_requested import _api, _generated_run, _journal, _put
-from tests.test_review_two_commands import _bundles, _events, _flags, _open, _verdict
+from tests.test_review_two_commands import _events, _flags, _open, _select_verdict, _verdict
 
 
 def _main(capsys, argv: list[str]) -> tuple[int, dict]:
@@ -151,7 +151,7 @@ def _rework_closed(tmp_path: Path, capsys) -> dict:
     run = _generated_run(tmp_path)
     code, opened = _open(run)
     assert code == 0, opened
-    code, selected = _main(capsys, ["review-select", *_flags(run), "--output-dir", _bundles(run), "--verdict", _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ")])
+    code, selected = _select_verdict(run, _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ"))
     assert code == 0, selected
     return run
 

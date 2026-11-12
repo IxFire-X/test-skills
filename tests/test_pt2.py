@@ -104,7 +104,7 @@ def test_the_help_of_the_cases_only_pack_lists_no_command_of_automation(cases_on
         assert command not in listing, command
         refused = _run_api(cases_only_pack, command, "--help")
         assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr, command
-    for kept in ("prepare", "submit", "review-open", "review-select"):  # F4b: the three commands of the nine are not commands of this delivery
+    for kept in ("prepare", "submit"):  # F4b: the commands of the cycle are commands of this delivery
         assert _run_api(cases_only_pack, kept, "--help").returncode == 0, kept
 
 
@@ -227,12 +227,13 @@ def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: 
 
 @pytest.mark.slow
 def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet() -> None:
-    from tests.test_review_requested import _api as call, _complete, _reviewed, _select
+    from tests.test_review_requested import _api as call, _generated_run
+    from tests.test_review_two_commands import _open, _select_verdict, _verdict
     import tempfile
 
     with tempfile.TemporaryDirectory() as directory:
-        run, review = _reviewed(Path(directory), "ТРЕБУЕТ ДОРАБОТКИ")
-        assert _complete(run)[0] == 0 and _select(run, review)[0] == 0
+        run = _generated_run(Path(directory))
+        assert _open(run)[0] == 0 and _select_verdict(run, _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ"))[0] == 0
         code, answer = call("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
         assert code == 0 and answer["result"]["effective"] is None, answer
         assert "REJECTED" in answer["result"]["reason"] and "не принимает кандидата" in answer["result"]["reason"] and "не записан" not in answer["result"]["reason"]

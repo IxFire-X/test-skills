@@ -1,5 +1,5 @@
-"""FaT-10b: REVIEW_REQUESTED by command. The chain from assembly to the reviewer model request runs only through
-`python -m tools.…` commands; the fixture only prepares the generator answers a real run already has."""
+"""FaT-10b: REVIEW_REQUESTED by command (the digest checks), the review of the automation by commands, the fixture of the runs with the generator answers
+published, and the cycle of the review (``prepare`` / ``submit`` of ``tc-reviewer:canonical``): the session, the evidence and the budget."""
 from __future__ import annotations
 
 import json
@@ -110,103 +110,14 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     }
 
 
-def _assembled(run: dict) -> None:
-    """The candidate and the receipt of the assembly as files (the package of the review of the nine takes them as files; the generator step writes none)."""
-    from tools.batch_assembly import assemble_candidate
-
-    candidate, receipt = assemble_candidate(*(json.loads(Path(run[name]).read_bytes()) for name in ("header", "plan")),
-                                            [json.loads(Path(path).read_bytes()) for path in run["fragments"]])
-    _put(run["tmp"] / "candidate.json", candidate)
-    _put(run["tmp"] / "assembly-receipt.json", receipt)
-
-
 def _digest_of(path: Path) -> str:
     from tools.canonical_document import document_sha256
 
     return document_sha256(json.loads(Path(path).read_bytes()))
 
 
-def _open_session(run: dict, start: str = "fixture", budget_delta: int = 0, fresh: str = "yes") -> tuple[str, dict]:
-    """assemble → publish r1 → open-session, by commands only; returns the candidate digest and the boundary."""
-    tmp, run_root, attempt = run["tmp"], str(run["run_root"]), run["attempt_id"]
-    _assembled(run)
-    code, published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(tmp / "candidate.json"),
-                           "--output-dir", str(run["run_root"] / "published"), "--run-root", run_root, "--attempt-id", attempt)
-    assert code == 0 and published["status"] == "published", published
-    receipt = _put(tmp / "candidate-receipt.json", published["candidate_bundle_receipt"])
-    generator_flags = [flag for path in run["fragments"] for flag in ("--generator-fragment", path)]
-    package_flags = ["--candidate", str(tmp / "candidate.json"), "--candidate-receipt", receipt, "--assembly-receipt", str(tmp / "assembly-receipt.json"),
-                     "--inventory-receipt", run["inventory"], "--context-receipt", run["context"], "--context-marker-output", run["marker"], *generator_flags]
-    before = _journal(run["run_root"])
-    if start == "command":  # FaT-10d: the session start from tools.api session-start, not by hand
-        code, built = _api("session-start", "--run-root", run_root, "--attempt", attempt, *package_flags, "--fresh-context", fresh,
-                           "--reviewer-invocation-id", "reviewer-subagent-1", "--out", str(tmp / "session-start.json"))
-        assert code == 0, built
-        assert _journal(run["run_root"]) == before  # it writes nothing in the run
-        run["start"] = built["out"]
-        if budget_delta:
-            value = json.loads(Path(run["start"]).read_bytes())
-            value["context_budget_bytes"] += budget_delta
-            _put(Path(run["start"]), value)
-    code, opened = _cmd("tools.orchestrate_test_case_revision", "open-session", *package_flags, "--session-start", run["start"],
-                        "--run-root", run_root, "--attempt-id", attempt)
-    run["opened"] = opened
-    if budget_delta < -_RESERVE:  # the refusal case: the caller checks it
-        assert code == 2 and _journal(run["run_root"]) == before, opened
-        return "", opened
-    assert code == 0 and opened["status"] == "opened", opened
-    digest = _digest_of(tmp / "candidate.json")
-    assert digest == published["candidate_bundle_receipt"]["document_sha256"], digest
-    return digest, opened["reviewer_session_boundary"]
-
-
-def _reviewer_request(run: dict, boundary: dict) -> tuple[int, dict]:
-    return _api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "tc-reviewer:canonical",
-                "--model-id", "model-reviewer", "--invocation-id", boundary["reviewer_invocation_id"],
-                "--input-digest", boundary["canonical_branch_digest"], "--input-digest", boundary["package_digest"])
-
-
-_RESERVE = 256 * 1024  # .skillsrc limits.context_batch_bytes by default
-
-
 def _review(run: dict, digest: str, stage: str = "tc-reviewer:canonical") -> tuple[int, dict]:
     return _api("review-requested", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", stage, "--digest", digest)
-
-
-def test_open_session_review_requested_and_the_reviewer_request_by_commands_only(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    candidate, boundary = _open_session(run)
-    assert boundary["canonical_branch_digest"] == candidate
-    # the blocker of the Petclinic run: without the event the request refuses
-    before = _journal(run["run_root"])
-    code, refused = _reviewer_request(run, boundary)
-    assert code == 2 and "must bind its prior candidate and reviewer boundary" in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], "model-request")  # J1: the one event the refusal itself added
-    code, recorded = _review(run, candidate)
-    assert code == 0 and recorded["status"] == "ok", recorded
-    event = recorded["result"]
-    assert (event["event_type"], event["stage_instance_id"], event["artifact_digest"], event["actor"]) == (
-        "REVIEW_REQUESTED", "tc-reviewer:canonical", candidate, "controller"), event
-    code, requested = _reviewer_request(run, boundary)
-    assert code == 0 and requested["status"] == "ok", requested
-    rows = [json.loads(line) for line in _journal(run["run_root"]).decode("utf-8").splitlines()]
-    order = [row["event_type"] for row in rows if row.get("stage_instance_id") in {"assembly", "tc-reviewer:canonical"}]
-    assert order == ["CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "MODEL_REQUESTED"], order
-
-
-def test_the_same_digest_again_is_a_no_op_and_another_is_refused(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    candidate, _boundary = _open_session(run)
-    code, first = _review(run, candidate)
-    assert code == 0, first
-    before = _journal(run["run_root"])
-    code, again = _review(run, candidate)
-    assert code == 0 and again["result"] == first["result"] and _journal(run["run_root"]) == before, again
-    code, other = _review(run, "sha256:" + "7" * 64)
-    assert code == 2 and other["message"].startswith("REVIEW_ALREADY_REQUESTED"), other
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, other["code"], "review-requested")  # J1: the one event the refusal itself added
 
 
 @pytest.mark.parametrize("stage", ["tc-generator:BATCH-fixture", "tc-to-autotest:r1", "autotest-reviewer:r3", "tc-reviewer:other", "assembly"])
@@ -283,205 +194,6 @@ def _review_answer(run: dict, verdict: str = "ПРИНЯТО") -> str:
     return _put(run["tmp"] / "review.json", {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report}, "warnings": []})
 
 
-def _reviewed(tmp_path: Path, verdict: str = "ПРИНЯТО", evidence: tuple[str, ...] = (), start: str = "fixture") -> tuple[dict, str]:
-    run = _generated_run(tmp_path)
-    candidate, boundary = _open_session(run, start)
-    assert _review(run, candidate)[0] == 0
-    code, requested = _reviewer_request(run, boundary)
-    assert code == 0, requested
-    run["evidence"] = []
-    for path in evidence:
-        code, given = _evidence(run, path)
-        assert code == 0, given
-        run["evidence"].append(given["result"]["evidence_receipt"]["digest"])
-    review = _review_answer(run, verdict)
-    code, answered = _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"],
-                          "--stage", "tc-reviewer:canonical", "--artifact", review)
-    assert code == 0, answered
-    return run, review
-
-
-def _evidence(run: dict, *paths: str) -> tuple[int, dict]:
-    return _api("review-evidence", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], *[flag for path in paths for flag in ("--path", path)])
-
-
-def _complete(run: dict) -> tuple[int, dict]:
-    return _api("complete-review", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--out", str(run["tmp"] / "session.json"))
-
-
-def _select(run: dict, review: str | None) -> tuple[int, dict]:
-    tmp = run["tmp"]
-    evidence = []
-    for index, digest in enumerate(run.get("evidence", [])):
-        from tools.pilot_state import read_context_selection
-
-        path = tmp / f"evidence-{index}.json"
-        path.write_text(json.dumps(read_context_selection(run["run_root"], run["attempt_id"], digest)), encoding="utf-8")
-        evidence += ["--evidence-receipt", str(path)]
-    return _cmd("tools.orchestrate_test_case_revision", "select", "--candidate", str(tmp / "candidate.json"),
-                "--candidate-receipt", str(tmp / "candidate-receipt.json"), "--assembly-receipt", str(tmp / "assembly-receipt.json"),
-                "--inventory-receipt", run["inventory"], "--context-receipt", run["context"], "--context-marker-output", run["marker"],
-                *[flag for path in run["fragments"] for flag in ("--generator-fragment", path)],
-                "--reviewer-session", str(tmp / "session.json"), *(["--review", review] if review else []), *evidence,
-                "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"], "--output-dir", str(run["run_root"] / "published"))
-
-
-def test_from_open_session_to_select_by_commands_only(tmp_path: Path) -> None:
-    run, review = _reviewed(tmp_path)
-    code, completed = _complete(run)
-    assert code == 0 and completed["status"] == "ok", completed
-    session = json.loads((run["tmp"] / "session.json").read_bytes())
-    assert session["status"] == "COMPLETED" and [event["event_type"] for event in session["events"]] == [
-        "REVIEW_SESSION_STARTED", "AUTHORITATIVE_VERDICT", "REVIEW_SESSION_COMPLETED"], session
-    code, selected = _select(run, review)
-    assert code == 0 and selected["status"] != "error" and selected["effective_bundle_receipt"] is not None, selected
-    code, effective = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
-    assert code == 0, effective
-    # the same command after select gives the same completed session
-    code, again = _api("complete-review", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
-    assert code == 0 and again["result"] == session, again
-
-
-def test_a_rejection_is_completed_the_same_way(tmp_path: Path) -> None:
-    run, review = _reviewed(tmp_path, "ТРЕБУЕТ ДОРАБОТКИ")
-    code, completed = _complete(run)
-    assert code == 0, completed
-    verdict = json.loads((run["tmp"] / "session.json").read_bytes())["events"][1]
-    assert verdict["verdict"] == "REJECTED", verdict
-    code, selected = _select(run, review)
-    assert code == 0 and selected["effective_bundle_receipt"] is None, selected
-
-
-def test_no_reviewer_answer_yet_is_refused_and_writes_nothing(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    _open_session(run)
-    before = _journal(run["run_root"])
-    code, refused = _complete(run)
-    assert code == 2 and refused["message"].startswith("REVIEWER_RESPONSE_MISSING"), refused
-    assert _journal(run["run_root"]) == before and not (run["tmp"] / "session.json").exists()
-
-
-def test_evidence_pair_then_complete_review_then_select_by_commands_only(tmp_path: Path) -> None:
-    run, review = _reviewed(tmp_path, evidence=("src/extra.py",))
-    code, again = _evidence(run, "src/extra.py")
-    assert code == 2 and again["message"].startswith("REVIEWER_EVIDENCE_DUPLICATE"), again
-    code, unknown = _evidence(run, "src/missing.py")
-    assert code == 2 and unknown["message"].startswith("REVIEWER_EVIDENCE_PATH_UNKNOWN"), unknown
-    code, completed = _complete(run)
-    assert code == 0, completed
-    session = json.loads((run["tmp"] / "session.json").read_bytes())
-    assert [event["event_type"] for event in session["events"]] == [
-        "REVIEW_SESSION_STARTED", "EVIDENCE_REQUESTED", "EVIDENCE_PROVIDED", "AUTHORITATIVE_VERDICT", "REVIEW_SESSION_COMPLETED"], session
-    assert session["events"][2]["provided_digest"] == run["evidence"][0]
-    code, selected = _select(run, review)
-    assert code == 0 and selected["effective_bundle_receipt"] is not None, selected
-
-
-def test_evidence_beyond_the_budget_is_refused_as_context_limit(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    _open_session(run, "command", -_RESERVE)  # the budget is exactly the package: no room for evidence
-    code, refused = _evidence(run, "src/extra.py")
-    assert code == 2 and refused["message"].startswith("REVIEW_CONTEXT_LIMIT"), refused
-    # the abort closes the branch as before FaT-10d
-    code, aborted = _api("review-abort", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--reason", "REVIEW_CONTEXT_LIMIT",
-                         "--out", str(run["tmp"] / "session.json"))
-    assert code == 0, aborted
-    code, selected = _select(run, None)
-    assert code == 0 and selected["effective_bundle_receipt"] is None, selected
-    assert selected["facts"]["attempt_state"] == "TERMINAL" and selected["facts"]["reason_code"] == "REVIEW_CONTEXT_LIMIT", selected
-
-
-def test_abort_then_select_closes_the_branch_without_a_verdict(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    candidate, _boundary = _open_session(run)
-    assert _review(run, candidate)[0] == 0
-    code, refused = _api("review-abort", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--reason", "MODEL_TIRED")
-    assert code == 2 and refused["message"].startswith("REVIEWER_ABORT_REASON_INVALID"), refused
-    code, aborted = _api("review-abort", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--reason", "REVIEW_CONTEXT_LIMIT",
-                         "--out", str(run["tmp"] / "session.json"))
-    assert code == 0, aborted
-    session = json.loads((run["tmp"] / "session.json").read_bytes())
-    assert session["status"] == "ABORTED" and session["events"][-1] == {"ordinal": 2, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_CONTEXT_LIMIT"}
-    code, selected = _select(run, None)
-    assert code == 0 and selected["effective_bundle_receipt"] is None, selected
-    assert selected["facts"]["attempt_state"] == "TERMINAL" and selected["facts"]["reason_code"] == "REVIEW_CONTEXT_LIMIT", selected
-    assert selected["facts"]["accepted"] is False, selected
-    # the session is closed now: no more evidence
-    code, closed = _evidence(run, "src/extra.py")
-    assert code == 2 and closed["message"].startswith("REVIEWER_SESSION_CLOSED"), closed
-
-
-# --------------------------------------------------------------------------------------
-# FaT-10d: the session start from a command; a budget below the package is refused at open-session
-# --------------------------------------------------------------------------------------
-
-def test_session_start_by_command_then_review_and_select(tmp_path: Path) -> None:
-    from tools.pilot_state import self_review_accepted
-
-    run, review = _reviewed(tmp_path, evidence=("src/extra.py",), start="command")
-    start = json.loads(Path(run["start"]).read_bytes())
-    package = run["opened"]["package_binding"]
-    assert start["context_budget_bytes"] == package["base_package_byte_count"] + _RESERVE, start
-    assert start["generator_invocation_id"] == "invoke-1" and start["reviewer_invocation_id"] == "reviewer-subagent-1", start
-    assert start["host_isolation"]["fresh_context"] is True and not self_review_accepted(run["run_root"]), start
-    assert start["host_isolation"]["distinct_invocations"] is True, start
-    assert run["opened"]["reviewer_session_boundary"]["context_budget_bytes"] == start["context_budget_bytes"]
-    code, completed = _complete(run)
-    assert code == 0, completed
-    code, selected = _select(run, review)
-    assert code == 0 and selected["effective_bundle_receipt"] is not None, selected
-
-
-def test_session_start_reserve_is_the_projects_context_batch_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from tools import orchestrate_test_case_revision as revision, run_pipeline
-
-    run = _generated_run(tmp_path)
-    _open_session(run)  # publishes the candidate and the receipts the start is built from
-    asked = []
-    monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project: asked.append(project) or 4096)
-    tmp = run["tmp"]
-    load = lambda path: json.loads(Path(path).read_bytes())  # noqa: E731
-    start = revision.reviewer_session_start(
-        run["run_root"], run["attempt_id"], candidate=load(tmp / "candidate.json"), candidate_receipt=tmp / "candidate-receipt.json",
-        assembly_receipt=load(tmp / "assembly-receipt.json"), inventory_receipt=load(run["inventory"]), context_receipts=[load(run["context"])],
-        context_marker_output=load(run["marker"]), generator_fragments=[load(path) for path in run["fragments"]],
-        fresh_context=True, reviewer_invocation_id="reviewer-subagent-1",
-    )
-    assert asked == [run["project"].resolve()], asked  # .skillsrc limits.context_batch_bytes of this project
-    assert start["context_budget_bytes"] == run["opened"]["package_binding"]["base_package_byte_count"] + 4096, start
-
-
-def test_a_budget_below_the_package_is_refused_at_open_session(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    _candidate, opened = _open_session(run, "command", -_RESERVE - 1)
-    assert opened["status"] == "error" and opened["reason_code"] == "REVIEW_CONTEXT_LIMIT", opened
-    assert "smaller than the review package" in opened["message"] and "tools.api review-open" in opened["fix"], opened
-
-
-def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    from tools import orchestrate_test_case_revision as revision
-
-    def refuse(*_args, **_kwargs):
-        raise ValueError("REVIEW_CONTEXT_LIMIT")
-
-    monkeypatch.setattr(revision, "load_json_strict", lambda _path: {})
-    monkeypatch.setattr(revision, "_load_receipt", lambda _path: None)
-    monkeypatch.setattr(revision, "_read_existing_context_receipts", lambda *_args: [])
-    monkeypatch.setattr(revision, "reviewer_package_binding", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(revision, "orchestrate_revision", refuse)
-    run_root = tmp_path / "project" / ".pilot-runs" / ("a" * 32)  # a real run: --output-dir is checked against its project
-    run_root.mkdir(parents=True)
-    (run_root / "run-manifest.json").write_text("{}", encoding="utf-8")
-    flags = ["--candidate", "c", "--candidate-receipt", "r", "--assembly-receipt", "a", "--inventory-receipt", "i", "--context-receipt", "x",
-             "--context-marker-output", "m", "--generator-fragment", "g", "--reviewer-session", "s", "--run-root", str(run_root),
-             "--attempt-id", "a1", "--output-dir", str(run_root / "published")]
-    assert revision.main(["select", *flags]) == 2
-    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    # FaT-U5: the envelope's code is the refusal's own code, not ORCHESTRATION_INPUT over it
-    assert printed["code"] == "REVIEW_CONTEXT_LIMIT" and printed["reason_code"] == "REVIEW_CONTEXT_LIMIT", printed
-    assert "review-abort" in printed["fix"] and "review-open" in printed["fix"], printed
-
-
 def test_automation_boundary_facts_from_the_journal_by_commands_only(tmp_path: Path) -> None:
     """FaT-10d: read-effective → model-response tc-to-autotest:r1 → automation-boundary-facts → open-automation-boundary
     → review-requested → model-request autotest-reviewer:r1; the agent computes and copies nothing."""
@@ -538,37 +250,78 @@ def test_automation_boundary_facts_from_the_journal_by_commands_only(tmp_path: P
     assert code == 0 and reviewer["status"] == "ok", reviewer
 
 
-def test_fresh_context_is_the_hosts_statement_in_both_self_profiles(tmp_path: Path) -> None:
-    """FaT-10d: --fresh-context yes|no is an input; "no" without SELF is refused, both values pass with SELF and change the digest."""
-    run = _generated_run(tmp_path / "plain")
-    _open_session(run)  # publishes the files the start is built from (the fixture start opens the session)
-    flags = ["--candidate", str(run["tmp"] / "candidate.json"), "--candidate-receipt", str(run["tmp"] / "candidate-receipt.json"),
-             "--assembly-receipt", str(run["tmp"] / "assembly-receipt.json"), "--inventory-receipt", run["inventory"],
-             "--context-receipt", run["context"], "--context-marker-output", run["marker"],
-             *[flag for path in run["fragments"] for flag in ("--generator-fragment", path)]]
+# --------------------------------------------------------------------------------------
+# the review on the cycle of the agent: the session, the verdict, the evidence, the budget
+# --------------------------------------------------------------------------------------
 
-    def start(target: dict, fresh: str, reviewer: str = "reviewer-subagent-1") -> tuple[int, dict]:
-        return _api("session-start", "--run-root", str(target["run_root"]), "--attempt", target["attempt_id"], *flags,
-                    "--fresh-context", fresh, "--reviewer-invocation-id", reviewer)
+def _opened_reviewed(tmp_path: Path, verdict: str = "ПРИНЯТО") -> dict:
+    from tests.test_review_two_commands import _open, _select_verdict, _verdict
 
-    code, refused = start(run, "no")
-    assert code == 2 and refused["code"] == "INDEPENDENCE_UNVERIFIED" and "--accept-self-review" in refused["message"], refused
-    code, fresh = start(run, "yes")
-    assert code == 0 and fresh["result"]["host_isolation"]["fresh_context"] is True, fresh
-    code, bad = start(run, "maybe")
-    assert code != 0, bad
-    # the same generator id is stated: distinct_invocations is computed false, not trusted
-    code, same = start(run, "yes", "invoke-1")
-    assert code == 0 and same["result"]["host_isolation"]["distinct_invocations"] is False, same
+    run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0
+    code, selected = _select_verdict(run, _verdict(run, verdict))
+    assert code == 0, selected
+    return run
 
-    self_run = _generated_run(tmp_path / "self", self_review=True)
-    _open_session(self_run)
-    flags = ["--candidate", str(self_run["tmp"] / "candidate.json"), "--candidate-receipt", str(self_run["tmp"] / "candidate-receipt.json"),
-             "--assembly-receipt", str(self_run["tmp"] / "assembly-receipt.json"), "--inventory-receipt", self_run["inventory"],
-             "--context-receipt", self_run["context"], "--context-marker-output", self_run["marker"],
-             *[flag for path in self_run["fragments"] for flag in ("--generator-fragment", path)]]
-    code, no = start(self_run, "no")
-    code_yes, yes = start(self_run, "yes")
-    assert code == 0 and code_yes == 0, (no, yes)
-    assert no["result"]["host_isolation"]["fresh_context"] is False and yes["result"]["host_isolation"]["fresh_context"] is True
-    assert no["result"]["host_isolation"]["evidence_digest"] != yes["result"]["host_isolation"]["evidence_digest"], (no, yes)
+
+def test_prepare_and_submit_complete_the_session_and_read_effective_gives_the_set(tmp_path: Path) -> None:
+    from tests.test_review_two_commands import _ledger
+
+    run = _opened_reviewed(tmp_path)
+    ledger = _ledger(run)
+    assert ledger["status"] == "COMPLETED" and [event["event_type"] for event in ledger["events"]] == [
+        "REVIEW_SESSION_STARTED", "AUTHORITATIVE_VERDICT", "REVIEW_SESSION_COMPLETED"], ledger
+    code, effective = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
+    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
+
+
+def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path: Path) -> None:
+    from tests.test_review_two_commands import _ledger
+
+    run = _opened_reviewed(tmp_path, "ТРЕБУЕТ ДОРАБОТКИ")
+    assert _ledger(run)["events"][1]["verdict"] == "REJECTED"
+    code, effective = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
+    assert code == 0 and effective["result"]["effective"] is None, effective
+
+
+def test_evidence_beyond_the_budget_is_refused_as_context_limit_and_the_abort_closes_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_cut_review import _evidence_verdict
+    from tests.test_review_two_commands import _cycle, _open, _select_verdict
+    from tools import run_pipeline
+
+    run = _generated_run(tmp_path)
+    monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project: 0)  # the budget is exactly the package: no room for evidence
+    assert _open(run)[0] == 0
+    code, refused = _select_verdict(run, _evidence_verdict(run, "src/extra.py"))
+    assert code == 2 and refused["code"] == "REVIEW_CONTEXT_LIMIT", refused
+    code, aborted = _cycle("submit", run, "--abort", "REVIEW_CONTEXT_LIMIT")
+    assert code == 0 and aborted["result"]["outcome"] == "ABORTED" and aborted["result"]["status"] == "REVIEW_CONTEXT_LIMIT", aborted
+    code, closed = _select_verdict(run, _evidence_verdict(run, "src/extra.py"))  # the session is closed now: no more evidence
+    assert code == 2 and closed["code"] == "REVIEWER_SESSION_CLOSED", closed
+
+
+def test_a_budget_below_the_package_is_refused_at_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_review_two_commands import _open
+    from tools import run_pipeline
+
+    run = _generated_run(tmp_path)
+    monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project: -1)
+    before = _journal(run["run_root"])
+    code, refused = _open(run)
+    assert code == 2 and refused["code"] == "REVIEW_CONTEXT_LIMIT" and "smaller than the review package" in refused["message"] and refused["fix"], refused
+    assert_refused_once(run["run_root"], before, refused["code"], "prepare")  # J1: the one event the refusal itself added
+
+
+def test_the_reserve_of_the_budget_is_the_projects_context_batch_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_review_two_commands import _ledger, _open
+    from tools import run_pipeline
+
+    budgets = []
+    for index, reserve in enumerate((4096, 8192)):
+        run = _generated_run(tmp_path / str(index))
+        asked = []
+        monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project, asked=asked, reserve=reserve: asked.append(project) or reserve)
+        assert _open(run)[0] == 0
+        assert asked == [run["project"].resolve()], asked  # .skillsrc limits.context_batch_bytes of this project
+        budgets.append(_ledger(run)["context_budget_bytes"])
+    assert budgets[1] - budgets[0] == 4096, budgets

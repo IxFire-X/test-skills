@@ -241,15 +241,13 @@ def test_the_view_command_writes_the_view_with_canaries_for_the_assembled_candid
     import subprocess
     import sys
 
-    from tests.test_review_requested import _cmd
+    from tools.orchestrate_test_case_revision import publish_unreviewed_candidate
 
     root = Path(__file__).resolve().parents[1]
     run = _generated_run(tmp_path)
     candidate = Path(run["project"]) / "r1.json"
     candidate.write_text(json.dumps(_candidate(run), ensure_ascii=False), encoding="utf-8")
-    code, _published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(candidate), "--output-dir",
-                            str(run["run_root"] / "published"), "--run-root", str(run["run_root"]), "--attempt-id", run["attempt_id"])
-    assert code == 0
+    publish_unreviewed_candidate(_candidate(run), run["run_root"] / "published", run_root=run["run_root"], attempt_id=run["attempt_id"])  # the setup: r1 is in the journal
     command = [sys.executable, "-m", "tools.review_view", "--project", str(run["project"]), "--run", run["run_root"].name, "--candidate", str(candidate)]
     out = json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8").stdout)
     assert out["status"] == "ok" and out["canaries"] == 0 and out["canaries_created"] is True, out  # the fixture has no checks to mutate
@@ -295,20 +293,6 @@ def test_a_forged_or_missing_canary_file_is_a_refusal_not_zero_hits(tmp_path: Pa
     with pytest.raises(ValueError, match="REVIEW_CANARY_MISMATCH"):
         _select(run, _answer(run))
     assert (run["run_root"] / "events.jsonl").read_bytes() == before  # nothing recorded
-
-
-def test_a_run_without_the_receipt_is_not_seeded_and_warns_unmeasured(tmp_path: Path) -> None:
-    from tests.test_review_requested import _complete, _reviewed, _select as legacy_select
-    from tools import review_canaries
-    from tools.run_report import build_report
-
-    run, review = _reviewed(tmp_path, start="command")  # the nine commands: no review-open of P7, no receipt
-    assert review_canaries.verify(*_flags(run)) is None
-    assert _complete(run)[0] == 0 and legacy_select(run, review)[0] == 0  # the old commands still work
-    found = review_canaries.summary(*_flags(run))
-    assert found["status"] == "NOT_SEEDED" and found["warning"] == "REVIEW_UNMEASURED"
-    report, _warnings = build_report(run["project"], run["run_root"].name)
-    assert "REVIEW_UNMEASURED" in report["warnings"] and report["review_canaries"]["status"] == "NOT_SEEDED"
 
 
 # --------------------------------------------------------------------------------------

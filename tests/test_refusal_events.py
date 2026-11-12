@@ -107,18 +107,18 @@ def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_sta
 
 
 def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
-    from tests.test_review_two_commands import _bundles, _flags
+    from tests.test_review_two_commands import _cycle
 
     run = _generated_run(tmp_path)
     before = _raw(run["run_root"])
-    code, refused = _api("review-select", *_flags(run), "--output-dir", _bundles(run), "--dry-run")  # no session yet: a refusal
+    code, refused = _cycle("submit", run, "--dry-run")  # no prepare yet: a refusal
     assert code == 2
     assert _raw(run["run_root"]) == before and not (run["run_root"] / "refusals.jsonl").exists()
 
 
 def test_the_events_between_the_others_change_no_reader_of_the_order(tmp_path: Path) -> None:
     """The same flow with a refusal at every stage and without: the same status, the same report outside the section of refusals."""
-    from tests.test_review_two_commands import _bundles, _candidate_file, _flags, _open, _select_verdict, _verdict
+    from tests.test_review_two_commands import _open, _select_verdict, _verdict
     from tools.run_pipeline import main
 
     def flow(root: Path, refusals: bool) -> tuple[dict, dict, list]:

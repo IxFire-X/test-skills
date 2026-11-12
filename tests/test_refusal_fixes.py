@@ -84,25 +84,6 @@ def test_an_answer_without_its_request_names_the_missing_request(tmp_path: Path)
     assert str(refused.value).startswith("MODEL_STAGE_NOT_REQUESTED") and "model-request" in str(refused.value)
 
 
-def test_a_bad_candidate_receipt_has_a_reason_code_and_a_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import orchestrate_test_case_revision as revision
-
-    receipt = tmp_path / "receipt.json"
-    receipt.write_text(json.dumps({"document_id": "TCDOC-x"}), encoding="utf-8")
-    candidate = tmp_path / "candidate.json"
-    candidate.write_text("{}", encoding="utf-8")
-    run_root = tmp_path / "project" / ".pilot-runs" / ("a" * 32)  # a real run: --output-dir is checked against its project first (P8a-2)
-    run_root.mkdir(parents=True)
-    (run_root / "run-manifest.json").write_text("{}", encoding="utf-8")
-    flags = ["--candidate", str(candidate), "--candidate-receipt", str(receipt), "--assembly-receipt", str(candidate),
-             "--inventory-receipt", str(candidate), "--context-receipt", str(candidate), "--context-marker-output", str(candidate),
-             "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root),
-             "--attempt-id", "a" * 32, "--output-dir", str(run_root / "published")]
-    assert revision.main(["select", *flags]) == 2
-    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert printed["reason_code"] == "ORCHESTRATION_RECEIPT_SHAPE" and "missing" in printed["message"] and "publish" in printed["fix"], printed
-
-
 @pytest.mark.parametrize(("stage", "extra", "fixed"), [
     # audit U2: without --input-digest a later stage takes the journal's inputs; a stage the journal does not fix still needs them
     ("context-marker:baseline", {"input_digests": []}, "--input-digest на каждый вход"),

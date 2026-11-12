@@ -123,39 +123,6 @@ def test_output_dir_through_a_link_out_of_the_published_directory_is_refused(tmp
             run_output_directory(run_root / "published" / name, run_root)
 
 
-def test_the_cli_refuses_an_output_dir_outside_the_run_before_it_reads_anything(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    project, run_root, attempt_id = _run(tmp_path / "p")
-    outside = tmp_path / "outside"
-    for argv in (["review-open", "--output-dir", str(outside)], ["review-select", "--output-dir", str(outside)],
-                 ["review-publish", "--output-dir", str(outside)], ["review-open", "--output-dir", str(project / ".git" / "hooks")]):
-        code, refused = _api([argv[0], "--run-root", str(run_root), "--attempt", attempt_id, *argv[1:]], capsys)
-        assert code == 2 and refused["code"] == "OUTPUT_DIR_OUTSIDE_RUN" and refused["fix"], (argv, refused)
-    assert not outside.exists() and not (project / ".git").exists()
-
-
-def test_the_old_publish_and_select_check_the_same_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.orchestrate_test_case_revision import main
-
-    project, run_root, attempt_id = _run(tmp_path / "p")
-    candidate = run_root / "tmp" / "candidate.json"
-    candidate.parent.mkdir(exist_ok=True)
-    candidate.write_text("{}", encoding="utf-8")
-    base = ["publish", "--candidate", str(candidate), "--run-root", str(run_root), "--attempt-id", attempt_id]
-    outside = tmp_path / "outside"
-    assert main([*base, "--output-dir", str(outside)]) == 2
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_RUN" and printed["fix"] and not outside.exists()
-    assert main([*base, "--output-dir", str(run_root / "published"), "--out", str(run_root / "receipt.json")]) == 2
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["code"] == printed["reason_code"] == "API_OUT_OUTSIDE_RUN"
-    select = ["select", "--candidate", str(candidate), "--candidate-receipt", str(candidate), "--assembly-receipt", str(candidate),
-              "--inventory-receipt", str(candidate), "--context-receipt", str(candidate), "--context-marker-output", str(candidate),
-              "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root), "--attempt-id", attempt_id]
-    assert main([*select, "--output-dir", str(outside)]) == 2
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_RUN" and not outside.exists()
-
-
 # ---- every entry point -------------------------------------------------------------------------------------------
 
 FLAGS = {"--out", "--output-dir"}

@@ -191,11 +191,11 @@ def test_a_tools_api_command_on_a_moved_project_names_the_move_and_the_fix(tmp_p
     run_root = target / ".pilot-runs" / run_id
     attempt = next((run_root / "attempts").glob("*.json")).stem
     capsys.readouterr()
-    code = api.main(["read-ledger", "--run-root", str(run_root), "--attempt", attempt])
+    code = api.main(["read-effective", "--run-root", str(run_root), "--attempt", attempt])
     answer = json.loads(capsys.readouterr().out.strip().splitlines()[0])
     assert code == 2 and answer["status"] == "error" and answer["code"] == "PROJECT_MOVED", answer
     assert str(source) in answer["message"] and str(target) in answer["message"], answer
     assert answer["fix"] and "scan" in answer["fix"] and "status" in answer["fix"], answer
     # the run of the home project still answers as before
-    home_code = api.main(["read-ledger", "--run-root", str(source / ".pilot-runs" / run_id), "--attempt", attempt])
+    home_code = api.main(["read-effective", "--run-root", str(source / ".pilot-runs" / run_id), "--attempt", attempt])
     assert "PROJECT_MOVED" not in capsys.readouterr().out and home_code in (0, 1, 2)

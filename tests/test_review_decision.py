@@ -4,8 +4,8 @@ Before: select published the COMPLETED ledger (validate_reviewer_session) and on
 (validate_review_decision / the successor). An answer valid by schema but wrong by meaning (ПРИНЯТО without every case,
 AUTO_FIX with a DESTRUCTIVE correction) left select → REVIEW_REWORK_REQUIRED, review-abort → REVIEWER_SESSION_CLOSED,
 finish → FINISH_FACT_UNDETERMINED: a dead end that blocked every scan.
-Now: model-response of tc-reviewer refuses it before the write (the stage keeps its one retry); select checks it before
-the ledger, so review-abort still closes the session; an AUTO_FIX of an import may not touch the human fields."""
+Now: submit of the review refuses it before the write (the stage keeps its one retry); the selection checks it before
+the ledger, so ``submit --abort`` still closes the session; an AUTO_FIX of an import may not touch the human fields."""
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from tests.journal_helpers import assert_refused_once
-from tests.test_review_requested import _api, _complete, _digest_of, _generated_run, _journal, _open_session, _put, _review, _reviewer_request, _select
+from tests.test_review_requested import _digest_of, _generated_run, _journal, _put
+from tests.test_review_two_commands import _candidate_file, _cycle, _open, _select_verdict
 
 
 def _answer(run: dict, mutate=None, name: str = "review.json") -> str:
@@ -45,36 +46,27 @@ def _destructive_autofix(value, candidate):
 
 def _requested(tmp_path: Path) -> dict:
     run = _generated_run(tmp_path)
-    candidate, boundary = _open_session(run)
-    assert _review(run, candidate)[0] == 0
-    assert _reviewer_request(run, boundary)[0] == 0
+    assert _open(run)[0] == 0
+    _candidate_file(run)
     return run
-
-
-def _respond(run: dict, review: str, attempts: int = 1) -> tuple[int, dict]:
-    return _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "tc-reviewer:canonical",
-                "--artifact", review, "--transport-attempts", str(attempts))
 
 
 @pytest.mark.parametrize("mutate", [_drop_case, _destructive_autofix], ids=["accepted-wrong-case-ids", "autofix-destructive"])
 def test_a_wrong_decision_is_refused_before_the_write_and_the_retry_closes_the_review(tmp_path: Path, mutate) -> None:
     run = _requested(tmp_path)
     before = _journal(run["run_root"])
-    code, refused = _respond(run, _answer(run, mutate))
+    code, refused = _select_verdict(run, _answer(run, mutate))
     assert code == 2 and refused["code"] == "REVIEW_DECISION_INVALID" and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, "REVIEW_DECISION_INVALID", "model-response")  # J1: the one event the refusal itself added
+    assert_refused_once(run["run_root"], before, "REVIEW_DECISION_INVALID", "submit")  # J1: the one event the refusal itself added
     # the one retry with a correct decision goes through to an effective document
-    code, answered = _respond(run, _answer(run, name="review-2.json"), attempts=2)
-    assert code == 0, answered
-    assert _complete(run)[0] == 0
-    code, selected = _select(run, str(run["tmp"] / "review-2.json"))
-    assert code == 0 and selected["effective_bundle_receipt"] is not None, selected
+    code, selected = _select_verdict(run, _answer(run, name="review-2.json"), "--transport-attempts", "2")
+    assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", selected
 
 
-def test_select_checks_the_decision_before_it_closes_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A journal written before FaT-R1 (the wrong answer is recorded): select refuses with the session still open, so
-    review-abort REVIEW_UNUSABLE and finish close the attempt — no dead end."""
+def test_the_selection_checks_the_decision_before_it_closes_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A journal written before FaT-R1 (the wrong answer is recorded): submit refuses with the session still open, so
+    ``submit --abort REVIEW_UNUSABLE`` and finish close the attempt — no dead end."""
     from tools import pilot_state
     from tools.pilot_state import derive_state, read_reviewer_session_ledger
 
@@ -84,15 +76,11 @@ def test_select_checks_the_decision_before_it_closes_the_ledger(tmp_path: Path, 
         old.setattr(pilot_state, "_validate_review_decision", lambda *_args: None)
         pilot_state.publish_model_stage_artifact(run["run_root"], run["attempt_id"], "tc-reviewer:canonical",
                                                  json.loads(Path(review).read_bytes()))
-    assert _complete(run)[0] == 0
-    code, refused = _select(run, review)
+    code, refused = _cycle("submit", run)
     assert code != 0, refused
     assert read_reviewer_session_ledger(run["run_root"], run["attempt_id"])["status"] == "WAITING"
-    code, aborted = _api("review-abort", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--reason", "REVIEW_UNUSABLE",
-                         "--out", str(run["tmp"] / "session.json"))
-    assert code == 0, aborted
-    code, selected = _select(run, None)
-    assert code == 0 and selected["facts"]["reason_code"] == "REVIEW_UNUSABLE", selected
+    code, aborted = _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")
+    assert code == 0 and aborted["result"]["status"] == "REVIEW_UNUSABLE", aborted
     from tools.run_pipeline import main
 
     assert main(["finish", "--project", str(run["project"]), "--run", run["run_root"].name]) != 0
