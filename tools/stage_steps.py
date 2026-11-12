@@ -284,6 +284,10 @@ def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_
     _refuse_unready(stage, step)
     if not _events(state, attempt_id, stage, "MODEL_REQUESTED"):
         raise ValueError(f"STAGE_NOT_PREPARED: {stage} has no request yet; fix: prepare --stage {stage}, затем модель, затем submit")
+    if stage == "tc-reviewer:canonical":  # a closed attempt or session takes no answer: refused before the slot is read, nothing written
+        from tools.orchestrate_test_case_revision import refuse_closed_review
+
+        refuse_closed_review(root, attempt_id)
     answer = load(str(slot(root, stage)), project)
     check, told = STEPS[stage.split(":", 1)[0]][2], {}
     key = step.get("extra")  # a key of the slot that is not part of the answer (the evidence of the review): taken out before the answer is checked

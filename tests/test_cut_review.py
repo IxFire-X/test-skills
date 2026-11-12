@@ -192,8 +192,7 @@ def test_submit_with_evidence_cut_between_the_ledger_file_and_its_events(tmp_pat
 # submit --abort writes the ABORTED ledger (file + pair)
 # --------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("point", ["ledger-file-written", pytest.param("ledger-published", marks=pytest.mark.xfail(
-    strict=True, reason="V4a: the repeat of submit --abort after a cut between published and read-back is REVIEWER_SESSION_CLOSED; the old review-select finished it (code in V4b-C or later)"))])
+@pytest.mark.parametrize("point", ["ledger-file-written", "ledger-published"])
 def test_abort_cut_between_the_ledger_file_and_its_events(tmp_path: Path, monkeypatch, point: str) -> None:
     run = _opened(tmp_path)
     with monkeypatch.context() as broken:
@@ -360,3 +359,14 @@ def test_a_fully_closed_review_whose_effective_file_is_gone_is_still_a_refusal(t
     assert code == 2 and effective["status"] == "error", effective
     report = build_report(run["project"], run["run_root"].name)[0]
     assert any("EFFECTIVE_CANON_UNREADABLE" in str(item) for item in report["warnings"]), report["warnings"]
+
+
+def test_another_reason_of_a_second_abort_is_refused_and_the_recorded_one_stands(tmp_path: Path) -> None:
+    run = _opened(tmp_path)
+    assert _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")[0] == 0
+    before = _journal(run["run_root"])
+    code, refused = _cycle("submit", run, "--abort", "REVIEW_CONTEXT_LIMIT")
+    assert code == 2 and refused["code"] == "REVIEWER_SESSION_CLOSED", refused
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))
+    code, again = _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")  # the recorded reason again: the same answer, nothing new
+    assert code == 0 and again["result"]["status"] == "REVIEW_UNUSABLE", again

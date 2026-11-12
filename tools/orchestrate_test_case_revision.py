@@ -691,10 +691,13 @@ _ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE")
 @_closure_cached
 def abort_reviewer_session(run_root: Path, attempt_id: str, reason_code: str) -> dict[str, Any]:
     """The aborted reviewer session for `select` (no verdict). Nothing is written: `select` validates and publishes it."""
-    from tools.pilot_state import reviewer_lifecycle_projection
+    from tools.pilot_state import read_reviewer_session_ledger, reviewer_lifecycle_projection
 
     if reason_code not in _ABORT_REASONS:
         raise ValueError(f"REVIEWER_ABORT_REASON_INVALID: one of {list(_ABORT_REASONS)}")
+    last = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)))
+    if last.get("status") == "ABORTED" and last["events"][-1].get("reason_code") == reason_code:
+        return last  # the same abort again: `select` finishes what a cut left, nothing is written twice; another reason is refused below
     session = _waiting_reviewer_session(run_root, attempt_id)
     events = list(session["events"])
     events.append({"ordinal": len(events) + 1, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": reason_code})
@@ -1413,6 +1416,14 @@ def _ledger_status(run_root: Path, attempt_id: str) -> str | None:
         return _plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)).get("status")
     except (KeyError, TypeError, ValueError, OSError):
         return None
+
+
+def refuse_closed_review(run_root: Path, attempt_id: str) -> None:
+    """``submit`` with an answer of the review: a closed attempt is ATTEMPT_TERMINAL, a session that ``--abort`` (or a verdict) ended takes no answer — REVIEW_CLOSED; both before any write."""
+    _require_open_attempt(run_root, attempt_id)
+    if _ledger_status(run_root, attempt_id) in {"ABORTED", "COMPLETED"}:
+        raise ReviewRefused("REVIEW_CLOSED", "сессия ревьюера уже закрыта (прервана или завершена), ответ в неё не добавить; ничего не записано; "
+                            "fix: ревью закрыто — закрой попытку командой finish (она напечатает next_run); новое ревью — новый прогон (scan --new-run)")
 
 
 def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path, csv_profile: str = _PROFILE,

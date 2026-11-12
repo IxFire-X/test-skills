@@ -297,7 +297,7 @@ def test_evidence_beyond_the_budget_is_refused_as_context_limit_and_the_abort_cl
     code, aborted = _cycle("submit", run, "--abort", "REVIEW_CONTEXT_LIMIT")
     assert code == 0 and aborted["result"]["outcome"] == "ABORTED" and aborted["result"]["status"] == "REVIEW_CONTEXT_LIMIT", aborted
     code, closed = _select_verdict(run, _evidence_verdict(run, "src/extra.py"))  # the session is closed now: no more evidence
-    assert code == 2 and closed["code"] == "REVIEWER_SESSION_CLOSED", closed
+    assert code == 2 and closed["code"] == "REVIEW_CLOSED", closed
 
 
 def test_a_budget_below_the_package_is_refused_at_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

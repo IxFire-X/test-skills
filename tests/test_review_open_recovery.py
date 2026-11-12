@@ -102,7 +102,6 @@ def test_another_reviewer_after_a_cut_opening_is_still_refused(tmp_path: Path, m
 
 # 7.3 --------------------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="V4a: submit after --abort records the answer and answers ABORTED; REVIEW_CLOSED of the old review-select is gone (code in V4b-C or later)")
 def test_a_verdict_after_the_review_was_aborted_is_refused_before_it_is_recorded(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
@@ -140,3 +139,38 @@ def test_a_canary_binding_cut_short_is_finished_and_a_real_divergence_is_not(tmp
     code, refused = _open(run)
     assert code == 2 and "REVIEW_CANARY_MISMATCH" in json.dumps(refused, ensure_ascii=False), refused
     assert review_canaries.BATCH_ID == "review-canaries-v1"
+
+
+# a closed attempt takes no review command ----------------------------------------------------------------------------------
+
+def _closed_by_finish(run: dict, capsys) -> None:
+    """The review opened, aborted, and the attempt closed by the real ``finish``."""
+    from types import SimpleNamespace
+
+    from tools import pilot_state
+    from tools.run_pipeline import cmd_finish
+
+    assert _open(run)[0] == 0 and _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")[0] == 0
+    capsys.readouterr()
+    cmd_finish(SimpleNamespace(project=str(run["run_root"].parents[1]), run=run["run_root"].name))
+    assert pilot_state.read_terminal_result(run["run_root"], run["attempt_id"]) is not None
+
+
+def test_submit_with_an_answer_in_a_closed_attempt_is_refused_and_writes_nothing(tmp_path: Path, capsys) -> None:
+    run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0
+    answer = _verdict(run)
+    _closed_by_finish(run, capsys)
+    before = _journal(run["run_root"])
+    code, refused = _select_verdict(run, answer)
+    assert code == 2 and refused["code"] == "ATTEMPT_TERMINAL", refused
+    assert_refused_in_order(run["run_root"], before, ("submit", "ATTEMPT_TERMINAL"))
+
+
+def test_prepare_in_a_closed_attempt_is_refused_and_writes_nothing(tmp_path: Path, capsys) -> None:
+    run = _generated_run(tmp_path)
+    _closed_by_finish(run, capsys)
+    before = _journal(run["run_root"])
+    code, refused = _open(run)
+    assert code == 2 and refused["code"] == "ATTEMPT_TERMINAL", refused
+    assert_refused_in_order(run["run_root"], before, ("prepare", "ATTEMPT_TERMINAL"))
