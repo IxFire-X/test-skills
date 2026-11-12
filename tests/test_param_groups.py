@@ -250,3 +250,12 @@ def test_the_reviewer_view_of_a_group_is_smaller_and_without_groups_unchanged() 
         return [line for line in view.splitlines() if b"document_sha256" not in line]
 
     assert without_digest(render(dict(example, schema_version="1.1.0"))) == without_digest(render(example))
+
+
+def test_the_same_design_reference_with_its_keys_in_another_order_is_no_variant() -> None:
+    from tools.canonical_document import _design_variants
+
+    one = {"design_refs": [{"parameter": "P-first", "class": "C-1", "value": "Anna"}]}
+    other = {"design_refs": [{"value": "Anna", "class": "C-1", "parameter": "P-first"}]}
+    assert _design_variants([one, other])[0] == []
+    assert _design_variants([one, {"design_refs": [{"parameter": "P-first", "class": "C-2", "value": "Anna"}]}])[0] == ["P-first"]
