@@ -336,6 +336,7 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
+    from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
 
     root = Path(run_root).resolve()
     run = pilot.read_run(root)
@@ -526,7 +527,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     if confirmed:
         result.update(max(confirmed, key=lambda row: row[0])[1])
     pending = [row for row in events if row["event_type"] == "MODEL_REQUESTED" and not any(response.get("stage_instance_id") == row.get("stage_instance_id") for response in responses)
-               and not (aborted and row.get("stage_instance_id") == "tc-reviewer:canonical")]
+               and not (aborted and row.get("stage_instance_id") == "tc-reviewer:canonical")
+               and not (row.get("stage_instance_id") in (REWORK_STAGE, REWORK_REVIEW_STAGE) and pilot.read_effective_canonical_if_present(root, attempt_id) is not None)]  # a rework closed unfinished waits for nothing
     if pending:
         request = pending[-1]
         path = f"model-requests/{attempt_id}/{request['artifact_digest'][7:]}.json"

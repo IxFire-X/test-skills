@@ -24,7 +24,7 @@ _TABLE = {
     "canonical reviewer package and boundary": ("review", "prepare"), "reviewer evidence or verdict": ("review", "submit"),
     "reviewer ledger and effective selection or negative closure": ("review", "submit"), "effective canonical": ("review", "submit"),
     "negative branch trace and finalization": ("closure", "finish"),
-    "rework fragment": ("generator", "prepare"), "rework answered": ("closure", "finish"),
+    "rework fragment": ("generator", "prepare"), "rework answered": ("review", "prepare"),
     "automation artifact": ("automation", "model-request"), "automation revision": ("automation", "model-request"),
     "static automation review": ("automation_review", "open-automation-boundary"), "automation refused": ("closure", "finish"),
     "review disposition and materialization": ("materialize", "materialize"), "materialization": ("materialize", "materialize"),

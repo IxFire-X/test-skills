@@ -440,6 +440,7 @@ def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_atte
     from tools import finalize_attempt, orchestrate_test_case_revision as orchestrate, pilot_state
 
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # one case of the two of the fixture
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # this test is the publication of the subtraction at the select; the rework is in test_rework_*
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     one, two = _ids(run)

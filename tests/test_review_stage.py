@@ -121,7 +121,6 @@ def test_a_partial_acceptance_goes_back_once_and_names_the_rework(tmp_path: Path
     from tools import orchestrate_test_case_revision as orchestrate
 
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
-    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
     run = _opened(tmp_path, monkeypatch, capsys)
     answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[*_boundary_and_removed(run), _finding("BLOCKING", [_ids(run)[0]["case_id"]], "Нет проверки состояния.")])
     code, out = _submit(capsys, run, answer)

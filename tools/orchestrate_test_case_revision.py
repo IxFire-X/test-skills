@@ -20,8 +20,8 @@ from tools.fixes import FIXES
 from tools import output_guard
 from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, partial_context, planned_receipt, publish_bundle, rejected_cases, status_payloads, verify_bundle
-from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_STAGE, SelectionError, candidate_rows, check_rework, review_outcome,
-                                      reviewer_verdict_is_bound, select_effective_document, validate_review_decision)
+from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_REVIEW_STAGE, REWORK_STAGE, SelectionError, candidate_rows, check_rework,
+                                      review_outcome, reviewer_verdict_is_bound, rework_final, select_effective_document, validate_review_decision)
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -452,11 +452,21 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     summary.update(outcome=outcome["kind"], reason=outcome["reason"], share=share, removed=outcome["removed"], rejected_by_findings=len(outcome["rejected"]),
                    rejected_with_group=len(outcome["with_group"]), accepted=0 if outcome["kind"] == "REWORK" else total - outcome["removed"])
     if outcome["kind"] == "PARTIAL":
-        state = rework_state(run_root, attempt_id)
-        partial = partial_context(candidate, outcome, {"state": state} if state else None)
+        state, final = rework_state(run_root, attempt_id), None
+        if state == "reviewed":  # the second round: the set is what rework_final makes of the answer and its review
+            data = rework_round_data(run_root, attempt_id)
+            final = rework_final(data["candidate"], data["outcome"], data["answer"], data["report2"])
+        partial = partial_context(candidate, outcome, {"state": state, **({"final": final} if final else {})} if state else None)
         name = f"published/{candidate['document_id']}.r{partial['revision']}"
         if state:  # the first review sent cases back for a rework: what became of it
-            summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": 0, "accepted_first": total - outcome["removed"]}
+            summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": len(final["accepted_after"]) if final else 0, "accepted_first": total - outcome["removed"],
+                                 **({"ignored": final["ignored"], "independent": rework_independent(run_root, attempt_id)} if final else {})}
+        if final:
+            left = len(final["rejected"]) + len(final["with_group"])
+            summary.update(accepted=len(final["effective"]["test_cases"]), removed=left, rejected_with_group=len(final["with_group"]))
+            if final["kind"] == "ALL":  # every case came back: a whole set, no file of the rejected
+                summary.update(outcome="ACCEPTED_WHOLE", removed=0, rejected_by_findings=0, rejected_with_group=0)
+                return summary
         codes = lambda rows: sorted({code for row in rows for code, _text in row["said"]})  # noqa: E731  (the report carries codes, never the reviewer's texts: they are in the set's files)
         summary.update(coverage_gaps=[{"requirement": gap["requirement"], "labels": gap["labels"], "codes": codes(row for row in partial["rejected"] if gap["requirement"] in row["requirements"])}
                                       for gap in partial["gaps"]],
@@ -521,33 +531,208 @@ def rework_asked(run_root: Path, attempt_id: str) -> bool:
 
 
 def rework_state(run_root: Path, attempt_id: str) -> str | None:
-    """What became of the rework of a run whose first review sent cases back: ``None`` (it did not), ``not_started`` (nobody asked the generator) or
-    ``unfinished`` (asked: answered or not, nobody reviewed it)."""
+    """What became of the rework of a run whose first review sent cases back: ``None`` (it did not), ``not_started`` (nobody asked the generator),
+    ``unfinished`` (asked: answered or not, nobody reviewed it) or ``reviewed`` (the second round has its answer)."""
     from tools.pilot_state import rework_round_if_present
 
     if rework_round_if_present(Path(run_root), attempt_id) is None:
         return None
-    return "unfinished" if rework_asked(run_root, attempt_id) else "not_started"
+    return "reviewed" if REWORK_REVIEW_STAGE in _rework_responses(run_root, attempt_id) else "unfinished" if rework_asked(run_root, attempt_id) else "not_started"
 
 
-def close_pending_rework(run_root: Path, attempt_id: str) -> list[str]:
-    """``finish`` of a run whose first review sent cases back and whose rework did not come to its review (not asked, refused twice, answered, nobody reviewed it):
-    the set is r2, the rejected cases are in ``REJECTED-CASES`` as r1 had them with the reviewer's words — a rework nobody reviewed is not shown — and the
-    effective canonical is published, once.  Nothing happens for a run that is not waiting for the rework (or already published)."""
-    from tools.pilot_state import publish_effective_canonical, read_effective_canonical_if_present, read_reviewer_session_ledger, rework_round_if_present
+def _rework_responses(run_root: Path, attempt_id: str) -> dict[str, str]:
+    """The digests of the recorded answers of the rework (the generator's) and of its review, by stage."""
+    from tools.pilot_state import derive_state
 
-    if rework_round_if_present(Path(run_root), attempt_id) is None or read_effective_canonical_if_present(Path(run_root), attempt_id) is not None:
-        return []
-    basis = rework_basis(run_root, attempt_id)
-    candidate, effective = basis["candidate"], basis["outcome"]["effective"]
-    partial, published = partial_context(candidate, basis["outcome"], {"state": rework_state(run_root, attempt_id)}), Path(run_root) / "published"
+    return {str(event["stage_instance_id"]): str(event["artifact_digest"]) for event in derive_state(Path(run_root))["events"]
+            if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") in (REWORK_STAGE, REWORK_REVIEW_STAGE)}
+
+
+def rework_round_data(run_root: Path, attempt_id: str, *, need_answer: bool = False) -> dict[str, Any]:
+    """``rework_basis`` with what the rework has made: the answer of the generator, r3 with all its cases and its digest, the review of it (``report2``) — from the
+    journal.  ``need_answer``: ``REWORK_NOT_ANSWERED`` while the generator has not answered."""
+    from tools.pilot_state import read_model_stage_artifact
+
+    data, got = rework_basis(run_root, attempt_id), _rework_responses(run_root, attempt_id)
+    data.update(answer=None, answer_digest=got.get(REWORK_STAGE), r3=None, r3_digest=None, report2=None, review_digest=got.get(REWORK_REVIEW_STAGE))
+    if data["answer_digest"]:
+        data["answer"] = _plain(read_model_stage_artifact(Path(run_root), attempt_id, REWORK_STAGE, data["answer_digest"])["artifact"])
+        data["r3"] = check_rework(data["candidate"], data["outcome"], data["answer"])
+        data["r3_digest"] = document_sha256(data["r3"])
+    elif need_answer:
+        raise ValueError("REWORK_NOT_ANSWERED: the generator has not answered the rework yet; fix: `status` names the next step")
+    if data["review_digest"]:
+        data["report2"] = _plain(read_model_stage_artifact(Path(run_root), attempt_id, REWORK_REVIEW_STAGE, data["review_digest"])["artifact"])["artifacts"]["validation_report"]
+    return data
+
+
+def rework_artifacts(run_root: Path, attempt_id: str) -> tuple[Any, Any] | None:
+    """``(answer, report)`` of the rework and of its review where the journal has both, else ``None`` — what the binding of the effective set is checked against."""
+    try:
+        data = rework_round_data(run_root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    return None if data["answer"] is None or data["report2"] is None else (data["answer"], data["report2"])
+
+
+REWORK_REVIEW_FIX = ("ответ — отчёт ревьюера по доработанным кейсам: verdict ПРИНЯТО или ТРЕБУЕТ ДОРАБОТКИ, candidate — ссылка из вида, reviewed_case_ids — доработанные кейсы, "
+                     "блокирующие замечания называют кейсы в related_ids; без правок и преемника; исправь ответ и отдай единственным повтором стадии (--transport-attempts 2), ничего не записано")
+
+
+def check_rework_review(run_root: Path, attempt_id: str, value: Mapping[str, Any]) -> None:
+    """The check of the answer of the second round before it is written: the report names r3 and the reworked cases only, accepts (ПРИНЯТО) or rejects them,
+    holds no fix and no successor, and ``rework_final`` makes a valid set of it; a refusal leaves the answer unwritten and the one retry."""
+    from tools.batch_assembly import BatchAssemblyError
+
+    data = rework_round_data(run_root, attempt_id, need_answer=True)
+    artifacts = _plain(value)["artifacts"]
+    report, r3, ids = artifacts["validation_report"], data["r3"], [case["case_id"] for case in data["answer"]["test_cases"]]
+    ref = {"document_id": r3["document_id"], "revision": r3["revision"], "document_sha256": data["r3_digest"]}
+    problem = None
+    if report.get("verdict") == "AUTO_FIX_APPLIED" or artifacts.get("successor_document") is not None or artifacts.get("successor_edits") is not None:
+        problem = ("REWORK_REVIEW_FIX", "the review of the reworked cases accepts or rejects them: no AUTO_FIX_APPLIED, no successor, no edits")
+    elif report.get("reviewed_case_ids") != ids:
+        problem = ("REWORK_REVIEW_CASES", f"reviewed_case_ids must be exactly the reworked cases {ids}")
+    elif report.get("candidate") != ref or report.get("effective") != (ref if report.get("verdict") == "ПРИНЯТО" else None):
+        problem = ("REWORK_REVIEW_CANDIDATE", f"candidate must be {ref}; effective must be it for ПРИНЯТО and null for ТРЕБУЕТ ДОРАБОТКИ")
+    else:
+        try:
+            rework_final(data["candidate"], data["outcome"], data["answer"], report)
+        except SelectionError as error:
+            problem = (error.diagnostics[0]["code"], error.diagnostics[0]["message"])
+    if problem is not None:
+        raise BatchAssemblyError(problem[0], problem[1], [{"path": "/artifacts/validation_report", "code": problem[0], "message": problem[1], "fix": REWORK_REVIEW_FIX}], REWORK_REVIEW_FIX)
+
+
+def rework_label(run_root: Path, attempt_id: str, stage: str) -> str | None:
+    """The label of the session the request of ``stage`` names (the host's, or the code's where the host gave none), or None where there is no request."""
+    from tools.pilot_state import derive_state, read_model_request
+
+    event = next((row for row in derive_state(Path(run_root))["events"] if row.get("attempt_id") == attempt_id and row["event_type"] == "MODEL_REQUESTED"
+                  and row.get("stage_instance_id") == stage), None)
+    return None if event is None else str(read_model_request(Path(run_root), attempt_id, stage, str(event["artifact_digest"]))["invocation_id"])
+
+
+def rework_independent(run_root: Path, attempt_id: str) -> bool:
+    """The second round is independent of the generator of the rework: the two requests name different sessions.  By the rule of ``open_rework_review`` that is the host's
+    statement of a new session (the same one is SELF, a different label with ``no`` is refused)."""
+    reviewer, generator = (rework_label(run_root, attempt_id, stage) for stage in (REWORK_REVIEW_STAGE, REWORK_STAGE))
+    return reviewer is not None and generator is not None and reviewer != generator
+
+
+def open_rework_review(run_root: Path, attempt_id: str, *, model_id: str | None, invocation_id: str | None, fresh_context: bool | None) -> dict[str, Any]:
+    """``prepare --stage tc-reviewer:rework-1``: the label is the host's and carries its statement, there being no stored boundary: ``--fresh-context yes`` names a session
+    other than the generator's of the rework; ``no`` is that same session (a label of its own with ``no`` is refused, no label is the generator's label); the same
+    label is SELF, refused where the run does not admit it.  The review of the answer is requested here; the request of the model follows (``prepare``)."""
+    from tools.pilot_state import IndependenceUnverified, request_review, self_review_accepted
+    from tools.stage_steps import slot
+    from tools.step_size import rework_review_view_path
+
+    with _closure_ctx():
+        _require_open_attempt(run_root, attempt_id)
+        data = rework_round_data(run_root, attempt_id, need_answer=True)
+        generator = rework_label(run_root, attempt_id, REWORK_STAGE)
+        mismatch = ("REVIEW_FRESH_CONTEXT_MISMATCH", "--fresh-context no говорит «та же сессия, что у генератора доработки», а --invocation-id называет другую; "
+                    f"fix: либо --fresh-context yes --invocation-id <метка новой сессии>, либо --fresh-context no без метки (метка генератора доработки — {generator})")
+        if fresh_context is False and invocation_id not in (None, generator):  # said before the rule of the run about a statement of «no»: the label is the host's own word
+            raise ReviewRefused(*mismatch)
+        fresh = _resolve_fresh_context(run_root, fresh_context)
+        if fresh and invocation_id is None:
+            raise ReviewRefused("REVIEW_INVOCATION_REQUIRED", "--fresh-context yes без --invocation-id: независимость заявляет хост, назвав сессию ревьюера; "
+                                "fix: --invocation-id <метка сессии ревьюера> (не метка генератора доработки) или --fresh-context no, если ревью в той же сессии")
+        if not fresh and invocation_id not in (None, generator):
+            raise ReviewRefused(*mismatch)
+        label = invocation_id or generator
+        if label == generator and not self_review_accepted(Path(run_root)):
+            raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора доработки, а прогон не принял SELF; fix: ревью доработки — отдельной "
+                                         "сессией: --fresh-context yes --invocation-id <метка новой сессии>; только если человек согласен на ревью в той же сессии, повтори scan с --accept-self-review")
+        prior = rework_label(run_root, attempt_id, REWORK_REVIEW_STAGE)
+        if prior is not None and prior != label:
+            raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью доработки уже открыто с ревьюером {prior}; второй сессии нет; fix: повтори prepare с тем же --invocation-id")
+        request_review(Path(run_root), attempt_id, REWORK_REVIEW_STAGE, data["answer_digest"])
+        view = rework_review_view_path(Path(run_root), data["answer_digest"])
+        where = f"вид доработанных кейсов {view}, проверь только их (названное замечанием должно быть исправлено) и запиши ответ в {slot(Path(run_root), REWORK_REVIEW_STAGE)}"
+        return {"reviewer_view": str(view), "label": label,
+                "for_human": (f"Ревью доработки в этой же сессии (SELF; результат не называется независимым): прочти {where}. Затем `submit` этой стадии." if label == generator else
+                              f"Ревью доработки в новой сессии: открой её (/clear или новое окно), в ней — «проведи ревью доработки test-skills {Path(run_root).name}»: она прочтёт {where}. "
+                              "Вернись в рабочую сессию — `submit` этой стадии.")}
+
+
+def _closure_ctx():
+    from contextlib import ExitStack
+
+    from tools.pilot_state import closure_cache
+    from tools.project_inventory import inventory_cache
+
+    stack = ExitStack()
+    stack.enter_context(closure_cache())
+    stack.enter_context(inventory_cache())
+    return stack
+
+
+def _publish_final(run_root: Path, attempt_id: str, data: Mapping[str, Any], final: Mapping[str, Any] | None) -> list[str]:
+    """The set of the rework's end, once: ``final`` is ``rework_final`` of the answer and its review, or ``None`` for the rework nobody reviewed (r2, the rejected cases as r1 had
+    them).  Every case came back: the set alone (r3), no file of the rejected; else the set, ``REJECTED-CASES`` and the effective canonical."""
+    from tools.pilot_state import publish_effective_canonical, read_reviewer_session_ledger
+
+    candidate, outcome, published = data["candidate"], data["outcome"], Path(run_root) / "published"
+    effective = final["effective"] if final else outcome["effective"]
+    partial = None if final and final["kind"] == "ALL" else partial_context(candidate, outcome, {"state": "reviewed", "final": final} if final else {"state": rework_state(run_root, attempt_id)})
     receipt = publish_bundle(effective, published, _PROFILE, partial=partial)
     if verify_bundle(effective, published, _PROFILE, partial=partial) != receipt:
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
-    shown, extras, intro = rejected_cases(candidate, partial, Path(run_root).name)
-    files = write_status_files(run_root, shown, published, _PROFILE, "REJECTED-CASES", extras=extras, intro=intro)
+    files = []
+    if partial is not None:
+        shown, extras, intro = rejected_cases(candidate, partial, Path(run_root).name)
+        files = write_status_files(run_root, shown, published, _PROFILE, "REJECTED-CASES", extras=extras, intro=intro)
     publish_effective_canonical(Path(run_root), attempt_id, effective, _receipt_value(receipt), str(read_reviewer_session_ledger(Path(run_root), attempt_id)["digest"]))
     return files
+
+
+def close_pending_rework(run_root: Path, attempt_id: str) -> list[str]:
+    """``finish`` of a run whose first review sent cases back and whose rework did not come to the end (not asked, refused twice, answered, nobody reviewed it): the set is r2,
+    the rejected cases are in ``REJECTED-CASES`` as r1 had them with the reviewer's words — a rework nobody reviewed is not shown — and the effective canonical is published, once.
+    Where the second round has its answer the set is what ``rework_final`` makes of it.  Nothing happens for a run that is not waiting for the rework (or already published)."""
+    from tools.pilot_state import read_effective_canonical_if_present, rework_round_if_present
+
+    if rework_round_if_present(Path(run_root), attempt_id) is None or read_effective_canonical_if_present(Path(run_root), attempt_id) is not None:
+        return []
+    data = rework_round_data(run_root, attempt_id)
+    return _publish_final(run_root, attempt_id, data, None if data["report2"] is None else rework_final(data["candidate"], data["outcome"], data["answer"], data["report2"]))
+
+
+def select_rework_review(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] | None = None, dry_run: bool = False) -> dict[str, Any]:
+    """``submit``'s end of the second round: the set ``rework_final`` makes of the answer of the rework and its review (``review``: the answer of a dry run, not recorded yet),
+    published once; what the agent is told of it.  The same call again finishes what a refusal left."""
+    from tools.pilot_state import read_effective_canonical_if_present
+
+    with _closure_ctx():
+        _require_open_attempt(run_root, attempt_id)
+        data = rework_round_data(run_root, attempt_id, need_answer=True)
+        report = _plain(review)["artifacts"]["validation_report"] if review is not None else data["report2"]
+        final = rework_final(data["candidate"], data["outcome"], data["answer"], report)
+        told = {"outcome": "ACCEPTED_WHOLE" if final["kind"] == "ALL" else "PARTIAL",
+                "rework": {"accepted": len(final["accepted_after"]), "not_accepted": len(final["rejected"]) + len(final["with_group"]), "ignored": final["ignored"]},
+                "independence": "verified" if rework_independent(run_root, attempt_id) else "independence_unverified"}
+        if dry_run:
+            return {**told, "would_publish": {"revision": final["effective"]["revision"], "cases": len(final["effective"]["test_cases"])}}
+        if read_effective_canonical_if_present(Path(run_root), attempt_id) is None:
+            _publish_final(run_root, attempt_id, data, final)
+        published = Path(run_root) / "published"
+        return {**told, "files": sorted(path.name for path in published.iterdir()) if published.is_dir() else []}
+
+
+def abort_rework_review(run_root: Path, attempt_id: str, reason: str, dry_run: bool) -> dict[str, Any]:
+    """``submit --abort`` of the second round: no verdict is coming; the set closes as for a rework nobody finished («Доработка не завершена.»); ``finish`` follows."""
+    if reason not in ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE"):
+        raise ValueError(f"REVIEWER_ABORT_REASON_INVALID: {reason}; fix: --abort REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE")
+    data = rework_round_data(run_root, attempt_id, need_answer=True)
+    if data["report2"] is not None:
+        raise ValueError("REVIEW_CLOSED: the review of the rework has its answer; fix: submit без --abort довершает итог")
+    if not dry_run:
+        close_pending_rework(run_root, attempt_id)
+    return {"outcome": "ABORTED", "independence": "independence_unverified",
+            "rework": {"accepted": 0, "not_accepted": len(data["outcome"]["rejected"]) + len(data["outcome"]["with_group"]), "ignored": 0}}
 
 
 _VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}

@@ -896,7 +896,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     elif terminal.get("review_independence") == "SELF":
         review = "ревью в той же сессии (SELF), принято по согласию человека"
     elif evidence.get("reviewer_isolation_state") is not None:
-        review = "ревью в свежем контексте"
+        review = "ревью в свежем контексте" if ((acceptance or {}).get("rework") or {}).get("independent", True) else "ревью в той же сессии (SELF): второй круг шёл в той же сессии"
     else:
         review = None
     scope = _scope(root, attempt_id, state)
@@ -1111,15 +1111,16 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
                   "> Ревью могло пропустить и настоящие ошибки — просмотрите принятые кейсы внимательнее перед импортом.", ""]
+    who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
     if acc["outcome"] != "PARTIAL":
-        return lines
+        return lines + ([f"Ревью: {who}, 2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])
     gaps, files = acc["coverage_gaps"], acc["files"]
     rework = rework if rework and rework["state"] != "not_started" else None  # nothing was sent back: the three rows of V6
     first = rework["accepted_first"] if rework else accepted
     lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {first} |",
               *([f"| Отклонено и отправлено на доработку | {rework['sent']} |", f"| Принято после доработки | {rework['accepted']} |"] if rework else []),
               f"| Не принято (вынесено отдельно) | {left} |", "",
-              f"Ревью: {'независимое (INDEPENDENT)' if report.get('reviewer_isolation_state') == 'verified' else 'в той же сессии (SELF)'}, "
+              f"Ревью: {who}, "
               + ("2 круга: весь набор, затем только доработанный кейс." if rework and rework["state"] == "reviewed" else "1 круг: весь набор."),
               (f"Пробелы покрытия: {len(gaps)} {plural(len(gaps), 'требование осталось', 'требования остались', 'требований остались')} без принятого кейса — см. «Пробелы покрытия»." if gaps
                else "Пробелов покрытия нет: у каждого требования остался принятый кейс."), "",

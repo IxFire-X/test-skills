@@ -72,7 +72,7 @@ def test_prepare_publishes_the_request_and_the_view_of_the_rejected_case(tmp_pat
     assert [row["basis"] for row in listed if row["path"].endswith("rework.md")] == ["роль доработки"] and any(row["path"].endswith(".rework-view.json") for row in listed)
 
 
-def test_the_answer_is_recorded_once_and_status_then_names_finish(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_answer_is_recorded_once_and_status_then_names_the_review_of_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     run, _done = _reviewed(tmp_path, monkeypatch)
     root = run["run_root"]
     _call(capsys, "prepare", root, STAGE)
@@ -82,7 +82,7 @@ def test_the_answer_is_recorded_once_and_status_then_names_finish(tmp_path: Path
     before = _events(root)
     code, again = _call(capsys, "submit", root, STAGE)
     assert code == 0 and again["result"]["answered"] is True and _events(root) == before
-    assert _status(root)["next"]["verb"] == "finish"
+    assert _status(root)["next"] == {"verb": "prepare", "stage": "tc-reviewer:rework-1"}  # V7b: the second round; finish before it closes the rework unfinished
 
 
 @pytest.mark.parametrize("change, code", [
@@ -205,7 +205,7 @@ def test_the_rounds_are_read_from_the_limits_the_run_froze(tmp_path: Path, monke
 
     run = _generated_run(tmp_path)
     args = (run["run_root"], run["attempt_id"])
-    for limits, wanted in (({"rework_rounds": 1}, 1), ({"rework_rounds": 0}, 0), ({}, 0), ({"rework_rounds": 7}, 1)):
+    for limits, wanted in (({"rework_rounds": 1}, 1), ({"rework_rounds": 0}, 0), ({}, 1), ({"rework_rounds": 7}, 1)):
         monkeypatch.setattr(step_size, "run_limits", lambda *_args, limits=limits: (limits, None))
         assert rework_rounds(*args) == wanted
 
@@ -280,7 +280,7 @@ def test_the_limit_of_a_real_skillsrc_is_what_the_scan_froze(tmp_path: Path, val
     root, attempt_id, *_rest = _run(tmp_path / "b", files=1)
     assert rework_rounds(root, attempt_id) == value
     (tmp_path / "b" / ".skillsrc").write_text(json.dumps({**content, "limits": {"rework_rounds": 1 - value}}), encoding="utf-8")  # edited after the scan: the file is no longer the frozen one
-    assert rework_rounds(root, attempt_id) == 0
+    assert rework_rounds(root, attempt_id) == 1  # the default of the code: V7b — the rejected cases go back
 
 
 def test_the_schema_of_the_skillsrc_refuses_more_than_one_round(tmp_path: Path) -> None:

@@ -36,3 +36,16 @@ def test_the_file_is_in_every_delivery_profile() -> None:
 def test_the_role_of_the_reviewer_says_a_blocking_finding_names_its_cases() -> None:
     text = (ROOT / "skills" / "tc-reviewer" / "SKILL.md").read_text(encoding="utf-8")
     assert "names the cases it is about in `related_ids`" in text and "names no case rejects the whole set" in text
+
+
+def test_the_text_of_the_second_round_fits_its_limit_names_the_form_and_no_role_reads_it_by_default() -> None:
+    from tools.pack_registry import PROFILES, profile_paths
+    from tools.step_size import role_files
+
+    path = ROOT / "skills" / "tc-reviewer" / "rework.md"
+    text = path.read_text(encoding="utf-8")
+    assert path.stat().st_size <= 2000 and path not in role_files("tc-reviewer")
+    for word in ("tc-reviewer:rework-1", "incoming/tc-reviewer-rework-1.json", "REWORK_REVIEW_FIX", "reviewed_case_ids", "related_ids", "--transport-attempts 2"):
+        assert word in text, word
+    assert not re.search(r"(pip|mvn|gradle|npm|curl|git)", text) and "Не запускай сборку, не ставь зависимости, не ходи в сеть" in text
+    assert all("skills/tc-reviewer/rework.md" in profile_paths(["skills/tc-reviewer/rework.md"], profile) for profile in PROFILES)

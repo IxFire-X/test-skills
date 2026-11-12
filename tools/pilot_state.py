@@ -31,7 +31,7 @@ _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:(?:BATCH-[a-z0-9-]+|rework-1)|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
+    r"^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:(?:BATCH-[a-z0-9-]+|rework-1)|assembly|tc-reviewer:(?:canonical|rework-1)|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
 )
 REWORK_BATCH = "rework-round-v1"  # the mark of the events of the receipt ``rework-round``: the first review sent cases back and the code waits for the rework
 _REWORK_STAGE = "tc-generator:rework-1"
@@ -543,6 +543,8 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
             if event_type == "EXECUTION_STARTED":
                 if attempt_id in execution_started or any(
                     key[0] == attempt_id and key not in model_responses
+                    # the second round closed by --abort has no answer; the automation of the attempt exists only after the effective canonical (the request reads it), so the result was published
+                    and not (key[1] == _REWORK_REVIEW_STAGE and (attempt_id, "tc-to-autotest:r1") in model_responses)
                     for key in model_requests
                 ):
                     raise ValueError("invalid event journal")
@@ -1418,7 +1420,8 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
     return _append_event(project, root, event_type, actor=actor, attempt_id=attempt_id, batch_id=batch_id, artifact_digest=artifact_digest, stage_instance_id=stage_instance_id, transport_attempts=transport_attempts)
 
 
-_REVIEW_STAGE = re.compile(r"^(?:tc-reviewer:canonical|autotest-reviewer:r[12])$")
+_REVIEW_STAGE = re.compile(r"^(?:tc-reviewer:(?:canonical|rework-1)|autotest-reviewer:r[12])$")
+_REWORK_REVIEW_STAGE = "tc-reviewer:rework-1"
 
 
 @closure_cached
@@ -1446,7 +1449,8 @@ def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, cand
         if recorded[0].get("artifact_digest") == candidate_digest:
             return recorded[0]
         raise ValueError(f"REVIEW_ALREADY_REQUESTED: {stage_instance_id} already reviews {recorded[0].get('artifact_digest')}")
-    source = "assembly" if stage_instance_id == "tc-reviewer:canonical" else stage_instance_id.replace("autotest-reviewer:", "tc-to-autotest:", 1)
+    source = ("assembly" if stage_instance_id == "tc-reviewer:canonical" else _REWORK_STAGE if stage_instance_id == _REWORK_REVIEW_STAGE
+              else stage_instance_id.replace("autotest-reviewer:", "tc-to-autotest:", 1))
     candidates = [event for event in events if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == source]
     if not any(event.get("artifact_digest") == candidate_digest for event in candidates):
         published = [str(event.get("artifact_digest")) for event in candidates]
@@ -2027,6 +2031,10 @@ def _validate_model_request_predecessors(
     if stage_instance_id == _REWORK_STAGE:  # the rework is asked for after the first review sent cases back (its receipt is in the journal before the request)
         if not any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("batch_id") == REWORK_BATCH and event["seq"] < cutoff for event in events):
             raise ValueError("tc-generator:rework-1 is requested only after the first review sent cases back")
+    elif stage_instance_id == _REWORK_REVIEW_STAGE:  # the review of the rework: asked for on the answer of the generator of the rework
+        if not any(event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id and event["seq"] < cutoff
+                   and event.get("artifact_digest") == inputs[0] for event in events):
+            raise ValueError("tc-reviewer:rework-1 is requested only on the review request of the answer of the rework")
     elif stage == "tc-generator":
         from tools.project_inventory import read_execution_baseline
 
@@ -2432,7 +2440,7 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             or context.get("digest") != _model_stage_artifact_digest(context_body)
         ):
             raise ValueError("invalid generator fragment artifact")
-    elif stage_instance_id == "tc-reviewer:canonical":
+    elif stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):
         schema_name = "tc-reviewer-output.schema.json"
     elif stage_instance_id.startswith("tc-to-autotest:"):
         schema_name = "tc-to-autotest-output.schema.json"
@@ -2551,7 +2559,7 @@ def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: st
     if not responses:
         return "none"
     value = dict(artifact)
-    if stage_instance_id == "tc-reviewer:canonical":  # as the answer is stored
+    if stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):  # as the answer is stored
         from tools.review_canaries import hash_codeword
 
         value = hash_codeword(value)
@@ -2616,7 +2624,7 @@ def _publish_model_stage_artifact(
 
         value, normalized = normalize_fragment(value)
         value, mechanics = fill_fragment_mechanics(value)  # ids, display_order, defaults, the types the code can take
-    if stage_instance_id == "tc-reviewer:canonical":  # the control word the reviewer names is kept as its sha256 only
+    if stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):  # the control word the reviewer names is kept as its sha256 only
         from tools.review_canaries import hash_codeword
 
         value = hash_codeword(value)
@@ -2723,6 +2731,10 @@ def _publish_model_stage_artifact(
         check_requirements_answer(root, attempt, value)  # the links of an import with documents (by the run, not a label)
     if stage_instance_id == "tc-reviewer:canonical":
         _validate_review_decision(root, state, attempt_id, value)
+    if stage_instance_id == _REWORK_REVIEW_STAGE:
+        from tools.orchestrate_test_case_revision import check_rework_review
+
+        check_rework_review(root, attempt_id, value)  # the review of the reworked cases only: its form and the set it gives, before the answer is written
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     if before_write is not None:
         before_write(value)
@@ -3771,7 +3783,10 @@ def _validate_factual_receipt(
                 from tools.orchestrate_test_case_revision import journal_assembly
                 from tools.review_canaries import verify as verify_canaries
 
-                partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or []}
+                from tools.orchestrate_test_case_revision import rework_artifacts
+
+                partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or [],
+                           "rework": rework_artifacts(root, str(attempt["attempt_id"]))}  # the answer of the rework and the review of it, when the journal has both
             review_bound = (
                 isinstance(package_binding, Mapping)
                 and effective_review_is_bound(
@@ -5680,6 +5695,14 @@ def _expected_model_inputs(
 
         return [(basis["answer_digest"], "ответ tc-reviewer:canonical журнала"), (document_sha256(basis["candidate"]), "кандидат r1 журнала"),
                 *((digest, "context_receipt_digest пачки с отклонённым кейсом") for digest in basis["contexts"])]
+    if stage_instance_id == _REWORK_REVIEW_STAGE:  # the answer of the generator of the rework and r3 with its cases: from the journal
+        from tools.orchestrate_test_case_revision import rework_round_data
+
+        try:
+            data = rework_round_data(root, attempt_id, need_answer=True)
+        except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
+            raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id} is asked for only after the rework is answered ({error}); fix: `status` names the next step") from error
+        return [(data["answer_digest"], "ответ tc-generator:rework-1 журнала"), (data["r3_digest"], "r3: r2 и кейсы ответа доработки")]
     if stage == "tc-generator":
         markers = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:baseline"]
@@ -5821,6 +5844,10 @@ def _response_bindings(
     try:
         if stage_instance_id == _REWORK_STAGE:
             pass  # the answer holds cases only: nothing in it is a digest the journal fixes
+        elif stage_instance_id == _REWORK_REVIEW_STAGE:
+            add("/artifacts/validation_report/candidate/document_sha256", str(request["input_digests"][1]), "r3 (вход 2 запроса)")
+            if value["artifacts"]["validation_report"]["verdict"] == "ПРИНЯТО" and isinstance(value["artifacts"]["validation_report"].get("effective"), Mapping):
+                add("/artifacts/validation_report/effective/document_sha256", str(request["input_digests"][1]), "ПРИНЯТО принимает r3 (вход 2 запроса)")
         elif stage == "tc-generator":
             inputs = request["input_digests"]
             try:  # further context receipts of the published plan shift plan and header

@@ -203,3 +203,34 @@ def test_a_variant_taken_out_with_its_group_is_no_case_of_the_rework() -> None:
     outcome = _outcome(document, [_finding("BLOCKING", ids[:2])])  # the third variant is out with them but no finding names it
     answer = {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1", "test_cases": [copy.deepcopy(case) for case in document["test_cases"] if case["case_id"] in ids]}
     assert _code(lambda: check_rework(document, outcome, answer)) == "REWORK_CASE_SET"
+
+
+# ---- the second round: the view and the binding of the set to the two answers --------------------------------------------------------------
+
+def test_the_view_of_the_second_round_holds_the_reworked_cases_the_first_findings_and_what_they_stand_on() -> None:
+    from tools.revision_selection import rework_review_request
+
+    document = r1_document()
+    outcome = _outcome(document, [_finding("BLOCKING", ["TC-B1-003"], "Нет проверки состояния.")])
+    answer = _answer(document, 3)
+    view = rework_review_request(document, outcome, answer, check_rework(document, outcome, answer))
+    assert view["reviewed_case_ids"] == ["TC-B1-003"] and [case["title"] for case in view["cases"]] == ["Доработанный кейс"] and view["candidate"]["revision"] == 3
+    assert view["first_round"]["TC-B1-003"][0]["message"] == "Нет проверки состояния." and {row["requirement_id"] for row in view["requirements"]} == set(document["test_cases"][2]["requirement_ids"])
+    assert "TC-B1-004" not in str(view["cases"])  # a case of the first round is not in the view
+
+
+def test_the_set_is_bound_to_what_the_two_answers_give_and_to_nothing_else() -> None:
+    from tools.revision_selection import partial_is_bound
+
+    document = r1_document()
+    findings = _real(document, 3, 4)
+    outcome, report1 = _outcome(document, findings), _report(document, *findings)
+    answer = _answer(document, 3, 4)
+    passes, rejects = _review(document, "ПРИНЯТО"), _review(document, "ТРЕБУЕТ ДОРАБОТКИ", _finding("BLOCKING", ["TC-B1-004"]))
+    whole = rework_final(document, outcome, answer, passes)["effective"]
+    one = rework_final(document, outcome, answer, rejects)["effective"]
+    assert partial_is_bound(document, report1, (), whole, (answer, passes)) and partial_is_bound(document, report1, (), one, (answer, rejects))
+    assert not partial_is_bound(document, report1, (), whole, (answer, rejects))  # a case the second answer rejected is in the set
+    assert not partial_is_bound(document, report1, (), one, (answer, passes))  # a case it accepted is not
+    assert not partial_is_bound(document, report1, (), whole)  # a set of the rework with no record of the second round
+    assert partial_is_bound(document, report1, (), outcome["effective"])  # r2 itself, as before the rework

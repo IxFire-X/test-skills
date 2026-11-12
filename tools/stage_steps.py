@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
 from tools.project_inventory import read_inventory_receipt
-from tools.revision_selection import REWORK_STAGE
+from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
 
 SLOT_DIR = "incoming"
 
@@ -138,26 +138,40 @@ def _reviewer_steps(root: Path) -> list[dict[str, Any]]:
     batches = [step for step in _generator_steps(root) if step["stage"] != REWORK_STAGE]
     if not batches or not all(step["done"] for step in batches):
         return []
-    from tools.orchestrate_test_case_revision import REVIEW_STAGE, abort_review, open_review
+    from tools.orchestrate_test_case_revision import REVIEW_STAGE, abort_review, abort_rework_review, open_review, open_rework_review, rework_label
 
-    return [{"stage": REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")), "extra": "evidence",
-             "open": lambda model_id, invocation_id, fresh: open_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
-             "abort": lambda reason, dry_run: abort_review(root, attempt_id, reason, dry_run)}]
+    steps = [{"stage": REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")), "extra": "evidence",
+              "open": lambda model_id, invocation_id, fresh: open_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
+              "abort": lambda reason, dry_run: abort_review(root, attempt_id, reason, dry_run)}]
+    from tools.pilot_state import read_effective_canonical_if_present, rework_round_if_present
+
+    answered = _events(state, attempt_id, REWORK_STAGE, "MODEL_RESPONSE_RECEIVED") and rework_round_if_present(root, attempt_id) is not None
+    reviewed = _events(state, attempt_id, REWORK_REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")
+    if answered and (reviewed or read_effective_canonical_if_present(root, attempt_id) is None):  # the rework is answered and the set is not published (or the answer of the second round stands): the second round, on the reworked cases only
+        steps.append({"stage": REWORK_REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REWORK_REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")),
+                      "invocation": rework_label(root, attempt_id, REWORK_STAGE),  # no label from the host: the generator's of the rework (the same session)
+                      "open": lambda model_id, invocation_id, fresh: open_rework_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
+                      "abort": lambda reason, dry_run: abort_rework_review(root, attempt_id, reason, dry_run)})
+    return steps
 
 
-def _reviewer_accepted(root: Path, _stage: str) -> Mapping[str, Any]:
+def _reviewer_accepted(root: Path, stage: str) -> Mapping[str, Any]:
     """The answer is recorded: the selection by the journal — what a refusal left is finished by the repeat."""
-    from tools.orchestrate_test_case_revision import select_review
+    from tools.orchestrate_test_case_revision import select_review, select_rework_review
 
+    if stage == REWORK_REVIEW_STAGE:
+        return select_rework_review(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))
     return select_review(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))
 
 
 def _reviewer_check(root: Path, stage: str, value: Mapping[str, Any], dry_run: bool, evidence: Any) -> dict[str, Any] | None:
     """After every check of the answer, before its write: the evidence it names (a refusal leaves the answer unwritten; the same files again are no duplicate);
     a dry run says what the selection would publish."""
-    from tools.orchestrate_test_case_revision import provide_reviewer_evidence, select_review
+    from tools.orchestrate_test_case_revision import provide_reviewer_evidence, select_review, select_rework_review
 
     attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
+    if stage == REWORK_REVIEW_STAGE:  # no evidence in the second round; a dry run says what the set would be
+        return select_rework_review(root, attempt_id, review=value, dry_run=True) if dry_run else None
     if evidence is not None:
         if not isinstance(evidence, list) or not all(isinstance(path, str) for path in evidence):
             raise ValueError("REVIEW_EVIDENCE_INVALID: evidence — список путей внутри проекта; fix: evidence: [\"src/файл.py\", …] или без ключа")

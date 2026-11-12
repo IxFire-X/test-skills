@@ -47,6 +47,7 @@ def effective_review_is_bound(
     verdict_event: Any,
     candidate: Any = None,
     canaries: Sequence[Any] = (),
+    rework: Any = None,
 ) -> bool:
     """Bind one accepted durable effective document to the reviewer decision."""
     if (
@@ -58,7 +59,7 @@ def effective_review_is_bound(
         return False
     if report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted by the code: ACCEPTED in the ledger, and the set is exactly the reviewer's
         return (isinstance(candidate, dict) and document_sha256(candidate) == candidate_digest and verdict_event.get("verdict") == "ACCEPTED"
-                and successor is None and partial_is_bound(candidate, report, canaries, effective_document))
+                and successor is None and partial_is_bound(candidate, report, canaries, effective_document, rework))
     expected_effective = {
         "document_id": effective_document.get("document_id"),
         "revision": effective_document.get("revision"),
@@ -423,20 +424,27 @@ def review_outcome(candidate: dict[str, Any], report: dict[str, Any], canaries: 
     return {**base, "kind": "REWORK", "reason": reason} if reason else {**base, "kind": "PARTIAL", "effective": subtract(candidate, [*rejected, *dragged])}
 
 
-def partial_is_bound(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any], effective: Any) -> bool:
+def partial_is_bound(candidate: dict[str, Any], report: dict[str, Any], canaries: Sequence[Any], effective: Any, rework: Any = None) -> bool:
     """Whether *effective* is what the reviewer's report gives: r1 itself when only canaries were blocking, else a valid subtraction of exactly the
-    cases the report rejects.  The share is not part of it (a limit edited since the selection must not unseal the run)."""
+    cases the report rejects.  The share is not part of it (a limit edited since the selection must not unseal the run).  ``rework`` — the answer of the
+    generator of the rework and the report of its review, both recorded: the set is then what ``rework_final`` makes of them (byte for byte), nothing else."""
     reason, rejected, dragged, _said = _rejection(candidate, report, canaries)
     if reason is not None or not isinstance(effective, dict):
         return False
+    if rework:
+        try:
+            return rework_final(candidate, review_outcome(candidate, report, canaries, 100), rework[0], rework[1])["effective"] == effective
+        except SelectionError:
+            return False
     return effective == candidate if not rejected else not check_subtraction(candidate, effective, [*rejected, *dragged])
 
 
 # --- the rework: the cases of r1 the reviewer rejected go back once to the generator; the code builds r3 and checks it ---------------
 
-DEFAULT_REWORK_ROUNDS = 0  # ``.skillsrc`` limits.rework_rounds (0 | 1): 0 is V6 (nothing goes back); the code knows no second round
+DEFAULT_REWORK_ROUNDS = 1  # ``.skillsrc`` limits.rework_rounds (0 | 1): 1 — the rejected cases go back once and are reviewed again; 0 is V6 (they are only taken out); the code knows no second round
 REWORK_INSTANCE, REWORK_VIEW = "rework-1", "rework-view-v1"
 REWORK_STAGE = "tc-generator:" + REWORK_INSTANCE
+REWORK_REVIEW_STAGE = "tc-reviewer:" + REWORK_INSTANCE  # the second round: the review of the reworked cases only
 REWORK_TEXT_MAX, REWORK_FINDINGS_MAX = 2000, 10  # what one blocking finding of the reviewer may carry into the generator's view
 _CASE_IDENTITY = ("case_id", "requirement_ids", "display_order", "param_group")
 
@@ -552,3 +560,17 @@ def rework_final(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any
             raise SelectionError([_diagnostic(row["path"], "REWORK_FINAL_INVALID", f"{row['code']}: {row['message']}") for row in rows[:5]])
         result["effective"] = effective
     return result
+
+
+def rework_review_request(candidate: dict[str, Any], outcome: dict[str, Any], answer: dict[str, Any], r3: dict[str, Any]) -> dict[str, Any]:
+    """What the reviewer of the rework reads (the second round): the reworked cases as the generator answered, the blocking findings of the first round that
+    rejected each, the requirements those cases cover and the capabilities their steps name — a function of the journal.  ``candidate`` is r3: the report names it."""
+    from tools.canonical_document import document_sha256
+
+    cases = answer["test_cases"]
+    wanted = {item for case in cases for item in case["requirement_ids"]}
+    names = {(step.get("operation") or {}).get("capability_id") for case in cases for step in case["steps"]}
+    return {"view": "rework-review-view-v1", "candidate": {"document_id": r3["document_id"], "revision": r3["revision"], "document_sha256": document_sha256(r3)},
+            "cases": cases, "reviewed_case_ids": [case["case_id"] for case in cases], "first_round": rework_request(candidate, outcome)["findings"],
+            "requirements": [row for row in candidate["requirements"] if row["requirement_id"] in wanted],
+            "capabilities": [row for row in candidate["operation_capabilities"] if row["capability_id"] in names]}
