@@ -75,7 +75,7 @@ def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsy
 
     assert set(api.COMMANDS) >= {
         "model-request", "model-response", "read-model-artifact", "prepare", "submit", "plan-batches", "publish-generator-input",
-        "validate-fragment", "assemble", "document-digest", "validate-canonical", "read-ledger",
+        "validate-canonical", "read-ledger",
         "read-effective", "open-automation-boundary", "read-receipt", "automation-digest", "relations-digest",
         "validate-automation", "runner-compat",
     }
@@ -239,13 +239,9 @@ def test_the_automation_readers_match_the_direct_calls(tmp_path: Path, capsys: p
     assert code == 2 and {"code": refused["code"], "message": refused["message"]} == expected, refused
 
     from tools.automation_validation import automation_sha256
-    from tools.canonical_document import document_sha256
 
-    document = run_root / "tmp" / "document.json"
-    document.write_text(json.dumps(values["canonical_document"], ensure_ascii=False), encoding="utf-8")
     automation = run_root / "tmp" / "automation.json"
     automation.write_text(json.dumps(values["automation_artifact"], ensure_ascii=False), encoding="utf-8")
-    assert _api(["document-digest", "--document", str(document)], capsys)[1]["result"] == document_sha256(values["canonical_document"])
     assert _api(["automation-digest", "--automation", str(automation)], capsys)[1]["result"] == automation_sha256(values["automation_artifact"])
 
 
@@ -315,7 +311,7 @@ def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys:
     source = run_root / "tmp" / "document.json"
     source.parent.mkdir(exist_ok=True)  # PT2: the scan made tmp/
     source.write_text(json.dumps(automated_document(), ensure_ascii=False), encoding="utf-8")
-    code, _line = _api(["document-digest", "--document", str(source), "--out", str(run_root / "tmp" / "digest.json"), "--run-root", str(run_root)], capsys)
+    code, _line = _api(["relations-digest", "--relations", str(source), "--out", str(run_root / "tmp" / "digest.json"), "--run-root", str(run_root)], capsys)
     assert code == 0 and (run_root / "tmp" / "digest.json").is_file()
     assert "drift" not in _status(project, scan["run_id"], monkeypatch)
 

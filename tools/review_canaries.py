@@ -421,7 +421,7 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
                 "note": "ревью не измерено канарейками (прогон открыт до P7)"}
     seeded = len(canaries)
     if seeded == 0:
-        return {"status": "NONE", "seeded": 0, "caught": 0, "warning": None, "note": "канареек нет: в кандидате нечего мутировать"}
+        return {"status": "NONE", "seeded": 0, "caught": 0, "warning": None, "note": "контроль ревьюера не измерен: ни одной контрольной ошибки не поставлено — в кандидате нечего мутировать"}
     if answer is None:
         return {"status": "PENDING", "seeded": seeded, "caught": None, "warning": None, "note": "ответ ревьюера ещё не записан"}
     hits = hit_ids(canaries, answer)

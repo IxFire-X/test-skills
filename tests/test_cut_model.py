@@ -1,4 +1,4 @@
-"""F2 (A2-4, arch review 3): prior-capabilities cut between its receipt file and the pair of events — the same command again finishes it."""
+"""F2 (A2-4, arch review 3): the capabilities of the earlier batches cut between their receipt file and the pair of events — the same prepare again finishes it."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _generator_inputs(run: dict, plan_digest: str, header_digest: str) -> list[s
 
 
 # --------------------------------------------------------------------------------------
-# prior-capabilities: receipt file, ARTIFACT_PUBLISHED, ARTIFACT_READ_BACK
+# the capabilities of the earlier batches: receipt file, ARTIFACT_PUBLISHED, ARTIFACT_READ_BACK
 # --------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("point", ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"])
@@ -39,14 +39,14 @@ def test_prior_capabilities_cut_between_the_receipt_and_its_events(tmp_path: Pat
     pilot_state.publish_model_request(run["run_root"], run["attempt_id"], first_stage, model_id="model-generator", invocation_id="invoke-1",
                                       input_digests=_generator_inputs(run, plan_digest, header_digest))
     pilot_state.publish_model_stage_artifact(run["run_root"], run["attempt_id"], first_stage, fragments[0])
-    argv = ["prior-capabilities", *_run_flags(run), "--batch-id", fragments[1]["batch_id"]]
+    argv = ["prepare", "--run-root", str(run["run_root"]), "--stage", f"tc-generator:{fragments[1]['batch_id']}"]  # prepare publishes them before the request
     with monkeypatch.context() as broken:
         _crash_event(broken, point, None)
         code, first = _main(capsys, argv)
         assert code == 2, first
     assert (run["run_root"] / "prior-capabilities" / f"{run['attempt_id']}.{fragments[1]['batch_id']}.json").exists()  # the cut left the file
     code, again = _main(capsys, argv)
-    assert code == 0 and again["result"]["batch_id"] == fragments[1]["batch_id"], f"{point}: {again}"
+    assert code == 0 and again["result"]["request_digest"], f"{point}: {again}"
     code, bound = _main(capsys, ["read-receipt", *_run_flags(run), "--kind", f"prior-capabilities-{fragments[1]['batch_id']}", "--event", "ARTIFACT_READ_BACK"])
     assert code == 0, bound  # the receipt is bound now: both events
     pair = [row["event_type"] for row in _events(run["run_root"]) if row.get("artifact_digest") == bound["result"]["digest"]]
@@ -63,7 +63,7 @@ def test_a_prior_capabilities_file_with_other_bytes_and_no_events_is_refused_wit
     pilot_state.publish_model_request(run["run_root"], run["attempt_id"], first_stage, model_id="model-generator", invocation_id="invoke-1",
                                       input_digests=_generator_inputs(run, plan_digest, header_digest))
     pilot_state.publish_model_stage_artifact(run["run_root"], run["attempt_id"], first_stage, fragments[0])
-    argv = ["prior-capabilities", *_run_flags(run), "--batch-id", fragments[1]["batch_id"]]
+    argv = ["prepare", "--run-root", str(run["run_root"]), "--stage", f"tc-generator:{fragments[1]['batch_id']}"]  # prepare publishes them before the request
     with monkeypatch.context() as broken:
         _crash_event(broken, "ARTIFACT_PUBLISHED", None)
         assert _main(capsys, argv)[0] == 2

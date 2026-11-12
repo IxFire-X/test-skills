@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
@@ -2022,7 +2022,7 @@ def _validate_model_request_predecessors(
         from tools.project_inventory import read_execution_baseline
 
         markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-        # from batch 2 a fifth input — the capabilities of the earlier batches (prior-capabilities)
+        # from batch 2 a fifth input — the capabilities of the earlier batches (its receipt)
         # the exact list (M context receipts) is checked at publish time by _expected_model_inputs
         if len(inputs) < 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
@@ -2411,9 +2411,12 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
         context_body = {
             key: item for key, item in context.items() if key != "digest"
         } if isinstance(context, Mapping) else {}
+        if value.get("batch_id") != batch_id:
+            raise ValueError(f"MODEL_STAGE_ARTIFACT_INVALID: {stage_instance_id}: в слоте лежит фрагмент пачки {value.get('batch_id')}, а ответ этой стадии — фрагмент "
+                             f"пачки {batch_id}; fix: положи в слот фрагмент пачки {batch_id} (batch_id и namespace — из плана); ничего не записано, "
+                             "отдай его единственным повтором стадии (--transport-attempts 2)")
         if (
-            value.get("batch_id") != batch_id
-            or value.get("digest") != _model_stage_artifact_digest(body)
+            value.get("digest") != _model_stage_artifact_digest(body)
             or not isinstance(context, Mapping)
             or context.get("digest") != _model_stage_artifact_digest(context_body)
         ):
@@ -2503,8 +2506,12 @@ def publish_model_stage_artifact(
     transport_attempts: int = 1,
     raw_bytes: int | None = None,
     dry_run: bool = False,
+    before_write: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
+
+    ``before_write(answer)`` runs after every check, with the answer as it would be stored, and before the write: a refusal of
+    it leaves the stage as it was (the last batch of the generator is assembled there).
 
     Audit 2: a refused answer given as the one retry (--transport-attempts 2) never advises that retry again — its
     fix is the way out of the stage.  The code does not count refused answers yet (AB2, after the release).
@@ -2512,8 +2519,8 @@ def publish_model_stage_artifact(
     ``dry_run`` runs every check that precedes the write and returns ``{"dry_run": True, "artifact": <the answer as it would
     be stored>, "content_digest", "filled", "normalized"}`` — nothing is written, no event is appended."""
     try:
-        return _publish_model_stage_artifact(run_root, attempt_id, stage_instance_id, artifact,
-                                             transport_attempts=transport_attempts, raw_bytes=raw_bytes, dry_run=dry_run)
+        return _publish_model_stage_artifact(run_root, attempt_id, stage_instance_id, artifact, transport_attempts=transport_attempts,
+                                             raw_bytes=raw_bytes, dry_run=dry_run, before_write=before_write)
     except Exception as error:
         if transport_attempts == 2 and "--transport-attempts 2" in str(error):
             error.args = tuple(_retry_spent(arg) if isinstance(arg, str) and "--transport-attempts 2" in arg else arg for arg in error.args)
@@ -2561,6 +2568,7 @@ def _publish_model_stage_artifact(
     transport_attempts: int = 1,
     raw_bytes: int | None = None,
     dry_run: bool = False,
+    before_write: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
 
@@ -2592,7 +2600,7 @@ def _publish_model_stage_artifact(
     filled: list[str] = []
     normalized: list[str] = []
     mechanics: list[str] = []
-    if stage_instance_id.startswith("tc-generator:"):  # the order of requirement_ids and categories is the code's work, as in validate-fragment
+    if stage_instance_id.startswith("tc-generator:"):  # the order of requirement_ids and categories is the code's work, as in the check of a fragment
         from tools.batch_assembly import fill_fragment_mechanics, normalize_fragment
 
         value, normalized = normalize_fragment(value)
@@ -2701,6 +2709,8 @@ def _publish_model_stage_artifact(
     if stage_instance_id == "tc-reviewer:canonical":
         _validate_review_decision(root, state, attempt_id, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    if before_write is not None:
+        before_write(value)
     if dry_run:  # every check above ran; nothing below is written
         return {"dry_run": True, "artifact": value, "content_digest": content_digest, "filled": [*mechanics, *filled], "normalized": normalized}
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
@@ -5039,7 +5049,7 @@ def _accepted_earlier_fragments(project: Path, root: Path, state: Mapping[str, A
             continue
         fragments.append(dict(_read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, str(answers[-1]["artifact_digest"]))["artifact"]))
     if missing:
-        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: пачки идут по очереди — сначала принятый ответ (model-response) пачки "
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: пачки идут по очереди — сначала принятый ответ (submit) пачки "
                                   f"{', '.join(missing)}, потом {current.get('namespace', '')} {batch_id}")
     return fragments
 
@@ -5615,10 +5625,9 @@ def _expected_model_inputs(
                 _read_attempt_receipt_with_state(project, root, state, attempt_id, _PRIOR_KIND + instance, "ARTIFACT_READ_BACK")
             except (ValueError, OSError, KeyError) as error:
                 raise ModelInputsMismatch(
-                    f"MODEL_INPUTS_MISMATCH: capabilities прошлых пачек для {instance} не опубликованы; fix: tools.api prior-capabilities "
-                    f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — вход сразу после header"
+                    f"MODEL_INPUTS_MISMATCH: capabilities прошлых пачек для {instance} не опубликованы; fix: их публикует prepare --stage tc-generator:{instance}"
                 ) from error
-            expected.append((str(prior["digest"]), f"result.digest команды tools.api prior-capabilities --batch-id {instance}"))
+            expected.append((str(prior["digest"]), f"digest capabilities прошлых пачек для {instance} (их публикует prepare)"))
         if _imported_cases(project, root, state, attempt_id) is not None:  # the skeleton of this batch is its last input
             try:
                 skeleton = _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + instance, "ARTIFACT_READ_BACK")["record"]["imported"]
@@ -7260,3 +7269,8 @@ generator_input = _generator_input  # the published plan or header of the attemp
 validate_execution_event_branch = _validate_execution_event_branch
 publish_fixed_receipt_resuming = publish_bound  # the public name (execution_core, exec_commands) is the one contract; drop it when they call publish_bound
 canonical_digest = _digest
+
+
+# what ``tools.stage_steps`` reads of the generator's journal (a public alias is no private use of another module)
+published_generator_inputs, batch_ordinal, accepted_earlier_fragments, codeword_lost_note = (
+    _published_generator_inputs, _batch_ordinal, _accepted_earlier_fragments, _codeword_lost_note)

@@ -235,10 +235,11 @@ def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_check
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/steps/0/test_data" in refused["message"], refused
     assert "--transport-attempts 2" in refused["message"] and _journal(run["root"]) == before
     assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, validated = _api("validate-fragment", "--fragment", _put(tmp / "changed2.json", with_digest(changed)), "--plan", _put(tmp / "plan.json", run["plan"]),
-                           "--header", _put(tmp / "header.json", run["header"]), "--context-receipt", _put(tmp / "ctx.json", run["context"]),
-                           "--imported", _put(tmp / "imported.json", run["imported"]))
-    assert code == 2 and validated["code"] == "IMPORT_HUMAN_FIELD_CHANGED", validated
+    from tools.batch_assembly import BatchAssemblyError, validate_fragment
+
+    with pytest.raises(BatchAssemblyError) as validated:  # the check of the fragment itself: the same code
+        validate_fragment(with_digest(changed), run["plan"], run["header"], run["context"], imported=run["imported"])
+    assert validated.value.code == "IMPORT_HUMAN_FIELD_CHANGED"
     code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
     assert code == 0, answered
 
@@ -470,10 +471,9 @@ def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the
     assert run["imported"]["normalized"] == [{"row": 2, "field": "objective"}, {"row": 2, "field": "test_data"}]
     fragment = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
     tmp = run["root"] / "tmp"
-    code, validated = _api("validate-fragment", "--fragment", _put(tmp / "f.json", fragment), "--plan", _put(tmp / "plan.json", run["plan"]),
-                           "--header", _put(tmp / "header.json", run["header"]), "--context-receipt", _put(tmp / "ctx.json", run["context"]),
-                           "--imported", _put(tmp / "imported.json", run["imported"]))
-    assert code == 0, validated
+    from tools.batch_assembly import validate_fragment
+
+    validate_fragment(fragment, run["plan"], run["header"], run["context"], imported=run["imported"])  # passes: the normalized cells are the skeleton's
     report, _rows = build_report(run["project"], run["root"].name)
     assert report["import"] == {"csv": "cases/zephyr.csv", "cases": 1, "normalized": 2}
 

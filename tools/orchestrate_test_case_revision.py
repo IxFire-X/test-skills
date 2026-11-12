@@ -1306,7 +1306,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     """The seven reviewer-package inputs of the attempt, read from the journal (only reads).
 
     candidate and assembly receipt — ``assemble_candidate`` over the published plan, header and the tc-generator answers
-    (the bytes ``tools.api assemble`` gave); candidate receipt — ``planned_receipt`` of that candidate for ``output_dir``;
+    (the bytes the last ``submit`` of the generator checked); candidate receipt — ``planned_receipt`` of that candidate for ``output_dir``;
     inventory — the attempt baseline's; context receipts — the package's when a session is open, else every receipt the
     attempt published; marker — the context-marker:baseline answer.  A value in ``given`` (a file the agent passed) is
     compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
@@ -1329,7 +1329,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     try:
         candidate, assembly, fragments = journal_assembly(root, attempt_id)
         journal.update(candidate=candidate, assembly_receipt=assembly, generator_fragments=fragments)
-        sources.update(candidate="assemble над plan, header и ответами tc-generator журнала", assembly_receipt="assemble того же",
+        sources.update(candidate="сборка над plan, header и ответами tc-generator журнала", assembly_receipt="сборка той же",
                        generator_fragments="ответы tc-generator:<batch> журнала по порядку плана")
     except (ValueError, KeyError, BatchAssemblyError, TypeError) as error:
         for key in ("candidate", "assembly_receipt", "generator_fragments"):
@@ -1376,7 +1376,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
 
 def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
     """``(candidate, assembly receipt, fragments)`` — ``assemble_candidate`` over the published plan and header
-    and the tc-generator answers of the journal in plan order: the bytes ``tools.api assemble`` gives (only reads)."""
+    and the tc-generator answers of the journal in plan order: the bytes the last ``submit`` of the generator checked (only reads)."""
     from tools.batch_assembly import assemble_candidate
     from tools.pilot_state import _generator_input, _run_root, derive_state, read_model_stage_artifact
 

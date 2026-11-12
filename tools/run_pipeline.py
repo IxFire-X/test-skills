@@ -191,11 +191,11 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None,
                                  "scope_answer": Path((scope or {}).get("answer_slot", "")).is_file()}))
     result.update(scope or {})
-    if result["state"] == "marker":  # the id of the step, the slot and the size: from the plan of the marker
-        from tools.stage_steps import marker_status
+    if result["state"] in ("marker", "generator"):  # the id of the step, the slot and the size: from the steps of the stage
+        from tools.stage_steps import stage_status
 
         try:
-            result.update(marker_status(Path(run_root)))
+            result.update(stage_status(Path(run_root), "context-marker" if result["state"] == "marker" else "tc-generator"))
         except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
             pass
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
@@ -432,7 +432,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
                 next_artifact = "context-marker parts merge"  # the remaining parts, then the merge by code
             if stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
-                next_artifact = "assembly of the candidate"  # the journal does not see assemble: the hint holds until review-open publishes the candidate
+                next_artifact = "canonical reviewer package and boundary"  # the last answer assembled the candidate; review-open publishes it from the journal
             if stage_id.startswith("autotest-reviewer:"):
                 from tools.finalize_attempt import automation_next
 

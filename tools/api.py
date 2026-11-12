@@ -153,7 +153,7 @@ def _cmd_read_model_artifact(a):
 
 
 def _cmd_prepare(a):
-    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, reuse_from=a.reuse_from)
+    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from)
 
 
 def _cmd_submit(a):
@@ -227,25 +227,8 @@ def _cmd_plan(a):
                                                                  contexts, imported, answer))
 
 
-def _cmd_validate_fragment(a):
-    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # the receipt or its value
-    return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment, imported)
-
-
-def _cmd_prior_capabilities(a):
-    return pilot_state.publish_prior_capabilities(a.run_root, a.attempt, a.batch_id)
-
-
-def _cmd_assemble(a):
-    return batch_assembly.assemble_candidate(a.header, a.plan, a.fragment)
-
-
 def _cmd_publish_generator_input(a):
     return pilot_state.publish_generator_input(a.run_root, a.attempt, a.kind, a.value)
-
-
-def _cmd_document_digest(a):
-    return canonical_document.document_sha256(a.document)
 
 
 def _cmd_validate_canonical(a):
@@ -389,22 +372,18 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None, ()),
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
-    "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--reuse-from", str, None)), None, ()),
+    "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--invocation-id", str, None),
+                                                 ("--reuse-from", str, None)), None, ()),
     "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
     "cases-import": (_cmd_cases_import, RUN, None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
                                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
                                          ("--run-root", Path, None), ("--attempt", str, None)), None, ()),
-    # header + plan-batches + publish of both in one command; --out-plan is the plan (the file validate-fragment and assemble read)
+    # header + plan-batches + publish of both in one command
     "plan": (_cmd_plan, (("--header", _json), ("--requirements", _json), ("--grouping", _json), ("--project", Path),
                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
                          "--run-root", "--attempt"), None, ("plan", "published")),
-    "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
-                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
-    "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
-    "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
     "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
-    "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
     "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),
@@ -513,18 +492,7 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
         return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
-    stage, batch = getattr(args, "stage", None), getattr(args, "batch_id", None)
-    if args.command == "validate-fragment":  # PF-1: the check of a batch's answer is a step of that batch's tc-generator
-        given = getattr(args, "fragment", None)
-        batch = given.get("batch_id") if isinstance(given, Mapping) else None
-        stage = f"tc-generator:{batch}" if isinstance(batch, str) else None
-    run_root = getattr(args, "run_root", None)
-    if run_root is not None and args.command == "validate-fragment":  # PF-1: the optional --run-root of a command without a run of its own — the same check as --out's
-        try:
-            run_root = output_guard.existing_run(run_root)[1]
-        except output_guard.OutputRefused:
-            return
-    record_refusal(run_root, args.command, code, stage, batch)
+    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None))
 
 
 # the review in two commands; the nine of before work one more release and say so

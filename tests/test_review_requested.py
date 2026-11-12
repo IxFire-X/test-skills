@@ -110,13 +110,26 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     }
 
 
+def _assembled(run: dict) -> None:
+    """The candidate and the receipt of the assembly as files (the package of the review of the nine takes them as files; the generator step writes none)."""
+    from tools.batch_assembly import assemble_candidate
+
+    candidate, receipt = assemble_candidate(*(json.loads(Path(run[name]).read_bytes()) for name in ("header", "plan")),
+                                            [json.loads(Path(path).read_bytes()) for path in run["fragments"]])
+    _put(run["tmp"] / "candidate.json", candidate)
+    _put(run["tmp"] / "assembly-receipt.json", receipt)
+
+
+def _digest_of(path: Path) -> str:
+    from tools.canonical_document import document_sha256
+
+    return document_sha256(json.loads(Path(path).read_bytes()))
+
+
 def _open_session(run: dict, start: str = "fixture", budget_delta: int = 0, fresh: str = "yes") -> tuple[str, dict]:
     """assemble → publish r1 → open-session, by commands only; returns the candidate digest and the boundary."""
     tmp, run_root, attempt = run["tmp"], str(run["run_root"]), run["attempt_id"]
-    fragment_flags = [flag for path in run["fragments"] for flag in ("--fragment", path)]
-    code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *fragment_flags,
-                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", run_root)
-    assert code == 0, assembled
+    _assembled(run)
     code, published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(tmp / "candidate.json"),
                            "--output-dir", str(run["run_root"] / "published"), "--run-root", run_root, "--attempt-id", attempt)
     assert code == 0 and published["status"] == "published", published
@@ -142,9 +155,9 @@ def _open_session(run: dict, start: str = "fixture", budget_delta: int = 0, fres
         assert code == 2 and _journal(run["run_root"]) == before, opened
         return "", opened
     assert code == 0 and opened["status"] == "opened", opened
-    code, digest = _api("document-digest", "--document", str(tmp / "candidate.json"))
-    assert code == 0 and digest["result"] == published["candidate_bundle_receipt"]["document_sha256"], digest
-    return digest["result"], opened["reviewer_session_boundary"]
+    digest = _digest_of(tmp / "candidate.json")
+    assert digest == published["candidate_bundle_receipt"]["document_sha256"], digest
+    return digest, opened["reviewer_session_boundary"]
 
 
 def _reviewer_request(run: dict, boundary: dict) -> tuple[int, dict]:
@@ -259,9 +272,7 @@ def test_the_automation_review_by_commands(tmp_path: Path) -> None:
 
 def _review_answer(run: dict, verdict: str = "ПРИНЯТО") -> str:
     candidate = json.loads((run["tmp"] / "candidate.json").read_bytes())
-    code, digest = _api("document-digest", "--document", str(run["tmp"] / "candidate.json"))
-    assert code == 0, digest
-    selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": digest["result"]}
+    selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": _digest_of(run["tmp"] / "candidate.json")}
     rejected = verdict == "ТРЕБУЕТ ДОРАБОТКИ"
     report = {
         "verdict": verdict, "candidate": selected, "effective": None if rejected else selected,

@@ -30,8 +30,7 @@ def _shape(result: dict) -> tuple:
     ("the marker answered: the plan of the batches", "generator fragments", {}, ("generator", "agent", "plan", "tc-generator")),
     ("the marker has gaps: the human answers", "generator fragments", {"scope_pause": True}, ("scope_pause", "human", "prepare", "scope")),
     ("the human's answer lies in the slot", "generator fragments", {"scope_pause": True, "scope_answer": True}, ("scope_pause", "agent", "submit", "scope")),
-    ("a batch answered, not the last", "remaining fragments or assembled candidate", {}, ("generator", "agent", "model-request", "tc-generator")),
-    ("the last batch answered: the assembly", "assembly of the candidate", {}, ("generator", "agent", "assemble", "tc-generator")),
+    ("a batch answered, not the last", "remaining fragments or assembled candidate", {}, ("generator", "agent", "prepare", "tc-generator")),
     ("the candidate is built: the review opens", "canonical reviewer package and boundary", {}, ("review", "agent", "review-open", "tc-reviewer")),
     ("the reviewer is awaited", "reviewer evidence or verdict", {}, ("review", "agent", "review-select", "tc-reviewer")),
     ("cases-only: the set is accepted, the run closes", "pre-finalization trace", {}, ("closure", "agent", "finish", None)),
@@ -146,7 +145,7 @@ def _artifacts_set_by_the_status() -> set[str]:
 
 def test_every_value_the_status_can_set_has_a_known_state() -> None:
     artifacts = _artifacts_set_by_the_status()
-    assert {"authorized context", "context-marker response", "generator fragments", "assembly of the candidate", "static automation review"} <= artifacts
+    assert {"authorized context", "context-marker response", "generator fragments", "static automation review"} <= artifacts
     assert len(artifacts) >= 24
     for expected in sorted(artifacts):
         assert _next(expected)["state"] not in {"unknown"}, expected

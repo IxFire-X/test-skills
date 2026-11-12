@@ -1,11 +1,11 @@
-"""PG1 (Petclinic v0.4, 06.11): the param_group rules are decided by one batch — validate-fragment and model-response of a
+"""PG1 (Petclinic v0.4, 06.11): the param_group rules are decided by one batch — the check of a fragment and model-response of a
 generator batch refuse a group error before the answer is written, with the rows assemble's audit gives, and the stage keeps
 its one retry; assemble checks as before.
 
 A group lives in one batch: its cases share requirement_ids (the group shape keeps them), and a canonical requirement belongs
 to the batch whose namespace it carries. So the rules on the cases of one batch say what the audit says of the whole
 document, and a group name an earlier batch took is refused at the later batch, whose answer can still be replaced. Before:
-three such errors passed validate-fragment and model-response, assemble refused, the recorded answer could not be replaced
+three such errors passed the check of a fragment and model-response, assemble refused, the recorded answer could not be replaced
 (MODEL_STAGE_ANSWERED) — the one way out was a new run.
 
 The rules that need the whole document (Russian prose anywhere in it) run at the last batch of the plan, on the document
@@ -82,7 +82,7 @@ def _split() -> tuple[dict, dict]:
 
 
 def _group_rows(rows: list[dict]) -> list[tuple[str, str, str]]:
-    """(path, code, the audit's text) — validate-fragment puts the text after «… (of this fragment) — »."""
+    """(path, code, the audit's text) — the check of a fragment puts the text after «… (of this fragment) — »."""
     return [(row["path"], row["code"], row["message"].rsplit(" — ", 1)[-1]) for row in rows if row["code"].startswith("SEMANTIC_PARAM_GROUP_")]
 
 
@@ -149,8 +149,8 @@ def test_a_group_name_an_earlier_batch_took_is_refused_at_the_later_batch() -> N
     assert "SEMANTIC_PARAM_GROUP_MISMATCH" in {row["code"] for row in validate_canonical_document_all(candidate)}
 
 
-def test_a_group_error_is_refused_by_validate_fragment_and_model_response_before_the_write_and_the_retry_assembles(tmp_path: Path) -> None:
-    """The Petclinic path through `python -m tools.api`: the group error of batch 1 is refused by validate-fragment and by
+def test_a_group_error_is_refused_by_model_response_before_the_write_and_the_retry_assembles(tmp_path: Path) -> None:
+    """The Petclinic path through `python -m tools.api`: the group error of batch 1 is refused by
     model-response before the write; the corrected answer goes as the one retry, batch 2 follows, assemble builds the group."""
     run = _generated_run(tmp_path, generated=False, header=HEADER)
     plan_digest, header_digest = _publish_inputs(run)
@@ -158,10 +158,6 @@ def test_a_group_error_is_refused_by_validate_fragment_and_model_response_before
     first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
     broken = _put(run["tmp"] / "broken.json", _grouped(fragments[0], "undeclared"))
     fixed = _put(run["tmp"] / "grouped.json", _grouped(fragments[0]))
-
-    code, refused = _api("validate-fragment", "--fragment", broken, "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"])
-    assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT", refused
-    assert [row["code"] for row in refused["diagnostics"]] == ["SEMANTIC_PARAM_GROUP_PARAMETER"] and refused["fix"], refused
 
     assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
     before = _journal(run["run_root"])
@@ -177,10 +173,9 @@ def test_a_group_error_is_refused_by_validate_fragment_and_model_response_before
     assert code == 0, prior
     assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
     assert _response(run, second, run["fragments"][1])[0] == 0
-    code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], "--fragment", fixed, "--fragment", run["fragments"][1],
-                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
-    assert code == 0, assembled
-    candidate = json.loads((run["tmp"] / "c.json").read_bytes())
+    from tools.orchestrate_test_case_revision import journal_assembly
+
+    candidate = journal_assembly(run["run_root"], run["attempt_id"])[0]
     assert [case.get("param_group") for case in candidate["test_cases"]] == ["PG-amount", "PG-amount", None]
 
 
@@ -245,6 +240,6 @@ def test_the_last_batch_without_russian_is_refused_by_model_response_before_the_
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))
     code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
-    code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], "--fragment", plain[0], "--fragment", run["fragments"][1],
-                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
-    assert code == 0, assembled
+    from tools.orchestrate_test_case_revision import journal_assembly
+
+    assert journal_assembly(run["run_root"], run["attempt_id"])[0]["test_cases"]  # the journal's answers assemble

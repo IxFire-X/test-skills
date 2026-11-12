@@ -181,7 +181,7 @@ def test_status_names_each_step_with_its_stage_slot_and_size(tmp_path: Path, cap
 
 def test_a_stage_the_table_does_not_know_is_refused_with_the_way(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, *_ = _run(tmp_path, files=1)
-    code, out = _call(capsys, "prepare", root, "tc-generator:BATCH-1")
+    code, out = _call(capsys, "prepare", root, "tc-reviewer:canonical")
     assert code == 2 and out["code"] == "STAGE_UNKNOWN" and "next.verb" in out["fix"]
 
 
@@ -437,3 +437,214 @@ def test_a_decision_checked_without_a_marker_is_a_refusal_not_an_exception(tmp_p
     root, attempt_id, *_ = _run(tmp_path, files=1)
     with pytest.raises(scope_pause.ScopeRefused, match="SCOPE_NO_MARKER"):
         scope_pause.prepare_decision(root, attempt_id, CONTINUE)
+# ---- the batches of the generator: ``prepare`` / ``submit`` over the plan the journal holds -------------------------------------------
+
+def _generator(tmp_path: Path) -> dict:
+    """A run with the context, the marker, the published header and plan (two batches) and a fragment for each; no request of the generator yet."""
+    from tests.test_review_requested import _generated_run
+
+    run = _generated_run(tmp_path, generated=False)
+    header = json.loads(Path(run["header"]).read_bytes())
+    header.pop("digest", None)
+    pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "header", header)
+    pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "plan", json.loads(Path(run["plan"]).read_bytes()))
+    fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
+    return {**run, "root": run["run_root"], "stages": [f"tc-generator:{item['batch_id']}" for item in fragments], "values": fragments}
+
+
+def _answer(capsys: pytest.CaptureFixture[str], run: dict, index: int, *extra: str) -> tuple[int, dict]:
+    """``prepare`` the batch, put its fragment in the slot, ``submit``."""
+    assert _call(capsys, "prepare", run["root"], run["stages"][index])[0] == 0
+    _put(run["root"], run["stages"][index], run["values"][index])
+    return _call(capsys, "submit", run["root"], run["stages"][index], *extra)
+
+
+def test_prepare_of_a_batch_names_the_slot_the_files_and_the_control_word_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    code, first = _call(capsys, "prepare", run["root"], run["stages"][0])
+    assert code == 0 and first["result"]["answer_slot"] == str(stage_steps.slot(run["root"], run["stages"][0])) and first["result"]["budget"]["bytes"] > 0
+    assert first["result"]["nonce"] in first["result"]["nonce_note"] and first["result"]["read"]["count"] > 0
+    before = _events(run["root"])
+    code, again = _call(capsys, "prepare", run["root"], run["stages"][0])
+    assert code == 0 and _events(run["root"]) == before and "nonce" not in again["result"] and "CODEWORD_LOST" in again["result"]["nonce_note"]
+
+
+def test_a_batch_waits_for_the_answer_of_the_batch_before_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    before = _events(run["root"])
+    code, out = _call(capsys, "prepare", run["root"], run["stages"][1])
+    assert code == 2 and out["code"] == "STAGE_WAITS" and run["stages"][0] in out["message"] and _events(run["root"]) == before
+
+
+def test_the_second_batch_gets_the_capabilities_of_the_first_from_the_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    assert _answer(capsys, run, 0)[0] == 0
+    code, out = _call(capsys, "prepare", run["root"], run["stages"][1])
+    assert code == 0 and (run["root"] / "prior-capabilities").is_dir() and _events(run["root"])[-1] == f"MODEL_REQUESTED:{run['stages'][1]}"
+    request = pilot_state.read_model_request(run["root"], run["attempt_id"], run["stages"][1], out["result"]["request_digest"])
+    assert len(request["input_digests"]) == 5
+
+
+def test_submit_of_a_batch_records_the_fragment_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    code, out = _answer(capsys, run, 0)
+    assert code == 0 and f"MODEL_RESPONSE_RECEIVED:{run['stages'][0]}" in _events(run["root"]) and "candidate" not in out["result"]
+    before = _events(run["root"])
+    code, again = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 0 and again["result"]["answered"] is True and _events(run["root"]) == before
+
+
+def test_submit_of_a_batch_before_its_prepare_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 2 and out["code"] == "STAGE_NOT_PREPARED"
+
+
+@pytest.mark.parametrize("batch, other", [(1, 0), (0, 1)])
+def test_the_fragment_of_another_batch_in_the_slot_is_refused_with_its_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str], batch: int, other: int) -> None:
+    run = _generator(tmp_path)
+    if batch == 1:  # batch 2 is prepared only after batch 1
+        assert _answer(capsys, run, 0)[0] == 0
+    stage = run["stages"][batch]
+    _call(capsys, "prepare", run["root"], stage)
+    _put(run["root"], stage, run["values"][other])
+    before = _events(run["root"])
+    code, out = _call(capsys, "submit", run["root"], stage)
+    assert code == 2 and out["code"] == "MODEL_STAGE_ARTIFACT_INVALID" and stage.split(":")[1] in out["fix"] and _events(run["root"]) == before
+
+
+def test_a_fragment_with_the_digests_of_another_plan_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], {**run["values"][0], "plan_digest": "sha256:" + "0" * 64})
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 2 and out["code"] == "MODEL_RESPONSE_DIGEST_MISMATCH"
+
+
+def test_a_batch_slot_that_is_a_link_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    target = tmp_path / "elsewhere.json"
+    target.write_text(json.dumps(run["values"][0]), encoding="utf-8")
+    try:
+        stage_steps.slot(run["root"], run["stages"][0]).symlink_to(target)
+    except OSError:
+        pytest.skip("no symbolic links here")
+    before = _events(run["root"])
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 2 and out["code"] == "INPUT_OUTSIDE_PROJECT" and _events(run["root"]) == before
+
+
+def test_a_dry_run_of_a_batch_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], run["values"][0])
+    tree = {path.relative_to(run["root"]): path.stat().st_mtime_ns for path in run["root"].rglob("*") if path.is_file()}
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0], "--dry-run")
+    assert code == 0 and out["dry_run"] is True and {path.relative_to(run["root"]): path.stat().st_mtime_ns for path in run["root"].rglob("*") if path.is_file()} == tree
+
+
+def test_a_refused_fragment_has_the_code_of_the_check_and_the_one_retry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import batch_assembly
+
+    run = _generator(tmp_path)
+    bad = {**{key: value for key, value in run["values"][0].items() if key != "digest"}, "namespace": "B9"}
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], bad)
+    before = _events(run["root"])
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0], "--dry-run")
+    plan = json.loads(Path(run["plan"]).read_bytes())
+    with pytest.raises(batch_assembly.BatchAssemblyError) as refused:
+        batch_assembly.validate_fragment(bad, plan, json.loads(Path(run["header"]).read_bytes()), json.loads(Path(run["context"]).read_bytes()))
+    assert code == 2 and out["code"] == refused.value.code and "--transport-attempts 2" in out["fix"] and _events(run["root"]) == before
+    _put(run["root"], run["stages"][0], run["values"][0])  # the one retry is there
+    assert _call(capsys, "submit", run["root"], run["stages"][0], "--transport-attempts", "2")[0] == 0
+
+
+def test_the_last_batch_assembles_the_candidate_the_review_reads(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.batch_assembly import assemble_candidate, canonical_bytes
+    from tools.orchestrate_test_case_revision import journal_assembly
+
+    run = _generator(tmp_path)
+    assert _answer(capsys, run, 0)[0] == 0
+    code, out = _answer(capsys, run, 1)
+    candidate, receipt, _fragments = journal_assembly(run["root"], run["attempt_id"])
+    expected, expected_receipt = assemble_candidate(json.loads(Path(run["header"]).read_bytes()), json.loads(Path(run["plan"]).read_bytes()), run["values"])
+    assert code == 0 and out["result"]["candidate"]["document_digest"] == receipt["document_digest"] == expected_receipt["document_digest"]
+    assert canonical_bytes(candidate) == canonical_bytes(expected) and out["result"]["candidate"]["assembly_receipt_digest"] == receipt["digest"]
+    assert not list(run["root"].rglob("candidate*.json")) and _status(run["root"])["next"] == {"verb": "review-open", "stage": "tc-reviewer"}
+    code, again = _call(capsys, "submit", run["root"], run["stages"][1])  # the recorded answer stands; the candidate is said again
+    assert code == 0 and again["result"]["candidate"] == out["result"]["candidate"]
+
+
+def test_an_assembly_that_refuses_leaves_the_last_answer_unwritten_and_the_retry_takes(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import batch_assembly
+
+    run = _generator(tmp_path)
+    assert _answer(capsys, run, 0)[0] == 0
+    real = batch_assembly.assemble_candidate
+
+    def refuse(*_args):
+        raise batch_assembly.BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "the document of all the batches is not canonical")
+
+    monkeypatch.setattr(batch_assembly, "assemble_candidate", refuse)
+    _call(capsys, "prepare", run["root"], run["stages"][1])
+    _put(run["root"], run["stages"][1], run["values"][1])
+    before = _events(run["root"])
+    code, out = _call(capsys, "submit", run["root"], run["stages"][1])
+    assert code == 2 and out["code"] == "BATCH_SEMANTIC_CONFLICT" and _events(run["root"]) == before
+    monkeypatch.setattr(batch_assembly, "assemble_candidate", real)
+    code, out = _call(capsys, "submit", run["root"], run["stages"][1], "--transport-attempts", "2")
+    assert code == 0 and "candidate" in out["result"]
+
+
+def test_a_mostly_manual_candidate_of_a_project_with_code_is_warned(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    assert _answer(capsys, run, 0)[0] == 0
+    code, out = _answer(capsys, run, 1)
+    steps = [step for value in run["values"] for case in value["test_cases"] for step in case["steps"]]
+    assert code == 0 and all(step["manual_only"] for step in steps)  # the fixture has no automated step
+    assert out["result"]["candidate"]["warnings"].count("MANUAL_SHARE_HIGH") == 1 and out["result"]["candidate"]["manual_share"]["manual_steps"] == len(steps)
+
+
+def test_the_status_names_each_step_of_the_generator(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    first, second = run["stages"]
+    seen = _status(run["root"])
+    assert (seen["state"], seen["waiting_for"], seen["next"]) == ("generator", "agent", {"verb": "prepare", "stage": first}) and "budget" not in seen
+    _call(capsys, "prepare", run["root"], first)
+    seen = _status(run["root"])
+    assert (seen["waiting_for"], seen["next"], seen["answer_slot"]) == ("model", {"verb": "submit", "stage": first}, str(stage_steps.slot(run["root"], first)))
+    assert seen["budget"]["bytes"] > 0
+    _put(run["root"], first, run["values"][0])
+    _call(capsys, "submit", run["root"], first)
+    assert _status(run["root"])["next"] == {"verb": "prepare", "stage": second}
+
+
+def test_the_invocation_of_a_batch_is_a_label_the_reviewer_session_takes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import re
+
+    run = _generator(tmp_path)
+    _code, out = _call(capsys, "prepare", run["root"], run["stages"][0])
+    request = pilot_state.read_model_request(run["root"], run["attempt_id"], run["stages"][0], out["result"]["request_digest"])
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", request["invocation_id"]), request["invocation_id"]  # reviewer-session.schema.json: label
+
+
+def test_the_invocation_label_of_the_host_goes_into_the_request(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    _code, out = _call(capsys, "prepare", run["root"], run["stages"][0], "--invocation-id", "host-session-7")
+    request = pilot_state.read_model_request(run["root"], run["attempt_id"], run["stages"][0], out["result"]["request_digest"])
+    assert request["invocation_id"] == "host-session-7"
+
+
+def test_the_same_label_for_the_generator_and_the_reviewer_is_no_independence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _generator(tmp_path)
+    for index in range(2):
+        assert _call(capsys, "prepare", run["root"], run["stages"][index], "--invocation-id", "host-session-7")[0] == 0
+        _put(run["root"], run["stages"][index], run["values"][index])
+        assert _call(capsys, "submit", run["root"], run["stages"][index])[0] == 0
+    code = api.main(["review-open", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--output-dir", str(run["root"] / "published"),
+                     "--model-id", "model-reviewer", "--invocation-id", "host-session-7", "--fresh-context", "yes"])
+    opened = json.loads(capsys.readouterr().out)
+    assert code == 0 and opened["result"]["reviewer_session_boundary"]["host_isolation"]["distinct_invocations"] is False, opened

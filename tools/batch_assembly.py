@@ -28,7 +28,7 @@ _CONTEXT_SCHEMA = _ROOT / "schemas" / "context-selection-receipt.schema.json"
 class BatchAssemblyError(ValueError):
     """A stable controller-contract failure which must not invoke review.
 
-    ``diagnostics`` — all the rows of one validate-fragment pass, ``{path, code, message, fix}`` each; ``code`` is the
+    ``diagnostics`` — all the rows of one check of a fragment, ``{path, code, message, fix}`` each; ``code`` is the
     controller code of the first one, ``fix`` the way out of the whole list."""
 
     def __init__(self, code: str, message: str, diagnostics: Sequence[Mapping[str, Any]] = (), fix: str | None = None) -> None:
@@ -577,21 +577,9 @@ def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]],
     by_batch = {item.get("batch_id"): item for item in fragments if isinstance(item, dict) and item.get("plan_digest") == plan["digest"]}
     missing = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch]
     if missing:
-        # PF-1: «not given» and «given, but not the recorded answer» are two refusals with two fixes: a fragment of the batch
-        # without the plan_digest of this plan is the agent's file, not what model-response recorded
-        unrecorded = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch
-                      and any(isinstance(given, dict) and given.get("batch_id") == item["batch_id"] for given in fragments)]
-        if unrecorded:
-            raise _refusal("BATCH_PARTITION_CONFLICT", "/prior_fragment",
-                           f"batch {batch['namespace']} goes after {', '.join(missing)}: --prior-fragment of {', '.join(unrecorded)} is given, but it is "
-                           "not the recorded answer (its plan_digest is not this plan's)",
-                           "передай в --prior-fragment записанный ответ пачки — файл по path из вывода её model-response "
-                           "(или read-model-artifact), а не файл ответа агента; нужен тот, где код поставил digest и plan_digest")
         raise _refusal("BATCH_PARTITION_CONFLICT", "/prior_fragment",
-                       f"batch {batch['namespace']} goes after {', '.join(missing)}: give the accepted fragments of the earlier batches "
-                       "(--prior-fragment, one per batch)",
-                       f"добавь --prior-fragment для каждой пачки раньше этой ({', '.join(missing)}): записанный ответ пачки — "
-                       "файл по path из вывода её model-response")
+                       f"batch {batch['namespace']} goes after {', '.join(missing)}: the accepted fragments of the earlier batches are missing",
+                       f"пачки идут по очереди: сначала принятые ответы пачек {', '.join(missing)} (submit их стадий)")
     return [by_batch[item["batch_id"]] for item in earlier]
 
 
@@ -677,7 +665,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
 
 def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """The order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
-    display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for validate-fragment and
+    display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for the check of a fragment and
     model-response; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
     left where it is for the refusal; nothing else is touched."""
     if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
@@ -924,17 +912,15 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     header_bytes = {key: value for key, value in header.items() if key != "digest"}
     if _digest(header_bytes) != batch["header_digest"]:
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/header_digest", "fragment/header digest binding is invalid",
-                       "--header — тот же header-файл, что подан в plan (его digest без поля digest равен header_digest пачки в плане); "
-                       "не копия из generator-headers/ журнала прогона и не пересобранный header")
+                       "header — тот, что опубликован в плане (его digest без поля digest равен header_digest пачки в плане)")
     _validate_context_receipt(context_receipt, batch["context_receipt_digest"])
     if not isinstance(fragment.get("context_receipt"), dict):
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment lacks its context receipt",
-                       "у записанного ответа пачки квитанция контекста есть: передай его (path из model-response); validate-fragment ставит её сам из "
-                       "--context-receipt, assemble берёт из записанного ответа или из файла, где поле context_receipt есть")
+                       "квитанцию контекста пачки ставит код при записи ответа: не пиши поле context_receipt")
     _validate_context_receipt(fragment["context_receipt"], batch["context_receipt_digest"])
     if fragment["context_receipt"] != context_receipt:
         raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment context receipt differs from verified receipt",
-                       "context_receipt фрагмента должен совпасть с файлом --context-receipt байт в байт: замени объект целиком, не правь поля")
+                       "context_receipt фрагмента должен совпасть с квитанцией пачки байт в байт: не пиши поле — код поставит его сам")
     earlier = _earlier_fragments(plan, batches, batch, prior_fragments or []) if batch["ordinal"] > 1 else []
 
     rows: list[tuple[str, dict[str, str]]] = []  # (controller code, row)
@@ -955,7 +941,7 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
             rows[0][0],
             first["message"] if count == 1 else f"{first['message']}; всего диагностик {count} — все в diagnostics, у каждой свой fix",
             [row for _controller, row in rows],
-            first["fix"] if count == 1 else f"исправь все {count} диагностик из diagnostics за один заход (у каждой свой fix) и повтори validate-fragment")
+            first["fix"] if count == 1 else f"исправь все {count} диагностик из diagnostics за один заход (у каждой свой fix) и подай фрагмент единственным повтором стадии")
 
     # the fields the code puts itself: another value given is the answer's mistake, the way out is to leave the field out
     for key, expected, message in (("plan_digest", plan["digest"], "fragment plan digest does not match plan"),
@@ -1058,7 +1044,7 @@ DOCUMENT_WIDE_CODES = frozenset({
 def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> list[dict[str, str]]:
     """The canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
     header, the batch's own source requirements, the capabilities of the earlier batches and this one, and this fragment,
-    with the same display_order — so an order or format error is refused by validate-fragment, not first by assemble.
+    with the same display_order — so an order or format error is refused by the check of a fragment, not first by assemble.
     All its rows (``validate_canonical_document_all``), not the first."""
     owned = set(fragment["owned_source_requirement_ids"])
     probe = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
@@ -1147,7 +1133,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "there must be exactly one fragment per batch")
     by_batch: dict[str, dict[str, Any]] = {}
     ordinals = {key: item["ordinal"] for key, item in batches.items()}
-    # the document is built from the canon validate-fragment and model-response lay out — the order of the ids and
+    # the document is built from the canon the check of a fragment and the answer lay out — the order of the ids and
     # categories and the bindings the code puts itself — so the agent's file and the recorded answer give the same bytes
     fragments = [fill_fragment_bindings(fill_fragment_mechanics(normalize_fragment(item)[0])[0], plan) if isinstance(item, dict) else item for item in fragments]
     for fragment in sorted(fragments, key=lambda item: ordinals.get(item.get("batch_id"), 0) if isinstance(item, dict) else 0):
@@ -1169,7 +1155,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
             "BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {rows[0]['code']}"
             + (f"; всего диагностик {len(rows)} — все в diagnostics, у каждой свой fix" if len(rows) > 1 else ""), rows,
             rows[0]["fix"] if len(rows) == 1 else f"исправь все {len(rows)} диагностик из diagnostics за один заход (у каждой свой fix), "
-            "собери фрагменты и повтори assemble; validate-fragment этих правил не видит — они на весь документ")
+            "и подай последний фрагмент единственным повтором стадии: правила целого документа проверяет submit последней пачки")
     fingerprints: dict[str, list[str]] = defaultdict(list)
     for case in document["test_cases"]:
         fingerprints[_case_fingerprint(case)].append(case["case_id"])

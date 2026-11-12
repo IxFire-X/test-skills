@@ -45,7 +45,7 @@ class Observed:
             self.refusals.append((command, payload))
         elif "result" in payload:
             self.results.setdefault(command, shape(payload["result"]))
-        elif isinstance(payload.get("out"), dict):  # the commands with named parts (assemble, plan) answer {out: {part: file}}
+        elif isinstance(payload.get("out"), dict):  # the commands with named parts (plan) answer {out: {part: file}}
             self.results.setdefault(command, {part: shape(json.loads(Path(row["out"]).read_bytes())) for part, row in sorted(payload["out"].items())})
         elif isinstance(payload.get("out"), str):  # --out: the result is in the file, the line holds {out, bytes, sha256}
             self.results.setdefault(command, shape(json.loads(Path(payload["out"]).read_bytes())))
@@ -81,7 +81,7 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
     from tests.test_review_two_commands import _bundles, _flags, _open, _select_verdict, _verdict
 
     with recording(monkeypatch) as observed:
-        # (1) the generator: inputs, request, answer, the capabilities of the earlier batch, the fragment checks, the plan
+        # (1) the generator: inputs, request, answer, the capabilities of the earlier batch, the plan
         run, plan_digest, header_digest, fragments = _run(tmp_path / "generator")
         first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
         assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
@@ -95,8 +95,6 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
             assert rr._api(verb, "--run-root", str(run["run_root"]), "--stage", "context-marker:baseline")[0] == 0
         code, prior = _prior(run, second)
         assert code == 0, prior
-        assert rr._api("validate-fragment", "--fragment", run["fragments"][0], "--plan", run["plan"], "--header", run["header"],
-                       "--context-receipt", run["context"], "--run-root", str(run["run_root"]))[0] == 0
         assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
 
         # (1b) plan and plan-batches on a run that has no plan yet
@@ -110,14 +108,10 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
                                 "--project", str(fresh["project"]), "--input-file", fresh["marker"], "--context-receipt", fresh["context"])
         assert code == 0, batches
 
-        # (2) the review in two commands, then what reads its result; the assembled candidate is checked and digested
+        # (2) the review in two commands, then what reads its result; the assembled candidate is checked
         run = rr._generated_run(tmp_path / "review")
-        code, assembled = rr._api("assemble", "--header", run["header"], "--plan", run["plan"], *[f for p in run["fragments"] for f in ("--fragment", p)],
-                                  "--out-candidate", str(run["tmp"] / "candidate.json"), "--out-receipt", str(run["tmp"] / "assembly-receipt.json"),
-                                  "--run-root", str(run["run_root"]))
-        assert code == 0, assembled
+        rr._assembled(run)  # the files of the nine commands; the generator step itself writes none
         assert rr._api("validate-canonical", "--document", str(run["tmp"] / "candidate.json"))[0] in (0, 1)
-        assert rr._api("document-digest", "--document", str(run["tmp"] / "candidate.json"))[0] == 0
         assert _open(run)[0] == 0
         verdict = _verdict(run)
         assert rr._api("review-publish", *_flags(run), "--output-dir", _bundles(run))[0] == 0

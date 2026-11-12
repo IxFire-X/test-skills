@@ -1,4 +1,4 @@
-"""PF-1 (Petclinic v0.2): the refusals of validate-fragment reach the journal of the run and the report; the fix of a fragment that
+"""PF-1 (Petclinic v0.2): the refusals of the check of a fragment (submit) reach the journal of the run and the report; the fix of a fragment that
 lacks its context_receipt and of a --prior-fragment that is not the recorded answer say what to give; diagnostics exist when
 the fix points at them; model-response prints the receipt of the record, not the answer's body."""
 from __future__ import annotations
@@ -23,9 +23,25 @@ def _other_receipt(receipt: dict) -> dict:
     return {**other, "digest": _self_digest(other)}  # a receipt that is whole and sealed, but not the one of the batch
 
 
-def _validate(run: dict, fragment: Path, *extra: str) -> tuple[int, dict]:
-    return _api("validate-fragment", "--fragment", str(fragment), "--plan", str(run["plan"]), "--header", str(run["header"]),
-                "--context-receipt", str(run["context"]), *extra)
+def _validate(run: dict, fragment: Path, *extra: str, dry_run: bool = True) -> tuple[int, dict]:
+    """The check of a fragment: ``submit --dry-run`` of its batch after ``prepare``; the fragment goes into the slot of the stage."""
+    import contextlib
+    import io
+
+    from tools import api, stage_steps
+
+    stage = f"tc-generator:{json.loads(fragment.read_bytes())['batch_id']}"
+    for command, more in (("prepare", ()), ("submit", (*(("--dry-run",) if dry_run else ()), *extra))):
+        if command == "submit":
+            slot = stage_steps.slot(run["run_root"], stage)
+            slot.parent.mkdir(exist_ok=True)
+            slot.write_bytes(fragment.read_bytes())
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = api.main([command, "--run-root", str(run["run_root"]), "--stage", stage, *more])
+        if code:
+            break
+    return code, json.loads(buffer.getvalue().strip().splitlines()[-1])
 
 
 def test_a_fragment_with_another_context_receipt_gets_a_fix_that_names_the_object_and_its_source(tmp_path: Path) -> None:
@@ -33,8 +49,8 @@ def test_a_fragment_with_another_context_receipt_gets_a_fix_that_names_the_objec
     bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     code, refused = _validate(run, Path(_put(run["tmp"] / "bare.json", bare)))
     assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT", refused
-    assert "смотри diagnostics" not in refused["fix"] and "context_receipt" in refused["fix"] and "--context-receipt" in refused["fix"], refused
-    assert refused["diagnostics"] and refused["diagnostics"][0]["path"] == "/context_receipt" and refused["diagnostics"][0]["fix"] == refused["fix"], refused
+    assert "смотри diagnostics" not in refused["fix"] and "context_receipt" in refused["fix"] and "квитанци" in refused["fix"], refused
+    assert refused["diagnostics"] and refused["diagnostics"][0]["path"] == "/context_receipt" and refused["fix"].startswith(refused["diagnostics"][0]["fix"]), refused
 
 
 def test_a_refusal_whose_fix_would_point_at_diagnostics_has_none_gets_a_fix_that_stands_alone() -> None:
@@ -45,46 +61,24 @@ def test_a_refusal_whose_fix_would_point_at_diagnostics_has_none_gets_a_fix_that
     assert "смотри diagnostics" not in fields["fix"] and "message" in fields["fix"], fields
 
 
-def test_a_prior_fragment_that_is_the_agents_file_is_named_as_not_recorded(tmp_path: Path) -> None:
-    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    raw = {key: value for key, value in fragments[0].items() if key not in ("digest", "plan_digest", "header_digest", "context_receipt_digest")}
-    second = Path(run["fragments"][1])
-    code, refused = _validate(run, second, "--prior-fragment", _put(run["tmp"] / "agents-b1.json", raw))
-    assert code == 2 and refused["code"] == "BATCH_PARTITION_CONFLICT", refused
-    assert "is given, but it is not the recorded answer" in refused["message"], refused
-    assert "model-response" in refused["fix"] and "path" in refused["fix"] and "записанн" in refused["fix"], refused
-    assert refused["diagnostics"] and refused["diagnostics"][0]["path"] == "/prior_fragment", refused
-
-
-def test_a_prior_fragment_that_is_not_given_is_another_refusal_with_its_own_fix(tmp_path: Path) -> None:
-    run, *_rest = _run(tmp_path)
-    code, refused = _validate(run, Path(run["fragments"][1]))
-    assert code == 2 and refused["code"] == "BATCH_PARTITION_CONFLICT", refused
-    assert "is given" not in refused["message"] and "--prior-fragment" in refused["fix"] and "model-response" in refused["fix"], refused
-    code, accepted = _validate(run, Path(run["fragments"][1]), "--prior-fragment", run["fragments"][0])
-    assert code == 0, accepted  # the recorded one (with its plan_digest) goes
-
-
-def test_a_validate_fragment_refusal_with_a_run_is_in_the_journal_and_in_the_report(tmp_path: Path) -> None:
+def test_a_refusal_of_a_submit_is_in_the_journal_and_in_the_report(tmp_path: Path) -> None:
     from tools.run_report import refusals
 
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     path = Path(_put(run["tmp"] / "bare.json", bare))
-    assert _validate(run, path, "--run-root", str(run["run_root"]))[0] == 2
+    assert _validate(run, path, dry_run=False)[0] == 2  # a dry run leaves no line of refusal
     (line,) = (Path(run["run_root"]) / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
     row = json.loads(line)
-    assert row["command"] == "validate-fragment" and row["code"] == "BATCH_SEMANTIC_CONFLICT", row
+    assert row["command"] == "submit" and row["code"] == "BATCH_SEMANTIC_CONFLICT", row
     assert row["stage"] == f"tc-generator:{fragments[0]['batch_id']}" and row["batch"] == fragments[0]["batch_id"], row
     summary = refusals(Path(run["run_root"]))
-    assert summary["by_stage"] == {row["stage"]: 1} and summary["by_command"] == {"validate-fragment": 1}, summary
+    assert summary["by_stage"] == {row["stage"]: 1} and summary["by_command"] == {"submit": 1} and summary["by_batch"] == {row["batch"]: 1}, summary
 
 
-def test_a_validate_fragment_refusal_without_a_run_writes_nothing_and_an_ok_is_not_a_refusal(tmp_path: Path) -> None:
-    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
-    assert _validate(run, Path(_put(run["tmp"] / "bare.json", bare)))[0] == 2
-    assert _validate(run, Path(run["fragments"][0]), "--run-root", str(run["run_root"]))[0] == 0
+def test_a_passing_dry_run_is_not_a_refusal(tmp_path: Path) -> None:
+    run, _plan_digest, _header_digest, _fragments = _run(tmp_path)
+    assert _validate(run, Path(run["fragments"][0]))[0] == 0
     assert not (Path(run["run_root"]) / "refusals.jsonl").exists()
 
 
@@ -107,11 +101,10 @@ def test_model_response_prints_the_receipt_of_the_record_and_not_the_answers_bod
     assert code == 0 and stored["result"]["artifact"]["test_cases"][0]["objective"] == big["test_cases"][0]["objective"]  # the body is read apart
 
 
-def test_a_run_root_that_is_no_run_is_refused_as_such_and_nothing_is_written(tmp_path: Path) -> None:
-    """SEC-A (R): --run-root is the boundary of the input files; a directory that is no run is refused for what it is."""
+def test_a_refused_fragment_leaves_its_text_out_of_the_journal_of_refusals(tmp_path: Path) -> None:
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
-    nowhere = tmp_path / "nowhere"
-    nowhere.mkdir()
-    code, refused = _validate(run, Path(_put(run["tmp"] / "fragment.json", fragments[0])), "--run-root", str(nowhere))
-    assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
-    assert not any(nowhere.rglob("*")) and not (Path(run["run_root"]) / "refusals.jsonl").exists()
+    secret = "СЕКРЕТНЫЙ-ТЕКСТ-ФРАГМЕНТА"
+    bad = {key: value for key, value in fragments[0].items() if key != "digest"}
+    bad = {**bad, "namespace": "B9", "test_cases": [{**bad["test_cases"][0], "title": secret}, *bad["test_cases"][1:]]}
+    assert _validate(run, Path(_put(run["tmp"] / "secret.json", bad)), dry_run=False)[0] == 2
+    assert secret not in (Path(run["run_root"]) / "refusals.jsonl").read_text(encoding="utf-8")

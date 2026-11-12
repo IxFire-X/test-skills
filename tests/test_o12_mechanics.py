@@ -193,7 +193,7 @@ def test_the_number_of_the_step_in_the_ids_is_the_position_in_the_case() -> None
     assert steps[1]["inputs"][0]["input_id"] == f"INPUT-{SUFFIX}-02-1" and steps[1]["expectations"][0]["assertions"][0]["assertion_id"] == f"ASSERT-{SUFFIX}-02-1-1"
 
 
-# --- validate-fragment and the canon ------------------------------------------------------------------------------------
+# --- the check of a fragment and the canon ------------------------------------------------------------------------------------
 
 def test_validate_fragment_accepts_the_lean_fragment_and_names_what_it_put() -> None:
     from tools.batch_assembly import validate_fragment

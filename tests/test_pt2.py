@@ -100,7 +100,7 @@ def test_the_run_has_its_tmp_directory_from_the_start_and_out_writes_there(tmp_p
     assert (run_root / "tmp").is_dir() and not any((run_root / "tmp").iterdir())
     source = run_root / "tmp" / "document.json"
     source.write_text("{}", encoding="utf-8")
-    code = main(["document-digest", "--document", str(source), "--run-root", str(run_root), "--out", str(run_root / "tmp" / "digest.json")])
+    code = main(["relations-digest", "--relations", str(source), "--run-root", str(run_root), "--out", str(run_root / "tmp" / "digest.json")])
     assert code == 0 and (run_root / "tmp" / "digest.json").is_file(), capsys.readouterr().out
 
 
@@ -174,7 +174,7 @@ def test_the_help_of_the_cases_only_pack_lists_no_command_of_automation(cases_on
         assert command not in listing, command
         refused = _run_api(cases_only_pack, command, "--help")
         assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr, command
-    for kept in ("validate-fragment", "review-open", "review-select", "plan"):  # F4b: the three commands of the nine are not commands of this delivery
+    for kept in ("prepare", "submit", "review-open", "review-select", "plan"):  # F4b: the three commands of the nine are not commands of this delivery
         assert _run_api(cases_only_pack, kept, "--help").returncode == 0, kept
 
 

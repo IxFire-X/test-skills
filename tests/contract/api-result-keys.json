@@ -1,30 +1,5 @@
 {
  "commands": {
-  "assemble": {
-   "candidate": [
-    "content_locale",
-    "document_id",
-    "metadata",
-    "operation_capabilities",
-    "parent_sha256",
-    "requirements",
-    "revision",
-    "schema_version",
-    "source_requirements",
-    "source_to_canonical_mappings",
-    "test_cases"
-   ],
-   "receipt": [
-    "digest",
-    "document_digest",
-    "fragment_digests",
-    "header_digest",
-    "plan_digest",
-    "pre_review_audit",
-    "schema_version",
-    "warnings"
-   ]
-  },
   "automation-boundary-facts": [
    "automation_digest",
    "automation_revision",
@@ -62,7 +37,6 @@
    "session_id",
    "status"
   ],
-  "document-digest": "string",
   "model-request": [
    "attempt_id",
    "digest",
@@ -112,14 +86,6 @@
   "prepare": [
    "answered",
    "stage"
-  ],
-  "prior-capabilities": [
-   "batch_id",
-   "body_at",
-   "capabilities",
-   "capability_ids",
-   "digest",
-   "path"
   ],
   "publish-generator-input": [
    "digest",
@@ -274,8 +240,7 @@
    "stage"
   ],
   "validate-automation": "array",
-  "validate-canonical": "array",
-  "validate-fragment": "null"
+  "validate-canonical": "array"
  },
  "not_driven": {
   "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework"

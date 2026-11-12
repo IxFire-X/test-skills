@@ -98,7 +98,7 @@ FIXES: dict[str, str] = {
                          "и не меняй; идентификаторы внутри фрагмента начинаются с namespace пачки",
     "BATCH_PARTITION_CONFLICT": "фрагмент закрывает ровно требования своей пачки: owned_source_requirement_ids — как в плане, "
                                 "mappings — по одному на каждое из них, кейс ссылается только на требования своей пачки",
-    "BATCH_SEMANTIC_CONFLICT": "смотри diagnostics: у каждой строки свой путь и fix; исправь все за один заход и повтори validate-fragment",
+    "BATCH_SEMANTIC_CONFLICT": "смотри diagnostics: у каждой строки свой путь и fix; исправь все за один заход и подай фрагмент единственным повтором стадии (submit --transport-attempts 2)",
     "BATCH_UNCOVERED_REQUIREMENT": "у каждого требования пачки должен быть кейс: добавь кейс с этим requirement_ids (или кейс с "
                                    "явным блокером) — это ошибка ответа, стадия имеет единственный повтор",
     "BATCH_CAPABILITY_CONFLICT": "одна capability_id — одно описание во всех пачках: сделай описания одинаковыми или дай разные id",
@@ -149,10 +149,10 @@ FIXES: dict[str, str] = {
     # --- bare ValueErrors that became codes ---
     "INVALID_ARGUMENT": "проверь флаги команды: tools.api <команда> --help",
     # --- the audit of the canon: the order is the code's work, the rest is the agent's ---
-    "CANONICAL_REQUIREMENT_ID_ORDER": "requirement_ids кейса — в порядке requirements документа (display_order); validate-fragment, "
-                                      "model-response и assemble ставят порядок сами",
+    "CANONICAL_REQUIREMENT_ID_ORDER": "requirement_ids кейса — в порядке requirements документа (display_order); submit ставит "
+                                      "порядок сам",
     "CANONICAL_CATEGORY_ORDER": "categories кейса — в порядке positive, negative, boundary, authorization, security, concurrency, "
-                                "idempotency, observability, functional; validate-fragment, model-response и assemble ставят порядок сами",
+                                "idempotency, observability, functional; submit ставит порядок сам",
     "CANONICAL_ARGUMENT_ORDER": "arguments capability — по name в порядке кодовых точек Unicode",
     "CANONICAL_RESULT_ORDER": "results capability — по name в порядке кодовых точек Unicode",
     "CANONICAL_CAPABILITY_ORDER": "operation_capabilities — по capability_id в порядке кодовых точек Unicode",

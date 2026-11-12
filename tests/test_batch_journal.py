@@ -28,7 +28,14 @@ def _response(run: dict, batch_id: str, artifact: str, *extra: str) -> tuple[int
 
 
 def _prior(run: dict, batch_id: str) -> tuple[int, dict]:
-    return _api("prior-capabilities", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--batch-id", batch_id)
+    """The capabilities of the batches before ``batch_id`` — what ``prepare`` publishes before the request; the refusal as the CLI gives it."""
+    from tools.json_cli import error_envelope
+    from tools.pilot_state import publish_prior_capabilities
+
+    try:
+        return 0, {"result": publish_prior_capabilities(run["run_root"], run["attempt_id"], batch_id)}
+    except ValueError as error:
+        return 2, error_envelope(error)
 
 
 def _second_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, *fifth: str) -> tuple[int, dict]:
@@ -50,7 +57,7 @@ def test_batch_one_has_four_inputs_and_batch_two_a_fifth_built_from_the_journal(
     assert code == 2 and "первая пачка" in refused["message"], refused
 
     code, refused = _second_request(run, second, plan_digest, header_digest)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "tools.api prior-capabilities" in refused["message"], refused
+    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "prepare --stage" in refused["message"], refused
     code, prior = _prior(run, second)
     assert code == 0 and prior["result"]["capabilities"] == 1, prior
     digest = prior["result"]["digest"]
@@ -74,7 +81,7 @@ def test_batch_two_before_the_answer_of_batch_one_is_refused_by_name(tmp_path: P
     code, refused = _second_request(run, second, plan_digest, header_digest, "sha256:" + "b" * 64)
     assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and first in refused["message"], refused
     assert _journal(run["run_root"]) == before
-    assert_refused_in_order(run["run_root"], before, ("prior-capabilities", first_refusal["code"]), ("model-request", refused["code"]))  # J1: the two refusals of the test
+    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one refusal the command wrote (the other is a function)
 
 
 def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps_the_retry(tmp_path: Path) -> None:
@@ -97,9 +104,9 @@ def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
-    code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *[flag for path in run["fragments"] for flag in ("--fragment", path)],
-                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
-    assert code == 0, assembled
+    from tools.orchestrate_test_case_revision import journal_assembly
+
+    assert journal_assembly(run["run_root"], run["attempt_id"])[0]["test_cases"]  # both answers are the journal's: the review assembles them
 
 
 def test_step_size_finds_the_fifth_input_of_batch_two(tmp_path: Path) -> None:

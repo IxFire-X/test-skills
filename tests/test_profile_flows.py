@@ -5,8 +5,8 @@ every command runs in a copy of the files of the profile (``pack_registry.profil
 by the test (the marker, the fragments, the verdicts) and the run of the tests is the human's (``human_run``).
 
 - ``cases-only``: ``ready``, ``scan``, the marker (``prepare`` / ``submit``), the pause on a
-  gap, ``publish-generator-input``, ``plan``, the answers of the generator by batches (``validate-fragment``, ``prior-capabilities``),
-  ``assemble``, ``validate-canonical``, ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
+  gap, ``publish-generator-input``, ``plan``, the answers of the generator by batches (``prepare`` / ``submit``, the last one assembles),
+  ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
   the first ``model-response`` refused ``MODE_B_NOT_IN_PACKAGE``);
 - ``mode-b``: the same cases part, then the review of the automation by the commands of the text (``references/mode-b.md`` §5) —
   ``read-effective``, ``model-response tc-to-autotest``, ``automation-boundary-facts``, ``open-automation-boundary``, ``review-requested``,
@@ -195,39 +195,26 @@ def _front(pack: Path, tmp_path: Path, profile: str, *, requirements: int = 1, g
 # ---- the cases part of a path, in both profiles: the answers of the generator → assemble → the review → the effective canonical ----
 
 def _cases_to_effective(pack: Path, run: dict) -> dict:
-    """The generator batch by batch (checked, requested, answered), ``assemble``, ``validate-canonical``, ``review-open``, ``review-select``,
-    ``read-effective``: the effective canonical of the run."""
+    """The generator batch by batch (``prepare``, the fragment in the slot, ``submit``; the last one assembles), ``review-open``, ``review-select``,
+    ``read-effective``: the effective canonical of the run.  No file of the candidate is on the disk when the review opens."""
     from tests.test_review_two_commands import _bundles, _flags, _verdict
 
     flags, tmp = _flags(run), run["tmp"]
-    context = json.loads(Path(run["context"]).read_bytes())
-    plan, prior = json.loads(Path(run["plan"]).read_bytes()), []
+    plan = json.loads(Path(run["plan"]).read_bytes())
+    last = len(run["fragments"]) - 1
     for index, path in enumerate(run["fragments"]):
-        batch, fragment = plan["batches"][index]["batch_id"], json.loads(Path(path).read_bytes())
-        stage = f"tc-generator:{batch}"
-        checked = ("--fragment", path, "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"], *flags[:2],
-                   *[flag for earlier in prior for flag in ("--prior-fragment", earlier)])
-        code, valid = _api(pack, "validate-fragment", *checked)
-        assert code == 0, valid
-        digests = [run["marker_digest"], context["digest"], fragment["plan_digest"], fragment["header_digest"]]
-        if index:
-            code, capabilities = _api(pack, "prior-capabilities", *flags, "--batch-id", batch)
-            assert code == 0, capabilities
-            digests.append(capabilities["result"]["digest"])
-        code, requested = _api(pack, "model-request", *flags, "--stage", stage, "--model-id", "model-generator", "--invocation-id", f"invoke-{index + 1}",
-                               *[flag for digest in digests for flag in ("--input-digest", digest)])
-        assert code == 0, requested
-        code, answered = _api(pack, "model-response", *flags, "--stage", stage, "--artifact", path)
+        stage = f"tc-generator:{plan['batches'][index]['batch_id']}"
+        _status(pack, run["project"], run["run_root"].name, "generator", "prepare")
+        code, prepared = _api(pack, "prepare", "--run-root", str(run["run_root"]), "--stage", stage, "--model-id", "model-generator")
+        assert code == 0 and prepared["result"]["nonce"] and prepared["result"]["answer_slot"] == str(run["run_root"] / "incoming" / (stage.replace(":", "-") + ".json")), prepared
+        status = _status(pack, run["project"], run["run_root"].name, "generator", "submit", "model")
+        assert status["next"]["stage"] == stage and status["answer_slot"] == prepared["result"]["answer_slot"], status
+        Path(prepared["result"]["answer_slot"]).write_bytes(Path(path).read_bytes())
+        code, answered = _api(pack, "submit", "--run-root", str(run["run_root"]), "--stage", stage)
         assert code == 0, ("CO1: the answer of the model is not taken in a delivery of cases", answered)
-        prior.append(str(run["run_root"] / answered["result"]["path"]))
-        # the last answer asks for the assembly, an earlier one for the next batch
-        _status(pack, run["project"], run["run_root"].name, "generator", "assemble" if index == len(run["fragments"]) - 1 else "model-request")
-    code, assembled = _api(pack, "assemble", "--header", run["header"], "--plan", run["plan"], *[f for path in run["fragments"] for f in ("--fragment", path)],
-                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", str(run["run_root"]))
-    assert code == 0, assembled
-    _status(pack, run["project"], run["run_root"].name, "generator", "assemble")  # the journal does not see assemble
-    code, valid = _api(pack, "validate-canonical", "--document", str(tmp / "candidate.json"))
-    assert code == 0, valid
+        assert ("candidate" in answered["result"]) == (index == last), answered
+    assert answered["result"]["candidate"]["document_digest"].startswith("sha256:") and not list(run["run_root"].rglob("candidate*.json"))
+    _status(pack, run["project"], run["run_root"].name, "review", "review-open")  # the last answer assembled it: the review takes it from the journal
     code, opened = _api(pack, "review-open", *flags, "--output-dir", _bundles(run), "--model-id", "model-reviewer",
                         "--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
     assert code == 0 and opened["status"] == "ok", opened

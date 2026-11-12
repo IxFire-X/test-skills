@@ -247,7 +247,7 @@ behavior/prerequisite/testing-instruction distinction above to inventory require
 
 ## What the check of a fragment refuses most often
 
-`validate-fragment` returns the whole list of refusals, each with a `fix`: correct all of them in one pass.
+The check of a fragment returns the whole list of refusals, each with a `fix`: correct all of them in one pass.
 
 - Do not write `digest` or any `*_digest` field — the code sets them; a wrong value is refused («удали поле»).
 - Do not order `requirement_ids` or `categories` — the code does and names it (`normalized`).

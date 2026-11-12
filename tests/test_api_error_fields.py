@@ -89,23 +89,6 @@ def test_run_pipeline_answers_json_instead_of_a_traceback(monkeypatch: pytest.Mo
         assert output["message"] == "PermissionError: Permission denied: run/tmp/fragment-2.json"
 
 
-def test_a_missing_fragment_names_its_path(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Of three --fragment files the answer names the missing one (SEC-A: the files of a command without a run lie in a run)."""
-    from tests.test_output_guard import _run
-    from tools import api
-
-    _project, run_root, _attempt = _run(tmp_path)
-    (run_root / "tmp").mkdir(exist_ok=True)
-    present = run_root / "tmp" / "fragment-1.json"
-    present.write_text("{}", encoding="utf-8")
-    missing = run_root / "tmp" / "fragment-2.json"
-    code = api.main(["assemble", "--header", str(present), "--plan", str(present), "--fragment", str(present), "--fragment", str(missing),
-                     "--out-candidate", str(run_root / "tmp" / "c.json"), "--out-receipt", str(run_root / "tmp" / "r.json")])
-    output = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert code == 2 and output["status"] == "error"
-    assert json.dumps(str(missing), ensure_ascii=False)[1:-1] in json.dumps(output, ensure_ascii=False)
-
-
 def test_an_os_error_without_a_file_has_no_empty_tail() -> None:
     from tools.json_cli import error_fields
 

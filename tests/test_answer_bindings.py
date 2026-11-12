@@ -1,5 +1,5 @@
 """Audit U2: the digests the code knows are put by the code — model-request takes its inputs from the journal when no
---input-digest is given; model-response (and validate-fragment) put the binding fields an answer leaves out and refuse
+--input-digest is given; model-response (and the check of a fragment) put the binding fields an answer leaves out and refuse
 the ones given wrong, as before."""
 from __future__ import annotations
 

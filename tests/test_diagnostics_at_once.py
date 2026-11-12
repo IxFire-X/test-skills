@@ -1,4 +1,4 @@
-"""P1 «Диагностика разом»: validate-fragment отдаёт все диагностики за один проход (связки первыми и фатально), у каждой
+"""P1 «Диагностика разом»: проверка фрагмента отдаёт все диагностики за один проход (связки первыми и фатально), у каждой
 есть fix; механику (порядок id и категорий, digest) делает код; одна таблица code → fix; журнал отказов refusals.jsonl;
 голые ValueError стали кодами; model-request пишет замер шага."""
 from __future__ import annotations
@@ -135,7 +135,7 @@ def test_a_shuffled_order_passes_names_what_it_normalized_and_the_canon_is_byte_
 
 
 def test_model_response_stores_the_normalized_answer_and_names_it(tmp_path: Path) -> None:
-    """model-response and validate-fragment share one normalization: the stored canon has the order assemble wants."""
+    """model-response and the dry run of submit share one normalization: the stored canon has the order assemble wants."""
     from tests.test_batch_journal import _response, _run
     from tests.test_digest_traps import _generator_request
     from tests.test_review_requested import _api, _put
@@ -331,31 +331,6 @@ def test_a_refusal_with_a_run_root_is_one_line_with_five_fields(tmp_path: Path, 
     assert len((root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()) == 2  # appended
 
 
-def test_a_refusal_without_a_run_root_writes_nothing_and_never_the_content(tmp_path: Path, capsys, monkeypatch) -> None:
-    from tools import api
-
-    fragment, plan, header, context = _synthetic()
-    secret = "СЕКРЕТНЫЙ-ТЕКСТ-ФРАГМЕНТА"
-    fragment["test_cases"][0]["title"] = secret
-    paths = {}
-    for name, value in (("fragment", fragment), ("plan", plan), ("header", header), ("context", context)):
-        paths[name] = tmp_path / f"{name}.json"
-        paths[name].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    fragment["batch_id"] = "BATCH-unknown"
-    paths["fragment"].write_text(json.dumps(fragment, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    assert api.main(["validate-fragment", "--fragment", str(paths["fragment"]), "--plan", str(paths["plan"]), "--header", str(paths["header"]),
-                     "--context-receipt", str(paths["context"])]) == 2
-    capsys.readouterr()
-    assert not list(tmp_path.rglob("refusals.jsonl"))
-    from tests.test_marker_parts import _run
-
-    (tmp_path / "project").mkdir()
-    root, attempt_id, *_rest = _run(tmp_path / "project", files=1)
-    _refused_model_request(root, attempt_id)
-    assert secret not in (root / "refusals.jsonl").read_text(encoding="utf-8")
-
-
 def test_run_pipeline_refusals_of_a_named_run_go_to_the_same_journal(tmp_path: Path, capsys) -> None:
     from tests.test_marker_parts import AUTHORIZATION
     from tools import run_pipeline
@@ -381,11 +356,11 @@ def test_the_fix_of_the_call_site_beats_the_table_and_the_errors_own_beats_both(
 
 
 # --------------------------------------------------------------------------------------
-# P1-fix2: assemble lays out the same canon as validate-fragment and model-response (bug hunt 6, 6.1, 6.6, 6.7)
+# P1-fix2: assemble lays out the same canon as the check of a fragment and model-response (bug hunt 6, 6.1, 6.6, 6.7)
 # --------------------------------------------------------------------------------------
 
 def _shuffled_batch_one():
-    """The agent's file of batch 1: ids and categories not in the canon's order, no digest — validate-fragment accepts it."""
+    """The agent's file of batch 1: ids and categories not in the canon's order, no digest — the check of a fragment accepts it."""
     fragment, plan, header, context = _synthetic()
     second = dict(fragment["requirements"][0], requirement_id=fragment["requirements"][0]["requirement_id"] + "-B", display_order=100)
     fragment["requirements"].append(second)
@@ -445,19 +420,14 @@ def test_a_refusal_of_the_canonical_audit_in_assemble_gives_all_rows_and_its_own
     rows = refused.value.diagnostics
     assert rows and rows[0]["code"] == "SEMANTIC_RU_RU_HUMAN_FIELDS" and all(row["fix"] and row["path"] for row in rows), rows
     fields = error_fields(refused.value)
-    assert fields["fix"] and "validate-fragment" not in fields["fix"], fields  # not the circle back to the check that said ok
+    assert fields["fix"] and "submit --dry-run" not in fields["fix"], fields  # not the circle back to the check that said ok
 
 
-def test_the_fix_of_a_canonical_order_is_true_for_assemble_too() -> None:
+def test_the_fix_of_a_canonical_order_says_the_code_lays_it_out() -> None:
     from tools.fixes import fix_for
 
     for code in ("CANONICAL_REQUIREMENT_ID_ORDER", "CANONICAL_CATEGORY_ORDER"):
-        assert "assemble" in fix_for(code), code
-
-
-def test_the_skill_names_what_assemble_takes_as_the_fragment_file() -> None:
-    text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    assert "`--fragment` — файл ответа пачки как есть или записанный ответ" in text
+        assert "submit ставит порядок сам" in fix_for(code), code
 
 
 def test_a_scope_pause_is_not_a_refusal_of_the_journal(tmp_path: Path, capsys) -> None:

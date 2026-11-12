@@ -83,7 +83,7 @@ def test_the_skill_does_not_send_the_agent_for_outside_documentation() -> None:
 
 def test_the_skill_says_run_root_goes_with_out() -> None:
     text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    assert "вместе с `--run-root <run>`" in text and "--run-root <run> --out-candidate" in text
+    assert "вместе с `--run-root <run>`" in text
 
 
 def test_a_secret_in_a_csv_gets_a_placeholder_not_an_environment_variable() -> None:

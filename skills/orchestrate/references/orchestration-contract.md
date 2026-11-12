@@ -23,8 +23,8 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Подготовка | `tools.run_pipeline scan --project <path> --profile <profile> --docs <path>` (повтори `--docs` для всех входов) | run, inventory, baseline, context receipts; при нескольких modules нужен exact `--module <ID>` |
 | Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api publish-generator-input` (header, plan), `tools.api plan-batches` | independent plan и current receipt без truncation |
-| Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`, пачки по очереди; `tools.api validate-fragment`, с пачки 2 `tools.api prior-capabilities` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
-| Сборка | `tools.api assemble`, `tools.api review-publish` | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
+| Генерация | `tools.api prepare` / `tools.api submit` для `tc-generator:<batch>`, пачки по очереди; с пачки 2 capabilities прошлых пачек публикует `prepare` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
+| Сборка | последний `tools.api submit` (до записи ответа), `tools.api review-publish` | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
 | Canonical review | `tools.api review-open` (пакет и запрос проверяющего записаны до его вызова); вызов `tc-reviewer`; `tools.api review-select --verdict <ответ>`; при нужде `tools.api review-evidence`, `tools.api review-abort`, `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
 | Выбор | `review-select` (последняя команда ревью), затем `tools.api read-effective` | immutable selected document и receipt |
 | Закрытие | `tools.run_pipeline finish` | trace/finalization/terminal |

@@ -267,7 +267,7 @@ def test_a_later_batch_must_reuse_the_capabilities_of_the_earlier_ones_before_th
 
     header, context, plan, fragments = _three_batch_fragments()
     validate_fragment(fragments[1], plan, header, context, [fragments[0]])
-    with pytest.raises(BatchAssemblyError, match="--prior-fragment"):
+    with pytest.raises(BatchAssemblyError, match="accepted fragments of the earlier batches"):
         validate_fragment(fragments[1], plan, header, context)
 
     changed = fragments[1]
@@ -282,28 +282,6 @@ def test_a_later_batch_must_reuse_the_capabilities_of_the_earlier_ones_before_th
     _refresh(renamed)
     with pytest.raises(BatchAssemblyError, match="CAP-shared"):
         validate_fragment(renamed, plan, header, context, [fragments[0], fragments[1]])
-
-
-def test_api_validate_fragment_with_prior_fragments(tmp_path, capsys):
-    from tools import api
-
-    header, context, plan, fragments = _three_batch_fragments()
-    from tests.test_output_guard import _run
-
-    run_tmp = _run(tmp_path)[1] / "tmp"  # SEC-A: a command without a run reads files in a run
-    run_tmp.mkdir(exist_ok=True)
-    files = {"plan": plan, "header": header, "context": context, "f1": fragments[0], "f2": fragments[1]}
-    for name, value in files.items():
-        (run_tmp / f"{name}.json").write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-
-    code = api.main(["validate-fragment", "--fragment", str(run_tmp / "f2.json"), "--plan", str(run_tmp / "plan.json"),
-                     "--header", str(run_tmp / "header.json"), "--context-receipt", str(run_tmp / "context.json"),
-                     "--prior-fragment", str(run_tmp / "f1.json")])
-    assert code == 0, capsys.readouterr().out
-    capsys.readouterr()
-    code = api.main(["validate-fragment", "--fragment", str(run_tmp / "f1.json"), "--plan", str(run_tmp / "plan.json"),
-                     "--header", str(run_tmp / "header.json"), "--context-receipt", str(run_tmp / "context.json")])
-    assert code == 0, capsys.readouterr().out
 
 
 def test_group_of_several_requirements_over_the_budget_is_cut_in_order_into_batches_under_the_budget():

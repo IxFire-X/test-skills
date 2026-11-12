@@ -218,9 +218,7 @@ def test_c1_two_batches_in_skill_order_spend_no_retry_on_batch_one() -> None:
     assert validate_canonical_document(candidate) == []
 
     skill = (Path(__file__).resolve().parents[1] / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    before, _, after = skill.partition("До `model-response` пачки — только")
-    assert after and "`assemble` и `validate-canonical` — после ответа последней пачки" in skill  # V8: the map names the step without the old item number
-    assert "затем `assemble` и\n   `validate-canonical` из п.4 на этом же файле" not in skill
+    assert "Её делает `submit` последней пачки до записи ответа" in skill  # the assembly is a step of the last submit, before the answer is written
 
 
 # --------------------------------------------------------------------------------------

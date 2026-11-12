@@ -96,9 +96,9 @@ def test_the_input_is_split_by_kind_for_every_model_call(tmp_path: Path) -> None
 def test_refusals_are_summed_by_command_code_and_batch(tmp_path: Path) -> None:
     run = _generated(tmp_path)
     rows = [
-        {"at": "2026-11-03T10:00:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
-        {"at": "2026-11-03T10:01:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
-        {"at": "2026-11-03T10:02:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-b"},
+        {"at": "2026-11-03T10:00:00Z", "command": "submit", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
+        {"at": "2026-11-03T10:01:00Z", "command": "submit", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
+        {"at": "2026-11-03T10:02:00Z", "command": "submit", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-b"},
         {"at": "2026-11-03T10:03:00Z", "command": "assemble", "code": "BATCH_SEMANTIC_CONFLICT", "stage": None, "batch": None},
         {"at": "2026-11-03T10:04:00Z", "command": "/home/user/secret project", "code": "some text with a path C:\\x", "stage": None, "batch": None},
     ]
@@ -112,14 +112,14 @@ def test_refusals_are_summed_by_command_code_and_batch(tmp_path: Path) -> None:
     refusals = report["refusals"]
     assert refusals["mismatch"] == {"lines_without_event": 1, "events_without_line": 0}, refusals  # the line no event confirms is named, not counted
     assert refusals["total"] == 5
-    assert refusals["by_command"]["validate-fragment"] == 3 and refusals["by_command"]["assemble"] == 1
+    assert refusals["by_command"]["submit"] == 3 and refusals["by_command"]["assemble"] == 1
     assert refusals["by_code"]["BATCH_FRAGMENT_INVALID"] == 3
     assert refusals["by_batch"] == {"BATCH-a": 2, "BATCH-b": 1}
     assert refusals["first_at"] == "2026-11-03T10:00:00Z" and refusals["last_at"] == "2026-11-03T10:04:00Z"
     blob = json.dumps(refusals) + markdown
     assert "/home/user" not in blob and "secret project" not in blob  # only identifiers leave the run
     section = markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
-    assert "validate-fragment" in section and "BATCH_FRAGMENT_INVALID" in section
+    assert "submit" in section and "BATCH_FRAGMENT_INVALID" in section
 
 
 def test_a_run_before_v02_without_the_refusal_journal_says_so(tmp_path: Path) -> None:

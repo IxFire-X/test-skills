@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.test_review_requested import _api, _generated_run, _journal, _put
 from tests.journal_helpers import assert_refused_once
 
@@ -112,24 +114,26 @@ def test_microservices_4d8491a2_uncovered_requirement_before_the_write(tmp_path:
 
 
 def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, generated=False)
-    fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
-    bad = _put(run["tmp"] / "bad.json", _uncovered(fragments[0]))
-    code, validated = _api("validate-fragment", "--fragment", bad, "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"])
-    code_assembled, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], "--fragment", bad, "--fragment", run["fragments"][1],
-                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
-    missing = _uncovered(fragments[0])["requirements"][1]["requirement_id"]
-    assert code == code_assembled == 2 and validated["code"] == assembled["code"] == "BATCH_UNCOVERED_REQUIREMENT", (validated, assembled)
-    assert missing in validated["message"] and missing in assembled["message"]
+    import copy
+
+    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
     from tools.canonical_document import uncovered_requirements
 
+    run = _generated_run(tmp_path, generated=False)
+    fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
+    plan, header, context = (json.loads(Path(run[name]).read_bytes()) for name in ("plan", "header", "context"))
+    bad = _uncovered(fragments[0])
+    with pytest.raises(BatchAssemblyError) as validated:
+        validate_fragment(copy.deepcopy(bad), plan, header, context)
+    with pytest.raises(BatchAssemblyError) as assembled:
+        assemble_candidate(header, plan, [bad, fragments[1]])
+    missing = bad["requirements"][1]["requirement_id"]
+    assert validated.value.code == assembled.value.code == "BATCH_UNCOVERED_REQUIREMENT", (validated.value, assembled.value)
+    assert missing in str(validated.value) and missing in str(assembled.value)
     # the same rule assemble applies to the whole document (SEMANTIC_UNCOVERED_REQUIREMENT)
-    assert [row["requirement_id"] for row in _uncovered(fragments[0])["requirements"]][1] == _uncovered(fragments[0])["requirements"][
-        uncovered_requirements(_uncovered(fragments[0])["requirements"], fragments[0]["test_cases"])[0]]["requirement_id"]
-    code, validated = _api("validate-fragment", "--fragment", run["fragments"][0], "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"])
-    code_assembled, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *[flag for path in run["fragments"] for flag in ("--fragment", path)],
-                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
-    assert code == code_assembled == 0, (validated, assembled)
+    assert bad["requirements"][uncovered_requirements(bad["requirements"], fragments[0]["test_cases"])[0]]["requirement_id"] == missing
+    validate_fragment(copy.deepcopy(fragments[0]), plan, header, context)
+    assemble_candidate(header, plan, fragments)
 
 
 def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_path: Path) -> None:

@@ -15,14 +15,12 @@ from pathlib import Path
 import pytest
 
 from tests.journal_helpers import assert_refused_once
-from tests.test_review_requested import _api, _complete, _generated_run, _journal, _open_session, _put, _review, _reviewer_request, _select
+from tests.test_review_requested import _api, _complete, _digest_of, _generated_run, _journal, _open_session, _put, _review, _reviewer_request, _select
 
 
 def _answer(run: dict, mutate=None, name: str = "review.json") -> str:
     candidate = json.loads((run["tmp"] / "candidate.json").read_bytes())
-    code, digest = _api("document-digest", "--document", str(run["tmp"] / "candidate.json"))
-    assert code == 0, digest
-    selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": digest["result"]}
+    selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": _digest_of(run["tmp"] / "candidate.json")}
     report = {"verdict": "ПРИНЯТО", "candidate": selected, "effective": selected,
               "reviewed_case_ids": [case["case_id"] for case in candidate["test_cases"]], "corrections": [], "findings": []}
     value = {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report}, "warnings": []}

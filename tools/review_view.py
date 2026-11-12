@@ -736,7 +736,7 @@ def main(argv: list[str] | None = None) -> int:
             grouping, reference = _hints_of_run(root, state, document)
             extra = {"canaries": made["canaries"], "canaries_created": made["created"], "canaries_note": "канарейки — сигнал качества ревью, не защита"}
     except (OSError, ValueError, KeyError, TypeError) as error:
-        print(json.dumps({**cli_error(error, fix="--project, --run — проект и прогон; --candidate — файл кандидата, который собрал `tools.api assemble` "
+        print(json.dumps({**cli_error(error, fix="--project, --run — проект и прогон; --candidate — файл кандидата "
                                       "(тот же, что в журнале); вид ревьюера строит и `tools.api review-open`"), "message": str(error)[:2000]}, ensure_ascii=False))
         return 2
     view = AUTOTEST_VIEW_VERSION if profile == "autotest" else VIEW_VERSION

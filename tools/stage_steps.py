@@ -10,7 +10,8 @@ import stat
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from tools import confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools import batch_assembly, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools.project_inventory import read_inventory_receipt
 
 SLOT_DIR = "incoming"
 
@@ -20,9 +21,12 @@ def slot(root: Path, stage: str) -> Path:
     return Path(root) / SLOT_DIR / (stage.replace(":", "-") + ".json")
 
 
-def _marker_accepted(root: Path) -> Mapping[str, Any] | None:
+def _marker_accepted(root: Path) -> Mapping[str, Any]:
     """The last part answered: the merge by code is the one more step of that call."""
-    return context_marker_parts.merge_parts(root) if context_marker_parts.plan(root)["next"] == "merge" else None
+    if context_marker_parts.plan(root)["next"] != "merge":
+        return {}
+    merged = context_marker_parts.merge_parts(root)
+    return {"merged": {key: merged[key] for key in ("content_digest", "questions_draft") if key in merged}}
 
 
 def _scope_steps(root: Path) -> list[dict[str, Any]]:
@@ -35,9 +39,76 @@ def _scope_steps(root: Path) -> list[dict[str, Any]]:
             ] if scope["known"] else []
 
 
-STEPS: dict[str, tuple[Callable, Callable]] = {
-    "context-marker": (lambda root: context_marker_parts.plan(root)["parts"], _marker_accepted),
-    "scope": (_scope_steps, lambda root: None),
+MANUAL_SHARE_WARN = 0.5  # a candidate of a project with code whose manual steps are over this share: the reviewer's check is not measured
+
+
+def _batch_stage(batch: Mapping[str, Any]) -> str:
+    return f"tc-generator:{batch['batch_id']}"
+
+
+def _generator_steps(root: Path) -> list[dict[str, Any]]:
+    """The batches of the published plan in order; one waits for the answer of the batch before it (the order is the code's)."""
+    state = pilot_state.derive_state(root)
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    published = pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id)
+    if published is None:
+        return []
+    done = {event.get("stage_instance_id") for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"}
+    steps: list[dict[str, Any]] = []
+    for batch in sorted(published[0]["batches"], key=pilot_state.batch_ordinal):
+        step: dict[str, Any] = {"stage": _batch_stage(batch), "input_digests": [], "done": _batch_stage(batch) in done,
+                                "invocation": f"tc-generator-{batch['namespace']}"}  # a label: no ":" and no long hex (the id of the batch reads as a secret)
+        if pilot_state.batch_ordinal(batch) > 1:  # the capabilities of the batches before it are its fifth input, published by the code before its request
+            step["before"] = lambda batch_id=batch["batch_id"]: pilot_state.publish_prior_capabilities(root, attempt_id, batch_id)
+        if steps and not steps[-1]["done"]:
+            step["waits"] = f"ждёт принятого ответа {steps[-1]['stage']}"
+        steps.append(step)
+    return steps
+
+
+def _manual_share(root: Path, document: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The manual steps of a candidate of a project with code (the frozen inventory has a source or a test file) when they are over the share."""
+    state = pilot_state.derive_state(root)
+    inventory = read_inventory_receipt(root / "inventories" / (str(pilot_state.frozen_baseline(root, state["attempts"][-1])["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    steps = [step for case in document["test_cases"] for step in case["steps"]]
+    manual = sum(1 for step in steps if step["manual_only"])
+    if not steps or manual / len(steps) <= MANUAL_SHARE_WARN or not any(row["kind"] in ("source", "test") for row in inventory["files"]):
+        return None
+    return {"code": "MANUAL_SHARE_HIGH", "manual_steps": manual, "steps": len(steps)}
+
+
+def _candidate(root: Path, document: Mapping[str, Any], receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """What the agent is told of the assembled candidate: digests and numbers (the review takes the files from the journal, none is written)."""
+    share = _manual_share(root, document)
+    return {"candidate": {"document_digest": receipt["document_digest"], "assembly_receipt_digest": receipt["digest"], "cases": len(document["test_cases"]),
+                          "warnings": sorted({*(row["code"] for row in receipt["warnings"]), *([share["code"]] if share else [])}), **({"manual_share": share} if share else {})}}
+
+
+def _assemble(root: Path, stage: str, value: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Before the write of the last answer of the generator: the candidate of all the batches — a refusal leaves the answer unwritten, so the one retry is
+    still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``)."""
+    state = pilot_state.derive_state(root)
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    plan, header = (pilot_state.generator_input(root.parents[1], root, state, attempt_id, kind) for kind in ("plan", "header"))
+    if stage != _batch_stage(max(plan["batches"], key=pilot_state.batch_ordinal)):
+        return None
+    earlier = pilot_state.accepted_earlier_fragments(root.parents[1], root, state, attempt_id, plan, stage.split(":", 1)[1])
+    return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
+
+
+def _generator_accepted(root: Path) -> Mapping[str, Any]:
+    """Every batch answered: the candidate the journal gives (a repeated ``submit`` of the last batch says it again)."""
+    from tools.orchestrate_test_case_revision import journal_assembly
+
+    if not all(step["done"] for step in _generator_steps(root)):
+        return {}
+    return _candidate(root, *journal_assembly(root, str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]))[:2])
+
+
+STEPS: dict[str, tuple[Callable, Callable, Callable | None]] = {
+    "context-marker": (lambda root: context_marker_parts.plan(root)["parts"], _marker_accepted, None),
+    "tc-generator": (_generator_steps, _generator_accepted, _assemble),
+    "scope": (_scope_steps, lambda root: {}, None),
 }
 
 
@@ -59,13 +130,18 @@ def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], 
     return project, root, state, str(state["attempts"][-1]["attempt_id"]), step
 
 
-def _accepted(root: Path, stage: str) -> dict[str, Any]:
-    merged = STEPS[stage.split(":", 1)[0]][1](root)
-    return {"merged": {key: merged[key] for key in ("content_digest", "questions_draft") if key in merged}} if merged else {}
+def _accepted(root: Path, stage: str) -> Mapping[str, Any]:
+    return STEPS[stage.split(":", 1)[0]][1](root)
 
 
-def _budget(root: Path, step: Mapping[str, Any]) -> dict[str, Any]:
-    return {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
+def _budget(root: Path, step: Mapping[str, Any], found: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The size of the step against the budget: a step of the table has its bytes, a batch of the generator the files of its published request."""
+    if "bytes" in step:
+        return {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
+    found = found or step_size.stage_inputs(root, step["stage"], write_views=False)
+    report = step_size.measure(root.parents[1], [Path(row["path"]) for row in found["files"]], step["stage"].split(":", 1)[0],
+                               extra_bytes=sum(row["bytes"] for row in found["bindings"]))
+    return {key: report[key] for key in ("bytes", "budget_bytes", "fits", "hint")}
 
 
 def _refuse_linked_inbox(root: Path) -> None:
@@ -86,8 +162,10 @@ def _refuse_unready(stage: str, step: Mapping[str, Any]) -> None:
         raise ValueError(f"STAGE_WAITS: {stage}: {step['waits']}; fix: сначала prepare и submit этой стадии")
 
 
-def prepare(run_root: Path, stage: str, *, model_id: str | None = None, reuse_from: str | None = None) -> dict[str, Any]:
-    """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run."""
+def prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocation_id: str | None = None, reuse_from: str | None = None) -> dict[str, Any]:
+    """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run.
+    ``invocation_id`` is the host's label of the session that does the work (the review compares it with the reviewer's: same label, no independence);
+    without it the code's label."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
         if not step["done"]:
@@ -102,8 +180,10 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, reuse_fr
     if reuse_from is None:
         _refuse_linked_inbox(root)
     requested = _events(state, attempt_id, stage, "MODEL_REQUESTED")
+    if not requested and "before" in step:
+        step["before"]()
     request = (pilot_state.read_model_request(root, attempt_id, stage, str(requested[-1]["artifact_digest"])) if requested else
-               pilot_state.publish_model_request(root, attempt_id, stage, model_id=model_id, invocation_id=stage, input_digests=step["input_digests"],
+               pilot_state.publish_model_request(root, attempt_id, stage, model_id=model_id, invocation_id=invocation_id or step.get("invocation") or stage.replace(":", "-"), input_digests=step["input_digests"],
                                                  reuse_from=reuse_from))
     reuse = request.get("reuse")
     if isinstance(reuse, Mapping):  # the answer is the source run's, read from it — the slot is not looked at
@@ -113,8 +193,12 @@ def prepare(run_root: Path, stage: str, *, model_id: str | None = None, reuse_fr
         return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse["run_id"], **_accepted(root, stage)}
     if not (root / SLOT_DIR).is_dir():
         confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)
-    listed = step_size.compact_inputs(root, stage, step_size.stage_inputs(root, stage))["files_summary"]
-    return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": listed, "budget": _budget(root, step)}
+    found = step_size.stage_inputs(root, stage)
+    word = {key: request[key] for key in ("nonce", "nonce_note") if key in request}  # the control word is shown once, by the call that wrote the request
+    if requested and stage.startswith("tc-generator:"):
+        word = {"nonce_note": pilot_state.codeword_lost_note(root, state, attempt_id, stage).strip()}
+    return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": step_size.compact_inputs(root, stage, found)["files_summary"],
+            "budget": _budget(root, step, found), **word}
 
 
 def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1) -> dict[str, Any]:
@@ -130,19 +214,22 @@ def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_
     if not _events(state, attempt_id, stage, "MODEL_REQUESTED"):
         raise ValueError(f"STAGE_NOT_PREPARED: {stage} has no request yet; fix: prepare --stage {stage}, затем модель, затем submit")
     answer = load(str(slot(root, stage)), project)
-    published = pilot_state.publish_model_stage_artifact(root, attempt_id, stage, answer.value, transport_attempts=transport_attempts,
-                                                         raw_bytes=answer.raw_bytes, dry_run=dry_run)
-    return {**{key: value for key, value in published.items() if key != "artifact"}, **({} if dry_run else _accepted(root, stage))}
+    check, told = STEPS[stage.split(":", 1)[0]][2], {}
+    published = pilot_state.publish_model_stage_artifact(root, attempt_id, stage, answer.value, transport_attempts=transport_attempts, raw_bytes=answer.raw_bytes,
+                                                         dry_run=dry_run, before_write=(lambda value: told.update(check(root, stage, value) or {})) if check else None)
+    return {**{key: value for key, value in published.items() if key != "artifact"}, **(told or ({} if dry_run else _accepted(root, stage)))}
 
 
-def marker_status(root: Path) -> dict[str, Any]:
-    """What ``status`` says of the marker: the next verb and the id of the step, who waits, the slot and the size.  Only reads."""
+def stage_status(root: Path, family: str) -> dict[str, Any]:
+    """What ``status`` says of the marker or the generator: the next verb and the id of the step, who waits, the slot and the size.  Only reads."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    parts = context_marker_parts.plan(root)["parts"]
+    parts = STEPS[family][0](root)
+    if not parts:  # the generator before its plan: the command of the plan says it
+        return {}
     pending = [part for part in parts if not part["done"]]
     asked = next((part for part in pending if _events(state, attempt_id, part["stage"], "MODEL_REQUESTED")), None)
-    step = asked or (pending[0] if pending else parts[-1])  # every part answered, the merge not: submit repeats it
+    step = asked or (pending[0] if pending else parts[-1])  # every part of the marker answered, the merge not: submit repeats it
     verb = "submit" if asked or not pending else "cases-import" if "by_code" in step else "prepare"
-    return {"next": {"verb": verb, "stage": step["stage"]}, "waiting_for": "model" if asked else "agent", "budget": _budget(root, step),
-            **({} if verb == "cases-import" else {"answer_slot": str(slot(root, step["stage"]))})}
+    return {"next": {"verb": verb, "stage": step["stage"]}, "waiting_for": "model" if asked else "agent",
+            **({"budget": _budget(root, step)} if "bytes" in step or asked else {}), **({} if verb == "cases-import" else {"answer_slot": str(slot(root, step["stage"]))})}

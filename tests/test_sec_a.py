@@ -103,9 +103,9 @@ def test_an_api_json_input_without_a_run_is_read_only_inside_a_run(tmp_path: Pat
     inside = run_root / "tmp" / "document.json"
     inside.parent.mkdir(exist_ok=True)
     inside.write_text("{}", encoding="utf-8")
-    code, refused = _api(["document-digest", "--document", str(_outside(tmp_path))], capsys)
+    code, refused = _api(["relations-digest", "--relations", str(_outside(tmp_path))], capsys)
     assert code == 2 and refused["code"] == "INPUT_OUTSIDE_PROJECT", refused
-    code, line = _api(["document-digest", "--document", str(inside)], capsys)
+    code, line = _api(["relations-digest", "--relations", str(inside)], capsys)
     assert code == 0, line
 
 
@@ -299,5 +299,5 @@ def test_out_is_not_written_through_a_planted_link_of_its_temporary_name(tmp_pat
     source.write_text("{}", encoding="utf-8")
     _link(run_root / "tmp" / "digest.json.tmp", outside)
     out = run_root / "tmp" / "digest.json"
-    code, line = _api(["document-digest", "--document", str(source), "--out", str(out), "--run-root", str(run_root)], capsys)
+    code, line = _api(["relations-digest", "--relations", str(source), "--out", str(out), "--run-root", str(run_root)], capsys)
     assert code == 0 and outside.read_text(encoding="utf-8") == "keep" and json.loads(out.read_text(encoding="utf-8")), line

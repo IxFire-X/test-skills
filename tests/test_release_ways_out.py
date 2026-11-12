@@ -100,7 +100,7 @@ def test_n3_n4_the_texts_the_agent_reads() -> None:
     assert "`AUTOMATION_PARTIAL` — `TERMINAL + PARTIAL + PASS + accepted=false`" in usage
     generator = (ROOT / "skills" / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
     assert "`assemble` and `validate-canonical` before `model-response`" not in generator
-    assert "`assemble` runs only after the last batch" in generator
+    assert "assembles the last batch before its answer is written" in generator
 
 
 # --------------------------------------------------------------------------------------

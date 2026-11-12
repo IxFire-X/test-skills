@@ -208,46 +208,39 @@ def test_control_loader_pairs_a_surrogate_escape_pair_into_one_code_point(text: 
     assert all(not 0xD800 <= ord(char) <= 0xDFFF for char in value)
 
 
-def _fragment_request(tmp: Path, tail: str):
-    from tests.test_fragment_audit import _synthetic
+def _fragment_submit(tmp_path: Path, tail: str, capsys) -> list[str]:
+    """``submit`` of the first batch of a run with the slot holding the fragment with ``tail`` put into it."""
+    from tests.test_stage_steps import _generator
+    from tools import api, stage_steps
 
-    fragment, plan, header, context = _synthetic()
-    fragment = copy.deepcopy(fragment)
-    fragment.pop("digest", None)
+    run = _generator(tmp_path)
+    stage = run["stages"][0]
+    assert api.main(["prepare", "--run-root", str(run["root"]), "--stage", stage]) == 0
+    capsys.readouterr()
+    fragment = {key: value for key, value in copy.deepcopy(run["values"][0]).items() if key != "digest"}
     text = json.dumps(fragment, ensure_ascii=True)
-    (tmp / "fragment.json").write_text(text[:-1] + tail + "}", encoding="utf-8")
-    for name, value in (("plan", plan), ("header", header), ("context", context)):
-        (tmp / f"{name}.json").write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    return ["validate-fragment", "--fragment", str(tmp / "fragment.json"), "--plan", str(tmp / "plan.json"), "--header", str(tmp / "header.json"),
-            "--context-receipt", str(tmp / "context.json")]
+    stage_steps.slot(run["root"], stage).write_text(text[:-1] + tail + "}", encoding="utf-8")
+    return ["submit", "--run-root", str(run["root"]), "--stage", stage]
 
 
-def test_control_validate_fragment_with_a_finite_extra_value_is_refused_with_a_code_and_a_fix(capsys) -> None:
+def test_control_submit_with_a_finite_extra_value_is_refused_with_a_code_and_a_fix(tmp_path: Path, capsys) -> None:
     from tools import api
 
-    with tempfile.TemporaryDirectory() as folder:
-        argv = _fragment_request(Path(folder), ', "zz_extra": 1')
-        code = api.main(argv)
+    code = api.main(_fragment_submit(tmp_path, ', "zz_extra": 1', capsys))
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code == 2 and printed["status"] == "error" and printed["code"] != "ValueError", printed
 
 
 @pytest.mark.parametrize("tail,label", [(', "zz_extra": 1e999', "overflowing number"), (', "zz_extra": "' + BS + 'ud800"', "lone surrogate")])
-def test_validate_fragment_answers_a_non_serialisable_model_value_with_a_refusal_the_agent_can_act_on(tail: str, label: str, capsys) -> None:
-    """The model's fragment holds ``1e999`` / ``"\\ud800"``.  The strict loader lets it through, the digest of ``fill_fragment_bindings`` (before the schema is
+def test_submit_answers_a_non_serialisable_model_value_with_a_refusal_the_agent_can_act_on(tail: str, label: str, tmp_path: Path, capsys) -> None:
+    """The model's fragment holds ``1e999`` / ``"\ud800"``.  The strict loader lets it through, the digest of ``fill_fragment_bindings`` (before the schema is
     even asked) raises ValueError / UnicodeEncodeError, and the command prints ``{"code":"ValueError","fix":null,...}``: no schema path, no fix.  The same
     fragment with a duplicate key or a bad type is refused with a named code and a fix.  Right: the loader (or the schema check) refuses it first."""
     from tools import api
 
-    with tempfile.TemporaryDirectory() as folder:
-        argv = _fragment_request(Path(folder), tail)
-        try:
-            code = api.main(argv)
-        except SystemExit as stop:
-            code = stop.code  # the argument loader refused the file: also an answer
-            printed = {"status": "error", "code": "ARGUMENT", "fix": "x"}
-        else:
-            printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    argv = _fragment_submit(tmp_path, tail, capsys)
+    code = api.main(argv)
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code != 0 and printed["status"] == "error", (label, printed)
     assert printed["code"] not in ("ValueError", "UnicodeEncodeError") and printed.get("fix"), (label, printed)
 

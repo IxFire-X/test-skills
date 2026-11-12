@@ -80,8 +80,8 @@ def test_the_path_flags_of_every_parser_are_the_registered_ones() -> None:
 # the file flags of the commands of ``tools.api``, read by ``_read_inputs`` (``output_guard.input_file``) or judged by their text and
 # anchor (``--project``, ``--run-root``, ``--output-dir``: ``output_guard.existing_run`` / ``run_output_directory``)
 _API_FILE_FLAGS = {"--assembly-receipt", "--automation", "--candidate", "--candidate-receipt", "--canonical", "--context-marker-output",
-                   "--context-receipt", "--document", "--facts", "--fragment", "--generator-fragment", "--grouping", "--header",
-                   "--imported", "--input-file", "--inventory-receipt", "--module-root", "--output-dir", "--plan", "--prior-fragment",
+                   "--context-receipt", "--document", "--facts", "--generator-fragment", "--grouping", "--header",
+                   "--imported", "--input-file", "--inventory-receipt", "--module-root", "--output-dir",
                    "--project", "--relations", "--requirements", "--review", "--reviewer-session", "--run-root", "--session-start", "--value"}
 
 

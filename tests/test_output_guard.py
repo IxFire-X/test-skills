@@ -99,11 +99,11 @@ def test_the_cli_takes_run_root_for_a_command_that_has_no_run_of_its_own(tmp_pat
     source.parent.mkdir(exist_ok=True)
     source.write_text("{}", encoding="utf-8")
     out = run_root / "tmp" / "digest.json"
-    code, refused = _api(["document-digest", "--document", str(source), "--out", str(out)], capsys)
+    code, refused = _api(["relations-digest", "--relations", str(source), "--out", str(out)], capsys)
     assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN" and "--run-root" in refused["fix"] and not out.exists(), refused
-    code, line = _api(["document-digest", "--document", str(source), "--out", str(out), "--run-root", str(run_root)], capsys)
+    code, line = _api(["relations-digest", "--relations", str(source), "--out", str(out), "--run-root", str(run_root)], capsys)
     assert code == 0 and out.is_file() and line["out"] == str(out.resolve()), line
-    code, refused = _api(["document-digest", "--document", str(source), "--out", str(run_root / "d.json"), "--run-root", str(run_root)], capsys)
+    code, refused = _api(["relations-digest", "--relations", str(source), "--out", str(run_root / "d.json"), "--run-root", str(run_root)], capsys)
     assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
 
 
