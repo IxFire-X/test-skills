@@ -377,6 +377,26 @@ def test_no_decision_is_taken_after_the_plan_is_published(tmp_path: Path, capsys
     assert _events(root) == before and _decision(root, attempt_id) is None
 
 
+def test_the_same_answer_after_the_plan_is_published_is_answered_again(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _published_plan
+
+    root, _attempt, _plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _put(root, SCOPE, EXCLUDE)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 0 and out["result"]["answered"] is True and out["result"]["decision"] == "exclude" and _events(root) == before
+
+
+def test_another_answer_after_the_plan_is_published_is_a_conflict(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_scope_pause import _published_plan
+
+    root, attempt_id, _plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _put(root, SCOPE, CONTINUE)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, SCOPE)
+    assert code == 2 and out["code"] == "SCOPE_DECISION_CONFLICT" and _events(root) == before and _decision(root, attempt_id)["decision"] == "exclude"
+
+
 def test_status_follows_the_pause_before_prepare_with_the_file_and_after_submit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, _attempt = _paused(tmp_path)
     paused = _status(root)

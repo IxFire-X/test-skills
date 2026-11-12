@@ -185,7 +185,7 @@ def recorded(decision: Mapping[str, Any], **flags: Any) -> dict[str, Any]:
 
 def _refuse_after_plan(root: Path, attempt_id: str) -> None:
     """The decision is taken before the plan of the batches: the published plan carries the scope, another one is a new run."""
-    if plan_of(root, attempt_id) is not None:
+    if read_decision(root, attempt_id) is None and plan_of(root, attempt_id) is not None:  # a recorded decision stands, its repeat is safe
         raise ScopeRefused("SCOPE_DECISION_CONFLICT", "план пачек уже опубликован без этого решения; fix: другое решение — новый прогон (scan --new-run)")
 
 
