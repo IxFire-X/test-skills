@@ -111,7 +111,7 @@ def test_step_size_counts_the_role_instructions_and_reads_the_skillsrc_budget(tm
     assert report["budget_bytes"] == 1500 and code == 0 and report["warning"] == "STEP_OVER_BUDGET"
 
 
-@pytest.mark.parametrize("stage", ["context-marker", "context-marker:baseline"])  # MB2 D-A2: model-request asks for the second
+@pytest.mark.parametrize("stage", ["context-marker", "context-marker:baseline"])  # MB2 D-A2: prepare asks for the second
 def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str) -> None:
     from tests.test_phase2_scan import _args, _project
     from tools import run_pipeline

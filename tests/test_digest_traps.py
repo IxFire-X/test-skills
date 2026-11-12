@@ -1,19 +1,15 @@
 """FaT-DG: the digest traps of the 28.10 campaign, each caught before anything is written, with the right value in the
-refusal; the stage keeps its one retry. The chain runs through `python -m tools.api` commands."""
+refusal; the stage keeps its one retry. The chain runs through the commands of the agent (`prepare`, `submit`)."""
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from tests.test_review_requested import _api, _generated_run, _journal, _put
+from tests.helpers import prepare_stage, submit_stage
 from tests.journal_helpers import assert_refused_once
-
-
-def _sha_file(path: str) -> str:
-    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _publish_inputs(run: dict) -> tuple[str, str]:
@@ -27,13 +23,6 @@ def _publish_inputs(run: dict) -> tuple[str, str]:
     return published_plan["digest"], published_header["digest"]
 
 
-def _generator_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, transport: str = "") -> tuple[int, dict]:
-    context = json.loads(Path(run["context"]).read_bytes())["digest"]
-    return _api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                "--model-id", "model-generator", "--invocation-id", "invoke-generator",
-                "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest)
-
-
 def test_one_digest_for_plan_and_header(tmp_path: Path) -> None:
     run = _generated_run(tmp_path, generated=False)
     plan_digest, header_digest = _publish_inputs(run)
@@ -42,40 +31,6 @@ def test_one_digest_for_plan_and_header(tmp_path: Path) -> None:
     # the same value again changes nothing
     before = _journal(run["run_root"])
     assert _publish_inputs(run) == (plan_digest, header_digest) and _journal(run["run_root"]) == before
-
-
-def test_commons_lang_b1a27c0b_bytes_digest_of_the_header(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, generated=False)
-    plan_digest, header_digest = _publish_inputs(run)
-    batch = json.loads(Path(run["fragments"][0]).read_bytes())["batch_id"]
-    before = _journal(run["run_root"])
-    code, refused = _generator_request(run, batch, plan_digest, _sha_file(run["header"]))
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH", refused
-    assert "вход 4" in refused["message"] and header_digest in refused["message"] and "submit --stage plan" in refused["message"], refused
-    assert "вход 3" not in refused["message"] and _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, requested = _generator_request(run, batch, plan_digest, header_digest)
-    assert code == 0, requested
-
-
-def test_jpetstore_05b4a6e3_bytes_digests_of_plan_and_header(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, generated=False)
-    plan_digest, header_digest = _publish_inputs(run)
-    batch = json.loads(Path(run["fragments"][0]).read_bytes())["batch_id"]
-    before = _journal(run["run_root"])
-    code, refused = _generator_request(run, batch, _sha_file(run["plan"]), _sha_file(run["header"]))
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH", refused
-    assert plan_digest in refused["message"] and header_digest in refused["message"] and "вход 3" in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-
-
-def test_a_request_before_the_plan_is_published_names_the_command(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, generated=False)
-    plan = json.loads(Path(run["plan"]).read_bytes())
-    batch = json.loads(Path(run["fragments"][0]).read_bytes())["batch_id"]
-    code, refused = _generator_request(run, batch, plan["digest"], plan["header_digest"])
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "submit --stage plan" in refused["message"], refused
 
 
 def _uncovered(fragment: dict) -> dict:
@@ -92,19 +47,19 @@ def _uncovered(fragment: dict) -> dict:
 
 def test_microservices_4d8491a2_uncovered_requirement_before_the_write(tmp_path: Path) -> None:
     run = _generated_run(tmp_path, generated=False)
-    plan_digest, header_digest = _publish_inputs(run)
+    _publish_inputs(run)
     fragment = json.loads(Path(run["fragments"][0]).read_bytes())
-    assert _generator_request(run, fragment["batch_id"], plan_digest, header_digest)[0] == 0
+    stage = f"tc-generator:{fragment['batch_id']}"
+    assert prepare_stage(run["run_root"], stage)[0] == 0
     bad = _uncovered(fragment)
     before = _journal(run["run_root"])
-    response = ("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{fragment['batch_id']}")
-    code, refused = _api(*response, "--artifact", _put(run["tmp"] / "bad.json", bad))
+    code, refused = submit_stage(run["run_root"], stage, bad)
     assert code == 2 and refused["code"] == "BATCH_UNCOVERED_REQUIREMENT", refused
-    assert bad["requirements"][1]["requirement_id"] in refused["message"] and "--transport-attempts 2" in refused["message"], refused
+    assert bad["requirements"][1]["requirement_id"] in refused["message"] and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     # the one retry of the stage is still there
-    code, answered = _api(*response, "--artifact", run["fragments"][0], "--transport-attempts", "2")
+    code, answered = submit_stage(run["run_root"], stage, run["fragments"][0], "--transport-attempts", "2")
     assert code == 0, answered
 
 
@@ -181,7 +136,7 @@ def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_
 
 
 def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monkeypatch) -> None:
-    """A run whose generator request was published without the published plan and header (the old flow) reads as before."""
+    """A run whose generator request was published without the published plan and header (the old flow) is read as before."""
     from tools import pilot_state
 
     run = _generated_run(tmp_path, generated=False)
@@ -195,30 +150,27 @@ def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monk
     state = pilot_state.derive_state(run["run_root"])
     request = next(event for event in state["events"] if event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id", "").startswith("tc-generator:"))
     assert pilot_state.read_model_request(run["run_root"], run["attempt_id"], request["stage_instance_id"], request["artifact_digest"])["input_digests"][2] == plan["digest"]
-    code, answered = _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", request["stage_instance_id"],
-                          "--artifact", run["fragments"][0])
-    assert code == 0, answered
-    code, inputs = _api("step-inputs", "--run-root", str(run["run_root"]), "--stage", request["stage_instance_id"])
-    assert code == 0, inputs
+    # the cycle of the agent does not drive such a run: its steps come from the published plan, which the old flow never had
+    assert prepare_stage(run["run_root"], request["stage_instance_id"])[1]["code"] == "STAGE_UNKNOWN"
 
 
 def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tmp_path: Path) -> None:
-    """The whole fragment check runs at model-response against the published plan/header, not only in assemble."""
+    """The whole fragment check runs at submit against the published plan/header, not only in assemble."""
     from tools.batch_assembly import with_digest
 
     run = _generated_run(tmp_path, generated=False)
-    plan_digest, header_digest = _publish_inputs(run)
+    _publish_inputs(run)
     fragment, other = (json.loads(Path(path).read_bytes()) for path in run["fragments"])
-    assert _generator_request(run, fragment["batch_id"], plan_digest, header_digest)[0] == 0
+    stage = f"tc-generator:{fragment['batch_id']}"
+    assert prepare_stage(run["run_root"], stage)[0] == 0
     bad = {key: item for key, item in fragment.items() if key != "digest"}
     bad["test_cases"] = [dict(bad["test_cases"][0], requirement_ids=[*bad["test_cases"][0]["requirement_ids"], other["requirements"][0]["requirement_id"]])]
     before = _journal(run["run_root"])
-    response = ("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{fragment['batch_id']}")
-    code, refused = _api(*response, "--artifact", _put(run["tmp"] / "foreign.json", with_digest(bad)))
-    assert code == 2 and refused["code"] == "BATCH_PARTITION_CONFLICT" and "--transport-attempts 2" in refused["message"], refused
+    code, refused = submit_stage(run["run_root"], stage, with_digest(bad))
+    assert code == 2 and refused["code"] == "BATCH_PARTITION_CONFLICT" and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, answered = _api(*response, "--artifact", run["fragments"][0], "--transport-attempts", "2")
+    code, answered = submit_stage(run["run_root"], stage, run["fragments"][0], "--transport-attempts", "2")
     assert code == 0, answered
 
 

@@ -11,7 +11,7 @@ from tools import pilot_state
 
 @pytest.mark.parametrize("given", [True, False], ids=["with --input-digest", "without --input-digest"])
 def test_a_new_run_without_publish_generator_input_is_refused_at_model_request(tmp_path: Path, given: bool) -> None:
-    """Audit 1, 5g: the coverage-only check of model-response is reachable only for a request from before FaT-DG — a new
+    """Audit 1, 5g: the coverage-only check of submit is reachable only for a request from before FaT-DG — a new
     generator request without the published plan and header is refused, with the fix, before anything is written."""
     from tests.test_step_inputs import _generator_run
 

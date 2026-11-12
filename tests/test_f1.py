@@ -1,7 +1,6 @@
 """F1 «правда отчёта и status» (bug hunt 8: 8.1, 8.3, 8.4, 8.5; arch review 3: A1-1, A1-3, A1-7): the report takes the case document only
 from the journal; the size of an answer never drops under the stored artifact; the number of refusals says it comes from a file;
-read-receipt before the boundary says «not yet» without a refusal; a receipt of the journal without its file is named by status
-and the report."""
+a receipt of the journal without its file is a refusal with its code and fix, and is named by status and the report."""
 from __future__ import annotations
 
 import json
@@ -9,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run, _put
+from tests.helpers import answer_stage, submit_stage
+from tests.test_review_requested import _generated_run, _put
 from tests.test_review_two_commands import _events, _flags, _open, _select_verdict, _verdict
 
 
@@ -119,7 +119,7 @@ def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
     run = _generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
-    code, answered = _main(capsys, ["model-response", *_flags(run), "--stage", stage, "--artifact", str(fragment)])
+    code, answered = answer_stage(run["run_root"], stage, fragment)
     assert code == 0 and answered["result"]["warning"] == "STEP_OUTPUT_LARGE" and answered["result"]["output_basis"] == "raw", answered
     assert "STEP_OUTPUT_LARGE" in _report(run)["warnings"]
     sizes = Path(run["run_root"]) / "output-sizes.jsonl"
@@ -138,7 +138,7 @@ def test_the_number_of_refusals_comes_from_the_journal(tmp_path: Path) -> None:
     from tools.run_report import render_markdown
 
     run = _opened(tmp_path)
-    code, refused = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", "f" * 32)
+    code, refused = submit_stage(run["run_root"], "tc-unknown:x")  # a stage the run has no step for
     assert code == 2, refused
     report = _report(run)
     assert report["refusals"]["total"] == 1 and report["refusals"]["mismatch"] is None
@@ -146,38 +146,28 @@ def test_the_number_of_refusals_comes_from_the_journal(tmp_path: Path) -> None:
     assert "по журналу" in render_markdown(report) and "журналом не подтверждено" not in render_markdown(report)
 
 
-# --- read-receipt before the boundary -----------------------------------------------------------------------------------
+# --- a receipt whose file is gone --------------------------------------------------------------------------------------
 
-def test_read_receipt_of_the_boundary_before_review_open_is_not_yet_and_not_a_refusal(tmp_path: Path, capsys) -> None:
-    run = _generated_run(tmp_path)
-    root = Path(run["run_root"])
-    code, answer = _main(capsys, ["read-receipt", "--run-root", str(root), "--attempt", run["attempt_id"], "--kind", "reviewer-session-boundary",
-                                  "--event", "ARTIFACT_READ_BACK"])
-    assert code == 0 and answer["status"] == "ok", answer
-    assert answer["result"]["receipt"] is None and "ещё нет" in answer["result"]["reason"], answer
-    assert not (root / "refusals.jsonl").exists()
+def _refusal_of_the_receipt(run: dict, kind: str) -> dict:
+    from tools.json_cli import error_envelope
+    from tools.pilot_state import read_attempt_receipt
 
-
-def test_read_receipt_of_the_boundary_after_review_open_is_the_receipt_as_before(tmp_path: Path, capsys) -> None:
-    run = _opened(tmp_path)
-    code, answer = _main(capsys, ["read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "reviewer-session-boundary",
-                                  "--event", "ARTIFACT_READ_BACK"])
-    assert code == 0 and answer["result"]["record"]["kind"] == "reviewer-session-boundary" and answer["result"]["digest"], answer
+    with pytest.raises(ValueError) as refused:
+        read_attempt_receipt(run["run_root"], run["attempt_id"], kind, "ARTIFACT_READ_BACK")
+    return error_envelope(refused.value)
 
 
-def test_read_receipt_of_a_boundary_the_journal_knows_but_whose_file_is_gone_is_a_refusal_with_a_code_and_a_fix(tmp_path: Path, capsys) -> None:
+def test_the_receipt_of_a_boundary_the_journal_knows_but_whose_file_is_gone_is_a_refusal_with_a_code_and_a_fix(tmp_path: Path) -> None:
     run = _opened(tmp_path)
     next((Path(run["run_root"]) / "reviewer-session-boundaries").glob("*.json")).unlink()
-    code, answer = _main(capsys, ["read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "reviewer-session-boundary",
-                                  "--event", "ARTIFACT_READ_BACK"])
-    assert code == 2 and answer["code"] not in ("ValueError", None) and answer.get("fix"), answer  # never «not yet»
+    answer = _refusal_of_the_receipt(run, "reviewer-session-boundary")
+    assert answer["code"] not in ("ValueError", None) and answer.get("fix"), answer  # never «not yet»
 
 
-def test_read_receipt_of_another_kind_without_its_file_is_a_coded_refusal(tmp_path: Path, capsys) -> None:
+def test_the_receipt_of_another_kind_without_its_file_is_a_coded_refusal(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
-    code, answer = _main(capsys, ["read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "effective-canonical",
-                                  "--event", "ARTIFACT_READ_BACK"])
-    assert code == 2 and answer["code"] not in ("ValueError", None) and answer.get("fix"), answer
+    answer = _refusal_of_the_receipt(run, "effective-canonical")
+    assert answer["code"] not in ("ValueError", None) and answer.get("fix"), answer
 
 
 # --- 8.5 / A1-7 -------------------------------------------------------------------------------------------------------

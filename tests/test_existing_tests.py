@@ -235,7 +235,7 @@ def test_the_map_of_a_campaign_project_keeps_the_worst_batch_in_the_window(proje
 
 @pytest.mark.parametrize("with_tests", [True, False])
 def test_the_report_counts_the_map_in_the_generator_input_as_step_inputs_do(tmp_path: Path, with_tests: bool) -> None:
-    """FaT-RE (hunt 3, 3.12): the report measured the batch input without the map that step-inputs give the generator."""
+    """FaT-RE (hunt 3, 3.12): the report measured the batch input without the map that the list of reading of prepare gives the generator."""
     from tools.run_report import build_report
     from tools.step_size import request_files
 

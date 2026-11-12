@@ -1,7 +1,7 @@
 """F4b: the envelope of every CLI, no deepcopy of scalars; the delivery of cases has no mode-B command.
 
 - A3-2: ``review-requested`` is not a command of the cases delivery (the review of the cases goes by ``prepare`` / ``submit``);
-- A5-5: ``MODEL_OUTPUT_TRUNCATED`` of ``--artifact`` and of the answer in the slot of the review is a refusal with its code and fix,
+- A5-5: ``MODEL_OUTPUT_TRUNCATED`` of the answer in the slot of the review is a refusal with its code and fix,
   recorded in ``refusals.jsonl`` — not ``INVALID_ARGUMENT`` with «check the flags»;
 - A5-9: ``step_size``, ``review_view``, ``review_edits`` refuse with ``code`` and ``fix``;
 - O-9: ``_plain`` leaves a scalar as it is."""
@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_pack_profile import copy_profile
-from tests.test_review_requested import _api, _generated_run
-from tests.test_review_two_commands import _open, _select_verdict
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _cycle, _open, _select_verdict
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,16 +54,6 @@ def _truncated(tmp_path: Path) -> str:
     return str(path)
 
 
-def test_a_truncated_answer_is_a_refusal_with_its_code_its_fix_and_a_line_in_the_refusals(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    code, printed = _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "context-marker:baseline",
-                         "--artifact", _truncated(run["tmp"]))  # SEC-A: the answer lies in the run
-    assert code == 2 and printed["code"] == "MODEL_OUTPUT_TRUNCATED", printed
-    assert printed["fix"] and "флаги" not in printed["fix"] and "--help" not in printed["fix"]
-    lines = [json.loads(row) for row in (run["run_root"] / "refusals.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert any(row["code"] == "MODEL_OUTPUT_TRUNCATED" and row["command"] == "model-response" for row in lines), lines
-
-
 def test_a_truncated_answer_of_the_review_is_refused_by_submit_with_its_code_and_a_line(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
@@ -76,12 +66,12 @@ def test_a_truncated_answer_of_the_review_is_refused_by_submit_with_its_code_and
 
 def test_a_missing_or_broken_answer_file_has_a_code_and_a_fix_too(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
-    ids = ["--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", "context-marker:baseline"]
-    code, missing = _api("model-response", *ids, "--artifact", str(run["tmp"] / "nothing.json"))
+    assert _open(run)[0] == 0
+    code, missing = _cycle("submit", run)  # nothing in the slot
     assert code == 2 and missing["code"] == "ANSWER_FILE_UNREADABLE" and missing["fix"], missing
     broken = run["tmp"] / "broken.json"
     broken.write_text('{"a": 1,, }', encoding="utf-8")
-    code, bad = _api("model-response", *ids, "--artifact", str(broken))
+    code, bad = _select_verdict(run, str(broken))
     assert code == 2 and bad["code"] == "ANSWER_JSON_INVALID" and bad["fix"], bad
 
 

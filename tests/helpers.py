@@ -118,7 +118,7 @@ def projection_fixture(root: Path, target: Path) -> Path:
 @contextlib.contextmanager
 def generator_requests_before_dg():
     """FaT-DG: fixtures whose generator fragments carry no real plan publish their requests as runs did before
-    FaT-DG — no published plan/header, so model-request checks no inputs and model-response checks only coverage."""
+    FaT-DG — no published plan/header, so the request checks no inputs and the answer is checked only for coverage."""
     import pytest
 
     from tools import pilot_state
@@ -149,3 +149,46 @@ def run_tmp(tmp_path: Path) -> Path:
     directory = run_root / "tmp"
     directory.mkdir(exist_ok=True)
     return directory
+
+
+# ---- the cycle of the agent over one stage: ``prepare`` -> the answer in the slot -> ``submit`` (in process, through ``api.main``) ----
+
+def api_call(*argv: str) -> tuple[int, dict]:
+    """One command of ``tools.api`` in this process: the exit code and the last JSON line it printed (the result or the refusal)."""
+    import io
+
+    from tools import api
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = api.main(list(argv))
+    return code, json.loads(buffer.getvalue().strip().splitlines()[-1])
+
+
+def put_in_slot(run_root: Path, stage: str, answer: object) -> Path:
+    """The answer into the slot of the stage: a path is copied byte for byte, bytes as they are, any other value is written as JSON."""
+    from tools import stage_steps
+
+    slot = stage_steps.slot(run_root, stage)
+    slot.parent.mkdir(exist_ok=True)
+    if isinstance(answer, (str, Path)):
+        answer = Path(answer).read_bytes()
+    slot.write_bytes(answer if isinstance(answer, bytes) else json.dumps(answer, ensure_ascii=False).encode("utf-8"))
+    return slot
+
+
+def prepare_stage(run_root: Path, stage: str, *extra: str) -> tuple[int, dict]:
+    return api_call("prepare", "--run-root", str(run_root), "--stage", stage, *extra)
+
+
+def submit_stage(run_root: Path, stage: str, answer: object = None, *extra: str) -> tuple[int, dict]:
+    """``submit`` of the stage; *answer* (if given) is put into the slot first, ``None`` leaves the slot as it is."""
+    if answer is not None:
+        put_in_slot(run_root, stage, answer)
+    return api_call("submit", "--run-root", str(run_root), "--stage", stage, *extra)
+
+
+def answer_stage(run_root: Path, stage: str, answer: object, *extra: str, prepare: tuple[str, ...] = ()) -> tuple[int, dict]:
+    """``prepare`` the stage, put the answer into its slot, ``submit`` it; stops at the first refusal and returns it."""
+    code, out = prepare_stage(run_root, stage, *prepare)
+    return (code, out) if code else submit_stage(run_root, stage, answer, *extra)

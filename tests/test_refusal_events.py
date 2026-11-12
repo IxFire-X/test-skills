@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run
+from tests.helpers import submit_stage
+from tests.test_review_requested import _generated_run
 
 
 def _events(run_root: Path) -> list[dict]:
@@ -31,8 +32,8 @@ def _raw(run_root: Path) -> bytes:
 
 def _refuse(run: dict, times: int = 1) -> None:
     for _ in range(times):
-        code, refused = _api("read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "no-such-kind", "--event", "ARTIFACT_READ_BACK")
-        assert code == 2, refused
+        code, refused = submit_stage(run["run_root"], "tc-unknown:x")  # a stage the run has no step for
+        assert code == 2 and refused["code"] == "STAGE_UNKNOWN", refused
 
 
 def _rows(run_root: Path) -> list[bytes]:
@@ -101,7 +102,7 @@ def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_sta
     copy = run["run_root"] / "events" / "0000000003.json"
     copy.write_bytes(copy.read_bytes() + b" ")  # the journal no longer passes its checks
     before = _raw(run["run_root"])
-    code, refused = _api("read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "x", "--event", "ARTIFACT_READ_BACK")
+    code, refused = submit_stage(run["run_root"], "tc-unknown:x")
     assert code == 2
     assert _raw(run["run_root"]) == before and len(_rows(run["run_root"])) == 1  # the line is there, no event was written into a broken journal
 

@@ -1,6 +1,5 @@
-"""Audit U2: the digests the code knows are put by the code — model-request takes its inputs from the journal when no
---input-digest is given; model-response (and the check of a fragment) put the binding fields an answer leaves out and refuse
-the ones given wrong, as before."""
+"""Audit U2: the digests the code knows are put by the code — ``prepare`` takes the inputs of the request from the journal;
+``submit`` (and the check of a fragment) put the binding fields an answer leaves out and refuse the ones given wrong, as before."""
 from __future__ import annotations
 
 import json
@@ -15,12 +14,13 @@ def _stage(run: dict) -> str:
     return f"tc-generator:{run['plan']['batches'][0]['batch_id']}"
 
 
-def test_without_input_digest_the_request_takes_the_inputs_the_journal_fixes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import import _generator_request, _to_generator
+def test_the_request_takes_the_inputs_the_journal_fixes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _to_generator
     from tools import pilot_state
 
     run = _to_generator(tmp_path, monkeypatch)
-    code, requested = _generator_request(run)
+    code, requested = prepare_stage(run["root"], _stage(run))
     assert code == 0, requested
     state = pilot_state.derive_state(run["root"])
     attempt = state["attempts"][-1]
@@ -55,11 +55,12 @@ def _fragment(run: dict) -> dict:
 
 
 def test_a_fragment_without_its_binding_fields_gets_them_from_the_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import import _generator_request, _to_generator
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _to_generator
     from tools import pilot_state
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run)[0] == 0
+    assert prepare_stage(run["root"], _stage(run))[0] == 0
     good = _fragment(run)
     bare = {key: value for key, value in good.items() if key not in BINDINGS}
     published = pilot_state.publish_model_stage_artifact(run["root"], run["attempt_id"], _stage(run), bare)
@@ -70,11 +71,12 @@ def test_a_fragment_without_its_binding_fields_gets_them_from_the_code(tmp_path:
 
 
 def test_a_binding_field_given_wrong_is_refused_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import import _generator_request, _to_generator
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _to_generator
     from tools import pilot_state
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run)[0] == 0
+    assert prepare_stage(run["root"], _stage(run))[0] == 0
     wrong = {key: value for key, value in _fragment(run).items() if key != "digest"}
     wrong["header_digest"] = run["plan_digest"]
     with pytest.raises(ValueError, match="MODEL_RESPONSE_DIGEST_MISMATCH: .*/header_digest"):
@@ -82,11 +84,12 @@ def test_a_binding_field_given_wrong_is_refused_as_before(tmp_path: Path, monkey
 
 
 def test_a_full_answer_is_stored_as_before_and_names_nothing_filled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import import _generator_request, _to_generator
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _to_generator
     from tools import pilot_state
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run)[0] == 0
+    assert prepare_stage(run["root"], _stage(run))[0] == 0
     good = _fragment(run)
     published = pilot_state.publish_model_stage_artifact(run["root"], run["attempt_id"], _stage(run), good)
     assert "filled" not in published and published["content_digest"] == pilot_state._model_stage_artifact_digest(good)
@@ -107,12 +110,13 @@ def test_validate_fragment_accepts_what_model_response_will_fill(tmp_path: Path,
 
 def test_a_refused_retry_does_not_advise_the_retry_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit 2 (FaT-AB): the answer given as the one retry and refused names the way out of the stage, not a third call."""
-    from tests.test_cases_import import _generator_request, _to_generator
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _to_generator
     from tools import pilot_state
     from tools.json_cli import error_fields
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run)[0] == 0
+    assert prepare_stage(run["root"], _stage(run))[0] == 0
     wrong = dict(_fragment(run), header_digest=run["plan_digest"])
     with pytest.raises(ValueError) as first:
         pilot_state.publish_model_stage_artifact(run["root"], run["attempt_id"], _stage(run), wrong)

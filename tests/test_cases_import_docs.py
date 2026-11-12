@@ -12,7 +12,8 @@ import pytest
 
 from tests.journal_helpers import assert_refused_in_order
 
-from tests.test_cases_import import CSV, _generator_request, _project, _scan
+from tests.helpers import prepare_stage, submit_stage
+from tests.test_cases_import import CSV, _project, _scan
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -191,32 +192,30 @@ def _changed(good: dict, change) -> dict:
 
 
 def test_the_trace_goes_through_the_documents_and_the_management_stays_byte_for_byte(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _api, _journal, _put
+    from tests.test_review_requested import _journal
 
     run = _to_plan(tmp_path, monkeypatch)
     [batch] = run["plan"]["batches"]
-    skeleton = run["batch_skeletons"][batch["batch_id"]]
-    code, requested = _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], skeleton)
-    assert code == 0, requested
+    stage = f"tc-generator:{batch['batch_id']}"
+    code, prepared = prepare_stage(run["root"], stage)
+    assert code == 0, prepared
     good = _fragment(run)
-    tmp = run["root"] / "tmp"
-    response = ("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch['batch_id']}")
     before = _journal(run["root"])
 
     def folder(value: dict) -> None:
         value["test_cases"][0]["management"]["folder"] = "/Другая папка"
 
-    code, refused = _api(*response, "--artifact", _put(tmp / "folder.json", _changed(good, folder)))
+    code, refused = submit_stage(run["root"], stage, _changed(good, folder))
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/management" in refused["message"], refused
 
     def trace(value: dict) -> None:
         value["test_cases"][0]["requirement_ids"] = value["test_cases"][0]["requirement_ids"][:1]  # SREQ-0003 dropped
 
-    code, refused = _api(*response, "--artifact", _put(tmp / "trace.json", _changed(good, trace)))
+    code, refused = submit_stage(run["root"], stage, _changed(good, trace))
     assert code == 2 and refused["code"] == "IMPORT_TRACE_CHANGED" and "SREQ-0001, SREQ-0003" in refused["message"], refused
     assert _journal(run["root"]) == before
-    assert_refused_in_order(run["root"], before, ("model-response", "IMPORT_HUMAN_FIELD_CHANGED"), ("model-response", "IMPORT_TRACE_CHANGED"))  # J1: the two refusals of the test
-    code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
+    assert_refused_in_order(run["root"], before, ("submit", "IMPORT_HUMAN_FIELD_CHANGED"), ("submit", "IMPORT_TRACE_CHANGED"))  # J1: the two refusals of the test
+    code, answered = submit_stage(run["root"], stage, good, "--transport-attempts", "2")
     assert code == 0, answered
 
 

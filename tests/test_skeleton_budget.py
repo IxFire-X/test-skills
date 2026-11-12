@@ -74,14 +74,14 @@ def test_the_plan_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path) -> 
     assert any("её часть скелета импорта" in note for note in plan.notes)
 
 
-def test_step_inputs_of_a_batch_read_the_skeleton_of_that_batch(run: dict) -> None:
-    from tests.test_cases_import import _generator_request, _skeleton
+def test_the_step_inputs_of_a_batch_read_the_skeleton_of_that_batch(run: dict) -> None:
+    from tests.helpers import prepare_stage
+    from tests.test_cases_import import _skeleton
     from tools.pilot_state import _receipt_target
     from tools.step_size import request_files
 
-    four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
-    assert _generator_request(run, *four, _skeleton(run))[0] == 0
     batch_id = run["plan"]["batches"][0]["batch_id"]
+    assert prepare_stage(run["root"], f"tc-generator:{batch_id}")[0] == 0
     files = request_files(run["root"], f"tc-generator:{batch_id}")
     [row] = [row for row in files["files"] if row["digest"] == _skeleton(run)]
     assert Path(row["path"]) == _receipt_target(run["root"], run["attempt_id"], "imported-cases-" + batch_id), files

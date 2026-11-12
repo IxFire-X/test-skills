@@ -203,7 +203,7 @@ def test_c1_two_batches_in_skill_order_spend_no_retry_on_batch_one() -> None:
     plan = _plan(header, context)
     assert len(plan["batches"]) == 2
     first, second = _fragment(plan, context, 0), _fragment(plan, context, 1)
-    validate_fragment(first, plan, header, context)  # before model-response of batch 1: the check the SKILL names
+    validate_fragment(first, plan, header, context)  # before submit of batch 1: the check the SKILL names
     with pytest.raises(BatchAssemblyError) as partial:  # the check the SKILL used to name: it always refused here
         assemble_candidate(header, plan, [first])
     assert partial.value.code == "BATCH_PARTITION_CONFLICT"

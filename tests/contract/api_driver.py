@@ -68,13 +68,41 @@ def recording(monkeypatch):
     yield observed
 
 
+def _generator_request(run: dict, batch_id: str, plan_digest: str, header_digest: str) -> tuple[int, dict]:
+    """The old command ``model-request`` of a batch — driven here until the part that deletes the command (the tests of the generator went to ``prepare``)."""
+    from tests import test_review_requested as rr
+
+    context = json.loads(Path(run["context"]).read_bytes())["digest"]
+    return rr._api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
+                   "--model-id", "model-generator", "--invocation-id", "invoke-generator",
+                   "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest)
+
+
+def _second_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, *fifth: str) -> tuple[int, dict]:
+    """The same for a later batch: the digests of the earlier batches are the fifth input."""
+    from tests import test_review_requested as rr
+
+    context = json.loads(Path(run["context"]).read_bytes())["digest"]
+    return rr._api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
+                   "--model-id", "model-generator", "--invocation-id", "invoke-generator-2",
+                   "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest,
+                   *[flag for digest in fifth for flag in ("--input-digest", digest)])
+
+
+def _response(run: dict, batch_id: str, artifact: str, *extra: str) -> tuple[int, dict]:
+    """The old command ``model-response`` of a batch."""
+    from tests import test_review_requested as rr
+
+    return rr._api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
+                   "--artifact", artifact, *extra)
+
+
 def drive(tmp_path: Path, monkeypatch) -> Observed:
     """The commands reachable by the helpers of the existing tests, in four runs."""
     import shutil
 
     from tests import test_review_requested as rr
-    from tests.test_batch_journal import _prior, _response, _run, _second_request
-    from tests.test_digest_traps import _generator_request
+    from tests.test_batch_journal import _prior, _run
     from tests.test_cut_review import _evidence_verdict
     from tests.test_review_two_commands import _candidate_file, _flags, _slot, _verdict
 

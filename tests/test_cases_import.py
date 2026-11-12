@@ -203,44 +203,37 @@ def test_the_skeleton_keeps_the_human_fields_of_the_csv(tmp_path: Path, monkeypa
     assert [step["expectations"] for step in second["steps"]] == [["Возвращена строка «a:»"], ["Строки совпадают", "Длина строки 2"]]
 
 
-def _generator_request(run: dict, *inputs: str) -> tuple[int, dict]:
-    from tests.test_review_requested import _api
-
-    batch_id = run["plan"]["batches"][0]["batch_id"]
-    return _api("model-request", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                "--model-id", "model-generator", "--invocation-id", "invoke-generator",
-                *[flag for digest in inputs for flag in ("--input-digest", digest)])
+def _batch_stage(run: dict, index: int = 0) -> str:
+    return f"tc-generator:{run['plan']['batches'][index]['batch_id']}"
 
 
 def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_checked_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _api, _journal, _put
+    from tests.helpers import prepare_stage, submit_stage
+    from tests.test_review_requested import _journal
     from tools.batch_assembly import with_digest
+    from tools.pilot_state import read_model_request
 
     run = _to_generator(tmp_path, monkeypatch)
-    four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
-    code, refused = _generator_request(run, *four)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and _skeleton(run) in refused["message"], refused
-    assert "submit --stage plan" in refused["message"]
-    code, requested = _generator_request(run, *four, _skeleton(run))
-    assert code == 0, requested
+    code, prepared = prepare_stage(run["root"], _batch_stage(run))
+    assert code == 0, prepared
+    request = read_model_request(run["root"], run["attempt_id"], _batch_stage(run), prepared["result"]["request_digest"])
+    assert request["input_digests"] == [run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], _skeleton(run)], request
 
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
     changed = {key: value for key, value in good.items() if key != "digest"}
     first = changed["test_cases"][0]
     changed["test_cases"] = [dict(first, steps=[dict(first["steps"][0], test_data="другие данные"), *first["steps"][1:]])] + changed["test_cases"][1:]
-    tmp = run["root"] / "tmp"
     before = _journal(run["root"])
-    response = ("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{good['batch_id']}")
-    code, refused = _api(*response, "--artifact", _put(tmp / "changed.json", with_digest(changed)))
+    code, refused = submit_stage(run["root"], _batch_stage(run), with_digest(changed))
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/steps/0/test_data" in refused["message"], refused
-    assert "--transport-attempts 2" in refused["message"] and _journal(run["root"]) == before
+    assert "--transport-attempts 2" in refused["fix"] and _journal(run["root"]) == before
     assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     from tools.batch_assembly import BatchAssemblyError, validate_fragment
 
     with pytest.raises(BatchAssemblyError) as validated:  # the check of the fragment itself: the same code
         validate_fragment(with_digest(changed), run["plan"], run["header"], run["context"], imported=run["imported"])
     assert validated.value.code == "IMPORT_HUMAN_FIELD_CHANGED"
-    code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
+    code, answered = submit_stage(run["root"], _batch_stage(run), good, "--transport-attempts", "2")
     assert code == 0, answered
 
 
@@ -351,19 +344,19 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
     review → materialize, a run of the printed command and ingest of the pytest mini project."""
     from tests.test_automation_revision_budget import durable_boundary, host_evidence, review
     from tests.p4_flow import flow_args, human_run
-    from tests.test_review_requested import _api, _put
+    from tests.helpers import answer_stage
+    from tests.test_review_requested import _put
     from tests.test_review_two_commands import _candidate_file, _open, _select_verdict, _verdict
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import (append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt,
-                                   read_model_stage_artifact, read_terminal_result)
+                                   read_effective_canonical, read_model_stage_artifact, read_terminal_result)
     from tools import exec_commands
 
     run = _to_generator(tmp_path, monkeypatch)
     root, attempt_id, tmp = run["root"], run["attempt_id"], run["root"] / "tmp"
-    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], _skeleton(run))[0] == 0
     fragment = _automated_fragment(run)
-    code, answered = _api("model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", f"tc-generator:{fragment['batch_id']}",
-                          "--artifact", _put(tmp / "fragment.json", fragment))
+    _put(tmp / "fragment.json", fragment)  # the review below reads the fragment as a file
+    code, answered = answer_stage(root, _batch_stage(run), fragment)
     assert code == 0, answered
 
     [inventory] = [json.loads(path.read_text(encoding="utf-8")) for path in (root / "inventories").glob("*.json")]
@@ -379,10 +372,9 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
         (case["title"], [step["test_data"] for step in case["steps"]]) for case in run["imported"]["cases"]]  # the human fields of the CSV
     code, selected = _select_verdict(review_run, _verdict(review_run))
     assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", selected
-    code, effective = _api("read-effective", "--run-root", str(root), "--attempt", attempt_id)
-    assert code == 0, effective
+    effective = read_effective_canonical(root, attempt_id)  # the setup of the scene: the library reads what the host does not
 
-    artifact = _automation(document, effective["result"]["effective_bundle_receipt_digest"])
+    artifact = _automation(document, effective["effective_bundle_receipt_digest"])
     evidence = host_evidence("static-session", generator=f"automation-generator-{attempt_id[:12]}", reviewer=f"automation-reviewer-{attempt_id[:12]}")
     _root, _attempt, static_boundary = durable_boundary(run["project"], artifact, "static-session", evidence, run_root=root, attempt_id=attempt_id,
                                                         generator=evidence["generator_invocation_id"], reviewer=evidence["reviewer_invocation_id"])
@@ -412,23 +404,22 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
 
 def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The human fields of case A with the trace of case B would put A's autotest under B's requirement."""
-    from tests.test_review_requested import _api, _journal, _put
+    from tests.helpers import prepare_stage, submit_stage
+    from tests.test_review_requested import _journal
     from tools.batch_assembly import with_digest
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], _skeleton(run))[0] == 0
+    assert prepare_stage(run["root"], _batch_stage(run))[0] == 0
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
     crossed = {key: value for key, value in good.items() if key != "digest"}
     first, second = crossed["test_cases"]
     crossed["test_cases"] = [dict(first, requirement_ids=second["requirement_ids"]), dict(second, requirement_ids=first["requirement_ids"])]
-    tmp = run["root"] / "tmp"
     before = _journal(run["root"])
-    response = ("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{good['batch_id']}")
-    code, refused = _api(*response, "--artifact", _put(tmp / "crossed.json", with_digest(crossed)))
+    code, refused = submit_stage(run["root"], _batch_stage(run), with_digest(crossed))
     assert code == 2 and refused["code"] == "IMPORT_TRACE_CHANGED", refused
     assert "/test_cases/0/requirement_ids" in refused["message"] and "SREQ-0001" in refused["message"] and _journal(run["root"]) == before
     assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
+    code, answered = submit_stage(run["root"], _batch_stage(run), good, "--transport-attempts", "2")
     assert code == 0, answered
 
 

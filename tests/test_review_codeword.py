@@ -1,6 +1,6 @@
 """P7: the control word of the generator.
 
-- ``model-request`` of a generator gives a ``nonce`` in its output only; the request file and the journal hold its sha256;
+- ``prepare`` of a generator gives a ``nonce`` in its output only; the request file and the journal hold its sha256;
 - the word is nowhere in the files of the run and not in the review package;
 - the reviewer's ``codeword_seen`` is stored as a sha256 too; a named word is SELF whatever ``--fresh-context`` said (refused in a
   run that does not admit SELF, before anything is written); a word not named is a sign of a fresh context, not a proof."""

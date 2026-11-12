@@ -1,6 +1,6 @@
 """PF-1 (Petclinic v0.2): the refusals of the check of a fragment (submit) reach the journal of the run and the report; the fix of a fragment that
 lacks its context_receipt and of a --prior-fragment that is not the recorded answer say what to give; diagnostics exist when
-the fix points at them; model-response prints the receipt of the record, not the answer's body."""
+the fix points at them; submit prints the receipt of the record, not the answer's body."""
 from __future__ import annotations
 
 import copy
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_batch_journal import _response, _run
-from tests.test_digest_traps import _generator_request
-from tests.test_review_requested import _api, _put
+from tests.helpers import answer_stage
+from tests.test_batch_journal import _run
+from tests.test_review_requested import _put
 
 pytestmark = pytest.mark.contract
 
@@ -25,23 +25,8 @@ def _other_receipt(receipt: dict) -> dict:
 
 def _validate(run: dict, fragment: Path, *extra: str, dry_run: bool = True) -> tuple[int, dict]:
     """The check of a fragment: ``submit --dry-run`` of its batch after ``prepare``; the fragment goes into the slot of the stage."""
-    import contextlib
-    import io
-
-    from tools import api, stage_steps
-
     stage = f"tc-generator:{json.loads(fragment.read_bytes())['batch_id']}"
-    for command, more in (("prepare", ()), ("submit", (*(("--dry-run",) if dry_run else ()), *extra))):
-        if command == "submit":
-            slot = stage_steps.slot(run["run_root"], stage)
-            slot.parent.mkdir(exist_ok=True)
-            slot.write_bytes(fragment.read_bytes())
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            code = api.main([command, "--run-root", str(run["run_root"]), "--stage", stage, *more])
-        if code:
-            break
-    return code, json.loads(buffer.getvalue().strip().splitlines()[-1])
+    return answer_stage(run["run_root"], stage, fragment, *(("--dry-run",) if dry_run else ()), *extra)
 
 
 def test_a_fragment_with_another_context_receipt_gets_a_fix_that_names_the_object_and_its_source(tmp_path: Path) -> None:
@@ -82,23 +67,23 @@ def test_a_passing_dry_run_is_not_a_refusal(tmp_path: Path) -> None:
     assert not (Path(run["run_root"]) / "refusals.jsonl").exists()
 
 
-def test_model_response_prints_the_receipt_of_the_record_and_not_the_answers_body(tmp_path: Path) -> None:
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
-    first = fragments[0]["batch_id"]
+def test_submit_prints_the_receipt_of_the_record_and_not_the_answers_body(tmp_path: Path) -> None:
+    from tools.pilot_state import read_model_stage_artifact
+
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    stage = f"tc-generator:{fragments[0]['batch_id']}"
     big = copy.deepcopy(fragments[0])
     big.pop("digest", None)
     big["test_cases"][0]["objective"] = "Проверить сценарий " + "подробно " * 40_000
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
     artifact = _put(run["tmp"] / "big.json", big)
     assert Path(artifact).stat().st_size > 300_000
-    code, answered = _response(run, first, artifact)
+    code, answered = answer_stage(run["run_root"], stage, Path(artifact))
     assert code == 0, answered
     assert "artifact" not in answered["result"], sorted(answered["result"])
     assert {"content_digest", "path", "byte_count", "output_bytes", "filled"} <= set(answered["result"]), sorted(answered["result"])
     assert len(json.dumps(answered, ensure_ascii=False)) < 4_000
-    code, stored = _api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
-                        "--digest", answered["result"]["content_digest"])
-    assert code == 0 and stored["result"]["artifact"]["test_cases"][0]["objective"] == big["test_cases"][0]["objective"]  # the body is read apart
+    stored = read_model_stage_artifact(run["run_root"], run["attempt_id"], stage, answered["result"]["content_digest"])["artifact"]
+    assert stored["test_cases"][0]["objective"] == big["test_cases"][0]["objective"]  # the body is read apart
 
 
 def test_a_refused_fragment_leaves_its_text_out_of_the_journal_of_refusals(tmp_path: Path) -> None:

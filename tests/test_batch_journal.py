@@ -8,9 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.test_digest_traps import _generator_request, _publish_inputs
-from tests.test_review_requested import _api, _generated_run, _journal, _put
-from tests.journal_helpers import assert_refused_in_order, assert_refused_once
+from tests.helpers import answer_stage, prepare_stage, submit_stage
+from tests.test_digest_traps import _publish_inputs
+from tests.test_review_requested import _generated_run, _journal
+from tests.journal_helpers import assert_refused_once
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,11 +21,6 @@ def _run(tmp_path: Path) -> tuple[dict, str, str, list[dict]]:
     plan_digest, header_digest = _publish_inputs(run)
     fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
     return run, plan_digest, header_digest, fragments
-
-
-def _response(run: dict, batch_id: str, artifact: str, *extra: str) -> tuple[int, dict]:
-    return _api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                "--artifact", artifact, *extra)
 
 
 def _prior(run: dict, batch_id: str) -> tuple[int, dict]:
@@ -38,71 +34,55 @@ def _prior(run: dict, batch_id: str) -> tuple[int, dict]:
         return 2, error_envelope(error)
 
 
-def _second_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, *fifth: str) -> tuple[int, dict]:
-    context = json.loads(Path(run["context"]).read_bytes())["digest"]
-    return _api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                "--model-id", "model-generator", "--invocation-id", "invoke-generator-2",
-                "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest,
-                *[flag for digest in fifth for flag in ("--input-digest", digest)])
+def _to_the_second_batch(run: dict, fragments: list[dict]) -> str:
+    """Batch 1 is prepared and answered, batch 2 prepared; the stage of batch 2."""
+    first, second = (f"tc-generator:{fragment['batch_id']}" for fragment in fragments)
+    assert answer_stage(run["run_root"], first, run["fragments"][0])[0] == 0
+    code, prepared = prepare_stage(run["run_root"], second)
+    assert code == 0, prepared
+    return second
 
 
 def test_batch_one_has_four_inputs_and_batch_two_a_fifth_built_from_the_journal(tmp_path: Path) -> None:
+    from tools.pilot_state import read_model_request
+
     run, plan_digest, header_digest, fragments = _run(tmp_path)
     first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
-    code, refused = _second_request(run, first, plan_digest, header_digest, "sha256:" + "a" * 64)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "лишние входы" in refused["message"], refused
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-    assert _response(run, first, run["fragments"][0])[0] == 0
+    code, prepared = prepare_stage(run["run_root"], f"tc-generator:{first}")
+    assert code == 0, prepared
+    request = read_model_request(run["run_root"], run["attempt_id"], f"tc-generator:{first}", prepared["result"]["request_digest"])
+    assert len(request["input_digests"]) == 4 and request["input_digests"][2:] == [plan_digest, header_digest], request
+    assert submit_stage(run["run_root"], f"tc-generator:{first}", run["fragments"][0])[0] == 0
     code, refused = _prior(run, first)
     assert code == 2 and "первая пачка" in refused["message"], refused
 
-    code, refused = _second_request(run, second, plan_digest, header_digest)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "prepare --stage" in refused["message"], refused
     code, prior = _prior(run, second)
     assert code == 0 and prior["result"]["capabilities"] == 1, prior
     digest = prior["result"]["digest"]
-    code, refused = _second_request(run, second, plan_digest, header_digest)
-    assert code == 2 and "вход 5" in refused["message"] and digest in refused["message"], refused
-    code, requested = _second_request(run, second, plan_digest, header_digest, digest)
-    assert code == 0, requested
+    code, prepared = prepare_stage(run["run_root"], f"tc-generator:{second}")
+    assert code == 0, prepared
+    request = read_model_request(run["run_root"], run["attempt_id"], f"tc-generator:{second}", prepared["result"]["request_digest"])
+    assert len(request["input_digests"]) == 5 and request["input_digests"][4] == digest, request
 
     before = _journal(run["run_root"])
     code, again = _prior(run, second)
     assert code == 0 and again["result"]["digest"] == digest and _journal(run["run_root"]) == before, again
 
 
-def test_batch_two_before_the_answer_of_batch_one_is_refused_by_name(tmp_path: Path) -> None:
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
-    first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
-    before = _journal(run["run_root"])
-    code, refused = _prior(run, second)
-    assert code == 2 and "сначала" in refused["message"] and first in refused["message"], refused
-    first_refusal = refused
-    code, refused = _second_request(run, second, plan_digest, header_digest, "sha256:" + "b" * 64)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and first in refused["message"], refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one refusal the command wrote (the other is a function)
-
-
 def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps_the_retry(tmp_path: Path) -> None:
     from tools.batch_assembly import with_digest
 
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
-    first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-    assert _response(run, first, run["fragments"][0])[0] == 0
-    code, prior = _prior(run, second)
-    assert code == 0, prior
-    assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    second = _to_the_second_batch(run, fragments)
 
     changed = {key: item for key, item in fragments[1].items() if key != "digest"}
     changed["operation_capabilities"] = [dict(changed["operation_capabilities"][0], action="different")]
     before = _journal(run["run_root"])
-    code, refused = _response(run, second, _put(run["tmp"] / "changed.json", with_digest(changed)))
-    assert code == 2 and refused["code"] == "BATCH_CAPABILITY_CONFLICT" and "--transport-attempts 2" in refused["message"], refused
+    code, refused = submit_stage(run["run_root"], second, with_digest(changed))
+    assert code == 2 and refused["code"] == "BATCH_CAPABILITY_CONFLICT" and "--transport-attempts 2" in refused["fix"], refused
     assert _journal(run["run_root"]) == before
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
+    code, answered = submit_stage(run["run_root"], second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
     from tools.orchestrate_test_case_revision import journal_assembly
 
@@ -110,16 +90,11 @@ def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps
 
 
 def test_step_size_finds_the_fifth_input_of_batch_two(tmp_path: Path) -> None:
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
-    first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-    assert _response(run, first, run["fragments"][0])[0] == 0
-    code, prior = _prior(run, second)
-    assert code == 0, prior
-    assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    second = _to_the_second_batch(run, fragments)
 
     completed = subprocess.run([sys.executable, "-m", "tools.step_size", "--project", str(run["project"]), "--run", Path(run["run_root"]).name,
-                                "--stage", f"tc-generator:{second}"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+                                "--stage", second], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     report = json.loads(completed.stdout)
     assert completed.returncode == 0 and report.get("warning") != "STEP_INPUT_UNRESOLVED", report
     assert not report.get("unresolved"), report

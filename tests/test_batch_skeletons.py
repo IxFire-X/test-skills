@@ -9,7 +9,8 @@ import pytest
 
 from tests.journal_helpers import assert_refused_once
 
-from tests.test_cases_import import HEADER, _generator_request, _manual_fragment, _skeleton, _to_generator
+from tests.helpers import prepare_stage, submit_stage
+from tests.test_cases_import import HEADER, _batch_stage, _manual_fragment, _skeleton, _to_generator
 
 
 def _three_cases_csv() -> str:
@@ -49,12 +50,12 @@ def test_the_plan_publishes_one_skeleton_per_batch_with_its_own_cases(run: dict)
 
 
 def test_the_last_input_of_a_batch_is_its_skeleton_not_the_whole_import(run: dict) -> None:
-    four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
-    code, refused = _generator_request(run, *four, run["imported"]["digest"])
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and _skeleton(run, 0) in refused["message"], refused
-    assert "submit --stage plan" in refused["message"]
-    code, requested = _generator_request(run, *four, _skeleton(run, 0))
-    assert code == 0, requested
+    from tools.pilot_state import read_model_request
+
+    code, prepared = prepare_stage(run["root"], _batch_stage(run))
+    assert code == 0, prepared
+    inputs = read_model_request(run["root"], run["attempt_id"], _batch_stage(run), prepared["result"]["request_digest"])["input_digests"]
+    assert inputs[-1] == _skeleton(run, 0) and run["imported"]["digest"] not in inputs, inputs
 
 
 def test_a_forged_batch_skeleton_is_refused_on_read(run: dict) -> None:
@@ -71,11 +72,10 @@ def test_a_forged_batch_skeleton_is_refused_on_read(run: dict) -> None:
 
 
 def test_a_case_of_another_batch_in_the_answer_is_refused_by_the_skeleton_of_the_batch(run: dict) -> None:
-    from tests.test_review_requested import _api, _journal, _put
+    from tests.test_review_requested import _journal
     from tools.batch_assembly import with_digest
 
-    four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
-    assert _generator_request(run, *four, _skeleton(run, 0))[0] == 0
+    assert prepare_stage(run["root"], _batch_stage(run))[0] == 0
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
     foreign = _manual_fragment(run["plan"], run["context"], run["imported"], 1)
     wrong = {key: value for key, value in good.items() if key != "digest"}
@@ -84,29 +84,24 @@ def test_a_case_of_another_batch_in_the_answer_is_refused_by_the_skeleton_of_the
                         for n, step in enumerate(foreign["test_cases"][0]["steps"], 1)])
     wrong["test_cases"] = [*wrong["test_cases"], extra]
     before = _journal(run["root"])
-    response = ("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{good['batch_id']}")
-    code, refused = _api(*response, "--artifact", _put(run["root"] / "tmp" / "wrong.json", with_digest(wrong)))
+    code, refused = submit_stage(run["root"], _batch_stage(run), with_digest(wrong))
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases" in refused["message"], refused
     assert _journal(run["root"]) == before
     assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    assert _api(*response, "--artifact", _put(run["root"] / "tmp" / "good.json", good), "--transport-attempts", "2")[0] == 0
+    assert submit_stage(run["root"], _batch_stage(run), good, "--transport-attempts", "2")[0] == 0
 
 
 def test_a_run_from_before_with_the_whole_skeleton_as_its_last_input_still_answers(run: dict) -> None:
-    """A request published before FaT-SKB took the whole imported-cases as its last input: model-response checks the
+    """A request published before FaT-SKB took the whole imported-cases as its last input: submit checks the
     answer by that whole receipt and records it."""
     from tests.helpers import generator_requests_before_dg
-    from tests.test_review_requested import _api, _put
 
     from tools.pilot_state import publish_model_request
 
-    batch_id = run["plan"]["batches"][0]["batch_id"]
     with generator_requests_before_dg():  # the request as a run published it before FaT-SKB, in this process
-        publish_model_request(run["root"], run["attempt_id"], f"tc-generator:{batch_id}", model_id="model-generator", invocation_id="invoke-old",
+        publish_model_request(run["root"], run["attempt_id"], _batch_stage(run), model_id="model-generator", invocation_id="invoke-old",
                               input_digests=[run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], run["imported"]["digest"]])
-    good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
-    code, answered = _api("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage",
-                          f"tc-generator:{good['batch_id']}", "--artifact", _put(run["root"] / "tmp" / "old.json", good))
+    code, answered = submit_stage(run["root"], _batch_stage(run), _manual_fragment(run["plan"], run["context"], run["imported"], 0))
     assert code == 0, answered
 
 
@@ -116,32 +111,15 @@ def test_the_step_input_of_each_batch_reads_only_its_skeleton(run: dict) -> None
     from tools.step_size import request_files
 
     whole = _receipt_target(run["root"], run["attempt_id"], "imported-cases").stat().st_size
-    four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
     sizes = []
     for index, batch in enumerate(run["plan"]["batches"]):
-        inputs = list(four)
-        if index:
-            from tools.pilot_state import publish_prior_capabilities
-            from tests.test_review_requested import _api, _put
-
-            previous = _manual_fragment(run["plan"], run["context"], run["imported"], index - 1)
-            assert _api("model-response", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage",
-                        f"tc-generator:{previous['batch_id']}", "--artifact", _put(run["root"] / "tmp" / f"f{index}.json", previous))[0] == 0
-            inputs.append(publish_prior_capabilities(run["root"], run["attempt_id"], batch["batch_id"])["digest"])
-        code, requested = _request(run, index, *inputs, _skeleton(run, index))
-        assert code == 0, requested
-        files = request_files(run["root"], f"tc-generator:{batch['batch_id']}")
+        stage = _batch_stage(run, index)
+        code, prepared = prepare_stage(run["root"], stage)
+        assert code == 0, prepared
+        files = request_files(run["root"], stage)
         [row] = [row for row in files["files"] if row["digest"] == _skeleton(run, index)]
         assert Path(row["path"]) == _receipt_target(run["root"], run["attempt_id"], "imported-cases-" + batch["batch_id"]), files
         assert not files.get("unresolved"), files
         sizes.append(row["bytes"])
+        assert submit_stage(run["root"], stage, _manual_fragment(run["plan"], run["context"], run["imported"], index))[0] == 0  # the next batch waits for it
     assert all(size < whole for size in sizes) and sum(sizes) < whole + 3 * 600, (sizes, whole)  # each batch: its share
-
-
-def _request(run: dict, index: int, *inputs: str):
-    from tests.test_review_requested import _api
-
-    batch_id = run["plan"]["batches"][index]["batch_id"]
-    return _api("model-request", "--run-root", str(run["root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                "--model-id", "model-generator", "--invocation-id", f"invoke-generator-{index}",
-                *[flag for digest in inputs for flag in ("--input-digest", digest)])

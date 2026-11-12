@@ -1,5 +1,5 @@
 """FaT-VF: validate_fragment runs the canonical pre-review audit of assemble on one batch, so an order or format error is
-refused before the answer is written (model-response), not first by assemble of all batches."""
+refused before the answer is written (submit), not first by assemble of all batches."""
 from __future__ import annotations
 
 import copy
@@ -34,7 +34,7 @@ def _fixed(fragment: dict) -> dict:
 
 def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code(tmp_path: Path) -> None:
     """run-doc-only c1f13463…: the check of the fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER.
-    P1: the order is the code's work — the check of a fragment (and model-response) put the categories in V3 order and say so; the rule
+    P1: the order is the code's work — the check of a fragment (and submit) put the categories in V3 order and say so; the rule
     stays in the document audit; P1-fix2: assemble puts the same file in the same order."""
     from tools.batch_assembly import normalize_fragment, validate_fragment
 

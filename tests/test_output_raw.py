@@ -12,56 +12,31 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 
 
-def _api(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, dict]:
-    from tools import api
-
-    code = api.main(argv)
-    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-
-
-def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                                         capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools import pilot_state, step_size
+def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.helpers import answer_stage
+    from tests.test_batch_journal import _run
+    from tools import step_size
     from tools.run_report import write_report
 
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    run_root = run["run_root"]
+    raw = [json.dumps(fragment, ensure_ascii=False, indent=2).encode("utf-8") for fragment in fragments]  # the model answers with indents
+    compact = [len(json.dumps(fragment, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) for fragment in fragments]
+    threshold = (len(raw[0]) + compact[0]) // 2  # the raw answer is over it, its compact form is not
+    monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", threshold)
     published: list[tuple[dict, int]] = []
-    original = pilot_state.publish_model_stage_artifact
-
-    def through_the_command(run_root, attempt_id, stage, artifact, **kwargs):
-        # the model answers with indents; the command publishes that very file
-        answer = tmp_path / f"answer-{len(published)}.json"
-        answer.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
-        monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", original)
-        try:
-            code, output = _api(["model-response", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", stage,
-                                 "--artifact", str(answer)], capsys)
-        finally:
-            monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", through_the_command)
+    for fragment, body in zip(fragments, raw):
+        code, output = answer_stage(run_root, f"tc-generator:{fragment['batch_id']}", body)
         assert code == 0, output
-        published.append((output["result"], answer.stat().st_size))
-        # PF-1: the command prints the receipt of the record, not the answer's body; the callers get it read back by the digest of the receipt
-        code, stored = _api(["read-model-artifact", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", stage,
-                             "--digest", output["result"]["content_digest"]], capsys)
-        assert code == 0, stored
-        return {**output["result"], "artifact": stored["result"]["artifact"]}
+        published.append((output["result"], len(body)))
+    for result, size in published:
+        assert result["output_bytes"] == size > result["byte_count"] and result["output_basis"] == "raw"
+        assert result["warning"] == (step_size.OUTPUT_LARGE if size > threshold else None)
+    assert any(size > threshold >= result["byte_count"] for result, size in published), "a raw answer over the threshold whose compact form is not"
 
-    monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", through_the_command)
-    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
-    monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 1000)
-    _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
-    assert published
-    for result, raw in published:
-        assert result["output_bytes"] == raw > result["byte_count"] and result["output_basis"] == "raw"
-        assert result["warning"] == (step_size.OUTPUT_LARGE if raw > 1000 else None)
-    assert any(raw > 1000 >= result["byte_count"] for result, raw in published), "a raw answer over the threshold whose compact form is not"
-
-    monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", original)
-    write_report(tmp_path, run_root.name)
+    write_report(run["project"], run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
-    raw_by_digest = {result["content_digest"]: raw for result, raw in published}
+    raw_by_digest = {result["content_digest"]: size for result, size in published}
     answered = [call for call in report["model_calls"] if call["response_digest"] in raw_by_digest]
     # V9a: the raw size is the agent's measurement (a file the journal does not bind): the report prints it apart and judges by the stored answer
     assert answered and all(call["output_raw_bytes"] == raw_by_digest[call["response_digest"]] for call in answered)
@@ -104,15 +79,14 @@ def test_the_report_totals_the_model_calls_and_prints_the_raw_answer_size(tmp_pa
     assert "| Итого по прогону |" in (run_root / "report.md").read_text(encoding="utf-8")
 
 
-def _in_run(tmp_path: Path, path: Path) -> tuple[Path, Path]:
-    """SEC-A: the answer file of a command lies in the run — the run root and the copy of *path* in its tmp/."""
-    from tests.test_output_guard import _run
+def _review_run(tmp_path: Path) -> dict:
+    """A run whose review is prepared: its slot is where the answers of the tests below go."""
+    from tests.test_review_requested import _generated_run
+    from tests.test_review_two_commands import _open
 
-    _project, run_root, _attempt = _run(tmp_path)
-    (run_root / "tmp").mkdir(exist_ok=True)
-    answer = run_root / "tmp" / path.name
-    answer.write_bytes(path.read_bytes())
-    return run_root, answer
+    run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0
+    return run
 
 
 def _cut_answer(tmp_path: Path) -> tuple[Path, int]:
@@ -123,14 +97,12 @@ def _cut_answer(tmp_path: Path) -> tuple[Path, int]:
     return path, len(data)
 
 
-def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_and_a_hint(tmp_path: Path,
-                                                                                         capsys: pytest.CaptureFixture[str]) -> None:
+def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_and_a_hint(tmp_path: Path) -> None:
+    from tests.test_review_two_commands import _select_verdict
     from tools.step_size import OUTPUT_TRUNCATED
 
     path, size = _cut_answer(tmp_path)
-    run_root, answer = _in_run(tmp_path, path)
-    code, output = _api(["model-response", "--run-root", str(run_root), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-                         "--artifact", str(answer)], capsys)  # F4b: refused in main with its code and fix, before the function
+    code, output = _select_verdict(_review_run(tmp_path), str(path))  # F4b: refused in main with its code and fix, before the function
     message = output["message"]
     assert code == 2 and output["status"] == "error" and OUTPUT_TRUNCATED == "MODEL_OUTPUT_TRUNCATED" and output["code"] == OUTPUT_TRUNCATED
     assert f"{OUTPUT_TRUNCATED}: ответ модели оборван на {size} Б" in message and "без отступов" in message and output["fix"]
@@ -148,7 +120,8 @@ def test_validate_artifact_names_a_cut_answer_and_gives_a_retry_prompt(tmp_path:
 
 
 @pytest.mark.parametrize("text", ['{"a": 1,, "b": 2}', '{"a": 1} trailing', '[1, 2]]'])
-def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: str, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: str) -> None:
+    from tests.test_review_two_commands import _select_verdict
     from tools.step_size import looks_truncated
     from tools.validate_artifact import validate
 
@@ -157,9 +130,7 @@ def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: 
     path.write_text(text, encoding="utf-8")
     code, report = validate(str(ROOT / "schemas" / "canonical-test-document.schema.json"), str(path))
     assert code == 2 and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(report, ensure_ascii=False)
-    run_root, answer = _in_run(tmp_path, path)
-    code, output = _api(["model-response", "--run-root", str(run_root), "--attempt", "a", "--stage", "tc-reviewer:canonical",
-                         "--artifact", str(answer)], capsys)
+    code, output = _select_verdict(_review_run(tmp_path), str(path))
     assert code == 2 and output["code"] == "ANSWER_JSON_INVALID" and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(output, ensure_ascii=False)
 
 

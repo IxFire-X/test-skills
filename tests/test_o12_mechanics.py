@@ -306,44 +306,38 @@ def test_validate_fragment_puts_the_context_receipt_it_was_given_and_a_different
         validate_fragment(lean, plan, header, context)
 
 
-# --- model-response ------------------------------------------------------------------------------------------------------
+# --- submit ------------------------------------------------------------------------------------------------------
 
-def test_model_response_stores_the_full_form_of_a_lean_answer_and_prints_the_summary(tmp_path: Path, capsys) -> None:
-    from tests.test_batch_journal import _response, _run
-    from tests.test_digest_traps import _generator_request
-    from tests.test_review_requested import _api, _put
+def test_submit_stores_the_full_form_of_a_lean_answer_and_prints_the_summary(tmp_path: Path) -> None:
+    from tests.helpers import answer_stage
+    from tests.test_batch_journal import _run
+    from tools.pilot_state import read_model_stage_artifact
 
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     plan = json.loads(Path(run["plan"]).read_bytes())
     context = json.loads(Path(run["context"]).read_bytes())
-    first = fragments[0]["batch_id"]
+    stage = f"tc-generator:{fragments[0]['batch_id']}"
     full = _full_fragment(plan, context)
     lean = _lean(full)
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-    code, answered = _response(run, first, _put(run["tmp"] / "lean.json", lean))
+    code, answered = answer_stage(run["run_root"], stage, lean)
     assert code == 0, answered
     filled = answered["result"]["filled"]
     assert "/context_receipt" in filled and any(item.startswith("display_order ×") for item in filled) and "/digest" in filled, filled
-    code, stored = _api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
-                        "--digest", answered["result"]["content_digest"])
-    assert code == 0, stored
-    record = stored["result"]["artifact"]
+    record = read_model_stage_artifact(run["run_root"], run["attempt_id"], stage, answered["result"]["content_digest"])["artifact"]
     assert record["context_receipt"] == context and record["test_cases"][0]["steps"][0]["step_id"] == f"STEP-{SUFFIX}-01"
-    assert {key: value for key, value in record.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")} \
-        == {key: value for key, value in full.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")}
+    assert {key: value for key, value in record.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")}         == {key: value for key, value in full.items() if key not in ("plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "digest")}
 
 
 def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code_puts(tmp_path: Path) -> None:
     """The receipt put into a lean answer is the one the published plan binds to the batch; a digest of another receipt of the run in the answer
     is a refusal of the digest binding, and nothing is stored."""
-    from tests.test_batch_journal import _response, _run
-    from tests.test_digest_traps import _generator_request
-    from tests.test_review_requested import _put
+    from tests.helpers import prepare_stage, submit_stage
+    from tests.test_batch_journal import _run
     from tools import pilot_state
     from tools.pilot_state import derive_state, publish_context_selection
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
 
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     root, attempt_id, project = Path(run["run_root"]), run["attempt_id"], run["project"]
     attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
     baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
@@ -356,8 +350,8 @@ def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code
     assert other_digest != context["digest"]
     lean = _lean(_full_fragment(plan, context))
     lean["context_receipt_digest"] = other_digest
-    first = fragments[0]["batch_id"]
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
+    stage = f"tc-generator:{fragments[0]['batch_id']}"
+    assert prepare_stage(root, stage)[0] == 0  # prepare reads the receipts of the attempt for the list of reading; the spy is for the answer
     asked: list[str] = []
     real = pilot_state.read_context_selection
 
@@ -367,7 +361,7 @@ def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code
 
     pilot_state.read_context_selection = spy
     try:
-        code, refused = _response(run, first, _put(run["tmp"] / "other-context.json", lean))
+        code, refused = submit_stage(root, stage, lean)
     finally:
         pilot_state.read_context_selection = real
     assert code == 2 and refused["code"] == "MODEL_RESPONSE_DIGEST_MISMATCH", refused

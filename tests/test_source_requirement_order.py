@@ -1,6 +1,6 @@
 """FaT-SN: source requirements follow their documents — (document, line as a number). run-doc-only numbered them by the
 string order of their references (`…md:12` < `…md:4`), so SCOPE (line 4) landed between P05 and P06 and the batches with it.
-The marker writes the numbers; model-response now refuses an answer out of document order, and journals already written read
+The marker writes the numbers; submit now refuses an answer out of document order, and journals already written read
 as before."""
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def _published(tmp_path: Path, rows: list[dict], monkeypatch: pytest.MonkeyPatch
     marker = _marker([REQUIREMENTS_PLACEHOLDER], requirements=rows)
     if monkeypatch is None:
         return root, attempt_id, pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", marker)
-    with monkeypatch.context() as old:  # the package before FaT-SN: no order check at model-response
+    with monkeypatch.context() as old:  # the package before FaT-SN: no order check at submit
         old.setattr(pilot_state, "_requirement_order_rows", lambda *_args: None)
         return root, attempt_id, pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", marker)
 

@@ -1,6 +1,6 @@
 """P1 «Диагностика разом»: проверка фрагмента отдаёт все диагностики за один проход (связки первыми и фатально), у каждой
 есть fix; механику (порядок id и категорий, digest) делает код; одна таблица code → fix; журнал отказов refusals.jsonl;
-голые ValueError стали кодами; model-request пишет замер шага."""
+голые ValueError стали кодами; prepare пишет замер шага."""
 from __future__ import annotations
 
 import ast
@@ -134,24 +134,22 @@ def test_a_shuffled_order_passes_names_what_it_normalized_and_the_canon_is_byte_
     assert canonical_bytes(fill_fragment_bindings(done, plan)) == canonical_bytes(right)
 
 
-def test_model_response_stores_the_normalized_answer_and_names_it(tmp_path: Path) -> None:
-    """model-response and the dry run of submit share one normalization: the stored canon has the order assemble wants."""
-    from tests.test_batch_journal import _response, _run
-    from tests.test_digest_traps import _generator_request
-    from tests.test_review_requested import _api, _put
+def test_submit_stores_the_normalized_answer_and_names_it(tmp_path: Path) -> None:
+    """submit and its dry run share one normalization: the stored canon has the order assemble wants."""
+    from tests.helpers import answer_stage
+    from tests.test_batch_journal import _run
+    from tools.pilot_state import read_model_stage_artifact
 
-    run, plan_digest, header_digest, fragments = _run(tmp_path)
-    first = fragments[0]["batch_id"]
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    stage = f"tc-generator:{fragments[0]['batch_id']}"
     shuffled = {key: value for key, value in fragments[0].items() if key != "digest"}
     shuffled["test_cases"] = copy.deepcopy(shuffled["test_cases"])
     shuffled["test_cases"][0]["categories"] = ["functional", "positive"]
-    assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-    code, answered = _response(run, first, _put(run["tmp"] / "shuffled.json", shuffled))
+    code, answered = answer_stage(run["run_root"], stage, shuffled)
     assert code == 0, answered
     assert answered["result"]["normalized"] == ["/test_cases/0/categories"] and answered["result"]["filled"] == ["/digest"], answered
-    code, stored = _api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
-                        "--digest", answered["result"]["content_digest"])
-    assert code == 0 and stored["result"]["artifact"]["test_cases"][0]["categories"] == ["positive", "functional"], stored
+    stored = read_model_stage_artifact(run["run_root"], run["attempt_id"], stage, answered["result"]["content_digest"])["artifact"]
+    assert stored["test_cases"][0]["categories"] == ["positive", "functional"], stored
 
 
 # --------------------------------------------------------------------------------------
@@ -266,22 +264,11 @@ def test_the_ledger_of_a_closed_attempt_is_refused_with_attempt_terminal(tmp_pat
     assert envelope["code"] == "ATTEMPT_TERMINAL" and "report.md" in envelope["fix"], envelope
 
 
-def test_model_request_flags_given_to_model_response_are_an_invalid_argument(capsys) -> None:
-    from tools import api
-
-    with pytest.raises(SystemExit) as stopped:
-        api.main(["model-response", "--run-root", "x", "--attempt", "a", "--stage", "s", "--artifact", str(ROOT / "schemas" / "batch-plan.schema.json"),
-                  "--model-id", "m"])
-    envelope = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert stopped.value.code == 2 and envelope["code"] == "INVALID_ARGUMENT" and "model-request" in envelope["fix"], envelope
-    assert envelope["errors"]  # the old field stays
-
-
 # --------------------------------------------------------------------------------------
 # step measurement, refusal log
 # --------------------------------------------------------------------------------------
 
-def test_model_request_writes_a_step_measurement_for_the_stages_the_journal_resolves(tmp_path: Path) -> None:
+def test_a_request_writes_a_step_measurement_for_the_stages_the_journal_resolves(tmp_path: Path) -> None:
     from tests.test_step_inputs import _generator_run, _request
     from tools.run_report import step_sizes
 
@@ -309,25 +296,24 @@ def test_a_failed_measurement_is_named_in_the_output_and_never_refuses_the_reque
     assert request["step_measure_error"] == {"code": "STEP_MEASURE_FAILED", "error": "OSError"} and request["digest"]
 
 
-def _refused_model_request(root: Path, attempt_id: str, *extra: str) -> int:
+def _refused_prepare(root: Path) -> int:
     from tools import api
 
-    return api.main(["model-request", "--run-root", str(root), "--attempt", attempt_id, "--stage", "tc-generator:BATCH-x", "--model-id", "m",
-                     "--invocation-id", "i", "--input-digest", "sha256:" + "1" * 64, *extra])
+    return api.main(["prepare", "--run-root", str(root), "--stage", "tc-generator:BATCH-x"])  # no such batch in the plan
 
 
 def test_a_refusal_with_a_run_root_is_one_line_with_five_fields(tmp_path: Path, capsys) -> None:
     from tests.test_marker_parts import _run
 
     root, attempt_id, *_rest = _run(tmp_path, files=1)
-    assert _refused_model_request(root, attempt_id) == 2
+    assert _refused_prepare(root) == 2
     capsys.readouterr()
     lines = (root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     row = json.loads(lines[0])
     assert sorted(row) == ["at", "batch", "code", "command", "stage"], row
-    assert row["command"] == "model-request" and row["stage"] == "tc-generator:BATCH-x" and row["batch"] == "BATCH-x" and row["code"]
-    assert _refused_model_request(root, attempt_id) == 2
+    assert row["command"] == "prepare" and row["stage"] == "tc-generator:BATCH-x" and row["batch"] == "BATCH-x" and row["code"]
+    assert _refused_prepare(root) == 2
     assert len((root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()) == 2  # appended
 
 
@@ -356,7 +342,7 @@ def test_the_fix_of_the_call_site_beats_the_table_and_the_errors_own_beats_both(
 
 
 # --------------------------------------------------------------------------------------
-# P1-fix2: assemble lays out the same canon as the check of a fragment and model-response (bug hunt 6, 6.1, 6.6, 6.7)
+# P1-fix2: assemble lays out the same canon as the check of a fragment and submit (bug hunt 6, 6.1, 6.6, 6.7)
 # --------------------------------------------------------------------------------------
 
 def _shuffled_batch_one():
@@ -390,7 +376,7 @@ def test_assemble_of_the_agents_file_and_of_the_recorded_answer_is_the_same_cand
     from tools.batch_assembly import assemble_candidate, fill_fragment_bindings, normalize_fragment
 
     mixed, plan, header, context = _shuffled_batch_one()
-    recorded = fill_fragment_bindings(normalize_fragment(copy.deepcopy(mixed))[0], plan)  # what model-response writes to the journal
+    recorded = fill_fragment_bindings(normalize_fragment(copy.deepcopy(mixed))[0], plan)  # what submit writes to the journal
     others = _others(plan, context)
     from_file = assemble_candidate(header, plan, [copy.deepcopy(mixed), *copy.deepcopy(others)])
     from_journal = assemble_candidate(header, plan, [recorded, *copy.deepcopy(others)])
