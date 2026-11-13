@@ -11,7 +11,7 @@ from types import MappingProxyType
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.schema_validation import load_json_strict, schema_diagnostics
+from tools.schema_validation import schema_diagnostics
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -990,18 +990,6 @@ def canonical_bytes(document: dict[str, Any]) -> bytes:
 def document_sha256(document: dict[str, Any]) -> str:
     """Return the prefixed SHA-256 identity of bare canonical-document bytes."""
     return "sha256:" + hashlib.sha256(canonical_bytes(document)).hexdigest()
-
-
-def load_canonical_document(path: Path) -> dict[str, Any]:
-    """Strictly load and validate a structurally and physically canonical document."""
-    document = load_json_strict(path)
-    if not isinstance(document, dict):
-        raise ValueError("canonical document must be a JSON object")
-    diagnostics = validate_canonical_document(document)
-    if diagnostics:
-        first = diagnostics[0]
-        raise ValueError(f"canonical document validation failed at {first['path']}: {first['code']}: {first['message']}")
-    return document
 
 
 # Public name for batch_assembly: the same object under a name without an underscore; a rename of the private name is then a rename here.

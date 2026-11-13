@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_open_recovery import _crash_once, _main
+from tests.test_review_open_recovery import _crash_once
 from tests.test_review_requested import _generated_run, _journal, _put
 from tests.journal_helpers import assert_refused_once, refusal_log
-from tests.test_review_two_commands import _autofix, _cycle, _flags, _open, _select_verdict, _shape, _verdict
+from tests.test_review_two_commands import _autofix, _cycle, _open, _select_verdict, _shape, _verdict
 
 LEDGER = "reviewer-ledger-v1"
 

@@ -160,7 +160,6 @@ def test_case_2() -> None:
 
 def partial_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:
     """The test_finish fixture project with the three-case document and its partial automation, statically reviewed."""
-    import shutil
 
     import tests.test_project_native_pytest as native
     from tests.test_finish import _project

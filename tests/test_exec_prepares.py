@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_finish import _args, _module_python
+from tests.test_finish import _module_python
 from tests.test_project_native_pytest import _reviewed_inputs
 from tests.helpers import MODULE_PYTHON
 

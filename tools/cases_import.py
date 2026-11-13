@@ -15,7 +15,6 @@ none («вне документов»); a document requirement no case links is 
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Any, Mapping
@@ -371,7 +370,6 @@ def check_requirements_answer(root: Path, attempt: Mapping[str, Any], value: Map
 def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Answer ``context-marker:requirements`` by code from the CSV of the run; again on an answered step changes nothing."""
     from tools import pilot_state
-    from tools.project_inventory import read_execution_baseline
 
     root = Path(run_root).resolve()
     path = cases_path(root)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.journal_helpers import assert_refused_in_order, assert_refused_once
+from tests.journal_helpers import assert_refused_once
 
 ROOT = Path(__file__).resolve().parents[1]
 

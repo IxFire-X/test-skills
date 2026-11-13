@@ -191,7 +191,7 @@ def test_generic_event_api_cannot_fabricate_execution_unknown(tmp_path: Path) ->
 
 
 def test_public_execution_receipt_records_unknown_immediately_after_readback(tmp_path: Path) -> None:
-    from tools import pilot_state, run_pipeline
+    from tools import pilot_state
     from tools.execution_adapters import request_digest
 
     root, attempt_id, _passed, request, durable = _execution_facts(tmp_path)

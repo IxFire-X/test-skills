@@ -10,7 +10,7 @@ import pytest
 
 from tests.helpers import answer_stage, submit_stage
 from tests.test_review_requested import _generated_run, _put
-from tests.test_review_two_commands import _events, _flags, _open, _select_verdict, _verdict
+from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
 
 
 def _main(capsys, argv: list[str]) -> tuple[int, dict]:
@@ -85,14 +85,6 @@ def test_an_effective_file_that_cannot_be_read_is_named_and_gives_no_other_docum
     report = _report(run)
     assert report["counts"]["cases"] is None, report["counts"]
     assert any("эффективный канон не читается" in str(item) for item in report["warnings"]), report["warnings"]
-
-
-def test_the_case_document_function_reads_nothing_but_the_journal(tmp_path: Path) -> None:
-    from tools.run_report import case_document
-
-    run = _opened(tmp_path)
-    _put(Path(run["run_root"]) / "case-sets" / "r1" / "planted.json", _forged_document(run))
-    assert case_document(Path(run["run_root"]), run["attempt_id"]) is None  # before the verdict the journal has no effective document
 
 
 # --- 8.3 --------------------------------------------------------------------------------------------------------------

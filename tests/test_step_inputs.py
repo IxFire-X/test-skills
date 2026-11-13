@@ -2,7 +2,6 @@
 size of the context-marker:requirements step. Only a measurement: nothing is chosen, guessed or decided."""
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -185,7 +184,6 @@ def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixtu
 def test_the_requirements_step_measures_only_the_documents(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_marker_parts import _run
     from tools import step_size
-    from tools.project_inventory import read_execution_baseline
 
     root, attempt_id, baseline, _receipts = _run(tmp_path, files=3)
     docs = [tmp_path / row["path"] for row in baseline["requirements"].get("docs", [])]

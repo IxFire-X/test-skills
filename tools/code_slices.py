@@ -53,19 +53,6 @@ class FileSlices:
         width = max(4, len(str(len(self.lines))))
         return "\n".join(f"L{number:0{width}d}| {self.lines[number - 1]}" for number in range(start, end + 1))
 
-    def support_ranges(self) -> list[tuple[int, int]]:
-        """Every line that is not inside a case method, as merged ranges."""
-        case_lines = {line for member in self.symbols.values() for line in range(member.start, member.end + 1)}
-        ranges: list[tuple[int, int]] = []
-        for line in range(1, len(self.lines) + 1):
-            if line in case_lines:
-                continue
-            if ranges and ranges[-1][1] == line - 1:
-                ranges[-1] = (ranges[-1][0], line)
-            else:
-                ranges.append((line, line))
-        return ranges
-
 
 # --------------------------------------------------------------------------------------
 # Java

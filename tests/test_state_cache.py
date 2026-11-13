@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run, _journal
+from tests.test_review_requested import _generated_run, _journal
 
 
 def test_the_state_in_a_closure_is_the_state_without_it(tmp_path: Path) -> None:

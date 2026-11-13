@@ -7,7 +7,7 @@ import copy
 
 import pytest
 
-from tests.test_partial_acceptance import _finding, _grouped, _group_ids, _ids, _outcome, _real, _report, r1_document
+from tests.test_partial_acceptance import _finding, _grouped, _group_ids, _outcome, _real, _report, r1_document
 from tools.revision_selection import SelectionError, check_rework, rework_final, rework_request
 
 

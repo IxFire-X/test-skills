@@ -31,7 +31,6 @@ from tools.java_text import mask_java_noncode  # the Java lexer is shared with t
 
 _mask_java_noncode = mask_java_noncode
 _ROOT = Path(__file__).resolve().parents[1]
-_AUTOTEST_REVIEW_SCHEMA = _ROOT / "schemas" / "autotest-reviewer-output.schema.json"
 DURABLE_NATIVE_REPORT_MAX_BYTES = 1024 * 1024
 NATIVE_REPORT_MAX_BYTES = 8 * 1024 * 1024
 NATIVE_REPORT_SET_MAX_BYTES = 32 * 1024 * 1024
@@ -464,24 +463,9 @@ def _csv_rows(raw: str) -> list[str] | None:
     return [value[1:-1].split(",", 1)[0].strip().strip("'") for _kind, value in strings]
 
 
-def _annotation_region(masked: str, start: int) -> int:
-    """Where the annotations of the member declared at ``start`` begin: after the previous `;`, `}` or the class `{`."""
-    depth, index = 0, start
-    while index > 0:
-        char = masked[index - 1]
-        if char in ")}" and not (char == "}" and depth == 0):
-            depth += 1
-        elif char in "({" and depth > 0:
-            depth -= 1
-        elif depth == 0 and char in ";{}":
-            break
-        index -= 1
-    return index
-
-
 def _annotation_regions(masked: str, starts: Sequence[int]) -> dict[int, int]:
-    """``_annotation_region`` of every start in one pass.  A walk that reaches an earlier start at depth 0 goes
-    on exactly as the walk from that start did, so it takes that start's answer: linear instead of a walk per member."""
+    """Where the annotations of the member declared at each start begin: after the previous `;`, `}` or the class `{`.  A walk that reaches an earlier start
+    at depth 0 goes on exactly as the walk from that start did, so it takes that start's answer: linear instead of a walk per member."""
     regions: dict[int, int] = {}
     for start in sorted(set(starts)):
         depth, index = 0, start

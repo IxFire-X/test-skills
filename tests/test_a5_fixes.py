@@ -28,7 +28,7 @@ def test_a_value_error_without_a_code_is_input_invalid_with_the_way_out() -> Non
 
     fields = error_fields(ValueError("missing event journal"))
     assert fields["code"] == "INPUT_INVALID" and fields["message"] == "missing event journal"
-    assert "--run-root" in fields["fix"] and "--attempt" in fields["fix"]
+    assert "--run-root" in fields["fix"] and "--attempt" not in fields["fix"]  # no command takes --attempt any more
 
 
 def test_a_value_error_with_a_code_and_the_other_exceptions_keep_what_they_had() -> None:

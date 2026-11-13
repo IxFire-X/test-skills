@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh, _self_digest
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
 
 pytestmark = pytest.mark.contract
 

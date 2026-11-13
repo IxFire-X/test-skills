@@ -58,9 +58,11 @@ def test_status_names_prepare_for_the_review_and_prepare_opens_it(tmp_path: Path
     assert _status(run["run_root"])["next"] == {"verb": "submit", "stage": STAGE}
 
 
-def test_prepare_leaves_in_published_nothing_but_the_questions_of_the_analyst(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    run = _opened(tmp_path, monkeypatch, capsys)
-    assert set(_published(run)) <= {"questions-for-analyst.md"}
+def test_the_first_prepare_of_the_review_names_no_analyst_questions_and_leaves_published_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    run = _run(tmp_path, monkeypatch)
+    code, out = _prepare(capsys, run)
+    assert code == 0 and "ANALYST_QUESTIONS" not in str(out) and "warnings" not in out["result"] and "questions_for_analyst" not in out["result"]
+    assert not _published(run)  # nothing is in published/ after the first prepare
 
 
 def test_prepare_again_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:

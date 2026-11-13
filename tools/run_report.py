@@ -615,12 +615,6 @@ def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str
     return None, True
 
 
-def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
-    """The selected case document — the effective canonical of the attempt and nothing else (no file the agent can
-    put into the run); before a verdict the report takes the candidate from the journal (``journal_assembly``)."""
-    return _effective_document(root, attempt_id)[0]
-
-
 UNUSED_TEST_DESIGN = "генератор не заполнил технику и параметры — подсказки тест-дизайна не строились"
 
 
@@ -1257,48 +1251,6 @@ def _attempt_notes(run_root: Path) -> tuple[list[Any], list[Any]]:
         return [], []
     attempt_id = attempts[-1]["attempt_id"]
     return review_notes(run_root, attempt_id)["texts"], review_notes(run_root, attempt_id, "autotests")["texts"]
-
-
-def write_questions_next_to(output_dir: Path, run_root: Path) -> tuple[str | None, str | None]:
-    """Install ``questions-for-analyst.md`` beside a published case set the way the set itself is installed.
-
-    A complete temporary file in the same directory is hard-linked to the target, so the write never follows a
-    link and never replaces another file.  Returns ``(path, None)`` or ``(None, warning code)``; it never raises.
-    """
-    import os
-    import tempfile
-
-    from tools.run_pipeline import _durable_status_facts
-
-    try:
-        run_root = Path(run_root).resolve()
-        warnings = _durable_status_facts(run_root.parents[1], run_root, stage="publish").get("warnings") or []
-        data = analyst_questions(warnings, *_attempt_notes(run_root)).encode("utf-8")
-    except Exception:  # noqa: BLE001 - the case set is already published; the report still writes the file
-        return None, "ANALYST_QUESTIONS_UNREADABLE"
-    temporary: Path | None = None
-    try:
-        directory = Path(output_dir).resolve()
-        if not directory.is_dir():
-            return None, "ANALYST_QUESTIONS_WRITE_FAILED"
-        target = directory / "questions-for-analyst.md"
-        with tempfile.NamedTemporaryFile("wb", delete=False, dir=directory) as handle:
-            temporary = Path(handle.name)
-            handle.write(data)
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
-                return None, "ANALYST_QUESTIONS_CONFLICT"
-        return str(target), None
-    except OSError:
-        return None, "ANALYST_QUESTIONS_WRITE_FAILED"
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
 
 
 if __name__ == "__main__":  # pragma: no cover

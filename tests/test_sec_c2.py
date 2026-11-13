@@ -336,11 +336,10 @@ def _write_sites() -> dict[str, int]:
 WRITES_OUTSIDE_CONFINED_OUTPUT = {
     "pilot_state.py": (2, "rmdir of the empty directory of an attempt step the same code made, below the run"),
     "project_inventory.py": (4, "the inventory's own probes of the project: unlink/mkdir of its guard files inside the scanned module"),
-    "publish_test_case_bundle.py": (6, "the bundle of ``--output-dir``: <run>/published only (output_guard.run_output_directory), hard link install"),
+    "publish_test_case_bundle.py": (6, "the bundle of the run: <run>/published only (orchestrate.published_dir asks output_guard.run_output_directory at every entry; a link out is refused), hard link install"),
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),
     "init_skillsrc.py": (3, "the .skillsrc of the project and its evidence copies, the project given by --project (confined target)"),
-    "run_report.py": (3, "report.md/json below <run>/ (link install of a temporary file next to it)"),
 }
 
 

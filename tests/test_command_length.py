@@ -4,7 +4,6 @@ realworld-b: 74 ``--tests`` flags made 9011 characters; ``gradlew.bat`` goes thr
 materialize said ok.  Only the printed form is shortened: the closed request, its digest and the reports it is held against stay per method."""
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 
 import pytest

@@ -9,7 +9,7 @@ import pytest
 
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_open_recovery import _main
-from tests.test_review_requested import _generated_run, _journal, _put
+from tests.test_review_requested import _generated_run, _journal
 from tests.journal_helpers import assert_refused_once
 from tests.test_cut_review import _crash_event, _crash_nth, _events
 

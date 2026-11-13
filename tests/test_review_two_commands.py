@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run, _journal, _put, _review_answer
+from tests.test_review_requested import _generated_run, _journal, _put, _review_answer
 from tests.journal_helpers import assert_refused_once
 
 STAGE = "tc-reviewer:canonical"

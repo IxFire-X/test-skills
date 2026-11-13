@@ -1847,8 +1847,9 @@ def cmd_finish(args: Any) -> int:
         _print({"status": "ok", "stage": "finish", "run_id": run["manifest"]["run_id"], "left": _leave(project, root, attempt_id),
                 "message": "прогон оставлен до ревью кейсов; простой scan того же запроса начнёт новый", "next_run": closed["next_run"]})
         return 0
-    from tools.orchestrate_test_case_revision import close_pending_rework
+    from tools.orchestrate_test_case_revision import close_pending_rework, published_dir
 
+    published_dir(root)  # a published directory that leads out of the run: refused before the attempt is closed
     if not executed:
         close_pending_rework(root, attempt_id)  # the first review sent cases back and the rework is not over: r2 and the rejected cases are published now, once
     try:

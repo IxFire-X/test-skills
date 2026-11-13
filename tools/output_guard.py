@@ -1,11 +1,10 @@
-"""Where the package writes and reads a path the agent names: ``--output-dir`` and the input files.
+"""Where the package publishes and reads a path the agent names: the published directory and the input files.
 
-A path from the command line or from a file is input, not a boundary.  ``--output-dir`` names ``<run>/published`` of an existing run or a
-directory below it.  An input file is inside the project (or, for a command without a run, inside the run it lies in), with no link or
-junction on the way.  Every path is judged by its text first — no NUL, no UNC
-or device path, no ``..`` — so a path that would reach the network is refused before anything opens it.  Nothing is created here.  Every
-entry point of the package that takes ``--output-dir`` calls this module; ``tests/test_output_guard.py`` reads the sources
-and fails for one that does not.
+A path from the command line or from a file is input, not a boundary.  The published directory is ``<run>/published`` of an existing run: no
+command names it, the code takes it from the run root and asks ``run_output_directory`` — a link or junction in its place leads out of the
+run and is refused.  An input file is inside the project (or, for a command without a run, inside the run it lies in), with no link or
+junction on the way.  Every path is judged by its text first — no NUL, no UNC or device path, no ``..`` — so a path that would reach the
+network is refused before anything opens it.  Nothing is created here.
 """
 
 from __future__ import annotations
@@ -18,8 +17,8 @@ from pathlib import Path, PureWindowsPath
 OUT_CODE = "API_OUT_OUTSIDE_RUN"
 DIR_CODE = "OUTPUT_DIR_OUTSIDE_RUN"
 IN_CODE = "INPUT_OUTSIDE_PROJECT"
-OUT_FIX = "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json"
-DIR_FIX = "каталог публикации — <run>/published (или ниже) прогона из --run-root; повтори с таким --output-dir"
+OUT_FIX = "--run-root — существующий прогон <project>/.pilot-runs/<run_id> (каталог из вывода scan); повтори команду с ним"
+DIR_FIX = "каталог публикации прогона `<run>/published` подменён ссылкой (junction) или ведёт за пределы прогона: код ничего туда не записал; агент ничего не правит — человек удаляет эту ссылку (на её месте должна быть обычная папка внутри прогона или её нет) и повторяет ту же команду"
 PACK_ROOT = Path(__file__).resolve().parents[1]
 PACK_FIX = "схема — файл пакета (schemas/…), путь от каталога пакета, обычный файл без ссылок и «..»"
 RUN_FIX = "--run — id прогона (32 символа 0-9a-f из вывода scan), не путь; путь к проекту — в --project"
@@ -143,10 +142,10 @@ def existing_run(run_root: object) -> tuple[Path, Path]:
 
 
 def run_output_directory(path: str | Path, run_root: object) -> Path:
-    """The directory ``--output-dir`` names: ``<run>/published`` of the run ``run_root`` names, or below it, links resolved."""
+    """``path`` as the published directory of the run ``run_root`` names: ``<run>/published`` or below it, links resolved; a link out of it is refused."""
     _project, run = existing_run(run_root)
     published = run / "published"
     directory = Path(path).resolve() if local_path_text(str(path)) else None
     if directory is None or (directory != published and published not in directory.parents):
-        raise OutputRefused(DIR_CODE, f"--output-dir must be {published} or below it", DIR_FIX)
+        raise OutputRefused(DIR_CODE, f"{published} must be a plain directory inside the run, not a link or junction out of it", DIR_FIX)
     return directory

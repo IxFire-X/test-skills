@@ -96,7 +96,7 @@ def test_wrong_case_links_are_refused_before_the_write(tmp_path: Path, monkeypat
 
 def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     from tests.test_batch_assembly import _header
-    from tools import api, context_marker_parts, pilot_state
+    from tools import context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
 
     project, root, attempt_id = _scanned(tmp_path, monkeypatch)
@@ -265,7 +265,7 @@ SPEC = ("## Requirements\n### Requirement: Join\ncombine joins two strings.\n###
 
 
 def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import api, context_marker_parts, pilot_state
+    from tools import context_marker_parts, pilot_state
     from tools.build_context import build_context
     from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 

@@ -447,7 +447,7 @@ def test_cells_no_answer_can_keep_are_refused_on_scan_by_row(tmp_path: Path, mon
 
 
 def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the_fragment_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _api, _put
+    from tests.test_review_requested import _put
     from tools.run_report import build_report
 
     run = _to_generator(tmp_path, monkeypatch, _row(objective="", data=""))

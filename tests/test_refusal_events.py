@@ -14,7 +14,6 @@ import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
-import pytest
 
 from tests.helpers import submit_stage
 from tests.test_review_requested import _generated_run

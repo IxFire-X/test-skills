@@ -2,7 +2,6 @@
 could put there and wants the number, the map or the decision to come from the journal."""
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import shutil
@@ -79,7 +78,6 @@ def test_the_over_budget_warning_of_the_report_follows_the_calls_of_the_journal_
 
 
 def test_the_step_size_rows_are_printed_as_the_agents_measurement() -> None:
-    from tools.run_report import render_markdown
 
     report = {"step_sizes": [{"step": "x", "bytes": 1, "input_bytes": 1, "role_bytes": 0, "role": None, "files": 1, "tokens_est": 1, "budget_bytes": 2,
                               "fits": True, "warning": None, "at": "t"}]}

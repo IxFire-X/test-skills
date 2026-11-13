@@ -17,6 +17,7 @@ NT = [r"\??\UNC\host\share\mvn.cmd", "/??/UNC/host/share/mvn.cmd"]  # SEC-A D3: 
 
 @pytest.mark.parametrize("executable", [*UNC, *NT])
 def test_the_system_maven_path_refuses_a_share_or_a_device_before_any_io(executable: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import output_guard  # noqa: F401 - imported before the patch: it reads the pack root with Path.resolve at import
     from tools.project_inventory import InventoryError, system_maven_path
 
     def touched(*_args, **_kwargs):

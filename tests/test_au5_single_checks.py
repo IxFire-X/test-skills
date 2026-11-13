@@ -10,7 +10,7 @@ import pytest
 
 from tests.journal_helpers import assert_refused_once
 
-from tests.test_digest_traps import _api, _journal, _put
+from tests.test_digest_traps import _journal
 from tests.test_marker_parts import _marker, _publish_part, _run
 from tools import pilot_state
 

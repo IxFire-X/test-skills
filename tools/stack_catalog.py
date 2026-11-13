@@ -38,7 +38,6 @@ MANIFEST_LANGUAGES = {
     "pom.xml": "java", "build.gradle": "java", "build.gradle.kts": "java",
     "package.json": "typescript", "go.mod": "go",
 }
-WORKSPACE_MANIFEST_NAMES = frozenset({"settings.gradle", "settings.gradle.kts", "go.work"})
 
 
 def confined_files(root: Path) -> list[Path]:
@@ -66,10 +65,6 @@ def confined_files(root: Path) -> list[Path]:
                 continue
             found.append(path)
     return found
-PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "Pipfile"]
-JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
-JS_MANIFESTS = ["package.json"]
-GO_MANIFESTS = ["go.mod"]
 PYTHON_FRAMEWORK_MARKERS = [("django", "django"), ("rest_framework", "django"), ("djangorestframework", "django"), ("fastapi", "fastapi"), ("flask", "flask"), ("aiohttp", "aiohttp"), ("tornado", "tornado")]
 JAVA_FRAMEWORK_MARKERS = [("spring-boot-starter", "spring-boot"), ("org.springframework.boot", "spring-boot"), ("quarkus", "quarkus"), ("micronaut", "micronaut")]
 JS_FRAMEWORK_MARKERS = [('"express"', "express"), ('"next"', "nextjs"), ('"nuxt"', "nuxt"), ('"@nestjs/core"', "nestjs"), ('"fastify"', "fastify")]
@@ -79,7 +74,6 @@ PYTHON_TEST_MARKERS = [("pytest", "pytest"), ("unittest", "unittest")]
 JAVA_TEST_MARKERS = [("junit-jupiter", "junit5"), ("spring-boot-starter-test", "junit5")]
 JS_TEST_MARKERS = [('"jest"', "jest"), ('"mocha"', "mocha")]
 GO_TEST_MARKERS: list[tuple[str, str]] = []
-BUILD_TOOL_NORMALIZE = {"uv": "pip", "conda": "pip", "pipenv": "pip", "setuptools": "pip", "kotlin": "gradle"}
 
 
 def manifest_language(name: str) -> str | None:

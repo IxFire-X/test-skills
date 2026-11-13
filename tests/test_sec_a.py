@@ -126,7 +126,7 @@ def test_a_typographic_quote_or_an_exclamation_mark_is_not_printed(token: str) -
 
 
 def _builders():
-    from tools import ready, run_pipeline, scope_pause
+    from tools import ready, run_pipeline
 
     return {
         "scan": lambda bad: run_pipeline._scan_command(Path("project"), {"docs": [bad]}),

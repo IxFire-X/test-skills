@@ -8,7 +8,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.confined_output import remove_confined_bytes_if_equal
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _remove_receipt_if_created(project: Path, root: Path, receipt: Mapping[str, Any]) -> bool:
+    """Take back the receipt this call created (the file it installed, by its bytes and identity); False for one it did not create."""
+    identity = receipt.get("installed_identity")
+    if receipt.get("created") is not True or not isinstance(receipt.get("path"), str) or not isinstance(receipt.get("bytes"), bytes) or not isinstance(identity, tuple):
+        return False
+    return remove_confined_bytes_if_equal(project, root, root / receipt["path"], receipt["bytes"], expected_identity=identity)
 
 
 def run_phase_one_spine(project: Path, policy_profile: str, authorization: Mapping[str, Any], identity: Mapping[str, Any], baseline: Mapping[str, Any], facts: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -22,7 +32,6 @@ def run_phase_one_spine(project: Path, policy_profile: str, authorization: Mappi
         freeze_phase_two_inputs,
         module_selection_digest,
         publish_attempt_receipt,
-        remove_attempt_receipt_if_created,
     )
     from tools.pilot_state import _PublicationUnknown
 
@@ -50,7 +59,7 @@ def run_phase_one_spine(project: Path, policy_profile: str, authorization: Mappi
     except _PublicationUnknown:
         raise
     except Exception:
-        if not remove_attempt_receipt_if_created(root, result):
+        if not _remove_receipt_if_created(project_root, root, result):
             return {
                 "run": run,
                 "state": derive_state(root),

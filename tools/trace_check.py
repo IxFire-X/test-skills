@@ -10,16 +10,6 @@ from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"
-AUDIT_SCHEMA = ROOT / "schemas" / "trace-audit-output.schema.json"
-from tools.json_cli import JsonArgumentParser
-
-
-class _TraceArgumentParser(JsonArgumentParser):
-    """Emit one value-redacting JSON object for every CLI argument error."""
-
-    def error(self, message: str) -> None:
-        print(json.dumps({"status": "error", "errors": [{"path": "", "code": "TRACE_ARGUMENT", "message": "Trace arguments are invalid."}]}, ensure_ascii=False, separators=(",", ":")))
-        raise SystemExit(2)
 
 
 def _diag(path: str, code: str, message: str = "Trace input is invalid.") -> dict[str, str]:

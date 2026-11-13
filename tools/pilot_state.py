@@ -2582,32 +2582,6 @@ def publish_model_stage_artifact(
         raise
 
 
-def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: str, artifact: Mapping[str, Any]) -> str:
-    """``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``submit``
-    would store it, the digest fields it puts filled in), ``"other"`` when another answer is recorded.  Reads only."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id]
-    responses = [event for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-    requests = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
-    if not responses:
-        return "none"
-    value = dict(artifact)
-    if stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):  # as the answer is stored
-        from tools.review_canaries import hash_codeword
-
-        value = hash_codeword(value)
-    if len(requests) == 1:
-        prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
-        if not isinstance(prior.get("reuse"), Mapping):
-            try:
-                value, _filled = _fill_response_bindings(project, root, state, attempt_id, stage_instance_id, prior, value)
-            except (ValueError, KeyError, TypeError):
-                return "other"
-    digest = "sha256:" + hashlib.sha256(_model_stage_artifact_bytes(value)).hexdigest()
-    return "same" if responses[0].get("artifact_digest") == digest else "other"
-
-
 def _retry_spent(text: str) -> str:
     return text.split("; fix: ", 1)[0] + "; fix: " + _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
 
@@ -4606,10 +4580,6 @@ def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, di
     return {"created": created, "installed_identity": identity, "path": str(target.relative_to(root)).replace("\\", "/"), "digest": digest}
 
 
-# the earlier names the code and the tests used
-_publish_bound_attempt_receipt = publish_bound
-
-
 def publish_execution_trace_pair(
     run_root: Path,
     attempt_id: str,
@@ -6008,17 +5978,6 @@ def publish_phase5_receipt(run_root: Path, attempt_id: str, kind: str, payload: 
     if kind not in {"materialization-ownership", "disposition-plan", "disposition-receipt"}:
         raise ValueError("invalid phase5 receipt kind")
     return publish_bound(run_root, attempt_id, kind, {"payload": dict(payload)})
-
-
-def remove_attempt_receipt_if_created(run_root: Path, receipt: Mapping[str, Any]) -> bool:
-    project, root = _run_root(run_root)
-    identity = receipt.get("installed_identity")
-    if receipt.get("created") is not True or not isinstance(receipt.get("path"), str) or not isinstance(receipt.get("bytes"), bytes) or not isinstance(identity, tuple):
-        return False
-    try:
-        return remove_confined_bytes_if_equal(project, root, root / receipt["path"], receipt["bytes"], expected_identity=identity)
-    except OutputConfinementError as error:
-        raise ValueError("factual receipt rollback failed") from error
 
 
 _RESULT_EVIDENCE_KEYS = {

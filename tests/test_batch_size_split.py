@@ -187,7 +187,6 @@ def test_split_assembly_keeps_duplicate_warning_and_refuses_an_uncovered_require
 
 
 def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path, capsys):
-    from tools import api
 
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)

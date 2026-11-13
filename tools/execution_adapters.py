@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 
 PYTEST = "pytest:selected-symbols-v1"
@@ -362,12 +362,3 @@ def is_zero_test_report(report_bytes: bytes | None) -> bool:
         return _is_zero_test_root(ET.fromstring(report_bytes))
     except ET.ParseError:
         return False
-
-
-def classify_zero_report(*, controller_timed_out: bool, process_returncode: int | None) -> Literal["FAIL", "UNKNOWN"]:
-    """A framework report that proves zero collected tests (``is_zero_test_report``): FAIL when the process ended by itself,
-    UNKNOWN after a controller timeout, a crash or an unknown end.  Audit U4: the reports with tests are matched by
-    ``tools.run_tests.match_junit_cases`` alone and classified by ``tools.run_tests.classify_evidence``."""
-    if controller_timed_out or process_returncode is None or process_returncode < 0:
-        return "UNKNOWN"
-    return "FAIL"

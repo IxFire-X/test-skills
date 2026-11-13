@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run, _journal, _put
-from tests.test_review_two_commands import _events, _flags, _open, _select_verdict, _verdict
+from tests.test_review_requested import _generated_run, _put
+from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
 
 
 def _main(capsys, argv: list[str]) -> tuple[int, dict]:

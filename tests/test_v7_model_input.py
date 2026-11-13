@@ -9,7 +9,7 @@ import pytest
 
 from tests.test_first_run import _python_project, _write
 from tests.test_review_requested import _generated_run, _journal
-from tests.test_scan_guard import DOCS, _scan
+from tests.test_scan_guard import _scan
 from tools import pilot_state, step_size
 
 MODULE = "services/api"

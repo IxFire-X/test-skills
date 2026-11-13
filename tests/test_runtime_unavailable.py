@@ -4,7 +4,6 @@ pq1-b1: no Maven on PATH made materialize answer «baseline is invalid or unread
 accepted cases and tests negatively.  A damaged baseline keeps its closed refusal."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest

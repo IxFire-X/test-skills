@@ -87,10 +87,6 @@ class BundlePublicationError(OSError):
     def code(self) -> str:
         return self._code
 
-    @property
-    def safe_message(self) -> str:
-        return self._safe_message
-
 
 def _digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()

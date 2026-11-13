@@ -667,7 +667,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `CanonicalDocumentError`, `validate_canonical_document`, `require_valid_canonical_document`, `canonical_bytes`, `document_sha256`, `load_canonical_document`.
+**Основные определения в коде:** `CanonicalDocumentError`, `validate_canonical_document`, `require_valid_canonical_document`, `canonical_bytes`, `document_sha256`.
 
 </details>
 
@@ -794,7 +794,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `invoke_request`, `is_zero_test_report`, `classify_zero_report`.
+**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `invoke_request`, `is_zero_test_report`.
 
 </details>
 
@@ -984,7 +984,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `create_run`, `derive_state`, `model_lifecycle_projection`, `append_event`, `claim_execution_start`, `record_execution_unknown`, `module_selection_digest`, `create_attempt`, `freeze_phase_two_inputs`, `publish_model_request`, `read_model_request`, `publish_model_stage_artifact`, `read_model_stage_artifact`, `publish_context_selection`, `read_context_selection`, `publish_reviewer_session_ledger`, `read_reviewer_session_ledger`, `reviewer_lifecycle_projection`, `terminal_reviewer_evidence`, `read_run`, `publish_attempt_receipt`, `read_attempt_receipt`, `publish_execution_trace_pair`, `publish_effective_canonical`, `publish_execution_inputs`, `recover_execution_inputs_events`, `read_execution_inputs`, `publish_resume_validation`, `read_resume_validation_if_present`, `read_effective_canonical`, `read_effective_canonical_if_present`, `recover_phase5_receipt_events`, `recover_execution_receipt_events`, `open_automation_review_boundary`, `publish_generated_delta`, `publish_phase5_receipt`, `remove_attempt_receipt_if_created`, `terminal_result`, `publish_closure_artifact`, `read_closure_artifact`, `read_closure_artifact_if_present`, `publish_terminal_result`, `read_terminal_result`, `publish_run_artifact_bytes`, `read_retained_native_rerun`, `read_scenario_observation`, `publish_project_state_observation`, `publish_resume_observations`, `publish_retained_rerun_observation`, `exit_code`.
+**Основные определения в коде:** `create_run`, `derive_state`, `model_lifecycle_projection`, `append_event`, `claim_execution_start`, `record_execution_unknown`, `module_selection_digest`, `create_attempt`, `freeze_phase_two_inputs`, `publish_model_request`, `read_model_request`, `publish_model_stage_artifact`, `read_model_stage_artifact`, `publish_context_selection`, `read_context_selection`, `publish_reviewer_session_ledger`, `read_reviewer_session_ledger`, `reviewer_lifecycle_projection`, `terminal_reviewer_evidence`, `read_run`, `publish_attempt_receipt`, `read_attempt_receipt`, `publish_execution_trace_pair`, `publish_effective_canonical`, `publish_execution_inputs`, `recover_execution_inputs_events`, `read_execution_inputs`, `publish_resume_validation`, `read_resume_validation_if_present`, `read_effective_canonical`, `read_effective_canonical_if_present`, `recover_phase5_receipt_events`, `recover_execution_receipt_events`, `open_automation_review_boundary`, `publish_generated_delta`, `publish_phase5_receipt`, `terminal_result`, `publish_closure_artifact`, `read_closure_artifact`, `read_closure_artifact_if_present`, `publish_terminal_result`, `read_terminal_result`, `publish_run_artifact_bytes`, `read_retained_native_rerun`, `read_scenario_observation`, `publish_project_state_observation`, `publish_resume_observations`, `publish_retained_rerun_observation`, `exit_code`.
 
 </details>
 

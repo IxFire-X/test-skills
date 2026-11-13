@@ -170,15 +170,16 @@ def _reviewer_accepted(root: Path, stage: str) -> Mapping[str, Any]:
 def _reviewer_check(root: Path, stage: str, value: Mapping[str, Any], dry_run: bool, evidence: Any) -> dict[str, Any] | None:
     """After every check of the answer, before its write: the evidence it names (a refusal leaves the answer unwritten; the same files again are no duplicate);
     a dry run says what the selection would publish."""
-    from tools.orchestrate_test_case_revision import provide_reviewer_evidence, select_review, select_rework_review
+    from tools.orchestrate_test_case_revision import provide_reviewer_evidence, published_dir, select_review, select_rework_review
 
     attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
+    published_dir(root)  # the set is published below <run>/published: a link in its place is refused before the answer is written
     if stage == REWORK_REVIEW_STAGE:  # no evidence in the second round; a dry run says what the set would be
         return select_rework_review(root, attempt_id, review=value, dry_run=True) if dry_run else None
     if evidence is not None:
         if not isinstance(evidence, list) or not all(isinstance(path, str) for path in evidence):
             raise ValueError("REVIEW_EVIDENCE_INVALID: evidence — список путей внутри проекта; fix: evidence: [\"src/файл.py\", …] или без ключа")
-        provide_reviewer_evidence(root, attempt_id, evidence, dry_run=dry_run, again_ok=True)
+        provide_reviewer_evidence(root, attempt_id, evidence, dry_run=dry_run)
     return select_review(root, attempt_id, review=value, dry_run=True) if dry_run else None
 
 
@@ -447,7 +448,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     if requested and stage.startswith("tc-generator:BATCH-"):
         word = {"nonce_note": pilot_state.codeword_lost_note(root, state, attempt_id, stage).strip()}
         _mark_lost_word(project, root, stage)
-    told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "questions_for_analyst", "warnings", "generator_checks") if key in opened}
+    told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "generator_checks") if key in opened}
     return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": step_size.compact_inputs(root, stage, found)["files_summary"],
             "budget": _budget(root, step, found), **word, **told}
 

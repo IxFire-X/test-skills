@@ -140,9 +140,3 @@ def test_the_naive_four_the_effective_canonical_and_the_canaries_publish_through
     kinds = [kind for kind, _batch in seen]
     assert kinds == ["generated-delta", "disposition-plan", "automation-review-boundary-r1", "review-canaries", "effective-canonical"], seen
     assert seen[3][1] is not None  # the canaries keep their batch_id
-
-
-def test_the_old_private_name_is_the_same_function() -> None:
-    from tools import pilot_state
-
-    assert pilot_state._publish_bound_attempt_receipt is pilot_state.publish_bound

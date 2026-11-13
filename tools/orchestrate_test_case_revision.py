@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
+from tools.output_guard import run_output_directory
 from tools.publish_test_case_bundle import Receipt, partial_context, planned_receipt, publish_bundle, rejected_cases, status_payloads, verify_bundle
 from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_REVIEW_STAGE, REWORK_STAGE, SelectionError, candidate_rows, check_rework,
                                       review_outcome, reviewer_verdict_is_bound, rework_final, select_effective_document, validate_review_decision)
@@ -28,8 +29,6 @@ REVIEWER_SESSION_SCHEMA = ROOT / "schemas" / "reviewer-session.schema.json"
 CONTEXT_RECEIPT_SCHEMA = ROOT / "schemas" / "context-selection-receipt.schema.json"
 ASSEMBLY_RECEIPT_SCHEMA = ROOT / "schemas" / "assembly-receipt.schema.json"
 INVENTORY_RECEIPT_SCHEMA = ROOT / "schemas" / "inventory-receipt.schema.json"
-AUTOMATION_REVIEW_SCHEMA = ROOT / "schemas" / "autotest-reviewer-output.schema.json"
-TRACE_AUDIT_SCHEMA = ROOT / "schemas" / "trace-audit-output.schema.json"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
 _PROFILE_V5 = "zephyr-scale-step-row-24-v5"
 _PROFILE = _PROFILE_V5
@@ -101,14 +100,18 @@ class OrchestrationError(ValueError):
         object.__setattr__(self, name, value)
 
 
+def published_dir(run_root: Path | str) -> Path:
+    """``<run>/published`` of the run, the one place the package publishes.  The code names it, no command does — so it is judged here, where it is taken:
+    a link or junction in its place (the run directory is the agent's to write) leads out of the run and is refused."""
+    return run_output_directory(Path(run_root) / "published", run_root)
+
+
 def _expected_paths(document: Mapping[str, Any], output_dir: str | os.PathLike[str], profile: str) -> tuple[str, str, str]:
     base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}"
     return str(base) + ".json", str(base) + (".html" if profile in _PROFILES else ".md"), str(base) + ".zephyr-scale.csv"
 
 
 def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | os.PathLike[str] | None, profile: str) -> list[dict[str, str]]:
-    from tools.run_pipeline import printed_or
-
     if type(receipt) is not Receipt:
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     expected_paths = _expected_paths(document, output_dir, profile) if output_dir is not None else None
@@ -124,13 +127,7 @@ def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | o
         if field in {"preview_sha256", "csv_sha256"} and (not isinstance(value, str) or not _DIGEST.fullmatch(value)):
             return [_diag(f"/receipt/{field}", "ORCHESTRATION_RECEIPT")]
     if expected_paths is not None and (receipt.json_path, receipt.preview_path, receipt.csv_path) != expected_paths:
-        # select got another --output-dir than publish — name both directories; same directory, other files: as before
-        published = Path(str(receipt.json_path)).parent
-        if Path(output_dir).resolve() == published:
-            return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
-        return [_diag("/receipt", "ORCHESTRATION_OUTPUT_DIR",
-                      f"--output-dir {printed_or(Path(output_dir).resolve(), '<каталог select>')} не совпадает с каталогом publish {published}; "
-                      f"fix: повтори с --output-dir {printed_or(published, '<каталог publish>')}")]
+        return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     if expected_paths is None and any(not isinstance(getattr(receipt, field), str) or not getattr(receipt, field) for field in ("json_path", "preview_path", "csv_path")):
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     return []
@@ -671,7 +668,7 @@ def _publish_final(run_root: Path, attempt_id: str, data: Mapping[str, Any], fin
     them).  Every case came back: the set alone (r3), no file of the rejected; else the set, ``REJECTED-CASES`` and the effective canonical."""
     from tools.pilot_state import publish_effective_canonical, read_reviewer_session_ledger
 
-    candidate, outcome, published = data["candidate"], data["outcome"], Path(run_root) / "published"
+    candidate, outcome, published = data["candidate"], data["outcome"], published_dir(run_root)
     effective = final["effective"] if final else outcome["effective"]
     partial = None if final and final["kind"] == "ALL" else partial_context(candidate, outcome, {"state": "reviewed", "final": final} if final else {"state": rework_state(run_root, attempt_id)})
     receipt = publish_bundle(effective, published, _PROFILE, partial=partial)
@@ -714,7 +711,7 @@ def select_rework_review(run_root: Path, attempt_id: str, *, review: Mapping[str
             return {**told, "would_publish": {"revision": final["effective"]["revision"], "cases": len(final["effective"]["test_cases"])}}
         if read_effective_canonical_if_present(Path(run_root), attempt_id) is None:
             _publish_final(run_root, attempt_id, data, final)
-        published = Path(run_root) / "published"
+        published = published_dir(run_root)
         return {**told, "files": sorted(path.name for path in published.iterdir()) if published.is_dir() else []}
 
 
@@ -806,14 +803,14 @@ def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]
 
 
 @_closure_cached
-def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str], *, dry_run: bool = False, again_ok: bool = False) -> dict[str, Any]:
+def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str], *, dry_run: bool = False) -> dict[str, Any]:
     """One C-lite evidence pair for the open reviewer session.
 
     The named project files of the attempt inventory become one context receipt (the one way to publish evidence now that
     publish-evidence is removed);
     the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
     with the cumulative package digest, and the WAITING ledger is published again.
-    ``dry_run`` checks and writes nothing; ``again_ok``: the same files given before are no duplicate (a repeated ``submit``).
+    ``dry_run`` checks and writes nothing; the same files given before are no duplicate (a repeated ``submit``).
     """
     from tools.pilot_state import derive_state, publish_context_selection, read_reviewer_session_ledger
     from tools.project_inventory import ContextSelectionError, read_inventory_receipt, select_context_batches
@@ -858,9 +855,9 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
                                       "fix: повтори `submit --stage tc-reviewer:canonical` с теми же путями в evidence, что в прошлый раз (он допишет события); иные файлы — после этого")
         receipt = publish_context_selection(Path(run_root), attempt_id, selected)  # the same receipt again: nothing new
         return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
-    if again_ok and selected["digest"] in digests:
+    if selected["digest"] in digests:
         return {}
-    if selected["digest"] in package["context_receipt_digests"] or selected["digest"] in digests:
+    if selected["digest"] in package["context_receipt_digests"]:
         raise ValueError("REVIEWER_EVIDENCE_DUPLICATE: these files were already given to the reviewer")
     if dry_run:
         return {}
@@ -1065,7 +1062,7 @@ def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
     in ``<run>/published``, unless the review ended in an effective document or a REJECTED set.  Called by ``finish``."""
     from tools.pilot_state import read_effective_canonical_if_present
 
-    published = Path(run_root) / "published"
+    published = published_dir(run_root)
     try:
         candidate = journal_assembly(Path(run_root), attempt_id)[0]
     except (KeyError, OSError, TypeError, ValueError):
@@ -1268,10 +1265,6 @@ def _source(document: Mapping[str, Any]) -> dict[str, Any]:
     return {"document_id": document["document_id"], "revision": document["revision"], "source_digest": document_sha256(_plain(document))}
 
 
-def _source_rows(value: Any, expected: Mapping[str, Any], path: str) -> list[dict[str, str]]:
-    return [] if isinstance(value, Mapping) and dict(value) == dict(expected) else [_diag(path, "ORCHESTRATION_SOURCE")]
-
-
 def _readback_rows(receipt: Any, document: Mapping[str, Any]) -> list[dict[str, str]]:
     rows = _receipt_rows(receipt, document, None, receipt.csv_profile if type(receipt) is Receipt else "")
     if rows:
@@ -1291,17 +1284,13 @@ def _receipt_json(receipt: Receipt | None) -> dict[str, Any] | None:
 
 
 def publish_command(candidate: Mapping[str, Any], output_dir: Path, csv_profile: str, *, run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """The candidate r1 as UNREVIEWED, the analyst questions beside it; the printed fields."""
+    """The candidate r1 as UNREVIEWED; the printed fields."""
     from tools.pilot_state import derive_state
-    from tools.run_report import write_questions_next_to
 
     again = any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt_id
                 and event.get("stage_instance_id") == "assembly" for event in derive_state(run_root)["events"])
     receipt = publish_unreviewed_candidate(candidate, output_dir, csv_profile, run_root=run_root, attempt_id=attempt_id)
-    # the analyst questions beside the case set; a failed write only warns, the set is published.
-    questions, code = write_questions_next_to(output_dir, run_root)
-    return {"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
-            "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [], "idempotent": again}
+    return {"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published", "idempotent": again}
 
 
 def review_package(run_root: Path, attempt_id: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -1454,8 +1443,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, output_dir: Path, model
             "canaries": {"seeded": view["canaries"], "note": "канарейки — сигнал качества ревью, не защита; классы и кейсы здесь не печатаются"},
             "for_human": review_for_human(run_root, view["path"], fresh)}
         if published is not None:
-            result.update(candidate_bundle_receipt=published["candidate_bundle_receipt"], questions_for_analyst=published["questions_for_analyst"],
-                          warnings=published["warnings"])
+            result.update(candidate_bundle_receipt=published["candidate_bundle_receipt"])
         return result
 
 
@@ -1485,7 +1473,7 @@ def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invoca
     if not (fresh and label != generator) and not self_review_accepted(Path(run_root)):
         raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора, а прогон не принял SELF; fix: вызови ревьюера отдельной сессией "
                                      "и назови её --invocation-id; только если человек согласен на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review")
-    return review_open_step(run_root, attempt_id, output_dir=Path(run_root) / "published", model_id=model_id, invocation_id=label, fresh_context=fresh)
+    return review_open_step(run_root, attempt_id, output_dir=published_dir(run_root), model_id=model_id, invocation_id=label, fresh_context=fresh)
 
 
 def review_for_human(run_root: Path, view: Path | str, fresh: bool) -> str:
@@ -1512,7 +1500,7 @@ def select_review(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] 
     with closure_cache(), inventory_cache():
         _require_open_attempt(run_root, attempt_id)
         session = session if session is not None else _last_reviewer_session(run_root, attempt_id, review)
-        published = Path(run_root) / "published"
+        published = published_dir(run_root)
         selected = review_step(run_root, attempt_id, output_dir=published, reviewer_session=session, review=review, dry_run=dry_run)
         selected = {**selected, **_canary_report(run_root, attempt_id, review)}
         answer = review if review is not None else journal_review_artifact(run_root, attempt_id, session)
@@ -1580,20 +1568,16 @@ REVIEW_INPUT_FIELDS = ("candidate", "candidate_receipt", "assembly_receipt", "in
                        "context_marker_output", "generator_fragments")
 
 
-def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = None, csv_profile: str = _PROFILE,
-                  given: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = None, csv_profile: str = _PROFILE) -> dict[str, Any]:
     """The seven reviewer-package inputs of the attempt, read from the journal (only reads).
 
     candidate and assembly receipt — ``assemble_candidate`` over the published plan, header and the tc-generator answers
     (the bytes the last ``submit`` of the generator checked); candidate receipt — ``planned_receipt`` of that candidate for ``output_dir``;
     inventory — the attempt baseline's; context receipts — the package's when a session is open, else every receipt the
-    attempt published; marker — the context-marker:baseline answer.  A value in ``given`` (a file the agent passed) is
-    compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
-    cannot give (a run of an earlier version) comes from ``given`` as before, else REVIEW_INPUTS_UNAVAILABLE."""
+    attempt published; marker — the context-marker:baseline answer.  A value the journal cannot give is REVIEW_INPUTS_UNAVAILABLE."""
     from tools.batch_assembly import BatchAssemblyError
     from tools.pilot_state import derive_state, frozen_baseline, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
-    given = {key: value for key, value in (given or {}).items() if value not in (None, [])}
+    from tools.project_inventory import read_inventory_receipt
     root = Path(run_root)
     project, resolved = _run_root(root)
     state = derive_state(root)
@@ -1603,37 +1587,29 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     answers = {str(event.get("stage_instance_id")): str(event["artifact_digest"]) for event in state["events"]
                if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"}
     journal: dict[str, Any] = {}
-    sources: dict[str, str] = {}
     missing: dict[str, str] = {}
     try:
         candidate, assembly, fragments = journal_assembly(root, attempt_id)
         journal.update(candidate=candidate, assembly_receipt=assembly, generator_fragments=fragments)
-        sources.update(candidate="сборка над plan, header и ответами tc-generator журнала", assembly_receipt="сборка той же",
-                       generator_fragments="ответы tc-generator:<batch> журнала по порядку плана")
     except (ValueError, KeyError, BatchAssemblyError, TypeError) as error:
         for key in ("candidate", "assembly_receipt", "generator_fragments"):
             missing[key] = str(error).removeprefix("MODEL_INPUTS_MISMATCH: ").removeprefix("REVIEW_INPUTS_UNAVAILABLE: candidate: ")
     baseline = frozen_baseline(resolved, attempt)
     journal["inventory_receipt"] = read_inventory_receipt(resolved / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
-    sources["inventory_receipt"] = "опись baseline попытки"
     try:
         digests = list(read_reviewer_session_ledger(root, attempt_id, unconfirmed_ok=True)["package_binding"]["context_receipt_digests"])
-        sources["context_receipts"] = "квитанции пакета открытой сессии ревьюера"
     except (KeyError, TypeError, ValueError):
         digests = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
                                      if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
-        sources["context_receipts"] = "квитанции контекста, опубликованные попыткой"
     journal["context_receipts"] = [read_context_selection(root, attempt_id, digest) for digest in digests]
     if "context-marker:baseline" in answers:
         journal["context_marker_output"] = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", answers["context-marker:baseline"])["artifact"]
-        sources["context_marker_output"] = "ответ context-marker:baseline журнала"
     else:
         missing["context_marker_output"] = "нет ответа context-marker:baseline"
-    candidate = journal.get("candidate", given.get("candidate"))
+    candidate = journal.get("candidate")
     if output_dir is not None and candidate is not None:
         try:
             journal["candidate_receipt"] = planned_receipt(_plain(candidate), output_dir, csv_profile)
-            sources["candidate_receipt"] = f"расчёт bundle кандидата для {output_dir} (файлов до вердикта нет)"
         except (OSError, ValueError) as error:
             missing["candidate_receipt"] = f"bundle кандидата в {output_dir} не проверен ({error})"
     else:
@@ -1641,15 +1617,9 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     result: dict[str, Any] = {}
     for field in REVIEW_INPUT_FIELDS:
         if field in journal:
-            if field in given and _review_key(field, given[field]) != _review_key(field, journal[field]):
-                raise ValueError(f"REVIEW_INPUT_MISMATCH: {field}: переданный файл не совпадает с журналом "
-                                 f"({sources[field]}); fix: не передавай {field} — код возьмёт его из журнала")
             result[field] = journal[field]
-        elif field in given:
-            result[field] = given[field]
         else:
-            raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: {field}: {missing.get(field, 'нет в журнале')}; fix: сначала этот шаг"
-                             " (или передай файл явно, для прогона до FaT-DG)")
+            raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: {field}: {missing.get(field, 'нет в журнале')}; fix: сначала этот шаг")
     return result
 
 
@@ -1681,17 +1651,3 @@ def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], d
     if kept is not None:
         kept[key] = copy.deepcopy((candidate, assembly, fragments))
     return candidate, assembly, fragments
-
-
-def _review_key(field: str, value: Any) -> bytes:
-    if field == "context_receipts":  # a context file may be the receipt or its digest pointer: the digests decide
-        value = [_plain(item).get("digest") if isinstance(_plain(item), dict) else None for item in value]
-    return _review_bytes(value)
-
-
-def _review_bytes(value: Any) -> bytes:
-    if isinstance(value, Receipt):
-        value = _receipt_json(value)
-    elif isinstance(value, (list, tuple)):
-        value = [_plain(item) for item in value]
-    return canonical_bytes(_plain(value))

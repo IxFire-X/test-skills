@@ -25,7 +25,6 @@ class FinalizationError(ValueError):
         self.fix = fix
 
 
-_DIGEST = "sha256:" + "0" * 64
 _VERIFICATIONS = {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"}
 _DISPOSITIONS = {
     "RETAINED", "QUARANTINED", "CLEANED", "NOT_MATERIALIZED", "PRESERVED_EXECUTION_UNKNOWN",

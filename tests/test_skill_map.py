@@ -4,7 +4,6 @@ The map stays short, carries no ``FaT-`` marks, names every command of the stage
 commands and flags it gives are checked against the real parsers by ``test_texts_cases_only``."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest

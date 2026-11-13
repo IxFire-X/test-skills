@@ -87,7 +87,7 @@ def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> Non
 
 
 def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_path: Path) -> None:
-    from tests.helpers import prepare_stage, put_in_slot, submit_stage
+    from tests.helpers import prepare_stage, submit_stage
     from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
     from tests.test_automation_revision_budget import review
     from tools.automation_validation import automation_sha256

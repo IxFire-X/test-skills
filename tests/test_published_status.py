@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _api, _generated_run
-from tests.test_review_two_commands import _bundles, _cycle, _flags, _open, _select_verdict, _verdict
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _bundles, _cycle, _open, _select_verdict, _verdict
 
 
 def _files(run: dict, pattern: str) -> list[Path]:

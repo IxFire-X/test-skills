@@ -365,6 +365,21 @@ def test_a_degenerate_class_of_200_kb_reads_its_rows_in_under_5_s() -> None:
     assert rows == ["TC-1", "TC-2"]  # the one declaration with @ParameterizedTest before it, as before
 
 
+def _walk_from(masked: str, start: int) -> int:
+    """The reference: the plain backward walk from one declaration to the `;`, `}` or class `{` before its annotations."""
+    depth, index = 0, start
+    while index > 0:
+        char = masked[index - 1]
+        if char in ")}" and not (char == "}" and depth == 0):
+            depth += 1
+        elif char in "({" and depth > 0:
+            depth -= 1
+        elif depth == 0 and char in ";{}":
+            break
+        index -= 1
+    return index
+
+
 def test_rows_are_the_same_with_the_memo_as_with_a_walk_from_each_declaration() -> None:
     """The memoised region of a member equals the plain backward walk on the PT3 shapes."""
     from tools import run_tests
@@ -374,6 +389,6 @@ def test_rows_are_the_same_with_the_memo_as_with_a_walk_from_each_declaration() 
             "  @ParameterizedTest(name = \"[{index}] {0}\") @CsvSource({\"TC-3, x\", \"TC-4, y\"}) void csv(String id, String v) {}\n}\n")
     masked = run_tests._mask_java_noncode(text)
     starts = [match.start() for match in re.finditer(r"\b\w+\s*\(", masked)]
-    assert run_tests._annotation_regions(masked, starts) == {start: run_tests._annotation_region(masked, start) for start in starts}
+    assert run_tests._annotation_regions(masked, starts) == {start: _walk_from(masked, start) for start in starts}
     assert run_tests._param_group_rows(text, "test") == ["TC-1", "TC-2"]
     assert run_tests._param_group_rows(text, "csv") == ["TC-3", "TC-4"]

@@ -6,7 +6,6 @@ answer, a field that answer does not have, and gave the provenance as ``file#Lst
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]

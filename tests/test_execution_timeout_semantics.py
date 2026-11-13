@@ -1,21 +1,11 @@
-"""The verdict rules of the result (P4b: the exit code of the build is not observed, so the zero-report-with-a-killed-process case is gone) — audit U4: the report rows come from ``run_tests.match_junit_cases`` alone; a report without
-tests is ``classify_zero_report``, a report with tests ``classify_evidence``."""
+"""The verdict rules of the result (P4b: the exit code of the build is not observed, so the zero-report-with-a-killed-process case is gone) — audit U4: the report rows come from ``run_tests.match_junit_cases`` alone and are classified by ``classify_evidence``.
+A report without tests is FAIL by ``exec_runner`` (``test_project_native_pytest.test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifacts``)."""
 
 from pathlib import Path
 
 
 def _rows(*statuses: str) -> list[dict]:
     return [{"status": status} for status in statuses]
-
-
-def test_a_report_without_tests_is_fail_unless_the_process_end_is_unknown():
-    from tools.execution_adapters import classify_zero_report
-
-    assert classify_zero_report(controller_timed_out=False, process_returncode=0) == "FAIL"
-    assert classify_zero_report(controller_timed_out=False, process_returncode=1) == "FAIL"
-    assert classify_zero_report(controller_timed_out=True, process_returncode=None) == "UNKNOWN"
-    assert classify_zero_report(controller_timed_out=False, process_returncode=None) == "UNKNOWN"
-    assert classify_zero_report(controller_timed_out=False, process_returncode=-9) == "UNKNOWN"
 
 
 def test_exact_framework_timeout_and_failure_are_fail_from_authoritative_reports():

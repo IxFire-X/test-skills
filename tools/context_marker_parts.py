@@ -37,7 +37,6 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
-    from tools.project_inventory import read_execution_baseline
     from tools.step_size import role_files, step_budget
 
     root = Path(root).resolve()
@@ -97,7 +96,6 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
 def merge_parts(root: Path) -> Mapping[str, Any]:
     """Publish the merged ``context-marker:baseline`` of a marker in parts; stop while any part answer is missing."""
     from tools.context_marker_merge import merge_marker_artifacts
-    from tools.project_inventory import read_execution_baseline
 
     root = Path(root).resolve()
     state, attempt = _attempt(root)

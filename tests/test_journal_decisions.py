@@ -7,7 +7,6 @@ of other bytes is RECEIPT_FILE_UNBOUND and nothing is written."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -15,7 +14,7 @@ import pytest
 
 from tests.test_cut_review import _crash_event
 from tests.test_release_ways_out import _main
-from tests.test_scope_pause import _api, _paused_run, _submit_scope
+from tests.test_scope_pause import _paused_run, _submit_scope
 
 
 def _events(root: Path, batch: str) -> list[tuple]:

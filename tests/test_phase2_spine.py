@@ -4,7 +4,7 @@ import pytest
 from helpers import build_phase_two_baseline
 
 from tools import pilot_state
-from tools.project_inventory import build_execution_baseline, build_inventory, build_skillsrc_authority_receipt, runtime_identity
+from tools.project_inventory import build_execution_baseline, build_inventory, build_skillsrc_authority_receipt
 
 
 AUTHORIZATION = {"request_id": "request-1", "execution_requested": False}

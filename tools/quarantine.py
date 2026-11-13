@@ -7,8 +7,7 @@ The package marks only its own failed methods, one line each, directly above the
 * pytest — ``@pytest.mark.xfail(strict=True, reason="test-skills quarantine: <REASON> <ref>")``
   (``import pytest`` is added when the module has none).
 
-``release`` removes exactly those lines.  A quarantined method is still run explicitly on the next
-suite run (``EXPLICIT_RUN``), so a fixed defect shows up as a pass.  Nothing else in the file changes.
+``release`` removes exactly those lines.  Nothing else in the file changes.
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from typing import Iterable, Mapping, Sequence
 from tools.code_slices import slice_file
 
 MARK = "test-skills quarantine"
-EXPLICIT_RUN = {"junit5": "-Djunit.jupiter.conditions.deactivate=org.junit.*DisabledCondition", "pytest": "--runxfail"}
 _JAVA_LINE = re.compile(r'^\s*@org\.junit\.jupiter\.api\.Disabled\("' + re.escape(MARK) + r':[^\n]*\)\s*$')
 _PYTHON_LINE = re.compile(r'^\s*@pytest\.mark\.xfail\(strict=True, reason="' + re.escape(MARK) + r':[^\n]*\)\s*$')
 _SAFE = re.compile(r"[^A-Za-z0-9 ._:/#@=+-]")

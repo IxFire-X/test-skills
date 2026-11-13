@@ -202,7 +202,7 @@ def test_a_long_error_list_is_cut_to_twenty_and_four_kilobytes() -> None:
 def test_questions_read_the_merged_marker_of_all_parts(tmp_path: Path) -> None:
     from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
     from tools.context_marker_parts import merge_parts
-    from tools.run_report import write_questions_next_to
+    from tools.run_report import write_report
 
     root, attempt_id, baseline, receipts = _run(tmp_path, files=2)
     requirements = _publish_requirements(root, attempt_id, baseline)
@@ -210,49 +210,9 @@ def test_questions_read_the_merged_marker_of_all_parts(tmp_path: Path) -> None:
     for index, receipt in enumerate(receipts, start=1):
         _publish_part(root, attempt_id, baseline, index, receipt, requirements, _marker([f"src/part{index - 1}.py — наблюдение"], [gaps[index - 1]]))
     merge_parts(root)
-    cases = tmp_path / "cases"
-    cases.mkdir()
-    path, code = write_questions_next_to(cases, root)
-    text = (cases / "questions-for-analyst.md").read_text(encoding="utf-8")
-    assert code is None and path == str((cases / "questions-for-analyst.md").resolve())
+    write_report(root.parents[1], root.name)
+    text = (root / "questions-for-analyst.md").read_text(encoding="utf-8")
     assert "## REQ-owner-create" in text and "## REQ-owner-find" in text
-
-
-def test_the_questions_write_never_raises_and_never_follows_a_link(tmp_path: Path) -> None:
-    from tools.run_report import write_questions_next_to
-
-    run_root = _finished_run(tmp_path)
-    cases = tmp_path / "cases"
-    cases.mkdir()
-    (cases / "questions-for-analyst.md").write_text("чужой файл\n", encoding="utf-8")
-    assert write_questions_next_to(cases, run_root) == (None, "ANALYST_QUESTIONS_CONFLICT")
-    assert (cases / "questions-for-analyst.md").read_text(encoding="utf-8") == "чужой файл\n"
-    assert write_questions_next_to(tmp_path / "missing", run_root) == (None, "ANALYST_QUESTIONS_WRITE_FAILED")
-    assert sorted(path.name for path in cases.iterdir()) == ["questions-for-analyst.md"]
-
-
-def test_a_link_at_the_questions_path_is_a_conflict_even_to_the_same_bytes(tmp_path: Path) -> None:
-    """FaT-WT: the ``is_symlink`` branch — a link to a file with exactly the bytes the write would give is still refused,
-    and the link and its target stay as they were (a plain foreign file above is refused by its bytes alone)."""
-    import os
-
-    from tools.run_report import write_questions_next_to
-
-    run_root = _finished_run(tmp_path)
-    first = tmp_path / "first"
-    first.mkdir()
-    written, problem = write_questions_next_to(first, run_root)
-    assert problem is None, problem
-    elsewhere = tmp_path / "elsewhere.md"
-    elsewhere.write_bytes(Path(written).read_bytes())
-    cases = tmp_path / "cases"
-    cases.mkdir()
-    try:
-        os.symlink(elsewhere, cases / "questions-for-analyst.md")
-    except OSError as error:  # pragma: no cover - a Windows host without the symlink privilege
-        pytest.skip(f"no symlink here: {error}")
-    assert write_questions_next_to(cases, run_root) == (None, "ANALYST_QUESTIONS_CONFLICT")
-    assert (cases / "questions-for-analyst.md").is_symlink() and elsewhere.read_bytes() == Path(written).read_bytes()
 
 
 def test_status_and_a_second_report_still_work_after_the_report(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -293,17 +253,6 @@ def _real_shaped_run(tmp_path: Path) -> tuple[Path, dict]:
     doc_digest = "sha256:" + hashlib.sha256(doc_bytes).hexdigest()
     return root, {"doc": doc_digest, "doc_bytes": len(doc_bytes), "context": context["digest"], "bundle": bundle["digest"],
                   "bundle_bytes": len(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")), "document": document}
-
-
-def test_the_case_document_is_the_effective_canonical_of_the_journal_and_no_case_sets_file(tmp_path: Path) -> None:
-    """F1: the folder case-sets/ (nothing in the package writes it) is no source of the case document any more."""
-    from tools.run_report import case_document
-
-    root, facts = _real_shaped_run(tmp_path)
-    assert case_document(root, None) is None
-    (root / "case-sets" / "r2").mkdir()
-    (root / "case-sets" / "r2" / "TCDOC-x.r2.json").write_text(json.dumps(dict(facts["document"], revision=2)), encoding="utf-8")
-    assert case_document(root, None) is None
 
 
 def test_step_time_runs_from_the_previous_event_to_the_response() -> None:

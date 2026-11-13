@@ -28,7 +28,6 @@ FIXES: dict[str, str] = {
     # --- the review layer (moved from orchestrate_test_case_revision._FIXES) ---
     "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api submit --run-root <run> --stage tc-reviewer:canonical "
                             "--abort REVIEW_CONTEXT_LIMIT`; вердикт уже записан — начни новый прогон (scan --new-run) и открой ревью заново командой `tools.api prepare --stage tc-reviewer:canonical`",
-    "ORCHESTRATION_RECEIPT_SHAPE": "квитанции ревью код берёт из журнала, файлов у агента нет: повтори `tools.api submit --stage tc-reviewer:canonical`",
     "REVIEWER_PROTOCOL": "входы не совпадают с журналом: повтори `tools.api prepare` / `submit` со стадией `tc-reviewer:canonical` — код берёт входы из журнала",
     "ORCHESTRATION_INPUT": "входы ревью не прошли проверку: их перечень называет diagnostics; файлов у агента нет — повтори `tools.api submit --stage tc-reviewer:canonical`",
     "ORCHESTRATION_PUBLICATION": "публикация не прочиталась обратно: ничего не правь руками, повтори команду; повторный отказ — "
@@ -62,7 +61,7 @@ FIXES: dict[str, str] = {
                              "только если человек согласен: prepare с --fresh-context no --accept-self-review",
     "MODEL_OUTPUT_TRUNCATED": "повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без "
                               "отступов и переносов; дальше — finish, если повтор тоже оборван",
-    "ANSWER_FILE_UNREADABLE": "--artifact — путь к файлу ответа модели, который лежит на диске; запиши ответ в файл (стадия по циклу — в слот `incoming/`) и подай его путь",
+    "ANSWER_FILE_UNREADABLE": "файл ответа не читается: ответ модели лежит в слоте стадии (`answer_slot` из `prepare` или `status`, `incoming/<стадия>.json`); запиши ответ туда и повтори `submit`",
     "ANSWER_JSON_INVALID": "файл ответа — один JSON-объект в UTF-8 без комментариев и дублей ключей; исправь файл и подай его единственным "
                            "повтором стадии (--transport-attempts 2)",
     "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
@@ -132,10 +131,7 @@ FIXES: dict[str, str] = {
     "EXECUTION_COORDINATES": "--run — один точный run_id этого проекта из run_pipeline status; --project — корень проекта прогона",
     "EXECUTION_RECEIPT": "выполнение закончилось, а квитанция не записана или не читается: повтори команду (она идемпотентна), "
                          "руками журнал не правь",
-    "EXECUTION_RECOVERY": "начатый запуск тестов не восстанавливается из журнала: run_pipeline status называет состояние, "
-                          "дальше — finish или новый прогон",
     "BASELINE_INCOMPLETE": "замер состояния проекта до запуска не читается: повтори prepare-execution (замер делает код), файлы проекта не меняй",
-    "RERUN_COORDINATES": "--run — один точный run_id прогона, который нужно перезапустить, --attempt — его attempt_id",
     # --- bare ValueErrors that became codes ---
     "INVALID_ARGUMENT": "проверь флаги команды: tools.api <команда> --help",
     # --- the audit of the canon: the order is the code's work, the rest is the agent's ---
@@ -186,7 +182,9 @@ FIXES: dict[str, str] = {
     "SEMANTIC_CAPABILITY_TYPE_MISMATCH": "семантический тип входа/выхода должен совпадать с типом аргумента/результата capability",
     "SEMANTIC_DUPLICATE_CAPABILITY_ACTION": "одно действие (adapter + action) — одна capability: объедини описания",
     "SEMANTIC_DUPLICATE_CAPABILITY_ARGUMENT": "у каждого аргумента capability не больше одного входа шага: удали повтор",
-    "SEMANTIC_FORWARD_STEP_OUTPUT": "вход или утверждение ссылается на выход шага, который идёт позже: поменяй порядок шагов или источник",
+    "SEMANTIC_FORWARD_STEP_OUTPUT": "`step_output` берёт выход шага строго выше по порядку шагов кейса — не своего шага и не нижнего: путь в диагностике называет вход или "
+                                    "утверждение с такой ссылкой. Утверждение о выходе своего шага — `actual` вида `http_status`/`http_body`/`project_result`, не `step_output`; "
+                                    "нужен выход нижнего шага — перенеси это утверждение или вход в тот шаг или переставь шаги",
     "SEMANTIC_HTTP_PATH_BINDINGS": "каждому {плейсхолдеру} пути HTTP нужен вход location=path с тем же name (и наоборот)",
     "SEMANTIC_MANUAL_STEP_OUTPUT": "автоматизируемый шаг не берёт выход ручного шага (manual_only): возьми значение из другого источника "
                                    "или сделай и этот шаг ручным",
@@ -199,7 +197,11 @@ FIXES: dict[str, str] = {
     "SEMANTIC_OUTPUT_TYPE": "semantic_type выхода не подходит его источнику",
     "SEMANTIC_TARGET_TYPE": "semantic_type входа не подходит его цели",
     "SEMANTIC_TYPE_MISMATCH": "тип источника и тип цели различаются: приведи semantic_type к одному",
-    "SEMANTIC_PARAM_GROUP_MISMATCH": "кейсы одной param_group различаются только значениями одного параметра: выровняй остальное",
+    "SEMANTIC_PARAM_GROUP_MISMATCH": "кейс группы param_group отличается от первого кейса группы не только вариантом. Сравнивается всё, кроме `case_id`, `display_order`, `title`, `objective`, "
+                                     "`design_refs`, `param_group`, у шагов — `step_id`, `action`, `test_data`, у входов и утверждений — `input_id`/`assertion_id` и литеральных значений: "
+                                     "операции, capability, виды и места входов и утверждений, ссылки `step_output` (по номеру шага), `expectations`, `automation_blockers` и число шагов "
+                                     "должны совпасть. Путь в диагностике — первое расхождение в этом кейсе: выровняй кейс по первому кейсу группы. Тот же код при занятом имени: "
+                                     "PG-… уже есть в прошлой пачке — дай группе новое имя, группа живёт в одной пачке",
     "SEMANTIC_PARAM_GROUP_PARAMETER": "в группе param_group варьируется ровно один параметр дизайна, у каждого кейса свой вариант: проверь design_refs",
     "SEMANTIC_PARAM_GROUP_SINGLE": "param_group из одного кейса не бывает: убери группу или добавь вариант",
     "SEMANTIC_REQUIRED_CAPABILITY_ARGUMENT": "каждому обязательному аргументу capability нужен ровно один вход шага (location=arg)",
@@ -217,8 +219,8 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
     # --- the paths the agent names (tools.output_guard) ---
-    "API_OUT_OUTSIDE_RUN": "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json",
-    "OUTPUT_DIR_OUTSIDE_RUN": "каталог публикации — <run>/published (или ниже) прогона из --run-root; повтори с таким --output-dir",
+    "API_OUT_OUTSIDE_RUN": "--run-root — существующий прогон `<project>/.pilot-runs/<run_id>` (каталог из вывода `scan`); повтори команду с ним",
+    "OUTPUT_DIR_OUTSIDE_RUN": "каталог публикации прогона `<run>/published` подменён ссылкой (junction) или ведёт за пределы прогона: код ничего туда не записал; агент ничего не правит — человек удаляет эту ссылку (на её месте должна быть обычная папка внутри прогона или её нет) и повторяет ту же команду",
     "INPUT_OUTSIDE_PROJECT": "передай --run-root <run> (или --project) и файл внутри этого проекта; без них — файл внутри прогона <project>/.pilot-runs/<run_id>/",
     # --- the pause after the marker (tools.scope_pause) ---
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
@@ -266,8 +268,7 @@ FIXES: dict[str, str] = {
     "CONCURRENT_WRITER": "с этим прогоном работает другая команда: повтори свою через несколько секунд; команды одного прогона не запускай параллельно",
     "JOURNAL_CORRUPT": "журнал прогона повреждён: начни новый прогон (`scan --new-run`); этот прогон не правь и не удаляй — он нужен для разбора",
     "PUBLICATION_UNKNOWN": "исход записи в журнал неизвестен: повтори ту же команду с теми же входами один раз, затем `status` — он покажет, что записано",
-    "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и --attempt (`status` называет попытку) и входные файлы команды; "
-                     "повтори с исправленными аргументами",
+    "INPUT_INVALID": "проверь --run-root (каталог прогона `<project>/.pilot-runs/<run_id>`) и входные файлы команды; повтори с исправленными аргументами",
     "PLAN_ANSWER_INVALID": 'файл `incoming/plan.json` — один JSON-объект {"subject": "<название предмета проверки по-русски>"}: непустая строка до 200 знаков '
                            "без управляющих символов, других ключей нет; исправь файл и повтори `submit --stage plan`",
     "GENERATOR_INPUT_CONFLICT": "у попытки уже есть другой такой вход (скелет, capabilities, план или header): продолжай с опубликованным, "
@@ -285,17 +286,17 @@ FIXES: dict[str, str] = {
     "REVIEW_CANDIDATE_NOT_PUBLISHED": "этот кандидат не тот, что опубликован журналом: повтори `prepare --stage tc-reviewer:canonical` — "
                                       "он возьмёт кандидата из журнала",
     "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → state, next), новое — новый прогон",
-    "REVIEW_INPUTS_UNAVAILABLE": "попытки нет в прогоне: проверь --run-root и --attempt (`status` называет текущую попытку)",
+    "REVIEW_INPUTS_UNAVAILABLE": "вход ревью не найден в журнале прогона: проверь --run-root (`status` называет шаг, которого не хватает) и выполни его",
     "CONTEXT_MARKER_PARTS_INCOMPLETE": "не все части разметки отвечены: `status` называет недостающую (next.stage); "
                                        "ответь на неё (`prepare`, `submit`) — последний `submit` повторит слияние",
     "CONTEXT_MARKER_REQUIREMENTS_CHANGED": "часть разметки может только добавлять наблюдения по коду, требования шага `context-marker:requirements` "
                                            "не меняются: убери правки требований из ответа части и повтори единственный раз",
-    "HARDLINK_UNAVAILABLE": "каталог публикации не поддерживает жёсткие ссылки: возьми `--output-dir` на том же диске внутри проекта (`<run>/published`)",
-    "OUTPUT_DIRECTORY_ERROR": "каталог публикации недоступен: возьми `--output-dir` `<run>/published` внутри проекта вне .git и проверь права записи",
+    "HARDLINK_UNAVAILABLE": "диск не поддерживает жёсткие ссылки в `<run>/published`: проект и прогон должны лежать на локальном диске с NTFS/ext4 — сообщи человеку",
+    "OUTPUT_DIRECTORY_ERROR": "каталог публикации `<run>/published` недоступен (это не папка или нет прав записи): человеку проверить права на каталог прогона",
     "TARGET_INSTALL_FAILED": "публикацию не удалось завершить: ничего не правь руками, повтори команду с теми же аргументами; повторный отказ — "
-                             "проверь права записи и свободное место в `--output-dir`",
-    "TEMPORARY_WRITE_FAILED": "временный файл публикации не записан: проверь права и свободное место в `--output-dir`, повтори команду",
-    "TARGET_READ_FAILED": "опубликованный файл не читается: проверь права доступа `--output-dir`, повтори команду с теми же аргументами",
+                             "проверь права записи и свободное место в `<run>/published`",
+    "TEMPORARY_WRITE_FAILED": "временный файл публикации не записан: проверь права и свободное место в `<run>/published`, повтори команду",
+    "TARGET_READ_FAILED": "опубликованный файл не читается: проверь права доступа `<run>/published`, повтори команду с теми же аргументами",
     "STEP_INPUT_UNRESOLVED": "не стоп: вход шага нашёлся не по журналу (или два файла с одним digest) — одна строка человеку, шаг продолжай",
 }
 

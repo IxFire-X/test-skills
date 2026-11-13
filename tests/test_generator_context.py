@@ -2,12 +2,10 @@
 index of the rest) waits for the measurement on the PQ1 line and a definition of «own group»: it is refused with its own code."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from tools import api
 
 
 def _project(tmp_path: Path, limits: dict | None) -> Path:

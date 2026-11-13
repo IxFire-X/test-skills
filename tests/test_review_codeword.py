@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_canaries import _answer, _candidate, _flags, _open, _select
+from tests.test_review_canaries import _answer, _flags, _open, _select
 from tests.test_review_requested import _generated_run
 
 
@@ -88,7 +88,6 @@ def test_a_named_word_is_refused_in_a_run_that_does_not_admit_self_even_with_fre
 
 
 def test_in_a_run_that_admits_self_a_named_word_is_recorded_as_a_hash_and_marks_self(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.pilot_state import recorded_model_answer
     from tools.review_canaries import nonce_digest, recorded_answer
 
     words = _with_words(monkeypatch)
@@ -101,7 +100,6 @@ def test_in_a_run_that_admits_self_a_named_word_is_recorded_as_a_hash_and_marks_
     stored = recorded_answer(*_flags(run))
     assert stored["codeword_seen"] == nonce_digest(word)  # the word itself is not stored
     assert word.encode() not in _every_file(run)
-    assert recorded_model_answer(*_flags(run), "tc-reviewer:canonical", answer) == "same"  # the same file again is the same answer
 
 
 def test_a_wrong_word_counts_as_not_named_and_is_said_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

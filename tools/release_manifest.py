@@ -18,7 +18,6 @@ from tools import pack_registry
 from tools.json_cli import JsonArgumentParser
 from tools.pack_registry import ARCHIVE_SUFFIXES, DELIVERY_FILES, PROFILES, REGISTRY_ROOTS, ROOT_FILES, RUNTIME_SUFFIXES
 from tools.pack_registry import canonical as _canonical
-from tools.pack_registry import crlf_converted, manifest_digest as _manifest_digest
 from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
 
 _digest_bytes = pack_registry.digest_bytes

@@ -9,7 +9,7 @@ import pytest
 
 from tests.test_cases_import import _project, _scan
 from tests.test_review_open_recovery import _crash_once, _main
-from tests.test_cut_review import _crash_event, _crash_nth, _events
+from tests.test_cut_review import _crash_event, _events
 
 
 def _import_argv(root: Path, attempt_id: str) -> list[str]:
@@ -89,7 +89,6 @@ def test_merge_cut_between_the_request_and_the_answer(tmp_path: Path, monkeypatc
 @pytest.mark.parametrize("point", ["skeleton-file-written", "skeleton-published"])
 def test_plan_of_an_import_cut_between_a_skeleton_file_and_its_events(tmp_path: Path, monkeypatch, capsys, point: str) -> None:
     from tests.test_batch_assembly import _header
-    from tests.test_review_requested import _put
     from tools import context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
     from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER

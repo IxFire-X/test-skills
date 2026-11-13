@@ -12,19 +12,10 @@ from typing import Any, Mapping, Sequence
 ROOT = Path(__file__).resolve().parents[1]
 TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"
 RUN_SCHEMA = ROOT / "schemas" / "run-tests-output.schema.json"
-from tools.json_cli import JsonArgumentParser
 
 
 # contextlib (closure_cache) sets __traceback__ on the way out; the error's own fields stay immutable.
 _EXCEPTION_SLOTS = frozenset({"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"})
-
-
-class _TraceArgumentParser(JsonArgumentParser):
-    """Emit one value-redacting JSON object for every CLI argument error."""
-
-    def error(self, message: str) -> None:
-        print(json.dumps({"status": "error", "errors": [{"path": "", "code": "TRACE_ARGUMENT", "message": "Trace arguments are invalid."}]}, ensure_ascii=False, separators=(",", ":")))
-        raise SystemExit(2)
 
 
 def _diag(path: str, code: str, message: str = "Trace input is invalid.") -> dict[str, str]:
