@@ -38,7 +38,7 @@ def test_every_reference_of_the_map_is_named_by_the_map(name: str) -> None:
 
 
 def test_every_cases_only_verb_of_next_is_named_in_the_map() -> None:
-    verbs = {"prepare", "submit", "model-request", "model-response", "finish", "report", "scan"}
+    verbs = {"prepare", "submit", "finish", "report", "scan"}
     text = _text()
     assert verbs <= set(stages.VERBS) and all(f"`{verb}" in text or f" {verb}" in text or f"{verb}`" in text for verb in verbs)
 

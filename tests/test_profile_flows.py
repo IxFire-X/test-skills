@@ -304,7 +304,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     assert (pack / "tools" / "exec_commands.py").is_file()
     front = _front(pack, tmp_path, "local-pilot-v1")
     effective = _cases_to_effective(pack, front)
-    _status(pack, front["project"], front["run_root"].name, "automation", "model-request")  # after the canonical review the automation is next
+    _status(pack, front["project"], front["run_root"].name, "automation", "prepare")  # after the canonical review the automation is next
     project, run_root, tmp = front["project"], front["run_root"], front["tmp"]
     run = _flags(front)
     document = json.loads((tmp / "candidate.json").read_bytes())
@@ -314,7 +314,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     artifact = _automation_answer(document, effective)
     code, answered = _api(pack, "model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))
     assert code == 0, answered
-    _status(pack, project, run_root.name, "automation_review", "open-automation-boundary")
+    _status(pack, project, run_root.name, "automation_review", "prepare")
     statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
     code, facts = _api(pack, "automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))
     assert code == 0, facts

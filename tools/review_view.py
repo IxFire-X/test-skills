@@ -692,6 +692,28 @@ def _hints_of_run(root: Path, state: Mapping[str, Any], document: Mapping[str, A
     return grouping, read_reference_cases(root, attempt_id)
 
 
+def ensure_autotest_view(project: Path, root: Path, state: Mapping[str, Any]) -> dict[str, Any]:
+    """The autotest view of the effective document of the run (``--effective``): what the generator of the automation reads, made by the code — ``prepare`` of the
+    generator calls it before the step is measured.  Written where the bytes differ; the same call again changes nothing."""
+    from tools.canonical_document import document_sha256
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.pilot_state import read_effective_canonical
+    from tools.step_size import autotest_view
+
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    effective = read_effective_canonical(root, str(state["attempts"][-1]["attempt_id"]))
+    document = effective["document"]
+    digest = document_sha256(dict(document))
+    if digest != effective["document_digest"]:
+        raise ValueError("the effective document does not match its digest")
+    target = autotest_view(root, digest)
+    data, grouping, reference = _run_render(root, state, document, "autotest")
+    if not target.is_file() or target.read_bytes() != data:
+        atomic_write_confined_bytes_at_root(project, root, target, data)
+    return {"path": target, "digest": digest, "data": data, "document": document, "grouping": grouping, "reference": reference}
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -704,10 +726,7 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--effective", action="store_true", help="FaT-AV: the autotest view of the effective document")
     args = parser.parse_args(argv)
     try:
-        from tools.canonical_document import document_sha256
-        from tools.confined_output import atomic_write_confined_bytes_at_root
-        from tools.pilot_state import derive_state, read_effective_canonical
-        from tools.step_size import autotest_view
+        from tools.pilot_state import derive_state
 
         project = Path(args.project).resolve()
         if Path(args.run).name != args.run or args.run in {"", ".", ".."}:
@@ -716,16 +735,8 @@ def main(argv: list[str] | None = None) -> int:
         state = derive_state(root)
         extra: dict[str, Any] = {}
         if args.effective:
-            if not state["attempts"]:
-                raise ValueError("the run has no attempt yet")
-            effective = read_effective_canonical(root, str(state["attempts"][-1]["attempt_id"]))
-            document, profile = effective["document"], "autotest"
-            digest = document_sha256(dict(document))
-            if digest != effective["document_digest"]:
-                raise ValueError("the effective document does not match its digest")
-            target = autotest_view(root, digest)
-            data, grouping, reference = _run_render(root, state, document, "autotest")
-            atomic_write_confined_bytes_at_root(project, root, target, data)
+            made = ensure_autotest_view(project, root, state)
+            target, digest, data, document, grouping, reference, profile = made["path"], made["digest"], made["data"], made["document"], made["grouping"], made["reference"], "autotest"
         else:
             from tools.output_guard import input_file
 

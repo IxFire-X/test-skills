@@ -8,10 +8,8 @@ from typing import Any, Mapping
 STAGES = ("scan", "marker", "scope_pause", "generator", "review", "automation", "automation_review", "materialize", "human_run",
           "closure", "done", "drift", "left", "unknown")
 ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
-# The verb is the command of the step by its one name (flags and paths are gone): ``prepare`` and ``submit`` for the stages that went over to
-# them (the marker, V2), the old command of the others until their packages; V5 drops the old ones.
-VERBS = ("scan", "prepare", "submit", "model-request", "model-response",
-         "open-automation-boundary", "materialize", "ingest", "finish", "report", None)
+# The verb is the command of the step by its one name (flags and paths are gone): ``prepare`` and ``submit`` for every stage that asks a model.
+VERBS = ("scan", "prepare", "submit", "materialize", "ingest", "finish", "report", None)
 _ROLE_OF_STATE = {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer", "automation": "tc-to-autotest",
                   "automation_review": "autotest-reviewer"}
 _STATE_OF_ROLE = {role: state for state, role in _ROLE_OF_STATE.items()}
@@ -25,8 +23,8 @@ _TABLE = {
     "reviewer ledger and effective selection or negative closure": ("review", "submit"), "effective canonical": ("review", "submit"),
     "negative branch trace and finalization": ("closure", "finish"),
     "rework fragment": ("generator", "prepare"), "rework answered": ("review", "prepare"),
-    "automation artifact": ("automation", "model-request"), "automation revision": ("automation", "model-request"),
-    "static automation review": ("automation_review", "open-automation-boundary"), "automation refused": ("closure", "finish"),
+    "automation artifact": ("automation", "prepare"), "automation revision": ("automation", "prepare"),
+    "static automation review": ("automation_review", "prepare"), "automation refused": ("closure", "finish"),
     "review disposition and materialization": ("materialize", "materialize"), "materialization": ("materialize", "materialize"),
     "materialization command": ("materialize", "materialize"), "human run report": ("human_run", "ingest"),
     "execution trace and dispositions": ("closure", "finish"), "disposition receipt": ("closure", "finish"),
@@ -65,11 +63,11 @@ def next_action(facts: Mapping[str, Any]) -> dict[str, Any]:
         state, verb = _TABLE[str(expected)]
     elif str(expected).endswith(" response") and str(expected).split(":", 1)[0] in _STATE_OF_ROLE:  # a pending request of the model
         state = _STATE_OF_ROLE[str(expected).split(":", 1)[0]]
-        verb = "submit" if state == "marker" else "model-response"
+        verb = "submit"
     else:
         state, verb, recovery = "unknown", None, _RECOVERY["unknown"]
     # drift and unknown wait for the human: to bring the files back or to start anew is his decision, never the agent's
-    waiting = ("model" if verb in ("model-response", "submit") and state != "scope_pause" else
+    waiting = ("model" if verb == "submit" and state != "scope_pause" else
                "human" if state in ("human_run", "drift", "unknown") or (state == "scope_pause" and not facts.get("scope_answer")) else "agent")
     return {"state": state, "waiting_for": waiting, "next": {"verb": verb, "stage": "scope" if state == "scope_pause" else _ROLE_OF_STATE.get(state)},
             **({"recovery": recovery} if recovery else {})}

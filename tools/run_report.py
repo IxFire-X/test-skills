@@ -465,9 +465,12 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
         pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")
         pairs[pair] = pairs.get(pair, 0) + 1
     summary["by_command_code"] = [{"command": command, "code": code, "count": count} for (command, code), count in sorted(pairs.items())]
-    # a second model-request of a generator batch is refused (MODEL_REQUEST_DUPLICATE) and the word of the first one is not shown again
-    summary["codeword_lost"] = sorted({stage for row in rows if row.get("code") == "MODEL_REQUEST_DUPLICATE"
-                                       for stage in [_identifier(row.get("stage"))] if stage and stage.startswith("tc-generator:")})
+    # a second request of a generator batch (the refusal MODEL_REQUEST_DUPLICATE of the old command, or the mark a repeated prepare leaves — no refusal) — the word of the first one is not shown again
+    from tools.stage_steps import LOST_WORD_MARK
+
+    marked = [f"tc-generator:{path.name.removeprefix(LOST_WORD_MARK + 'tc-generator-')}" for path in Path(root).glob(LOST_WORD_MARK + "tc-generator-*") if path.is_file()]
+    summary["codeword_lost"] = sorted({stage for stage in [*(_identifier(row.get("stage")) for row in rows if row.get("code") == "MODEL_REQUEST_DUPLICATE"), *map(_identifier, marked)]
+                                       if stage and stage.startswith("tc-generator:")})
     return summary
 
 
@@ -520,7 +523,7 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-_WARNING_TEXT = {"CODEWORD_LOST": "model-request генератора повторяли (MODEL_REQUEST_DUPLICATE): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
+_WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повторяли (prepare или model-request): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
                  "REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
                  "REVIEW_WEAK": "ревьюер поймал не все контрольные ошибки (канарейки) своего вида",
@@ -793,6 +796,14 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
     return result
 
 
+def _boundary_fresh(pilot: Any, root: Path, attempt_id: str, revision: int) -> bool | None:
+    """``fresh_context`` of the boundary of the review of the automation r<revision>; ``None`` where the review has none."""
+    try:
+        return pilot.read_attempt_receipt(root, attempt_id, f"automation-review-boundary-r{revision}", "ARTIFACT_READ_BACK")["record"]["host_isolation"]["fresh_context"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+
+
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
     """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
     from tools import pilot_state as pilot
@@ -899,6 +910,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         review = "ревью в свежем контексте" if ((acceptance or {}).get("rework") or {}).get("independent", True) else "ревью в той же сессии (SELF): второй круг шёл в той же сессии"
     else:
         review = None
+    if any(_boundary_fresh(pilot, root, attempt_id, revision) is False for revision in (1, 2) if attempt_id):  # the automation was reviewed in the session that wrote it
+        review = "; ".join(filter(None, [review, "автотесты проверены в той же сессии (SELF); независимость не засчитана"]))
     scope = _scope(root, attempt_id, state)
     refused = refusals(root, events)
     report = {
@@ -1040,7 +1053,7 @@ def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
         return ["## Отказы", "", "журнала отказов нет (прогон до v0.2)", ""]
     return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.",
             f"Число {summary.get('basis') or REFUSALS_BASIS}.",
-            *([f"Контрольное слово генератора: повторный model-request у {', '.join(summary['codeword_lost'])} — слово показывали один раз, вывод мог быть потерян."]
+            *([f"Контрольное слово генератора: повторный запрос у {', '.join(summary['codeword_lost'])} — слово показывали один раз, вывод мог быть потерян."]
               if summary.get("codeword_lost") else []),
             *([f"Расхождение журнала и файла refusals.jsonl: строк без события {summary['mismatch']['lines_without_event']} (не посчитаны), "
                f"событий без строки {summary['mismatch']['events_without_line']} (посчитаны, подробности потеряны)."] if summary.get("mismatch") else []), "",

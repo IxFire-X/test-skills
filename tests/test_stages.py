@@ -34,11 +34,11 @@ def _shape(result: dict) -> tuple:
     ("the candidate is built: the review opens", "canonical reviewer package and boundary", {}, ("review", "agent", "prepare", "tc-reviewer")),
     ("the reviewer is awaited", "reviewer evidence or verdict", {}, ("review", "model", "submit", "tc-reviewer")),
     ("cases-only: the set is accepted, the run closes", "pre-finalization trace", {}, ("closure", "agent", "finish", None)),
-    ("with autotests: the set is accepted, the automation", "automation artifact", {}, ("automation", "agent", "model-request", "tc-to-autotest")),
+    ("with autotests: the set is accepted, the automation", "automation artifact", {}, ("automation", "agent", "prepare", "tc-to-autotest")),
     ("the set is rejected", "negative branch trace and finalization", {}, ("closure", "agent", "finish", None)),
-    ("the autotests are written: their review", "static automation review", {}, ("automation_review", "agent", "open-automation-boundary", "autotest-reviewer")),
+    ("the autotests are written: their review", "static automation review", {}, ("automation_review", "agent", "prepare", "autotest-reviewer")),
     ("the autotest review accepted: written into the project", "review disposition and materialization", {}, ("materialize", "agent", "materialize", None)),
-    ("the autotest review asks a revision", "automation revision", {}, ("automation", "agent", "model-request", "tc-to-autotest")),
+    ("the autotest review asks a revision", "automation revision", {}, ("automation", "agent", "prepare", "tc-to-autotest")),
     ("the autotest review refused", "automation refused", {}, ("closure", "agent", "finish", None)),
     ("written into the project: the human runs it", "human run report", {}, ("human_run", "human", "ingest", None)),
     ("the reports are taken in", "execution trace and dispositions", {}, ("closure", "agent", "finish", None)),
@@ -63,7 +63,7 @@ def test_a_run_without_an_attempt_waits_for_the_scan() -> None:
 ])
 def test_a_pending_request_waits_for_the_model(stage_id: str, state: str, role: str) -> None:
     result = _next(f"{stage_id} response", pending_request_path="x")
-    assert _shape(result) == (state, "model", "submit" if state == "marker" else "model-response", role)
+    assert _shape(result) == (state, "model", "submit", role)
 
 
 def test_an_exact_value_is_never_taken_for_a_model_response() -> None:

@@ -130,16 +130,31 @@ def test_a_repeated_prepare_after_its_event_says_the_word_is_lost_and_writes_no_
     assert len(list(requests.glob("*.json"))) == receipts  # no second receipt
 
 
-@pytest.mark.xfail(strict=True, reason="V5-A: prepare, отдавший nonce_note, оставляет строку в refusals.jsonl; сигнал отчёта потерян с V3a")
-def test_the_report_says_the_word_of_the_generator_is_lost(tmp_path: Path, capsys) -> None:
+def test_the_report_says_the_word_of_the_generator_is_lost_and_counts_no_refusal(tmp_path: Path, capsys) -> None:
+    from tools import pilot_state
     from tools.run_report import build_report, render_markdown
 
     run, stage = _generator_stage(tmp_path)
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0
-    assert _main(capsys, _prepare_argv(run, stage))[0] == 0  # the agent lost the output and asks again
+    refusals = build_report(run["project"], run["run_root"].name)[0]["refusals"]
+    events = len(pilot_state.derive_state(run["run_root"])["events"])
+    for _ in range(2):
+        assert _main(capsys, _prepare_argv(run, stage))[0] == 0  # the agent lost the output and asks again
     report, _warnings = build_report(run["project"], run["run_root"].name)
     assert "CODEWORD_LOST" in report["warnings"] and report["refusals"]["codeword_lost"] == [stage], report["refusals"]
-    assert "Контрольное слово генератора" in render_markdown(report)
+    assert {key: report["refusals"][key] for key in ("total", "by_command", "by_code")} == {key: (refusals or {}).get(key, 0 if key == "total" else {}) for key in ("total", "by_command", "by_code")}
+    assert len(pilot_state.derive_state(run["run_root"])["events"]) == events and "Контрольное слово генератора" in render_markdown(report)
+
+
+def test_the_mark_of_a_lost_word_is_a_file_of_the_stage_made_once_and_never_changed(tmp_path: Path, capsys) -> None:
+    run, stage = _generator_stage(tmp_path)
+    _main(capsys, _prepare_argv(run, stage))
+    assert _main(capsys, _prepare_argv(run, stage))[0] == 0
+    [mark] = list(run["run_root"].glob("codeword-lost-*"))
+    seen = (mark.name, mark.read_bytes(), mark.stat().st_mtime_ns)
+    assert _main(capsys, _prepare_argv(run, stage))[0] == 0
+    assert seen == (mark.name, mark.read_bytes(), mark.stat().st_mtime_ns) and mark.name == "codeword-lost-" + stage.replace(":", "-")
+
 
 
 def test_only_the_generator_request_has_a_word_to_lose(tmp_path: Path, capsys) -> None:

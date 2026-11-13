@@ -97,7 +97,7 @@ def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) 
         places[stage] = [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"]]
     # the document file itself answers before the carrier that holds the same document inside
     assert places["tc-to-autotest:r1"] == ["candidate-bundle"], places
-    assert places["autotest-reviewer:r1"] == ["model-stage-artifacts", "automation-review-boundaries"], places
+    assert places["autotest-reviewer:r1"] == ["model-stage-artifacts", "automation-review-boundaries", "effective-canonicals"], places  # V5: the reviewer reads the document its answer is checked against
 
 
 def test_the_receipt_inside_the_effective_carrier_is_a_binding_not_a_second_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

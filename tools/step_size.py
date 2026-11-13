@@ -493,6 +493,16 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
                 files.append({"digest": answer, "path": str(paths[0]), "bytes": paths[0].stat().st_size, "basis": basis})
             else:
                 unresolved.append({"digest": answer, "source": source, "reason": "not-in-journal"})  # e.g. an r2 requested before r1
+    if stage.startswith("autotest-reviewer:"):  # the document the answer of the generator is checked against: the view of the effective one (the whole file is over the budget on a real project)
+        from tools.pilot_state import read_attempt_receipt, read_effective_canonical_if_present
+
+        effective = read_effective_canonical_if_present(root, attempt_id)
+        if effective is None:
+            unresolved.append({"digest": None, "source": "effective-canonical", "reason": "not-in-journal"})
+        else:
+            view = autotest_view(root, effective["document_digest"])  # the generator's prepare makes it; without it the whole file is read
+            target = view if view.is_file() else root / read_attempt_receipt(root, attempt_id, "effective-canonical", "ARTIFACT_READ_BACK")["path"]
+            files.append({"digest": effective["document_digest"], "path": str(target), "bytes": target.stat().st_size, "basis": "вид документа" if view.is_file() else "эффективный документ"})
     if contexts:
         # the map of existing project tests for the context — built (again, when its bytes differ) from the
         # frozen inventory and the receipts; no input digest of its own, like the autotest view. One map for

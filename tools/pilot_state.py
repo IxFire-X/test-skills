@@ -5035,7 +5035,7 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
     generator = str(_read_model_request_with_state(project, root, state, attempt_id, stage, str(requested[0]["artifact_digest"]))["invocation_id"])
     effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
     reviewer = str(reviewer_invocation_id)
-    isolation = {"fresh_context": fresh_context, "distinct_invocations": generator != reviewer}
+    isolation = {"fresh_context": fresh_context, "distinct_invocations": fresh_context and generator != reviewer}  # a session that is not fresh is no independent one, whatever its label
     isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return {
         "automation_digest": str(published[0]["artifact_digest"]), "automation_revision": revision,

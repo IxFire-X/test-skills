@@ -191,11 +191,12 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None,
                                  "scope_answer": Path((scope or {}).get("answer_slot", "")).is_file()}))
     result.update(scope or {})
-    if result["state"] in ("marker", "generator", "review"):  # the id of the step, the slot and the size: from the steps of the stage
+    if result["state"] in ("marker", "generator", "review", "automation", "automation_review"):  # the id of the step (with the revision), the slot and the size: from the steps of the stage
         from tools.stage_steps import stage_status
 
         try:
-            result.update(stage_status(Path(run_root), {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer"}[result["state"]]))
+            result.update(stage_status(Path(run_root), {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer", "automation": "tc-to-autotest",
+                                                                  "automation_review": "autotest-reviewer"}[result["state"]]))
         except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
             pass
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
