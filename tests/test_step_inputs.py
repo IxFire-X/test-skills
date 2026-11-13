@@ -140,7 +140,7 @@ def test_no_request_yet_is_an_error(tmp_path: Path) -> None:
     from tools.step_size import request_files
 
     root, *_rest = _generator_run(tmp_path)
-    with pytest.raises(ValueError, match="model-request"):
+    with pytest.raises(ValueError, match="prepare"):
         request_files(root, "tc-generator:BATCH-fixture")
 
 

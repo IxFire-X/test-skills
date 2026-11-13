@@ -512,7 +512,7 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
         return [_row("execution:java-level", EXECUTION, "OK", "уровень Java модуля в его сборке не задан (или задан во внешнем "
                      "родительском pom) — пакет не ограничивает API автотестов; сборка проверит сама")]
     return [_row("execution:java-level", EXECUTION, "OK", f"уровень Java модуля: {level['level']} ({'; '.join(level['evidence'])}); "
-                 f"автотесты — только API Java {level['level']}, новее отклонит runner-compat (RUNNER_API_LEVEL)")]
+                 f"автотесты — только API Java {level['level']}, новее отклонит submit генератора (RUNNER_API_LEVEL)")]
 
 
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:

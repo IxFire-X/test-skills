@@ -1283,7 +1283,7 @@ _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрываю
 # an interrupted select — the same session and answer again is safe
 _UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api submit "
                    "--run-root <run> --stage tc-reviewer:canonical (слот ответа тот же) — "
-                   "сессия закрыта с тем же ответом, повтор безопасен (проверка — python -m tools.api read-effective), затем finish; "
+                   "сессия закрыта с тем же ответом, повтор безопасен затем finish; "
                    "submit отказывает и после повтора — прогон оставь, scan с --new-run начнёт новый")
 
 

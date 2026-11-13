@@ -52,7 +52,7 @@ def test_a_repeated_request_says_the_answer_goes_to_model_response(tmp_path: Pat
     with pytest.raises(ModelRequestDuplicate) as refused:
         publish_model_request(run["run_root"], run["attempt_id"], stage, model_id="m", invocation_id="again",
                               input_digests=["sha256:" + "1" * 64])
-    assert "do not repeat model-request" in str(refused.value) and "--transport-attempts 2" in str(refused.value)
+    assert "a repeated prepare gives the same request" in str(refused.value) and "--transport-attempts 2" in str(refused.value)
     assert (run["run_root"] / "events.jsonl").read_bytes() == before
 
 
@@ -81,7 +81,7 @@ def test_an_answer_without_its_request_names_the_missing_request(tmp_path: Path)
     with pytest.raises(ValueError) as refused:
         publish_model_stage_artifact(run["run_root"], run["attempt_id"], f"tc-generator:{fragment['batch_id']}", with_digest(
             {key: value for key, value in fragment.items() if key != "digest"}))
-    assert str(refused.value).startswith("MODEL_STAGE_NOT_REQUESTED") and "model-request" in str(refused.value)
+    assert str(refused.value).startswith("MODEL_STAGE_NOT_REQUESTED") and "prepare for this stage first" in str(refused.value)
 
 
 @pytest.mark.parametrize(("stage", "extra", "fixed"), [

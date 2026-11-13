@@ -137,8 +137,8 @@ def emit_error(message: str, prog: str | None = None) -> None:
     payload: dict[str, object] = {"status": "error", "errors": [{"path": "", "message": message}]}
     if message.startswith("argument error: "):  # the one envelope of every refusal, the old field stays
         flags = [flag for flag in _MODEL_REQUEST_FLAGS if flag in message]
-        fix = ("флаги " + ", ".join(flags) + " — у model-request; model-response получает только --run-root, --attempt, --stage, "
-               "--artifact, --transport-attempts") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"
+        fix = ("флаги " + ", ".join(flags) + " — у prepare; submit получает только --run-root, --stage, --dry-run, --transport-attempts, --abort; "
+               "--attempt у prepare и submit нет") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"
         payload.update(code="INVALID_ARGUMENT", message=message, fix=fix)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 

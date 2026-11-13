@@ -22,7 +22,7 @@ permissions:
 входы; validators выполняются как код, их чтение не заменяет выполнения.
 
 Пути `contracts/`, `schemas/`, `skills/`, `tools/` — от корня пакета; tools вызывай с cwd пакета и абсолютным `--project`. Функции пакета не
-импортируй: шаг — `python -m tools.api <команда> --run-root <run> --attempt <attempt_id> …`; одна строка JSON: `status: ok` и `result`,
+импортируй: шаг — `python -m tools.api <команда> --run-root <run> …` (`prepare` и `submit` — ещё `--stage <id>`; флага `--attempt` у них нет); одна строка JSON: `status: ok` и `result`,
 `invalid` (код 1) или `error` (код 2, `code`, `message`, `fix`). Большой результат — `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>`
 (только в `tmp/` прогона, не в исходники проекта). Ход работы — `run_pipeline status` и поля JSON последних событий; `head`/`tail` по строкам
 объём не ограничивают. В `model_id` пиши фактический ID модели твоей CLI.
@@ -80,11 +80,9 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 
 ## 3. Построй canonical из deterministic batches
 
-Цикл стадий разметки и пачек генератора: `prepare --run-root <run> --stage <id>` печатает `read` — сводку файлов модели `files_summary` с `list_path` (один вызов размера
-на пачку; список без замера — `tools.api step-inputs`, замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `submit` с теми же флагами принимает его
-(`--dry-run` — проверка без записи; `--transport-attempts 2` — единственный повтор). Остальные стадии — `model-request --stage <stage> --model-id <id> --invocation-id <id>` и
-`model-response --stage <stage> --artifact <ответ.json>`: `model-response` печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`),
-не тело; тело — `read-model-artifact`; `--out` ему не нужен: с `--out` в stdout только `out`, `bytes`, `sha256`, квитанция — в файле.
+Цикл каждой стадии модели (разметка, пачки генератора, ревью, автотесты): `prepare --run-root <run> --stage <id>` печатает `read` — сводку файлов модели `files_summary` с `list_path` (один вызов размера
+на пачку; замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `submit` с теми же флагами принимает его (`--dry-run` — проверка без записи; `--transport-attempts 2` —
+единственный повтор) и печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело. `<id>` с номером ревизии (`…:r1`) называет `status`.
 
 1. **Разметка.** `status`: `next` — `prepare` или `submit`, `stage` (`context-marker:baseline`; частями — `:requirements`, затем `:batch-NNN`).
    `tools.api prepare --run-root <run> --stage <id>` печатает `read` (файлы модели), `answer_slot`, `budget`; ответ модели — как есть в

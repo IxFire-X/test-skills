@@ -374,8 +374,6 @@ _NAMED = __import__("re").compile(r"tools\.(api|run_pipeline)\s+([a-z](?:[a-z-]*
 # where the command is (mode B in a delivery of cases) or is a text of the development build
 _NOT_REACHABLE = {
     ("cases-only", "tools/finalize_attempt.py", "run_pipeline materialize"): "the accepted automation exists only in a run of mode B",
-    ("cases-only", "tools/pilot_state.py", "api automation-digest"): "message of the check of an automation answer (mode B)",
-    ("cases-only", "tools/pilot_state.py", "api relations-digest"): "message of the check of an automation answer (mode B)",
     ("cases-only", "tools/run_pipeline.py", "run_pipeline ingest"): "an attempt with a start of execution, which a delivery of cases cannot make",
 }
 

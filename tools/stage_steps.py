@@ -287,7 +287,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
     elif pilot_state.read_model_request(root, attempt_id, stage, str(asked[-1]["artifact_digest"]))["invocation_id"] != label:
         raise ReviewRefused("REVIEW_ALREADY_OPEN", "запрос ревьюера автотестов уже записан с другой меткой; fix: повтори prepare с теми же --invocation-id и --fresh-context")
     answer = slot(root, stage)
-    return {"generator_checks": ["смысл ответа генератора (validate_automation_artifact)", "статический runner-compat"],
+    return {"generator_checks": ["смысл ответа генератора (validate_automation_artifact)", "статическая совместимость с раннером"],
             "for_human": (f"Ревью автотестов в этой же сессии (SELF; результат не называется независимым): прочти файлы из read (список — read.list_path), проверь автотесты "
                           f"по эффективному документу и запиши ответ в {answer}. Затем `submit` этой стадии.") if not fresh else
                          ("Ревью автотестов в свежей сессии (руками): открой новую сессию GigaCode или выполни /clear — в ней не должно быть истории генерации; "

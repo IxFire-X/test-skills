@@ -1652,7 +1652,7 @@ def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], d
     stages = [f"tc-generator:{batch['batch_id']}" for batch in plan["batches"]]
     absent = [stage for stage in stages if stage not in answers]
     if absent:
-        raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: candidate: нет ответа {absent[0]}; fix: сначала model-response этой пачки")
+        raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: candidate: нет ответа {absent[0]}; fix: сначала submit этой пачки")
     # the canon is assembled once per process — the plan, the header and the answers are append-only facts of the journal, so
     # one command (publish, package, the decision of the verdict) asks for the same candidate several times and gets one assembly
     from tools.pilot_state import _CLOSURE_CACHE

@@ -2210,7 +2210,7 @@ def publish_model_request(
            for event in state["events"]):
         raise ModelRequestDuplicate(
             f"duplicate model request: {stage_instance_id} already has its request;{_codeword_lost_note(root, state, attempt_id, stage_instance_id)} "
-            "fix: do not repeat model-request — the answer goes to model-response, its one retry is model-response --transport-attempts 2"
+            "fix: a repeated prepare gives the same request — the answer goes to submit, its one retry is submit --transport-attempts 2"
         )
     if reuse_from is not None and stage != "context-marker":
         raise ValueError("MODEL_REUSE_REFUSED: only a context-marker answer is reused")
@@ -2462,7 +2462,7 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             f"invalid model stage artifact: {stage_instance_id} does not pass {schema_name}: "
             + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in diagnostics[:3])
             + (f" and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else "")
-            + "; fix: give the role its original input and this retry_prompt, then model-response --transport-attempts 2 — "
+            + "; fix: give the role its original input and this retry_prompt, then submit --transport-attempts 2 — "
             "nothing is written; retry_prompt:\n" + retry_prompt(dict(value), diagnostics)
         )
 
@@ -2672,9 +2672,9 @@ def _publish_model_stage_artifact(
 
                 raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
                                  "the stage has none; fix: запрос ревьюера пишет `prepare --stage tc-reviewer:canonical` (повтори его с тем же --invocation-id, если он уже был), "
-                                 "руками model-request не нужен — " + REVIEW_CHAIN)
+                                 "руками запрос не нужен — " + REVIEW_CHAIN)
             raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
-                             "the stage has none; fix: tools.api model-request for this stage first, then model-response")
+                             "the stage has none; fix: prepare for this stage first, then submit")
         raise ValueError("model stage artifact requires its exact prior request")
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
@@ -5035,7 +5035,7 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
     requested = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
     published = [event for event in events if event["event_type"] == "CANDIDATE_PUBLISHED"]
     if len(requested) != 1 or len(published) != 1:
-        raise ValueError(f"AUTOMATION_RESPONSE_MISSING: {stage} has no recorded answer yet: tools.api model-response --stage {stage} first")
+        raise ValueError(f"AUTOMATION_RESPONSE_MISSING: {stage} has no recorded answer yet: prepare and submit --stage {stage} first")
     generator = str(_read_model_request_with_state(project, root, state, attempt_id, stage, str(requested[0]["artifact_digest"]))["invocation_id"])
     effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
     reviewer = str(reviewer_invocation_id)
@@ -5290,7 +5290,7 @@ def _require_next_automation_stage(run_root: Path, attempt_id: str, stage_instan
         return
     if outcome == "PENDING" and expected != stage_instance_id:
         raise ModelRequestOutOfOrder(f"MODEL_REQUEST_OUT_OF_ORDER: {stage_instance_id} — следующая стадия цепочки автоматизации {expected}; "
-                                     f"fix: model-request --stage {expected}, ничего не записано")
+                                     f"fix: prepare --stage {expected}, ничего не записано")
 
 
 class ModelReuseRefused(ValueError):
@@ -5720,7 +5720,7 @@ def _expected_model_inputs(
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the plan binds the header {batch['header_digest']}, the published header is "
                                       f"{header['digest']}; the plan is built by submit --stage plan with the header digest")
         expected = [
-            (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
+            (str(markers[0]["artifact_digest"]), "content_digest ответа context-marker:baseline (submit)"),
             (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
             # the further context receipts of the plan, in its order
             *((context, f"context_receipt_digests[{index}] опубликованного плана") for index, context in enumerate(_plan_contexts(plan)) if index),
@@ -5748,8 +5748,8 @@ def _expected_model_inputs(
     try:
         if stage == "tc-reviewer":
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
-            return [(str(boundary["canonical_branch_digest"]), "boundary.canonical_branch_digest (read-receipt reviewer-session-boundary)"),
-                    (str(boundary["package_digest"]), "boundary.package_digest (read-receipt reviewer-session-boundary)")]
+            return [(str(boundary["canonical_branch_digest"]), "boundary.canonical_branch_digest (квитанция reviewer-session-boundary)"),
+                    (str(boundary["package_digest"]), "boundary.package_digest (квитанция reviewer-session-boundary)")]
         if stage in {"tc-to-autotest", "autotest-reviewer"}:
             return _automation_inputs(project, root, state, attempt_id, stage_instance_id)
     except (ValueError, OSError, KeyError, TypeError):
@@ -5762,11 +5762,11 @@ def _automation_inputs(project: Path, root: Path, state: Mapping[str, Any], atte
     stage, _, instance = stage_instance_id.partition(":")
     if stage == "tc-to-autotest":
         effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
-        return [(str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)"),
-                (str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")]
+        return [(str(effective["document_digest"]), "effective.document_digest (эффективный канон)"),
+                (str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (эффективный канон)")]
     boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
-    return [(str(boundary["automation_digest"]), f"boundary.automation_digest (read-receipt automation-review-boundary-{instance})"),
-            (str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")]
+    return [(str(boundary["automation_digest"]), f"boundary.automation_digest (квитанция automation-review-boundary-{instance})"),
+            (str(boundary["digest"]), f"boundary.digest (квитанция automation-review-boundary-{instance})")]
 
 
 def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Sequence[tuple[str, str]]) -> ModelInputsMismatch:
@@ -5774,13 +5774,12 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
             for index, (digest, source) in enumerate(expected, start=1) if index > len(inputs) or inputs[index - 1] != digest]
     if len(inputs) > len(expected):
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
-    order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
     if stage_instance_id.startswith("tc-reviewer:"):  # the reviewer's request is the work of prepare, one fix for the whole chain
         from tools.fixes import REVIEW_CHAIN
 
         return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет `prepare --stage tc-reviewer:canonical` "
                                    "(он знает оба digest сам), руками он не нужен — " + REVIEW_CHAIN)
-    return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + f"; fix: повтори model-request с {order}")
+    return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: повтори prepare этой стадии (входы он берёт из журнала сам)")
 
 
 _PROVENANCE_LINE = re.compile(r"^(?P<path>[^\s:]+):(?P<line>\d+)(?!\d)")
@@ -5871,16 +5870,16 @@ def _response_bindings(
         elif stage == "tc-to-autotest":
             effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
             artifacts = value["artifacts"]
-            add("/artifacts/source/source_digest", str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)")
+            add("/artifacts/source/source_digest", str(effective["document_digest"]), "effective.document_digest (эффективный канон)")
             add("/artifacts/source/effective_bundle_receipt_digest", str(effective["effective_bundle_receipt_digest"]),
-                "effective.effective_bundle_receipt_digest (tools.api read-effective)")
+                "effective.effective_bundle_receipt_digest (эффективный канон)")
             for index, row in enumerate(artifacts["generated_files"]):
                 add(f"/artifacts/generated_files/{index}/content_digest", "sha256:" + hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest(),
                     "sha256 поля content этого файла (UTF-8)")
             if instance == "r2":
                 automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
                 add("/artifacts/predecessor_automation_sha256", automation_sha256(answer("tc-to-autotest:r1", "CANDIDATE_PUBLISHED")),
-                    "tools.api automation-digest ответа tc-to-autotest:r1")
+                    "digest ответа tc-to-autotest:r1")
                 add("/artifacts/correction_review_sha256", autotest_review_sha256(answer("autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")),
                     "digest ответа autotest-reviewer:r1")
         elif stage == "autotest-reviewer":
@@ -5889,10 +5888,10 @@ def _response_bindings(
             review = value["artifacts"]["autotest_review"]
             automation = answer(f"tc-to-autotest:{instance}", "CANDIDATE_PUBLISHED")
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
-            add("/artifacts/autotest_review/automation_sha256", automation_sha256(automation), f"tools.api automation-digest ответа tc-to-autotest:{instance}")
+            add("/artifacts/autotest_review/automation_sha256", automation_sha256(automation), f"digest ответа tc-to-autotest:{instance}")
             add("/artifacts/autotest_review/reviewed_relations_sha256", implementation_relations_sha256(automation["artifacts"]["implementation_relations"]),
-                f"tools.api relations-digest массива implementation_relations ответа tc-to-autotest:{instance} (не digest артефакта)")
-            add("/artifacts/autotest_review/host_isolation_sha256", str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")
+                f"digest массива implementation_relations ответа tc-to-autotest:{instance} (не digest артефакта)")
+            add("/artifacts/autotest_review/host_isolation_sha256", str(boundary["digest"]), f"boundary.digest (квитанция automation-review-boundary-{instance})")
             for key in ("source_digest", "effective_bundle_receipt_digest"):
                 add(f"/artifacts/autotest_review/source/{key}", str(automation["artifacts"]["source"][key]), f"source.{key} ответа tc-to-autotest:{instance}")
             files = {row["file_id"]: row["content_digest"] for row in automation["artifacts"]["generated_files"]}

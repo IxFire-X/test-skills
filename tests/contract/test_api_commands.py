@@ -11,7 +11,10 @@ import pytest
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[2]
-SERVICE_COMMANDS: dict[str, str] = {}  # a command no text names, with the reason; the review of the cases has none since V4b
+_V5 = "V5-B1: no text names it any more — the automation goes by prepare / submit; the command goes with B3"
+SERVICE_COMMANDS: dict[str, str] = {name: _V5 for name in (
+    "automation-boundary-facts", "automation-digest", "model-request", "model-response", "open-automation-boundary", "read-effective", "read-model-artifact",
+    "read-receipt", "relations-digest", "review-requested", "runner-compat", "step-inputs", "validate-automation")}  # a command no text names, with the reason
 
 
 def _texts() -> dict[Path, str]:

@@ -33,7 +33,7 @@ FIXES: dict[str, str] = {
     "ORCHESTRATION_INPUT": "входы ревью не прошли проверку: их перечень называет diagnostics; файлов у агента нет — повтори `tools.api submit --stage tc-reviewer:canonical`",
     "ORCHESTRATION_PUBLICATION": "публикация не прочиталась обратно: ничего не правь руками, повтори команду; повторный отказ — "
                                  "сообщи код и run_id владельцу пакета",
-    "ORCHESTRATION_RECEIPT": "квитанция не та: ничего не правь руками, квитанции берутся из журнала (`tools.api read-receipt`); повтори `tools.api submit --stage tc-reviewer:canonical`",
+    "ORCHESTRATION_RECEIPT": "квитанция не та: ничего не правь руками, квитанции берутся из журнала; повтори `tools.api submit --stage tc-reviewer:canonical`",
     "ORCHESTRATION_SELECTION": "выбор редакции отказан: смотри diagnostics, исправь названное в ответе ревьюера и повтори `tools.api submit --stage tc-reviewer:canonical`",
     "ORCHESTRATION_VERIFICATION": "проверка выбранной редакции не прошла: ничего не правь руками, повтори `tools.api submit --stage tc-reviewer:canonical`; "
                                   "повторный отказ — сообщи код и run_id владельцу пакета",
@@ -69,12 +69,11 @@ FIXES: dict[str, str] = {
     "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: положи его в `incoming/tc-reviewer-canonical.json` и повтори `tools.api submit --stage tc-reviewer:canonical`; "
                                  "ревьюера ещё не вызывали — " + REVIEW_CHAIN,
     # --- the model stages of the journal ---
-    "MODEL_REQUEST_INVALID": "model-request --stage <стадия>:<экземпляр>; стадии: " + _STAGES + "; --attempt — attempt_id этого "
-                             "прогона (run_pipeline status); --input-digest на каждый вход стадии по порядку",
-    "MODEL_REQUEST_DUPLICATE": "у стадии один запрос: не повторяй model-request, ответ отдай в model-response",
-    "MODEL_REQUEST_OUT_OF_ORDER": "стадии цепочки идут по порядку: сделай model-request следующей стадии, названной в сообщении",
+    "MODEL_REQUEST_INVALID": "prepare --stage <стадия>:<экземпляр>; стадии: " + _STAGES + "; стадию с номером ревизии называет run_pipeline status (next.stage)",
+    "MODEL_REQUEST_DUPLICATE": "у стадии один запрос: повтори prepare (он отдаёт тот же запрос), ответ отдай в submit",
+    "MODEL_REQUEST_OUT_OF_ORDER": "стадии цепочки идут по порядку: сделай prepare следующей стадии, названной в сообщении (run_pipeline status: next.stage)",
     "MODEL_INPUTS_MISMATCH": "входы стадии не совпадают с журналом: возьми digest и источник из сообщения отказа (он называет верный "
-                             "digest каждой позиции) и повтори model-request; у ревьюера кейсов запроса вручную нет — " + REVIEW_CHAIN,
+                             "digest каждой позиции) и повтори prepare этой стадии (входы он берёт из журнала сам); у ревьюера кейсов запроса вручную нет — " + REVIEW_CHAIN,
     "MODEL_STAGE_ARTIFACT_INVALID": "ответ не прошёл схему стадии: исправь поля из diagnostics и отдай ответ единственным повтором "
                                     "стадии (--transport-attempts 2)",
     "MODEL_RESPONSE_DIGEST_MISMATCH": "удали из ответа поля digest, названные в сообщении, — код поставит их сам; отдай ответ "
@@ -83,7 +82,7 @@ FIXES: dict[str, str] = {
                            "иначе prepare без --reuse-from",
     "MODEL_REUSE_MISMATCH": "ответ переиспользуемой стадии не меняется: передай файл ответа источника как есть",
     "MODEL_STAGE_ANSWERED": "у стадии уже есть ответ, другой его не заменит; дальше — следующая стадия",
-    "MODEL_STAGE_NOT_REQUESTED": "сначала запрос стадии (prepare; у остальных стадий tools.api model-request), потом ответ (submit; model-response)",
+    "MODEL_STAGE_NOT_REQUESTED": "сначала запрос стадии (prepare --stage <стадия>), потом ответ в слот и submit",
     # --- batches (BatchAssemblyError) ---
     "BATCH_ID_CONFLICT": "batch_id, namespace и идентификаторы фрагмента должны быть из плана пачки: возьми их из batch-plan.json "
                          "и не меняй; идентификаторы внутри фрагмента начинаются с namespace пачки",
@@ -117,7 +116,7 @@ FIXES: dict[str, str] = {
     "ZEPHYR_CSV_PROFILE": "профиль CSV — zephyr-scale-step-row-24-v5 (по умолчанию, текст человека) или zephyr-scale-step-row-24-v4 "
                           "(плюс машинные колонки шагов); профили v1–v3 только читаются; других значений нет",
     # --- the host (HostStop without a fix at its raise site) ---
-    "FINISH_FACT_UNDETERMINED": "у прогона нет попытки: finish закрывает попытку, а её нет — сначала дойди до model-request "
+    "FINISH_FACT_UNDETERMINED": "у прогона нет попытки: finish закрывает попытку, а её нет — сначала дойди до prepare "
                                 "(run_pipeline status называет следующий шаг); для прогона, где работа не начата, "
                                 "достаточно scan --new-run",
     "INVENTORY_INVALID": "опись проекта не читается или не сходится с диском: повтори scan (--new-run), файлы проекта не меняй во время scan; "

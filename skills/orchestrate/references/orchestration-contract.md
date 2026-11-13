@@ -21,7 +21,7 @@ Human docs не переопределяют machine truth. Каждый artifac
 | --- | --- | --- |
 | Целостность | `tools.doctor --root <pack-root>` | manifest и registered bytes; не readiness |
 | Подготовка | `tools.run_pipeline scan --project <path> --profile <profile> --docs <path>` (повтори `--docs` для всех входов) | run, inventory, baseline, context receipts; при нескольких modules нужен exact `--module <ID>` |
-| Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
+| Контекст | `tools.api prepare` → model call → `tools.api submit` | schema, exact authorized context; marker OpenSpec reconciliation |
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api prepare` / `tools.api submit --stage plan` строит и публикует header и plan из журнала | independent plan и current receipt без truncation |
 | Генерация | `tools.api prepare` / `tools.api submit` для `tc-generator:<batch>`, пачки по очереди; с пачки 2 capabilities прошлых пачек публикует `prepare` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
 | Сборка | последний `tools.api submit` (до записи ответа); кандидата записывает `prepare` ревью | semantic/provenance audit, запись кандидата (файлов до вердикта нет) |
@@ -61,7 +61,7 @@ Inventory учитывает файлы выбранного модуля, paren
 5. Один раз вызови `context-marker` для complete normalized source requirements, затем
    создай deterministic batch plan. Для каждого batch: context receipt -> `tc-generator`
    -> immutable fragment bytes. Каждая logical stage invocation имеет exact stage-bound
-   persisted/read-back `model-request` со всеми input digests, model и invocation;
+   persisted/read-back запрос (`prepare`) со всеми input digests, model и invocation;
    `MODEL_REQUESTED` ссылается на этот envelope до вызова, затем следует
    `MODEL_RESPONSE_RECEIVED`. Каждый generator fragment немедленно получает
    `CANDIDATE_PUBLISHED`.
@@ -129,4 +129,4 @@ Company runner, production rollback и Zephyr tenant round-trip остаются
 
 ## Проекции входа модели (V7)
 
-`step-inputs` и `step_size` дают модели не квитанции, а проекции, которые строит код по журналу и пишет в `<run>/review-views/`: опись — `inventory-view-v1` (путь, вид, размер файлов вместо квитанции описи), план пачек генератора — `plan-view-v1` (без текстов требований: тексты — в ответе разметки, `requirements[].text` по `source_requirement_id`). Читай файл проекции из списка входа, а не `inventories/` и `batch-plans/`; `input_digests` запроса остаются digest-ами квитанций.
+`prepare` (список в `read`) и `step_size` дают модели не квитанции, а проекции, которые строит код по журналу и пишет в `<run>/review-views/`: опись — `inventory-view-v1` (путь, вид, размер файлов вместо квитанции описи), план пачек генератора — `plan-view-v1` (без текстов требований: тексты — в ответе разметки, `requirements[].text` по `source_requirement_id`). Читай файл проекции из списка входа, а не `inventories/` и `batch-plans/`; `input_digests` запроса остаются digest-ами квитанций.

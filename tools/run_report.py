@@ -523,7 +523,7 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-_WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повторяли (prepare или model-request): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
+_WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
                  "REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
                  "REVIEW_WEAK": "ревьюер поймал не все контрольные ошибки (канарейки) своего вида",
@@ -1039,7 +1039,7 @@ def _composition_lines(report: Mapping[str, Any]) -> list[str]:
 
 
 def _step_size_lines(report: Mapping[str, Any]) -> list[str]:
-    return ["## Размер входа шагов", "", "Замер агента (`tools.step_size --run` и model-request): строки файла step-sizes.jsonl, журналом не подтверждены; "
+    return ["## Размер входа шагов", "", "Замер агента (`tools.step_size --run` и prepare): строки файла step-sizes.jsonl, журналом не подтверждены; "
             "предупреждение STEP_OVER_BUDGET строится по вызовам модели из журнала.", "",
             *(["замеров нет", ""] if not report["step_sizes"] else [
                 "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",

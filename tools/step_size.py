@@ -396,7 +396,7 @@ def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str
     requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
                  and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
     if not requested:
-        raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
+        raise ValueError(f"no model request of {stage} yet: publish it first with prepare --stage {stage}")
     request_digest = str(requested[-1]["artifact_digest"])
     request = json.loads(_model_request_target(root, attempt_id, request_digest).read_text(encoding="utf-8"))
     check_sealed_value(request, "model request")
@@ -639,7 +639,7 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         module_root = project if module == "." else project.joinpath(*module.split("/"))
         level = java_api_level(module_root, project)
         if level is not None:
-            result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее отклонит runner-compat (RUNNER_API_LEVEL)"}
+            result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее `submit` отклонит (RUNNER_API_LEVEL)"}
         if (module_root / "pom.xml").is_file() or (module_root / "build.gradle").is_file() or (module_root / "build.gradle.kts").is_file():
             # a param_group becomes one @ParameterizedTest only where the tests have junit-jupiter-params
             params = junit_params_available(module_root, project)

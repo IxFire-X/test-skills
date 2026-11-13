@@ -49,7 +49,7 @@ def _plain(value):
 
 def test_the_docs_name_the_api_commands() -> None:
     named = _named_commands()
-    assert ("api", "model-request") in named and ("api", "model-response") in named and ("api", "read-effective") in named, named
+    assert not {("api", "model-request"), ("api", "model-response"), ("api", "read-effective")} & set(named), named  # V5-B1: the docs name no command of the old path
     # V4: the review goes through the one cycle — the docs name tools.api prepare/submit
     assert ("api", "prepare") in named and ("api", "submit") in named, named
 

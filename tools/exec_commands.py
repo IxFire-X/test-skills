@@ -218,8 +218,8 @@ def _reject_prestart_execution(
     return int(closed["exit_code"])
 
 
-_NOT_PREPARED_FIX = ("materialize кладёт в проект только принятую автоматизацию: заверши статическое ревью автотестов "
-                     "(autotest-reviewer, вердикт ПРИНЯТО), затем снова materialize")
+_NOT_PREPARED_FIX = ("materialize кладёт в проект только принятую автоматизацию: run_pipeline status называет следующий шаг — prepare и submit "
+                     "стадий tc-to-autotest:rN и autotest-reviewer:rN (вердикт ревью ПРИНЯТО), затем снова materialize")
 
 
 # after a review that did not accept the automation — never push for another review past the limit
@@ -227,7 +227,7 @@ _REFUSED_FIX = ("статическое ревью не приняло авто�
                 "она напечатает next_run, команду следующего захода")
 
 
-_REVISION_FIX = "ревью вернуло автоматизацию на правку: следующая ревизия tc-to-autotest:r2, её ревью autotest-reviewer:r2, затем materialize"
+_REVISION_FIX = "ревью вернуло автоматизацию на правку: prepare и submit --stage tc-to-autotest:r2, затем её ревью --stage autotest-reviewer:r2 (другая --invocation-id), затем materialize"
 
 
 # the review accepted the automation, but materialize cannot write it into the project — no later step changes that
@@ -244,7 +244,7 @@ def _not_prepared_fix(root: Path, attempt_id: str) -> str:
         return _NOT_PREPARED_FIX
     if outcome == "PENDING":
         return _REVISION_FIX if detail == "tc-to-autotest:r2" else (
-            f"автоматизация не закончена: следующий шаг — {detail}, затем ревью автотестов (ПРИНЯТО) и снова materialize")
+            f"автоматизация не закончена: prepare и submit стадии {detail}, затем ревью автотестов (ПРИНЯТО) и снова materialize")
     return {"AUTOMATION_REJECTED": _REFUSED_FIX, "AUTOMATION_BLOCKED": _REFUSED_FIX,
             "AUTOMATION_NOT_MATERIALIZABLE": _UNMATERIALIZABLE_FIX}.get(outcome, _NOT_PREPARED_FIX)
 

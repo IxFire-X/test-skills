@@ -55,11 +55,11 @@ pipeline в этом run. Наличие папки, scan или запрос te
 `NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение — новый scan того же запроса.
 Run остаётся связан с исходной project/module identity.
 
-## К §3 «Построй canonical»: шаги автоматизации
+## К §3 «Построй canonical»: стадии автоматизации
 
-одной строкой). Для `tc-to-autotest:rN` и `autotest-reviewer:rN` там же `java_level` — уровень Java модуля по его сборке — и `junit_params` (есть ли junit-jupiter-params для групп `param_group`);
-передай его генератору и ревьюеру как ограничение API. Для `tc-generator:<batch>` там же может быть файл
-`existing-tests.md` (basis «карта», FaT-EC) — карта существующих тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
+`status` называет `prepare` со стадией и номером ревизии (`next.stage`, например `tc-to-autotest:r1`; номер выбирает код). В `read` для `tc-to-autotest:rN` и `autotest-reviewer:rN` —
+`java_level` (уровень Java модуля) и `junit_params` (есть ли junit-jupiter-params для `param_group`): передай их как ограничение API. В `read` пачки генератора может быть `existing-tests.md`
+(basis «карта») — дай его генератору вместе со входами.
 
 ## К §4 «Ревью»
 
@@ -71,33 +71,24 @@ Run остаётся связан с исходной project/module identity.
 
 ### `local-pilot-v1`
 
-Для model request `tc-to-autotest:rN` передай `input_digests` ровно как
-`[effective.document_digest, effective.effective_bundle_receipt_digest]` из
-`python -m tools.api read-effective`. Перед вызовом построй вид документа для генератора (FaT-AV):
-`python -m tools.review_view --project <abs> --run <run_id> --effective` — `step_size`/`step-inputs` отдают этот вид
-вместо JSON документа, квитанцию — в `input_bindings` (носитель `effective-canonicals` не читай). Для `autotest-reviewer:rN` — ровно
-`[boundary.automation_digest, boundary.digest]` из read-back
-`automation-review-boundary-rN` (`tools.api read-receipt --kind automation-review-boundary-rN --event ARTIFACT_READ_BACK`). Порядок значим. Это привязки артефактов этапа,
-а не hashes всех прочитанных skill/schema/source файлов или полного prompt.
-Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
-эти поля. Не переписывай опубликованный request после вызова модели.
+Автотесты идут тем же циклом, что кейсы: `status` → `prepare --run-root <run> --stage <id>` → ответ в `answer_slot` → `submit` → `status`. Digest-ы входов, вид документа и границу ревью строит код;
+файлы, digest-ы и пути руками не передаются. Не переписывай опубликованный request после вызова модели.
 
-1. Вызови `tc-to-autotest` для effective canonical. `content_digest`, `source.*` и digest предшественника не считай:
-   пропущенные ставит `model-response`.
-2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
-   код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
-   `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no
-   --out <run>/tmp/auto-facts-rN.json` (заявления — как для `prepare` ревью в §4). Затем запиши
-   `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
-   вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
-3. После accepted static review сразу вызывай `materialize` (ниже). Он сам публикует
+1. `prepare --stage tc-to-autotest:rN` печатает `read`, `answer_slot`, `budget`. В слот — полный V5-артефакт; `source.*`, `content_digest` и digest предшественника ставит `submit`.
+   `submit --dry-run` проверяет смысл ответа и совместимость с раннером модуля до записи; отказ ничего не пишет — исправь слот и повтори (`--transport-attempts 2` — единственный повтор).
+2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <метка>]`: граница, `REVIEW_REQUESTED` и запрос — один вызов (повтор довершает оборванное). `yes` — ревьюер отдельной
+   сессией, `--invocation-id` — его метка: не метка генератора и, для r2, не метка ревью r1. `no` — ревью в той же сессии, только в прогоне с SELF (`scan --accept-self-review`), метку не называй:
+   независимость не засчитывается, отчёт это скажет. В выводе `read`, `answer_slot`, `for_human`, `generator_checks` (что код уже проверил). Digest-поля ответа ревьюера (`automation_sha256`,
+   `reviewed_relations_sha256`, `host_isolation_sha256`, `reviewed_files[].content_digest`) ставит `submit`, ревьюер их не заполняет. Разрешены initial + одна complete correction.
+3. После ревью `status` называет `materialize` (принято), `prepare --stage tc-to-autotest:r2` (`AUTO_FIX_APPLIED`; после `materialize` r2 запрещена) или `finish` (отказ).
+4. После accepted static review сразу вызывай `materialize` (ниже). Он сам публикует
    execution-inputs и материализует принятую автоматизацию (generated delta) из ответов
    журнала, если этого ещё не было; partial materialization по-прежнему запрещает запуск.
    Нет принятого static review — `EXECUTION_NOT_PREPARED` с подсказкой.
-4. `materialize` строит closed execution request сам: adapter ID, exact frozen
+5. `materialize` строит closed execution request сам: adapter ID, exact frozen
    interpreter/wrapper/executable, build profile и typed params; user shell strings и
    `argv_template` запрещены.
-5. Команда из `materialize` запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
+6. Команда из `materialize` запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
    системный `mvn` или `gradlew`; запускает её человек. Системный Maven использует закрытый адаптер
    `maven:selected-symbols-v1` и поле `executable`; абсолютный launcher и его bytes
    связаны с baseline. Hash launcher не доказывает идентичность всех библиотек Maven/JDK.
@@ -158,7 +149,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 
 ## Контракт оркестрации — места режима Б
 
-| Автоматизация | `model-request`/`model-response`; `tools.api automation-boundary-facts`, `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
+| Автоматизация | `tools.api prepare` / `tools.api submit` для `tc-to-autotest:rN` и `autotest-reviewer:rN` | одна версия и независимое static review; максимум одна correction |
 | Материализация | делает `tools.run_pipeline materialize` сам | accepted exact generated set, ownership/readback |
 | Выполнение | команду печатает `materialize`, запускает человек, отчёты принимает `ingest` | reviewed selectors, отчёт привязан к попытке |
 

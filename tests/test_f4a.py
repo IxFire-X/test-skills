@@ -42,12 +42,9 @@ def test_model_response_prints_a_receipt_without_the_body_and_the_text_says_so()
     assert 'if key != "artifact"' in source  # the receipt, not the answer
     text = _flat(SKILL)
     assert "весь артефакт" not in text and "сотни КБ" not in text
-    assert "`model-response` печатает квитанцию" in text
+    assert "и печатает квитанцию" in text and "не тело" in text  # V5-B1: the one cycle — `submit` prints the receipt
     for key in ("`result.path`", "`content_digest`", "`output_bytes`", "`warning`"):
         assert key in text, key
-    assert "`read-model-artifact`" in text
-    assert "`--out` ему не нужен" in text
-    assert "`out`, `bytes`, `sha256`" in text  # with --out the stdout holds only these; the receipt is in the file
 
 
 def test_the_out_text_matches_what_main_prints_with_out(tmp_path: Path) -> None:
@@ -116,7 +113,7 @@ def test_the_skill_asks_for_one_step_size_call_per_batch_and_names_the_key_of_ea
     text = _flat(SKILL)
     assert "один вызов размера на пачку" in text
     assert "`files_summary`" in text and "input_files_summary" not in text  # V0: one key for both commands
-    assert "`tools.api step-inputs`" in text and "`step_size`" in text
+    assert "`list_path`" in text and "`step_size`" in text  # V5-B1: the list is in `read` of prepare, no command of its own
     assert "`--dry-run` — только проверки" in text
     assert "оба" not in text.split("один вызов размера на пачку", 1)[1][:200]  # not «step-inputs and step_size»
 
