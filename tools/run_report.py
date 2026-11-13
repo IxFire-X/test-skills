@@ -247,7 +247,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
         reuse = request.get("reuse")  # the answer of an earlier run, reused — no model call either
     except (KeyError, OSError, TypeError, ValueError):
         pass
-    # the same files and bytes as step-inputs — from the journal, the map of existing tests measured, not written
+    # the same files and bytes as the list of reading of prepare — from the journal, the map of existing tests measured, not written
     try:
         found = stage_inputs(root, str(call["stage"]), attempt_id=str(call["attempt_id"]), write_views=False, state=state, journals=journals)
         resolved, unresolved = input_size(found), len(found["unresolved"])

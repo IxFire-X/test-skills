@@ -17,21 +17,17 @@ pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
-AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation", "runner-compat")
+REMOVED_COMMANDS = ("model-request", "model-response", "read-model-artifact", "review-requested", "read-effective", "read-receipt", "step-inputs",
+                    "automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation", "runner-compat")
 
 
 # ---- <run>/tmp is made by the scan -------------------------------------------------------------------------------------
 
-def test_the_run_has_its_tmp_directory_from_the_start_and_out_writes_there(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_run_has_its_tmp_directory_from_the_start(tmp_path: Path) -> None:
     from tests.test_self_review import _run
-    from tools.api import main
 
     run_root, _attempt = _run(tmp_path, "cases-only-v1", flag=False)
     assert (run_root / "tmp").is_dir() and not any((run_root / "tmp").iterdir())
-    source = run_root / "tmp" / "document.json"
-    source.write_text("{}", encoding="utf-8")
-    code = main(["relations-digest", "--relations", str(source), "--run-root", str(run_root), "--out", str(run_root / "tmp" / "digest.json")])
-    assert code == 0 and (run_root / "tmp" / "digest.json").is_file(), capsys.readouterr().out
 
 
 def test_a_scan_creates_the_tmp_directory_of_its_run(tmp_path: Path) -> None:
@@ -97,22 +93,15 @@ def _run_api(pack: Path, *argv: str) -> subprocess.CompletedProcess[str]:
                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
 
 
-def test_the_help_of_the_cases_only_pack_lists_no_command_of_automation(cases_only_pack: Path) -> None:
+def test_the_help_of_the_cases_only_pack_lists_none_of_the_removed_commands(cases_only_pack: Path) -> None:
     done = _run_api(cases_only_pack, "no-such-command", "--help")
     listing = done.stdout + done.stderr
-    for command in AUTOMATION_COMMANDS:
+    for command in REMOVED_COMMANDS:
         assert command not in listing, command
         refused = _run_api(cases_only_pack, command, "--help")
         assert refused.returncode == 2 and "invalid choice" in refused.stdout + refused.stderr, command
     for kept in ("prepare", "submit"):  # F4b: the commands of the cycle are commands of this delivery
         assert _run_api(cases_only_pack, kept, "--help").returncode == 0, kept
-
-
-def test_the_repository_build_keeps_the_commands_where_the_execution_files_are() -> None:
-    from tools import api, execution_gate
-
-    assert execution_gate.execution_available() is True
-    assert set(AUTOMATION_COMMANDS) <= set(api.COMMANDS)
 
 
 def test_ready_says_finish_in_the_cases_only_row_and_ingest_where_it_exists(tmp_path: Path) -> None:
@@ -171,18 +160,16 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
 
 # ---- before the verdict ----------------------------------------------------------------------------------------------------
 
-def test_read_effective_before_the_verdict_is_an_answer_not_a_refusal_of_the_journal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_no_effective_document_before_the_verdict_is_an_answer_not_a_refusal_of_the_journal(tmp_path: Path) -> None:
     from tests.test_self_review import _run
-    from tools.api import main
+    from tools.pilot_state import effective_canonical_or_reason
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
-    code = main(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id])
-    answer = json.loads(capsys.readouterr().out)
-    assert code == 0 and answer["status"] == "ok" and answer["result"]["effective"] is None and "вердикт" in answer["result"]["reason"], answer
+    answer = effective_canonical_or_reason(run_root, attempt_id)  # what status and the report read: «not yet» is the journal's word
+    assert answer["effective"] is None and "вердикт" in answer["reason"], answer
     assert not (run_root / "refusals.jsonl").exists(), "no refusal was counted"
-    code = main(["read-effective", "--run-root", str(run_root), "--attempt", "f" * 32])
-    refused = json.loads(capsys.readouterr().out)
-    assert code == 2 and refused["status"] == "error", "an attempt that does not exist is still refused"
+    with pytest.raises(ValueError):  # an attempt that does not exist is still refused
+        effective_canonical_or_reason(run_root, "f" * 32)
 
 
 def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_and_says_so(tmp_path: Path) -> None:
@@ -211,29 +198,28 @@ def test_the_three_texts_say_the_same_about_scripts_and_none_contradicts() -> No
 
 # ---- "no effective document yet" is decided by the journal, not by a missing file ------------------------------------------------
 
-def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: Path) -> None:
     """The probe of orchestrator-3: the run has its accepted effective selection; its file is gone; the journal still says it was accepted."""
     from tests.test_finish import _project
-    from tools import api, pilot_state
+    from tools import pilot_state
 
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    assert api.main(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id]) == 0
-    assert json.loads(capsys.readouterr().out)["result"].get("effective", "x") is not None
+    assert pilot_state.effective_canonical_or_reason(run_root, attempt_id).get("effective", "x") is not None
     pilot_state._receipt_target(Path(run_root), attempt_id, "effective-canonical").unlink()
-    code = api.main(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id])
-    refused = json.loads(capsys.readouterr().out)
-    assert code == 2 and refused["status"] == "error", refused
+    with pytest.raises(ValueError):
+        pilot_state.effective_canonical_or_reason(run_root, attempt_id)
 
 
 @pytest.mark.slow
 def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet() -> None:
-    from tests.test_review_requested import _api as call, _generated_run
+    from tests.test_review_requested import _generated_run
     from tests.test_review_two_commands import _open, _select_verdict, _verdict
+    from tools.pilot_state import effective_canonical_or_reason
     import tempfile
 
     with tempfile.TemporaryDirectory() as directory:
         run = _generated_run(Path(directory))
         assert _open(run)[0] == 0 and _select_verdict(run, _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ"))[0] == 0
-        code, answer = call("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
-        assert code == 0 and answer["result"]["effective"] is None, answer
-        assert "REJECTED" in answer["result"]["reason"] and "не принимает кандидата" in answer["result"]["reason"] and "не записан" not in answer["result"]["reason"]
+        answer = effective_canonical_or_reason(run["run_root"], run["attempt_id"])
+        assert answer["effective"] is None, answer
+        assert "REJECTED" in answer["reason"] and "не принимает кандидата" in answer["reason"] and "не записан" not in answer["reason"]

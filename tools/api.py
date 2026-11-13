@@ -4,7 +4,7 @@ One command calls exactly one function and prints what it returned. A refusal of
 command's refusal (code 2) with the same code and message; a validator's diagnostics are ``invalid``
 (code 1) with the list unchanged. No command decides a next step, loops or launches anything.
 
-python -m tools.api <command> [--run-root <run> --attempt <id>] ... [--out <project>/.pilot-runs/<run_id>/tmp/<file>.json]
+python -m tools.api prepare|submit --run-root <run> --stage <id> ...
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import canonical_document, confined_output, execution_gate, output_guard, pilot_state, stage_steps, step_size
+from tools import canonical_document, output_guard, stage_steps, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -61,7 +61,7 @@ def _input_project(args: argparse.Namespace) -> Path | None:
 
 
 def _read_inputs(args: argparse.Namespace) -> None:
-    """Every JSON input and answer file of the command, each read only after ``output_guard.input_file`` took its path."""
+    """Every JSON input file of the command (``--document``), read only after ``output_guard.input_file`` took its path."""
     anchor: list[Path | None] = []
 
     def project() -> Path | None:
@@ -79,14 +79,8 @@ def _read_inputs(args: argparse.Namespace) -> None:
             raise ValueError(f"INVALID_ARGUMENT: argument {flag}: {value.path}: {error}; fix: {flag} — путь к JSON-файлу на диске") from error
 
     for name, value in list(vars(args).items()):
-        flag = "--" + name.replace("_", "-")
         if isinstance(value, _JsonFile):
-            setattr(args, name, read(flag, value))
-        elif isinstance(value, list) and any(isinstance(item, _JsonFile) for item in value):
-            setattr(args, name, [read(flag, item) if isinstance(item, _JsonFile) else item for item in value])
-    for name in ("artifact", "verdict"):  # the answer file: its refusal has its code and fix and a line in refusals.jsonl
-        if isinstance(getattr(args, name, None), str):
-            setattr(args, name, _load_answer(getattr(args, name), project()))
+            setattr(args, name, read("--" + name.replace("_", "-"), value))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,27 +118,6 @@ def _yes_no(value: str) -> bool:
 # commands: one package function each
 # --------------------------------------------------------------------------------------
 
-def _cmd_model_request(a):
-    return pilot_state.publish_model_request(a.run_root, a.attempt, a.stage, model_id=a.model_id, invocation_id=a.invocation_id,
-                                             input_digests=a.input_digest)
-
-
-def _cmd_model_response(a):
-    published = pilot_state.publish_model_stage_artifact(a.run_root, a.attempt, a.stage, a.artifact.value, transport_attempts=a.transport_attempts,
-                                                         raw_bytes=a.artifact.raw_bytes)
-    # PF-1: the receipt of the record (digest, path, size, filled, normalized, warning), not the answer's body — hundreds of KB the agent
-    # already has; the body is read apart with read-model-artifact
-    return {key: value for key, value in published.items() if key != "artifact"}
-
-
-def _cmd_review_requested(a):
-    return pilot_state.request_review(a.run_root, a.attempt, a.stage, a.digest)
-
-
-def _cmd_read_model_artifact(a):
-    return pilot_state.read_model_stage_artifact(a.run_root, a.attempt, a.stage, a.digest)
-
-
 def _cmd_prepare(a):
     return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from, fresh_context=a.fresh_context)
 
@@ -159,88 +132,17 @@ def _cmd_validate_canonical(a):
     return candidate_rows(a.document) or canonical_document.validate_canonical_document(a.document)
 
 
-def _cmd_read_effective(a):
-    """PT2: before the verdict there is no effective document — that is an answer (``effective: null``), not a refusal that the
-    journal of refusals counts; a run or an attempt that does not exist is still a refusal."""
-    return pilot_state.effective_canonical_or_reason(a.run_root, a.attempt)
-
-
-def _cmd_open_automation_boundary(a):
-    return pilot_state.open_automation_review_boundary(a.run_root, a.attempt, a.facts)
-
-
-def _cmd_automation_boundary_facts(a):
-    return pilot_state.automation_boundary_facts(a.run_root, a.attempt, a.revision, fresh_context=a.fresh_context,
-                                                 reviewer_invocation_id=a.reviewer_invocation_id)
-
-
-def _cmd_read_receipt(a):
-    return pilot_state.attempt_receipt_or_reason(a.run_root, a.attempt, a.kind, a.event)  # «not yet» is decided by the journal
-
-
-def _cmd_automation_digest(a):
-    return execution_gate.load_mode_b("automation_validation").automation_sha256(a.automation)
-
-
-def _cmd_relations_digest(a):
-    return execution_gate.load_mode_b("automation_validation").implementation_relations_sha256(a.relations)
-
-
-def _cmd_validate_automation(a):
-    return execution_gate.load_mode_b("automation_validation").validate_automation_artifact(a.automation, a.canonical)
-
-
-def _cmd_runner_compat(a):
-    return execution_gate.load_mode_b("run_tests").validate_artifact_runner_compatibility(a.module_root, a.language, a.canonical, a.automation, materialized=a.materialized)
-
-
-def _cmd_step_inputs(a):
-    """PT2: the summary and the path of the file with the whole list — a generator batch reads a hundred files."""
-    return step_size.step_inputs(a.run_root, a.stage)
-
-
-RUN = ("--run-root", "--attempt")
-
-
 def _diagnostics(result: Any) -> bool:
     return bool(result)
 
 
-def _not_runnable(result: Any) -> bool:
-    return getattr(result, "status", None) != "READY"
-
-
 # name: (handler, options, invalid-when)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
-    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", str, "append", "optional")), None),
-    "model-response": (_cmd_model_response, (*RUN, "--stage", "--artifact", ("--transport-attempts", int, 1)), None),
-    "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None),
-    "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None),
     "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--invocation-id", str, None),
                                                  ("--reuse-from", str, None), ("--fresh-context", _yes_no, None)), None),
     "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag"), ("--abort", str, None)), None),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics),
-    "read-effective": (_cmd_read_effective, RUN, None),
-    "automation-boundary-facts": (_cmd_automation_boundary_facts, (*RUN, ("--revision", int), ("--fresh-context", _yes_no),
-                                                                     "--reviewer-invocation-id"), None),
-    "open-automation-boundary": (_cmd_open_automation_boundary, (*RUN, ("--facts", _json)), None),
-    "read-receipt": (_cmd_read_receipt, (*RUN, "--kind", "--event"), None),
-    "automation-digest": (_cmd_automation_digest, (("--automation", _json),), None),
-    "relations-digest": (_cmd_relations_digest, (("--relations", _json),), None),
-    "validate-automation": (_cmd_validate_automation, (("--automation", _json), ("--canonical", _json)), _diagnostics),
-    "runner-compat": (_cmd_runner_compat, (("--module-root", Path), ("--language", str), ("--canonical", _json), ("--automation", _json),
-                                           ("--materialized", "flag")), _not_runnable),
-    "step-inputs": (_cmd_step_inputs, ("--run-root", "--stage"), None),
 }
-
-
-# PT2: the commands of mode B (the automation of tests) exist only where the execution files are — the seam of the profile
-_AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation",
-                        "runner-compat")
-if not execution_gate.execution_available():
-    for _name in _AUTOMATION_COMMANDS:
-        COMMANDS.pop(_name, None)
-    COMMANDS.pop("review-requested", None)  # the command of the review of the automation (mode B): a delivery of cases has none
 
 
 def _parser() -> JsonArgumentParser:
@@ -263,10 +165,9 @@ def _parser() -> JsonArgumentParser:
                 command.add_argument(flag, dest=dest, type=rest[0], default=rest[1])
             else:
                 command.add_argument(flag, dest=dest, type=(rest[0] if rest else (Path if flag == "--run-root" else str)), required=True)
-        command.add_argument("--out", default=None)
         if not any(action.dest == "run_root" for action in command._actions):
-            # an --out file is confined to <run>/tmp/: a command that has no run of its own takes the run for that check only
-            command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="the run: --out writes into its tmp/; the refusals of the command are journaled there")
+            # a command that has no run of its own takes the run as the anchor of its input file and the place of its refusals
+            command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="the run: the anchor of the input file; the refusals of the command are journaled there")
     return parser
 
 
@@ -274,19 +175,6 @@ def _print(payload: Mapping[str, Any]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-def _out_target(path: str, run_root: object = None) -> Path:
-    """The one ``--out`` policy (tools.output_guard): a file directly in ``<run>/tmp/`` of the run ``--run-root`` names."""
-    return output_guard.out_file(path, run_root)
-
-
-def _write(target: Path, value: Any, run_root: object) -> dict[str, Any]:
-    """``--out``: the file in ``<run>/tmp/`` written through confined_output (a temporary of its own, no link followed)."""
-    data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    project, run = output_guard.existing_run(run_root)
-    confined_output.atomic_write_confined_bytes_at_root(project, run, target, data)
-    return {"out": str(target), "bytes": len(data), "sha256": "sha256:" + hashlib.sha256(data).hexdigest()}
 
 
 def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:
@@ -303,8 +191,6 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = bool(getattr(args, "dry_run", False))
     try:
         _read_inputs(args)
-        run_root = getattr(args, "run_root", None)
-        out = _out_target(args.out, run_root) if args.out is not None else None
         result = handler(args)
     except Exception as error:
         # the refusal's own code and fix; the one envelope {status, code, message, fix, next}
@@ -318,10 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     payload: dict[str, Any] = {"status": status, "command": args.command}
     if dry_run:
         payload["dry_run"] = True
-    if out is not None:
-        payload.update(_write(out, plain(result), run_root))
-    else:
-        payload["result"] = plain(result)
+    payload["result"] = plain(result)
     _print(payload)
     if status == "invalid":
         _record_refusal(args, payload)

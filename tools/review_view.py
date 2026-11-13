@@ -15,7 +15,7 @@ step's action and data — a number of any length as a whole token or a Russian 
 ``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
 
 The profile ``autotest`` is the view of the effective document that the automation generator reads instead of
-the full JSON (``--effective`` writes ``<run>/review-views/<document sha>.autotest.md``).  It keeps what a test is built
+the full JSON (``prepare`` of the generator writes ``<run>/review-views/<document sha>.autotest.md``).  It keeps what a test is built
 from — the canonical requirements (ID and text: the testing-work constraints), the capabilities with their whole
 provenance (the test boundary), each case's requirement IDs, objective, preconditions, each step's action, operation,
 inputs, outputs, blockers, expectation text and every assertion with its ID — and the machine part whole: every ID,
@@ -256,7 +256,7 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
 
 def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
     """The map of existing project tests for the context the generator's plan was built from (the one of
-    ``step-inputs``); empty when the project has none."""
+    the list of reading of ``prepare``); empty when the project has none."""
     from tools.existing_tests import for_context
     from tools.pilot_state import read_context_selection
 
@@ -693,7 +693,7 @@ def _hints_of_run(root: Path, state: Mapping[str, Any], document: Mapping[str, A
 
 
 def ensure_autotest_view(project: Path, root: Path, state: Mapping[str, Any]) -> dict[str, Any]:
-    """The autotest view of the effective document of the run (``--effective``): what the generator of the automation reads, made by the code — ``prepare`` of the
+    """The autotest view of the effective document of the run: what the generator of the automation reads, made by the code — ``prepare`` of the
     generator calls it before the step is measured.  Written where the bytes differ; the same call again changes nothing."""
     from tools.canonical_document import document_sha256
     from tools.confined_output import atomic_write_confined_bytes_at_root
@@ -717,13 +717,10 @@ def ensure_autotest_view(project: Path, root: Path, state: Mapping[str, Any]) ->
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = JsonArgumentParser(description="Write the compact view of the assembled candidate (reviewer) or of the effective "
-                                            "document (automation generator) of a run.")
+    parser = JsonArgumentParser(description="Write the compact view of the assembled candidate (reviewer) of a run.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--run", required=True)
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--candidate")
-    source.add_argument("--effective", action="store_true", help="FaT-AV: the autotest view of the effective document")
+    parser.add_argument("--candidate", required=True)
     args = parser.parse_args(argv)
     try:
         from tools.pilot_state import derive_state
@@ -733,24 +730,19 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"unknown run: {args.run}")
         root = project / ".pilot-runs" / args.run
         state = derive_state(root)
-        extra: dict[str, Any] = {}
-        if args.effective:
-            made = ensure_autotest_view(project, root, state)
-            target, digest, data, document, grouping, reference, profile = made["path"], made["digest"], made["data"], made["document"], made["grouping"], made["reference"], "autotest"
-        else:
-            from tools.output_guard import input_file
+        from tools.output_guard import input_file
 
-            document, profile = json.loads(input_file(args.candidate, project).read_text(encoding="utf-8")), "review"  # inside the project
-            made = ensure_reviewer_view(project, root, document)
-            target, digest = made["path"], made["candidate_sha256"]
-            data = Path(target).read_bytes()
-            grouping, reference = _hints_of_run(root, state, document)
-            extra = {"canaries": made["canaries"], "canaries_created": made["created"], "canaries_note": "канарейки — сигнал качества ревью, не защита"}
+        document, profile = json.loads(input_file(args.candidate, project).read_text(encoding="utf-8")), "review"  # inside the project
+        made = ensure_reviewer_view(project, root, document)
+        target, digest = made["path"], made["candidate_sha256"]
+        data = Path(target).read_bytes()
+        grouping, reference = _hints_of_run(root, state, document)
+        extra = {"canaries": made["canaries"], "canaries_created": made["created"], "canaries_note": "канарейки — сигнал качества ревью, не защита"}
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({**cli_error(error, fix="--project, --run — проект и прогон; --candidate — файл кандидата "
                                       "(тот же, что в журнале); вид ревьюера строит и `tools.api prepare --stage tc-reviewer:canonical`"), "message": str(error)[:2000]}, ensure_ascii=False))
         return 2
-    view = AUTOTEST_VIEW_VERSION if profile == "autotest" else VIEW_VERSION
+    view = VIEW_VERSION
     print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
                       "data_mismatch": len(data_mismatches(document)),
                       "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping),

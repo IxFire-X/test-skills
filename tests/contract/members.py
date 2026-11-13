@@ -25,7 +25,6 @@ SLOW = (
     "test_exec_prepares::test_materialize_after_the_static_review_prepares_its_inputs_and_the_ingest_of_the_run_closes",  # 93
     "test_exec_prepares::test_materialize_finishes_a_half_done_preparation",  # 82
     "test_schema_engine_differential::test_artifacts_of_earlier_runs_and_their_mutations",  # 71
-    "test_api_cli::test_a_file_written_by_out_makes_no_drift_for_materialize_and_ingest",  # 67
     "test_quality_hints::test_the_report_counts_weak_assertions_of_the_run_automation",  # 50
     "test_pt2::test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet",  # 41
     "test_abandon_closure::test_abandon_is_refused_where_finish_or_ingest_closes",  # 40

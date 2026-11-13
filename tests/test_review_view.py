@@ -516,22 +516,20 @@ def test_the_autotest_view_is_deterministic_and_is_not_the_review_view() -> None
         render(document, profile="other")
 
 
-def test_the_view_command_writes_the_autotest_view_of_the_effective_document_only(tmp_path: Path) -> None:
+def test_the_autotest_view_of_the_effective_document_is_written_by_the_code_and_the_cli_has_no_flag_for_it(tmp_path: Path) -> None:
     from tests.test_finish import _project
-    from tools.pilot_state import read_effective_canonical
-    from tools.review_view import render
+    from tools.pilot_state import derive_state, read_effective_canonical
+    from tools.review_view import ensure_autotest_view, render
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
-    command = [sys.executable, "-m", "tools.review_view", "--project", str(project), "--run", run_root.name]
-    both = subprocess.run([*command, "--effective", "--candidate", str(tmp_path / "x.json")], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
-    assert both.returncode != 0
-    done = subprocess.run([*command, "--effective"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
-    out = json.loads(done.stdout)
+    made = ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator calls
     data = render(effective["document"], profile="autotest")
-    assert done.returncode == 0 and out["candidate_sha256"] == effective["document_digest"] and out["profile"] == "autotest", out
-    assert Path(out["path"]) == run_root / "review-views" / (effective["document_digest"].removeprefix("sha256:") + ".autotest.md")
-    assert Path(out["path"]).read_bytes() == data and out["bytes"] == len(data)
+    assert made["digest"] == effective["document_digest"] and made["path"] == run_root / "review-views" / (effective["document_digest"].removeprefix("sha256:") + ".autotest.md")
+    assert Path(made["path"]).read_bytes() == data == made["data"]
+    refused = subprocess.run([sys.executable, "-m", "tools.review_view", "--project", str(project), "--run", run_root.name, "--effective"],
+                             cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    assert refused.returncode == 2  # V5-B3: ``--effective`` is gone; the CLI takes ``--candidate`` only
 
 
 def _variant_step() -> dict:

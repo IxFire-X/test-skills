@@ -1,4 +1,4 @@
-"""FaT-U7 (audit U7, F5): the inputs of a model step come from the journal of the attempt — one answer for step-inputs,
+"""FaT-U7 (audit U7, F5): the inputs of a model step come from the journal of the attempt — one answer for the list of reading of prepare,
 ``tools.step_size --run --stage`` and the run report; no walk of the run, no file of the agent's ``tmp/``."""
 from __future__ import annotations
 

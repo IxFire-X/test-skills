@@ -68,60 +68,20 @@ def recording(monkeypatch):
     yield observed
 
 
-def _generator_request(run: dict, batch_id: str, plan_digest: str, header_digest: str) -> tuple[int, dict]:
-    """The old command ``model-request`` of a batch — driven here until the part that deletes the command (the tests of the generator went to ``prepare``)."""
-    from tests import test_review_requested as rr
-
-    context = json.loads(Path(run["context"]).read_bytes())["digest"]
-    return rr._api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                   "--model-id", "model-generator", "--invocation-id", "invoke-generator",
-                   "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest)
-
-
-def _second_request(run: dict, batch_id: str, plan_digest: str, header_digest: str, *fifth: str) -> tuple[int, dict]:
-    """The same for a later batch: the digests of the earlier batches are the fifth input."""
-    from tests import test_review_requested as rr
-
-    context = json.loads(Path(run["context"]).read_bytes())["digest"]
-    return rr._api("model-request", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                   "--model-id", "model-generator", "--invocation-id", "invoke-generator-2",
-                   "--input-digest", run["marker_digest"], "--input-digest", context, "--input-digest", plan_digest, "--input-digest", header_digest,
-                   *[flag for digest in fifth for flag in ("--input-digest", digest)])
-
-
-def _response(run: dict, batch_id: str, artifact: str, *extra: str) -> tuple[int, dict]:
-    """The old command ``model-response`` of a batch."""
-    from tests import test_review_requested as rr
-
-    return rr._api("model-response", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{batch_id}",
-                   "--artifact", artifact, *extra)
-
-
 def drive(tmp_path: Path, monkeypatch) -> Observed:
     """The commands reachable by the helpers of the existing tests, in four runs."""
     import shutil
 
     from tests import test_review_requested as rr
-    from tests.test_batch_journal import _prior, _run
+    from tests.test_batch_journal import _run
     from tests.test_cut_review import _evidence_verdict
-    from tests.test_review_two_commands import _candidate_file, _flags, _slot, _verdict
+    from tests.test_review_two_commands import _candidate_file, _slot, _verdict
 
     with recording(monkeypatch) as observed:
-        # (1) the generator: inputs, request, answer, the capabilities of the earlier batch, the plan
-        run, plan_digest, header_digest, fragments = _run(tmp_path / "generator")
-        first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
-        assert _generator_request(run, first, plan_digest, header_digest)[0] == 0
-        code, listed = rr._api("step-inputs", "--run-root", str(run["run_root"]), "--stage", f"tc-generator:{first}")
-        assert code == 0, listed
-        code, response = _response(run, first, run["fragments"][0])
-        assert code == 0, response
-        assert rr._api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
-                       "--digest", response["result"]["content_digest"])[0] == 0
-        for verb in ("prepare", "submit"):  # the marker is answered: both say so
+        # (1) a run whose marker is answered: both verbs say so
+        run, _plan_digest, _header_digest, _fragments = _run(tmp_path / "generator")
+        for verb in ("prepare", "submit"):
             assert rr._api(verb, "--run-root", str(run["run_root"]), "--stage", "context-marker:baseline")[0] == 0
-        code, prior = _prior(run, second)
-        assert code == 0, prior
-        assert _second_request(run, second, plan_digest, header_digest, prior["result"]["digest"])[0] == 0
 
         # (1b) the plan of the batches on a run that has none yet: prepare, the subject in the slot, submit
         fresh = rr._generated_run(tmp_path / "plan", generated=False)
@@ -142,9 +102,6 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         _slot(run, _verdict(run))
         assert review(run, "submit", "--dry-run")[0] == 0
         assert review(run, "submit")[0] == 0
-        assert rr._api("read-effective", *_flags(run))[0] == 0
-        assert rr._review(run, rr._digest_of(run["tmp"] / "candidate.json"))[0] == 0  # the same digest again: the recorded request
-        assert rr._api("read-receipt", *_flags(run), "--kind", "reviewer-session-boundary", "--event", "ARTIFACT_READ_BACK")[0] == 0
 
         # (3) a review with evidence asked for in the slot
         evidence = rr._generated_run(tmp_path / "evidence")
@@ -172,23 +129,11 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         code, imported = direct(["prepare", "--run-root", scanned["run_root"], "--stage", "context-marker:requirements"])
         assert code == 0, imported
 
-        # (6) mode B: the digests and validators of the automation, the runner check, the boundary of the autotest review
-        from tests.test_finish import _project as finish_project
+        # (6) two answers that are not a plain success: a refusal (a stage the run has no step for) and an invalid result (no document)
+        from tests.test_run_lock import _run as made_run
 
-        project, run_root, attempt_id, values = finish_project(tmp_path / "finish")
-        files = {}
-        for name, value in (("document", values["canonical_document"]), ("automation", values["automation_artifact"]), ("relations", [])):
-            files[name] = rr._put(run_root / "tmp" / f"{name}.json", value)  # SEC-A: the files of a command lie in a run
-        assert direct(["automation-digest", "--automation", files["automation"]])[0] == 0
-        assert direct(["relations-digest", "--relations", files["relations"]])[0] == 0
-        assert direct(["validate-automation", "--automation", files["automation"], "--canonical", files["document"]])[0] in (0, 1)
-        assert direct(["runner-compat", "--module-root", str(project), "--language", "python", "--canonical", files["document"],
-                       "--automation", files["automation"]])[0] in (0, 1)
-        facts = direct(["automation-boundary-facts", "--run-root", str(run_root), "--attempt", attempt_id, "--revision", "1", "--fresh-context", "yes",
-                        "--reviewer-invocation-id", "autotest-reviewer-1"])
-        assert facts[0] == 0, facts
-
-        # (7) two answers that are not a plain success: a refusal (an attempt the run does not have) and an invalid result (no document)
-        assert direct(["read-effective", "--run-root", str(run_root), "--attempt", "no-such-attempt"])[0] == 2
+        (tmp_path / "refusal").mkdir()
+        run_root = made_run(tmp_path / "refusal")
+        assert direct(["prepare", "--run-root", str(run_root), "--stage", "no-such:stage"])[0] == 2
         assert direct(["validate-canonical", "--document", rr._put(run_root / "tmp" / "empty.json", {})])[0] == 1
     return observed

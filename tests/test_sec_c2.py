@@ -34,7 +34,7 @@ _PATHISH = re.compile(r"(?<!pro)file|path|dir|root|out|candidate|edits|answers|a
 # "guard": ``output_guard`` before the first I/O; "run": a run name, judged as a name; "maintainer": the root of the package's own
 # checkout, given by the person who runs a maintainer command, never by an agent.
 PATH_FLAGS = {
-    "api.py": {"--out": "guard", "--run-root": "guard"},
+    "api.py": {"--run-root": "guard"},
     "autotest_hints.py": {"--automation": "guard"},
     "build_context.py": {"--project": "parser", "--docs": "guard"},
     "ci_gate.py": {"--root": "maintainer"},
@@ -74,7 +74,7 @@ def test_the_path_flags_of_every_parser_are_the_registered_ones() -> None:
 
 # the file flags of the commands of ``tools.api``, read by ``_read_inputs`` (``output_guard.input_file``) or judged by their text and
 # anchor (``--project``, ``--run-root``: ``output_guard.existing_run``)
-_API_FILE_FLAGS = {"--automation", "--canonical", "--document", "--facts", "--module-root", "--relations"}
+_API_FILE_FLAGS = {"--document"}
 
 
 def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:

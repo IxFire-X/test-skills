@@ -124,7 +124,8 @@ def test_every_command_of_api_and_of_the_pipeline_answers_help_without_the_nine(
     assert done.returncode == 0, done.stderr
     commands, bad = done.stdout.strip().splitlines()[-2:]
     assert bad == "[]", bad
-    for removed in ("automation-digest", "relations-digest", "validate-automation", "runner-compat"):
+    for removed in ("model-request", "model-response", "read-model-artifact", "review-requested", "read-effective", "read-receipt", "step-inputs",
+                    "automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation", "runner-compat"):
         assert removed not in commands
 
 

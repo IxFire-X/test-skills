@@ -30,29 +30,21 @@ def test_the_order_check_reads_the_provenance_as_path_and_line_not_as_a_fragment
     assert not _PROVENANCE_LINE.match("docs/feature.md#L4-L7")  # the form PT2 gave: the order check skips it without a word
 
 
-# ---- A5-1 = 8.7: model-response prints a receipt; --out leaves only the file ---------------------------------------------
+# ---- A5-1 = 8.7: submit prints a receipt, not the body ---------------------------------------------
 
 
-def test_model_response_prints_a_receipt_without_the_body_and_the_text_says_so() -> None:
+def test_submit_prints_a_receipt_without_the_body_and_the_text_says_so() -> None:
     import inspect
 
-    from tools import api
+    from tools import stage_steps
 
-    source = inspect.getsource(api._cmd_model_response)
+    source = inspect.getsource(stage_steps._submit)
     assert 'if key != "artifact"' in source  # the receipt, not the answer
     text = _flat(SKILL)
     assert "весь артефакт" not in text and "сотни КБ" not in text
     assert "и печатает квитанцию" in text and "не тело" in text  # V5-B1: the one cycle — `submit` prints the receipt
     for key in ("`result.path`", "`content_digest`", "`output_bytes`", "`warning`"):
         assert key in text, key
-
-
-def test_the_out_text_matches_what_main_prints_with_out(tmp_path: Path) -> None:
-    from tests.test_output_guard import _run
-    from tools import api
-
-    _project, run_root, _attempt = _run(tmp_path)  # SEC-A: --out is written through confined_output, in <run>/tmp/
-    assert set(api._write(run_root / "tmp" / "x.json", {"result": 1}, run_root)) == {"out", "bytes", "sha256"}
 
 
 # ---- A5-2 + A5-4: the review is two commands everywhere -------------------------------------------------------------------
@@ -135,16 +127,3 @@ def test_the_controller_skill_is_not_longer_than_after_pt2_and_the_generator_rol
     role = ROOT / "skills" / "tc-generator"
     total = (role / "SKILL.md").stat().st_size + sum(path.stat().st_size for path in (role / "references").glob("*.md"))
     assert total <= GENERATOR_ROLE_BYTES_LIMIT, total
-
-
-def test_no_command_of_the_texts_gives_model_response_the_out_flag() -> None:
-    """With ``--out`` the stdout holds no ``result.path``: the texts that send the agent to ``result.path`` must not put ``--out`` in the command."""
-    offenders = []
-    for path in [*(ROOT / "skills").rglob("*.md"), ROOT / "HOW-TO-USE.md", ROOT / "README.md"]:
-        text = path.read_text(encoding="utf-8")
-        fence = r"```[a-z]*" + chr(10) + r"(.*?)```"
-        blocks = re.findall(fence, text, re.S)
-        spans = [" ".join(span.split()) for span in re.findall(r"`([^`]+)`", re.sub(fence, "", text, flags=re.S))]
-        spans += [" ".join(block.split()) for block in blocks]
-        offenders += [f"{path.name}: {span}" for span in spans if "model-response" in span and "--out" in span]
-    assert offenders == []

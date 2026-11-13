@@ -13,7 +13,7 @@ the stage or the role), sizes and the code, no file paths — is appended to ``<
 ``--stage context-marker:requirements`` is the requirements step of the marker in parts (the documents only);
 ``--stage tc-generator:<batch>|tc-reviewer:canonical|tc-to-autotest:rN|autotest-reviewer:rN`` takes the files behind the
 ``input_digests`` of the published model request of that stage (``stage_inputs``, by the journal of the attempt, the
-same answer as ``step-inputs`` and the run report): an input the journal does not bind is ``unresolved``
+same answer as the list of reading of ``prepare`` and the run report): an input the journal does not bind is ``unresolved``
 (``STEP_INPUT_UNRESOLVED``, not a stop), nothing is guessed.
 """
 
@@ -331,7 +331,7 @@ class _Journal:
         effective = root / "effective-canonicals" / f"{attempt_id}.json"
         if effective.is_file():
             value = json.loads(effective.read_text(encoding="utf-8"))
-            self.documents[str(value["document_digest"])] = effective  # read-effective gives the document with its carrier
+            self.documents[str(value["document_digest"])] = effective  # the effective canonical gives the document with its carrier
             receipt = value["effective_bundle_receipt"]
             if isinstance(receipt.get("json_path"), str) and receipt.get("document_sha256") == value["document_digest"]:
                 self.bundled[str(value["document_digest"])] = Path(receipt["json_path"])  # the bundle file the receipt names
@@ -408,7 +408,7 @@ def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str
 def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, write_views: bool = True,
                  state: Any = None, journals: dict[str, Any] | None = None) -> dict[str, Any]:
     """The files and bytes behind the ``input_digests`` of the published model request of ``stage``,
-    from the journal — the one answer of ``step-inputs``, ``tools.step_size --run --stage`` and the run report.
+    from the journal — the one answer of the list of reading of ``prepare``, ``tools.step_size --run --stage`` and the run report.
 
     A context receipt or a requirements digest opens into the project files it stands for; an object kept inside a carrier
     is a ``binding`` with its own bytes, or 0 when the step reads the carrier anyway.  The view of the document replaces it
@@ -607,23 +607,18 @@ def compact_inputs(run_root: Path, stage: str, found: Mapping[str, Any]) -> dict
     return {**{key: value for key, value in found.items() if key != "files"}, "files_summary": summary}
 
 
-def step_inputs(run_root: Path, stage: str) -> dict[str, Any]:
-    """``tools.api step-inputs``: the files of the step as :func:`request_files` finds them, printed as :func:`compact_inputs` — one function."""
-    return compact_inputs(run_root, stage, request_files(run_root, stage))
-
-
 def input_size(found: Mapping[str, Any]) -> int:
     """The bytes a step reads behind :func:`stage_inputs`: each file once (as ``measure`` counts them) and the bindings."""
     return sum({row["path"]: int(row["bytes"]) for row in found["files"]}.values()) + sum(int(row["bytes"]) for row in found["bindings"])
 
 
 def autotest_view(root: Path, document_digest: str) -> Path:
-    """Where ``python -m tools.review_view --effective`` writes the view of the effective document."""
+    """Where ``prepare`` of the generator writes the view of the effective document."""
     return root / "review-views" / (str(document_digest).removeprefix("sha256:") + ".autotest.md")
 
 
 def request_files(run_root: Path, stage: str) -> dict[str, Any]:
-    """``step-inputs`` — :func:`stage_inputs` of the published model request of ``stage``, plus for the
+    """:func:`stage_inputs` of the published model request of ``stage``, plus for the
     automation stages the Java level of the module's build and whether it has junit-jupiter-params."""
     from tools.pilot_state import derive_state
 
@@ -707,7 +702,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tokens-per-byte", type=float, default=TOKENS_PER_BYTE)
     parser.add_argument("--budget-bytes", type=int)
     args = parser.parse_args(argv)
-    if args.stage == "context-marker:baseline":  # the name model-request asks for; the journal and the report know the step as context-marker
+    if args.stage == "context-marker:baseline":  # the name of the stage of the request; the journal and the report know the step as context-marker
         args.stage = "context-marker"
     project = Path(args.project).resolve()
     try:

@@ -1,10 +1,10 @@
-"""Where the package writes and reads a path the agent names: ``--out``, ``--output-dir`` and the input files.
+"""Where the package writes and reads a path the agent names: ``--output-dir`` and the input files.
 
-A path from the command line or from a file is input, not a boundary.  ``--out`` names one file in ``<run>/tmp/`` of an existing run;
-``--output-dir`` names ``<run>/published`` of that run or a directory below it.  An input file is inside the project (or, for a command
-without a run, inside the run it lies in), with no link or junction on the way.  Every path is judged by its text first — no NUL, no UNC
+A path from the command line or from a file is input, not a boundary.  ``--output-dir`` names ``<run>/published`` of an existing run or a
+directory below it.  An input file is inside the project (or, for a command without a run, inside the run it lies in), with no link or
+junction on the way.  Every path is judged by its text first — no NUL, no UNC
 or device path, no ``..`` — so a path that would reach the network is refused before anything opens it.  Nothing is created here.  Every
-entry point of the package that takes ``--out`` or ``--output-dir`` calls this module; ``tests/test_output_guard.py`` reads the sources
+entry point of the package that takes ``--output-dir`` calls this module; ``tests/test_output_guard.py`` reads the sources
 and fails for one that does not.
 """
 
@@ -140,19 +140,6 @@ def existing_run(run_root: object) -> tuple[Path, Path]:
     if not (run / "run-manifest.json").is_file():
         raise OutputRefused(OUT_CODE, "--run-root must name an existing run: no run-manifest.json there", OUT_FIX)
     return project, run
-
-
-def out_file(path: str | Path, run_root: object) -> Path:
-    """The file ``--out`` names: directly in ``<run>/tmp/``, the run given by ``--run-root``."""
-    if run_root is None:
-        raise OutputRefused(OUT_CODE, "--out must name a file under <run>/tmp/: --run-root is missing", OUT_FIX)
-    _project, run = existing_run(run_root)
-    if not local_path_text(str(path)):
-        raise OutputRefused(OUT_CODE, "--out must name a file under <run>/tmp/ of the --run-root run", OUT_FIX)
-    target = Path(path).resolve()
-    if target.parent != run / "tmp" or not target.name:
-        raise OutputRefused(OUT_CODE, "--out must name a file under <run>/tmp/ of the --run-root run", OUT_FIX)
-    return target
 
 
 def run_output_directory(path: str | Path, run_root: object) -> Path:

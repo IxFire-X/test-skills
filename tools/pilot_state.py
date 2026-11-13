@@ -2549,7 +2549,7 @@ def publish_model_stage_artifact(
 
 
 def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: str, artifact: Mapping[str, Any]) -> str:
-    """``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``model-response``
+    """``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``submit``
     would store it, the digest fields it puts filled in), ``"other"`` when another answer is recorded.  Reads only."""
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -2714,7 +2714,7 @@ def _publish_model_stage_artifact(
         try:
             published = _published_generator_inputs(project, root, state, attempt_id)
             if published is None:
-                # reachable only for a request published by an earlier version: a new model-request without the published plan and
+                # reachable only for a request published by an earlier version: a new request without the published plan and
                 # header is refused by _expected_model_inputs (audit 1, 5g); such a run keeps the coverage rule
                 require_batch_coverage(value)
             else:  # the whole fragment check (coverage inside) against the journal, before the write
@@ -4469,27 +4469,6 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
     return sorted(dict.fromkeys(digest for digest in wanted if digest not in present))
 
 
-def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_type: str) -> Mapping[str, Any]:
-    """The answer of ``read-receipt`` — the receipt as ``read_attempt_receipt`` gives it, or ``{"receipt": None, "reason": …}`` while the
-    journal says there is none yet.  A file that is there is read the strict way.  The journal binds a receipt by its digest alone (the
-    events of a fixed receipt carry no kind), so «not yet» is decided only where the journal fixes it: the boundary of the reviewer
-    session exists from ``prepare`` of the review on, and it opens the ledger (events ``reviewer-ledger-v1``) — no such event, no boundary
-    yet.  The journal knows the boundary but the file is gone — a refusal with a code and a fix; every other kind without its file is a
-    refusal with a code and a fix too (no «not yet» is claimed for a kind whose events cannot be told apart)."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    if next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None) is None:
-        return _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, event_type)  # unknown attempt: its refusal
-    if _receipt_target(root, attempt_id, kind).exists():
-        return _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, event_type)
-    if kind == "reviewer-session-boundary" and not any(event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1" for event in state["events"]):
-        return {"receipt": None, "reason": "ещё нет: ревью не открыто (граница ревьюера появляется на `prepare --stage tc-reviewer:canonical`)"}
-    raise ValueError(f"RECEIPT_MISSING: the receipt {kind} of the attempt is not in the run" + (
-        "; fix: журнал знает ревью, а файла границы нет — прогон повреждён, ничего не восстанавливай руками: run_pipeline status называет потерю, дальше scan --new-run"
-        if kind == "reviewer-session-boundary" else
-        f"; fix: квитанции {kind} в прогоне нет — её пишет код шага, который её создаёт; run_pipeline status называет, какой шаг следующий"))
-
-
 class ReceiptFileUnbound(ValueError):
     """The file of a receipt lies without its events and its bytes are not the ones being published (one code for every family)."""
 
@@ -4904,7 +4883,7 @@ def read_effective_canonical_if_present(
 
 
 def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """PT2: the answer of ``read-effective`` — the effective selection, or ``{"effective": None, "reason": …}`` while the journal says there is none.
+    """PT2: what ``status`` and the report read — the effective selection, or ``{"effective": None, "reason": …}`` while the journal says there is none.
 
     "None yet" is decided by the journal, never by a missing file: a file that is there is read as before (validated against its
     events); a file that is gone or replaced where the journal recorded an accepting verdict is the refusal it always was.
@@ -5020,7 +4999,7 @@ def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None
 
 @closure_cached
 def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *, fresh_context: bool, reviewer_invocation_id: str) -> dict[str, Any]:
-    """The ``--facts`` of ``open-automation-boundary`` for revision N from the journal; writes nothing.
+    """The facts of the boundary of the automation review for revision N from the journal; writes nothing.
 
     The automation digest is the CANDIDATE_PUBLISHED of ``tc-to-autotest:rN``, the generator invocation its
     MODEL_REQUESTED, the effective pair the read-back effective canonical. ``fresh_context`` and the reviewer
@@ -5095,7 +5074,7 @@ def _batch_ordinal(batch: Mapping[str, Any]) -> int:
 
 def _accepted_earlier_fragments(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, plan: Mapping[str, Any],
                                 batch_id: str) -> list[dict[str, Any]]:
-    """The accepted fragments (model-response) of the batches before *batch_id*; one missing is refused by name."""
+    """The accepted fragments (submit) of the batches before *batch_id*; one missing is refused by name."""
     rows = [row for row in plan.get("batches") or [] if isinstance(row, Mapping)]
     current = next((row for row in rows if row.get("batch_id") == batch_id), None)
     if current is None:
@@ -5186,7 +5165,7 @@ def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
 
 def _imported_for_answer(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str,
                          request: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """What model-response checks the human fields against — the skeleton the request took as its last input:
+    """What submit checks the human fields against — the skeleton the request took as its last input:
     the batch's own one, or the whole one for a request published by an earlier version.  None for a run without --cases."""
     whole = _imported_cases(project, root, state, attempt_id)
     if whole is None or (request.get("input_digests") or [None])[-1] == whole["digest"]:

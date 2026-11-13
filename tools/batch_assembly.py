@@ -665,7 +665,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
 def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """The order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
     display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for the check of a fragment and
-    model-response; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
+    submit; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
     left where it is for the refusal; nothing else is touched."""
     if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
         return fragment, []
@@ -823,7 +823,7 @@ def fill_rework_mechanics(answer: dict[str, Any]) -> tuple[dict[str, Any], list[
 
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
     """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
-    plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given
+    plan, header and context digests of its batch, then the self-digest; what submit puts there too.  A field given
     with another value stays for the refusal (its fix is «удали поле — код поставит его сам»)."""
     batch = next((row for row in plan.get("batches") or [] if isinstance(row, Mapping) and row.get("batch_id") == fragment.get("batch_id")), None)
     if batch is None:
@@ -919,7 +919,7 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     if fragment.get("context_receipt") in (None, "") and isinstance(context_receipt, dict) and fragment.get("status") == "COMPLETE":
         fragment = {**fragment, "context_receipt": deepcopy(context_receipt)}  # the receipt of the batch given to the check (it is verified below), put by the code
         filled = [*filled, "/context_receipt"]
-    fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
+    fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields submit would put there
     batch = batches.get(fragment.get("batch_id"))
     if batch is None:
         raise BatchAssemblyError("BATCH_ID_CONFLICT", "fragment batch_id is not in plan")

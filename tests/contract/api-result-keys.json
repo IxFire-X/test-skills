@@ -1,98 +1,8 @@
 {
  "commands": {
-  "automation-boundary-facts": [
-   "automation_digest",
-   "automation_revision",
-   "effective_bundle_receipt_digest",
-   "effective_canonical_digest",
-   "generator_invocation_id",
-   "host_isolation",
-   "reviewer_invocation_id",
-   "reviewer_session_id",
-   "role_policy"
-  ],
-  "automation-digest": "string",
-  "model-request": [
-   "attempt_id",
-   "digest",
-   "input_digests",
-   "invocation_id",
-   "model_id",
-   "nonce",
-   "nonce_note",
-   "nonce_sha256",
-   "role",
-   "role_policy",
-   "run_id",
-   "schema_version",
-   "stage",
-   "stage_instance_id"
-  ],
-  "model-response": [
-   "byte_count",
-   "content_digest",
-   "output_basis",
-   "output_bytes",
-   "path",
-   "warning"
-  ],
   "prepare": [
    "answered",
    "stage"
-  ],
-  "read-effective": [
-   "attempt_id",
-   "digest",
-   "document",
-   "document_digest",
-   "effective_bundle_receipt",
-   "effective_bundle_receipt_digest",
-   "kind",
-   "policy_profile",
-   "reviewer_session_digest",
-   "run_id",
-   "schema_version"
-  ],
-  "read-model-artifact": [
-   "artifact",
-   "byte_count",
-   "content_digest",
-   "path"
-  ],
-  "read-receipt": [
-   "bytes",
-   "digest",
-   "path",
-   "record"
-  ],
-  "relations-digest": "string",
-  "review-requested": [
-   "actor",
-   "artifact_digest",
-   "attempt_id",
-   "digest",
-   "event_type",
-   "observed_at",
-   "prev_digest",
-   "run_id",
-   "schema_version",
-   "seq",
-   "stage_instance_id"
-  ],
-  "runner-compat": [
-   "bindings",
-   "diagnostics",
-   "required_pairs",
-   "status",
-   "verified_file_digests"
-  ],
-  "step-inputs": [
-   "attempt_id",
-   "bindings",
-   "files_summary",
-   "request_digest",
-   "stage",
-   "unresolved"
   ],
   "submit": [
    "answered",
@@ -112,10 +22,7 @@
    "status",
    "would_publish"
   ],
-  "validate-automation": "array",
   "validate-canonical": "array"
  },
- "not_driven": {
-  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework"
- }
+ "not_driven": {}
 }

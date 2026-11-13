@@ -2,7 +2,7 @@
 
 А1 — ``--output-dir`` is ``<run>/published`` or below it. А2 — a path the package reads is checked before it is opened: no UNC or device
 path, no ``..``, inside the project, no link on the way. А3 — every value the code puts into a command the agent runs as it is passes
-``command_token`` (``COMMAND_NOT_PRINTABLE``; scan refuses before the run is written). А4 — ``--out`` is written through confined_output."""
+``command_token`` (``COMMAND_NOT_PRINTABLE``; scan refuses before the run is written)."""
 from __future__ import annotations
 
 import hashlib
@@ -90,12 +90,10 @@ def test_step_size_refuses_a_file_outside_the_project(tmp_path: Path, capsys: py
 
 @pytest.mark.parametrize("value", ["{outside}", "{project}/../outside.json"])  # a share: refused while the arguments are read (D2)
 def test_an_api_json_input_outside_the_project_of_the_run_is_refused(tmp_path: Path, value: str, capsys: pytest.CaptureFixture[str]) -> None:
-    project, run_root, attempt_id = _run(tmp_path / "p")
+    project, run_root, _attempt_id = _run(tmp_path / "p")
     path = value.format(outside=_outside(tmp_path), project=project)
-    for argv in (["validate-canonical", "--run-root", str(run_root), "--document", path],
-                 ["model-response", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", path]):
-        code, refused = _api(argv, capsys)
-        assert code == 2 and refused["code"] == "INPUT_OUTSIDE_PROJECT" and refused["fix"], (argv[0], refused)
+    code, refused = _api(["validate-canonical", "--run-root", str(run_root), "--document", path], capsys)  # the slot of an answer: test_stage_steps
+    assert code == 2 and refused["code"] == "INPUT_OUTSIDE_PROJECT" and refused["fix"], refused
 
 
 def test_an_api_json_input_without_a_run_is_read_only_inside_a_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -103,10 +101,10 @@ def test_an_api_json_input_without_a_run_is_read_only_inside_a_run(tmp_path: Pat
     inside = run_root / "tmp" / "document.json"
     inside.parent.mkdir(exist_ok=True)
     inside.write_text("{}", encoding="utf-8")
-    code, refused = _api(["relations-digest", "--relations", str(_outside(tmp_path))], capsys)
+    code, refused = _api(["validate-canonical", "--document", str(_outside(tmp_path))], capsys)
     assert code == 2 and refused["code"] == "INPUT_OUTSIDE_PROJECT", refused
-    code, line = _api(["relations-digest", "--relations", str(inside)], capsys)
-    assert code == 0, line
+    code, line = _api(["validate-canonical", "--document", str(inside)], capsys)
+    assert code in (0, 1) and line["status"] in ("ok", "invalid"), line  # read: a document in the run is checked, whatever it holds
 
 
 # ---- А3: the values in the commands the agent runs as they are --------------------------------------------------
@@ -284,18 +282,3 @@ def test_every_cli_of_tools_builds_its_parser_from_the_json_parser() -> None:
                 bare.append(f"{path.name}:{node.lineno}")
     assert bare == [], bare
     assert set(UNC_ARGV) == {path.stem for path in tools.glob("*.py") if "add_argument(" in path.read_text(encoding="utf-8")}  # every CLI is in the table
-
-
-# ---- А4: --out ---------------------------------------------------------------------------------------------------
-
-def test_out_is_not_written_through_a_planted_link_of_its_temporary_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _project, run_root, _attempt = _run(tmp_path / "p")
-    outside = tmp_path / "outside.json"
-    outside.write_text("keep", encoding="utf-8")
-    (run_root / "tmp").mkdir(exist_ok=True)
-    source = run_root / "tmp" / "document.json"
-    source.write_text("{}", encoding="utf-8")
-    _link(run_root / "tmp" / "digest.json.tmp", outside)
-    out = run_root / "tmp" / "digest.json"
-    code, line = _api(["relations-digest", "--relations", str(source), "--out", str(out), "--run-root", str(run_root)], capsys)
-    assert code == 0 and outside.read_text(encoding="utf-8") == "keep" and json.loads(out.read_text(encoding="utf-8")), line

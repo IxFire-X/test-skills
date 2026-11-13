@@ -73,12 +73,7 @@ def test_the_docs_tell_no_python_imports_of_the_package() -> None:
 def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
     from tools import api
 
-    assert set(api.COMMANDS) >= {
-        "model-request", "model-response", "read-model-artifact", "prepare", "submit",
-        "validate-canonical",
-        "read-effective", "open-automation-boundary", "read-receipt", "automation-digest", "relations-digest",
-        "validate-automation", "runner-compat",
-    }
+    assert set(api.COMMANDS) == {"prepare", "submit", "validate-canonical"}  # V5-B3: the cycle of the agent and the check of a candidate
     for name in api.COMMANDS:
         with pytest.raises(SystemExit) as stop:
             api.main([name, "--no-such-flag"])
@@ -113,88 +108,44 @@ def _reversed(value):
     return value
 
 
-def test_model_request_and_response_match_the_direct_calls(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
+def test_prepare_and_submit_match_the_direct_calls(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state, stage_steps
 
     direct_root, direct_attempt, direct_digests = _marker_run(tmp_path / "direct")
     pilot_state.publish_model_request(direct_root, direct_attempt, "context-marker:baseline", model_id="m", invocation_id="inv",
                                       input_digests=direct_digests)
     direct = pilot_state.publish_model_stage_artifact(direct_root, direct_attempt, "context-marker:baseline", _marker_value())
 
-    root, attempt_id, digests = _marker_run(tmp_path / "command")
+    root, attempt_id, _digests = _marker_run(tmp_path / "command")
     seen: list = []
     real = pilot_state.publish_model_request
     monkeypatch.setattr(pilot_state, "publish_model_request", lambda *a, **k: seen.append(real(*a, **k)) or seen[-1])
-    code, request = _api(["model-request", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
-                          "--model-id", "m", "--invocation-id", "inv", *sum((["--input-digest", item] for item in digests), [])], capsys)
-    assert code == 0 and request["status"] == "ok" and request["command"] == "model-request", request
-    assert request["result"] == _plain(seen[0])
-    answer = root / "tmp" / "answer.json"  # SEC-A: the answer lies in the run
-    answer.parent.mkdir(exist_ok=True)
+    code, request = _api(["prepare", "--run-root", str(root), "--stage", "context-marker:baseline", "--model-id", "m", "--invocation-id", "inv"], capsys)
+    assert code == 0 and request["status"] == "ok" and request["command"] == "prepare", request
+    assert request["result"]["request_digest"] == seen[0]["digest"] and request["result"]["answer_slot"] == str(stage_steps.slot(root, "context-marker:baseline"))
+    answer = stage_steps.slot(root, "context-marker:baseline")
     answer.write_text(json.dumps(_reversed(_marker_value()), ensure_ascii=False, indent=3), encoding="utf-8")
-    code, response = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
-                           "--artifact", str(answer)], capsys)
-    assert code == 0, response
+    code, response = _api(["submit", "--run-root", str(root), "--stage", "context-marker:baseline"], capsys)
+    assert code == 0 and response["command"] == "submit", response
     assert response["result"]["content_digest"] == direct["content_digest"]
-    assert set(response["result"]) == set(_plain(direct)) - {"artifact"}  # PF-1: the receipt of the record; the body is read-model-artifact's
-    code, read = _api(["read-model-artifact", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
-                       "--digest", direct["content_digest"]], capsys)
-    assert code == 0 and read["result"] == _plain(pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", direct["content_digest"]))
+    assert set(_plain(direct)) - {"artifact"} <= set(response["result"])  # PF-1: the receipt of the record, not the body of the answer
+    assert pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", direct["content_digest"])["artifact"] == _marker_value()
 
 
-def _error_of(call) -> dict:
-    try:
-        call()
-    except Exception as error:  # the command must report the same failure, its code read as the CLI reads it (FaT-U6)
-        from tools.json_cli import error_fields
-
-        return {"code": error_fields(error)["code"], "message": str(error)}
-    raise AssertionError("the direct call did not fail")
-
-
-from tests.journal_helpers import assert_refused_once, files_minus_journal, journal_minus_refusals, refusal_log, state_minus_refusals
-
-
-def test_a_refused_request_and_a_second_response_fail_like_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import pilot_state
-
-    direct_root, direct_attempt, direct_digests = _marker_run(tmp_path / "direct")
-    expected = _error_of(lambda: pilot_state.publish_model_request(direct_root, direct_attempt, "context-marker:baseline", model_id="m",
-                                                                   invocation_id="inv", input_digests=list(reversed(direct_digests))))
-    root, attempt_id, digests = _marker_run(tmp_path / "command")
-    before, seen = state_minus_refusals(root), refusal_log(root)
-    code, refused = _api(["model-request", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
-                          "--model-id", "m", "--invocation-id", "inv", *sum((["--input-digest", item] for item in reversed(digests)), [])], capsys)
-    assert code == 2 and refused["status"] == "error" and {"code": refused["code"], "message": refused["message"]} == expected, refused
-    assert state_minus_refusals(root) == before
-    assert_refused_once(root, seen, refused["code"], "model-request")  # J1: the one event the refusal itself added
-
-    pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="inv", input_digests=digests)
-    pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", _marker_value())
-    from tests.test_marker_parts import _marker
-
-    other = _marker(["src/part0.py — другой ответ"])
-    expected = _error_of(lambda: pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", other))
-    answer = root / "tmp" / "answer.json"
-    answer.parent.mkdir(exist_ok=True)
-    answer.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
-    code, repeated = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
-                           "--artifact", str(answer)], capsys)
-    assert code == 2 and {"code": repeated["code"], "message": repeated["message"]} == expected, repeated
+from tests.journal_helpers import assert_refused_once, refusal_log, state_minus_refusals
 
 
 def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import pilot_state
+    from tools import stage_steps
 
-    root, attempt_id, digests = _marker_run(tmp_path)
-    pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="inv", input_digests=digests)
+    root, attempt_id, _digests = _marker_run(tmp_path)
+    assert _api(["prepare", "--run-root", str(root), "--stage", "context-marker:baseline"], capsys)[0] == 0
     before, seen = state_minus_refusals(root), refusal_log(root)
-    answer = tmp_path / "answer.json"
-    answer.write_text('{"stage": "context-marker", "stage": "x"}', encoding="utf-8")
-    code, refused = _api(["model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline", "--artifact", str(answer)], capsys)
+    stage_steps.slot(root, "context-marker:baseline").write_text('{"stage": "context-marker", "stage": "x"}', encoding="utf-8")
+    code, refused = _api(["submit", "--run-root", str(root), "--stage", "context-marker:baseline"], capsys)
     assert code == 2 and refused["status"] == "error" and refused["code"] == "ANSWER_JSON_INVALID" and refused["fix"]  # F4b: read in main, not by argparse
     assert state_minus_refusals(root) == before
-    assert_refused_once(root, seen, "ANSWER_JSON_INVALID", "model-response")
+    assert_refused_once(root, seen, "ANSWER_JSON_INVALID", "submit")
 
 
 def test_the_removed_digest_commands_are_gone_everywhere() -> None:
@@ -206,30 +157,6 @@ def test_the_removed_digest_commands_are_gone_everywhere() -> None:
     offenders = [str(path.relative_to(ROOT)) for path in [*DOCS, *sorted((ROOT / "tests").glob("*.py"))]
                  if any(name in path.read_text(encoding="utf-8") for name in removed)]
     assert offenders == []
-
-
-def test_the_automation_readers_match_the_direct_calls(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _project
-    from tools import pilot_state
-
-    _project_path, run_root, attempt_id, values = _project(tmp_path)
-    code, effective = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id], capsys)
-    assert code == 0 and effective["result"] == _plain(pilot_state.read_effective_canonical(run_root, attempt_id))
-    code, boundary = _api(["read-receipt", "--run-root", str(run_root), "--attempt", attempt_id, "--kind", "automation-review-boundary-r1",
-                           "--event", "ARTIFACT_READ_BACK"], capsys)
-    assert code == 0 and boundary["result"] == _plain(pilot_state.read_attempt_receipt(run_root, attempt_id, "automation-review-boundary-r1", "ARTIFACT_READ_BACK"))
-    (run_root / "tmp").mkdir(exist_ok=True)  # SEC-A: the files of the commands lie in the run
-    facts = run_root / "tmp" / "facts.json"
-    facts.write_text(json.dumps({"automation_revision": 3}), encoding="utf-8")
-    expected = _error_of(lambda: pilot_state.open_automation_review_boundary(run_root, attempt_id, {"automation_revision": 3}))
-    code, refused = _api(["open-automation-boundary", "--run-root", str(run_root), "--attempt", attempt_id, "--facts", str(facts)], capsys)
-    assert code == 2 and {"code": refused["code"], "message": refused["message"]} == expected, refused
-
-    from tools.automation_validation import automation_sha256
-
-    automation = run_root / "tmp" / "automation.json"
-    automation.write_text(json.dumps(values["automation_artifact"], ensure_ascii=False), encoding="utf-8")
-    assert _api(["automation-digest", "--automation", str(automation)], capsys)[1]["result"] == automation_sha256(values["automation_artifact"])
 
 
 # --------------------------------------------------------------------------------------
@@ -254,67 +181,6 @@ def test_a_validator_with_diagnostics_is_invalid_with_the_same_list(tmp_path: Pa
     assert code == 1 and invalid["status"] == "invalid" and invalid["result"] == _plain(validate_canonical_document(document)), invalid
 
 
-# --------------------------------------------------------------------------------------
-# (6) --out stays in the run and never makes drift
-# --------------------------------------------------------------------------------------
-
-def test_out_writes_the_result_into_the_run_and_prints_a_short_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _project
-    from tools import pilot_state
-
-    _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    out = run_root / "tmp" / "effective.json"
-    code, line = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(out)], capsys)
-    written = out.read_bytes()
-    assert code == 0 and set(line) == {"status", "command", "out", "bytes", "sha256"} and line["bytes"] == len(written), line
-    assert json.loads(written) == _plain(pilot_state.read_effective_canonical(run_root, attempt_id))
-    outside = tmp_path / "project" / "src" / "effective.json"
-    code, refused = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(outside)], capsys)
-    assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN" and not outside.exists(), refused
-
-
-@pytest.mark.parametrize("name", ["state.json", "model-stage-artifacts/x.json", "tmp/../state.json", "tmp"])
-def test_out_outside_the_run_tmp_directory_is_refused_and_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str) -> None:
-    from tests.test_finish import _project
-
-    _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    before, seen = (files_minus_journal(run_root), journal_minus_refusals(run_root)), refusal_log(run_root)
-    code, refused = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / name)], capsys)
-    assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
-    assert (files_minus_journal(run_root), journal_minus_refusals(run_root)) == before  # P1/J1: the refusal is a line and one COMMAND_REFUSED event, nothing else
-    assert_refused_once(run_root, seen, "API_OUT_OUTSIDE_RUN", "read-effective")
-    assert json.loads((run_root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()[-1])["code"] == "API_OUT_OUTSIDE_RUN"
-
-
-def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _scan, _status
-    from tests.test_automation_revision_budget import automated_document
-
-    project = _python_project(tmp_path, runtime=True)
-    code, scan = _scan(project, monkeypatch, accept_self_review=True)
-    assert code == 0, scan
-    run_root = project / ".pilot-runs" / scan["run_id"]
-    source = run_root / "tmp" / "document.json"
-    source.parent.mkdir(exist_ok=True)  # PT2: the scan made tmp/
-    source.write_text(json.dumps(automated_document(), ensure_ascii=False), encoding="utf-8")
-    code, _line = _api(["relations-digest", "--relations", str(source), "--out", str(run_root / "tmp" / "digest.json"), "--run-root", str(run_root)], capsys)
-    assert code == 0 and (run_root / "tmp" / "digest.json").is_file()
-    assert "drift" not in _status(project, scan["run_id"], monkeypatch)
-
-
-@pytest.mark.slow
-def test_a_file_written_by_out_makes_no_drift_for_materialize_and_ingest(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import run_the_build
-    from tests.test_finish import _project
-
-    project, run_root, attempt_id, _values = _project(tmp_path)
-    code, _line = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / "tmp" / "effective.json")], capsys)
-    assert code == 0
-    code, output = run_the_build(project, run_root, capsys)
-    assert code == 0 and output["verdict"] == "PASS", output
-
-
 def test_results_are_plain_json(tmp_path: Path) -> None:
     from tools.api import plain
 
@@ -333,9 +199,9 @@ def test_each_command_calls_exactly_one_package_function() -> None:
     tree = ast.parse(source)
     modules = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "tools"
                for alias in node.names}
-    # F6: the two modules of mode B are not imported by api — their four handlers reach them through the gate, one call each
-    assert {"pilot_state", "canonical_document", "execution_gate"} <= modules
-    assert not {"automation_validation", "run_tests"} & modules
+    # V5-B3: the cycle (``stage_steps``) and the check of a candidate (``canonical_document``); no module of mode B is imported by api
+    assert {"stage_steps", "canonical_document"} <= modules
+    assert not {"automation_validation", "run_tests", "execution_gate", "pilot_state"} & modules
     handlers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name.startswith("_cmd_")]
     from tools import api
 

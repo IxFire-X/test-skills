@@ -208,7 +208,7 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
     receipt["digest"] = "sha256:" + hashlib.sha256(json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     run_tmp = project / ".pilot-runs" / "run1" / "tmp"
     run_tmp.mkdir(parents=True)
-    (run_tmp.parent / "run-manifest.json").write_text("{}", encoding="utf-8")  # --out is checked against an existing run
+    (run_tmp.parent / "run-manifest.json").write_text("{}", encoding="utf-8")  # the run is an existing one
     marker = run_tmp / "marker.json"
     marker.write_bytes(b"{" + b" " * 700_000 + b"}")
     requirements = [_requirement(1, "REQ-1 Оплата " + "а" * 3000), _requirement(2, "REQ-2 Возврат " + "б" * 3000)]

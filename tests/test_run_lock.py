@@ -272,7 +272,7 @@ def _commands(project: Path, root: Path) -> dict[str, tuple[str, list[str]]]:
         "exec_commands": ("tools.run_pipeline", ["materialize", *run]),
         "ingest": ("tools.run_pipeline", ["ingest", *run, "--no-reports", "--reason", "BUILD_FAILED"]),
         "api": ("tools.api", ["prepare", "--run-root", name, "--stage", "tc-generator:b1"]),
-        "review_view": ("tools.review_view", [*run, "--effective"]),
+        "review_view": ("tools.review_view", [*run, "--candidate", str(project / "c.json")]),
         "step_size": ("tools.step_size", ["--project", str(project), "--run", root.name, "--stage", "tc-generator:b1"]),
         "zephyr_template_export": ("tools.zephyr_template_export", [*run, "--cases", name]),
     }

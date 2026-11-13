@@ -17,9 +17,7 @@ from tests.contract.api_driver import Observed, drive
 pytestmark = pytest.mark.contract
 SNAPSHOT = Path(__file__).with_name("api-result-keys.json")
 # A command the fixtures of the other tests cannot drive to a success.  Each line says why; a command that becomes drivable leaves the list.
-NOT_DRIVEN = {
-    "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework",
-}
+NOT_DRIVEN: dict[str, str] = {}
 # What a successful answer may carry besides {status, command, result}; nothing else is an answer of tools.api.
 OPTIONAL_OK_KEYS = {"dry_run"}
 OUT_KEYS = {"out", "bytes", "sha256"}

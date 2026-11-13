@@ -1066,7 +1066,7 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
                     share: int = DEFAULT_REJECT_SHARE) -> tuple[Any, Any]:
     """``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
     decision, writing nothing: the review shape, the successor edits, the decision against the candidate, the successor
-    document and the human fields of an import.  select runs it before it publishes the ledger, model-response
+    document and the human fields of an import.  select runs it before it publishes the ledger, submit
     of tc-reviewer before it writes the answer, so a wrong answer keeps the stage's one retry."""
     candidate_value, review_value = _plain(candidate), _plain(review_value)
     rows = _review_rows(review_value)

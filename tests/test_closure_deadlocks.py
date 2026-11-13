@@ -36,7 +36,7 @@ def _status(project: Path, run_root: Path, capsys: pytest.CaptureFixture[str]) -
 
 
 def _journal_before_dg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
-    """The 523ec561 journal as the package before FaT-DG wrote it: model-response did not check the digest fields yet."""
+    """The 523ec561 journal as the package before FaT-DG wrote it: the answer was not checked for the digest fields yet."""
     from tools import pilot_state
 
     with monkeypatch.context() as old:

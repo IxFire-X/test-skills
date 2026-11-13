@@ -1,7 +1,7 @@
 """V5-A: the automation through the commands of the agent — ``status`` → ``prepare --stage tc-to-autotest:rN`` → the answer in its slot → ``submit`` →
 ``status`` → ``prepare --stage autotest-reviewer:rN`` (the boundary, ``REVIEW_REQUESTED`` and the request: one call) → the answer → ``submit`` → ``status``.
 
-The old commands (``model-request``, ``model-response``, ``automation-boundary-facts`` …) stay until B3: these tests use none of them."""
+The old commands (``model-request``, ``model-response``, ``automation-boundary-facts`` …) are gone since V5-B3: the cycle is the only way."""
 from __future__ import annotations
 
 import json

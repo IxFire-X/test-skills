@@ -23,8 +23,7 @@ permissions:
 
 Пути `contracts/`, `schemas/`, `skills/`, `tools/` — от корня пакета; tools вызывай с cwd пакета и абсолютным `--project`. Функции пакета не
 импортируй: шаг — `python -m tools.api <команда> --run-root <run> …` (`prepare` и `submit` — ещё `--stage <id>`; флага `--attempt` у них нет); одна строка JSON: `status: ok` и `result`,
-`invalid` (код 1) или `error` (код 2, `code`, `message`, `fix`). Большой результат — `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>`
-(только в `tmp/` прогона, не в исходники проекта). Ход работы — `run_pipeline status` и поля JSON последних событий; `head`/`tail` по строкам
+`invalid` (код 1) или `error` (код 2, `code`, `message`, `fix`). Ход работы — `run_pipeline status` и поля JSON последних событий; `head`/`tail` по строкам
 объём не ограничивают. В `model_id` пиши фактический ID модели твоей CLI.
 
 Размер входа шага меряет `tools.step_size`; вход не урезай и модель ради вместимости не меняй. `STEP_OVER_BUDGET`, `STEP_OUTPUT_LARGE`,

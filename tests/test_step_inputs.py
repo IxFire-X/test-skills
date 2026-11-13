@@ -125,15 +125,13 @@ def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: 
     """FaT-AV: like the reviewer, the generator reads the view of the effective document; the request digests stay."""
     from tests.test_finish import _project
     from tools import review_view, step_size
-    from tools.pilot_state import read_effective_canonical
+    from tools.pilot_state import derive_state, read_effective_canonical
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
-    code = review_view.main(["--project", str(project), "--run", run_root.name, "--effective"])
-    built = json.loads(capsys.readouterr().out)
-    assert code == 0, built
+    built = review_view.ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator does before the step is measured
     found = step_size.request_files(run_root, "tc-to-autotest:r1")
-    assert found["files"] == [{"digest": effective["document_digest"], "path": built["path"], "bytes": built["bytes"], "basis": "вид"}], found
+    assert found["files"] == [{"digest": effective["document_digest"], "path": str(built["path"]), "bytes": len(built["data"]), "basis": "вид"}], found
 
 
 def test_no_request_yet_is_an_error(tmp_path: Path) -> None:
@@ -178,7 +176,7 @@ def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixtu
     listed = json.loads(Path(report["files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"]  # PT2: the list is in the file
     assert code == 0 and report["recorded"] and any("part0.py" in row["path"] for row in listed) and "input_files" not in report, report
     lines = (root / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()
-    line = lines[-1]  # P1: model-request has measured its own steps before (one line each); the last is this command's
+    line = lines[-1]  # P1: prepare has measured its own steps before (one line each); the last is this command's
     assert "part0.py" not in "".join(lines) and "\\" not in "".join(lines), lines
     assert "/" not in line.replace("tc-generator:BATCH-fixture", ""), line
     assert json.loads(line)["step"] == "tc-generator:BATCH-fixture"
@@ -197,20 +195,6 @@ def test_the_requirements_step_measures_only_the_documents(tmp_path: Path, capsy
     assert code == 0 and report["files"] == len(docs) and report["bytes"] == sum(path.stat().st_size for path in docs) + role, report
     assert json.loads((root / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()[-1])["step"] == "context-marker:requirements"
 
-
-def test_the_api_command_matches_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import api
-    from tools.step_size import compact_inputs, request_files
-
-    root, attempt_id, _baseline, receipts, marker, plan, header, _plan_path, _header_path = _generator_run(tmp_path)
-    _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
-    code = api.main(["step-inputs", "--run-root", str(root), "--stage", "tc-generator:BATCH-fixture"])
-    payload = json.loads(capsys.readouterr().out)
-    found = request_files(root, "tc-generator:BATCH-fixture")
-    assert code == 0 and payload["result"] == json.loads(json.dumps(api.plain(compact_inputs(root, "tc-generator:BATCH-fixture", found)), ensure_ascii=False))
-    assert json.loads(Path(payload["result"]["files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"] == json.loads(json.dumps(found["files"]))
-    code = api.main(["step-inputs", "--run-root", str(root), "--stage", "tc-to-autotest:r1"])
-    assert code == 2 and json.loads(capsys.readouterr().out)["status"] == "error"
 
 
 def test_a_document_kept_only_in_its_carrier_is_read_once_from_it(tmp_path: Path) -> None:

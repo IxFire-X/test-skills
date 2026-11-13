@@ -116,10 +116,6 @@ def _digest_of(path: Path) -> str:
     return document_sha256(json.loads(Path(path).read_bytes()))
 
 
-def _review(run: dict, digest: str, stage: str = "tc-reviewer:canonical") -> tuple[int, dict]:
-    return _api("review-requested", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", stage, "--digest", digest)
-
-
 def test_the_reviewer_of_r2_before_r1_is_refused_and_r1_is_recorded_once(tmp_path: Path) -> None:
     from tests.test_autotest_cycle import REVIEWER, autotest_run, next_of, run_generator
     from tests.test_stage_steps import _events
