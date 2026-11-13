@@ -70,6 +70,19 @@ def test_the_marker_of_an_accepted_run_with_the_same_inputs_is_reused_unchanged(
     assert published["content_digest"] == digest
 
 
+def test_the_marker_of_a_source_is_taken_whatever_the_profile_of_the_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The marker is reused as it was: the profile is no input of it (a scan of the same project gives the same inventory and requirements in both profiles);
+    only the cases, the plan and the review ask the baseline of the run."""
+    from tools import pilot_state
+
+    source_root, source_attempt = _source(tmp_path)
+    _marker_value, digest = _marker(source_root, source_attempt)
+    run_root, attempt_id, inputs = _fresh(tmp_path)
+    real = pilot_state.frozen_baseline
+    monkeypatch.setattr(pilot_state, "frozen_baseline", lambda root, attempt: {**real(root, attempt), **({"policy_profile": "local-pilot-v1"} if Path(root) == run_root else {})})
+    assert _request(run_root, attempt_id, inputs, source_root.name)["reuse"]["response_digest"] == digest
+
+
 def test_a_changed_answer_to_a_reuse_request_is_refused_and_nothing_is_written(tmp_path: Path) -> None:
     from tools.pilot_state import ModelReuseMismatch, derive_state, publish_model_stage_artifact
 
@@ -105,13 +118,13 @@ def test_a_source_is_refused_unless_every_condition_holds(tmp_path: Path, case: 
     assert expected in str(refused.value), str(refused.value)
 
 
-def test_reuse_is_for_the_context_marker_only(tmp_path: Path) -> None:
-    from tools.pilot_state import publish_model_request
+def test_reuse_takes_the_stages_of_the_list_only(tmp_path: Path) -> None:
+    from tools.pilot_state import ModelReuseRefused, publish_model_request
 
     source_root, _attempt = _source(tmp_path)
     run_root, attempt_id, _inputs = _fresh(tmp_path)
-    with pytest.raises(ValueError):
-        publish_model_request(run_root, attempt_id, "tc-reviewer:canonical", model_id="reuse", invocation_id="x",
+    with pytest.raises(ModelReuseRefused):  # the rework of the cases is no stage of the list: the exact names, not the prefix tc-generator:
+        publish_model_request(run_root, attempt_id, "tc-generator:rework-1", model_id="reuse", invocation_id="x",
                               input_digests=["sha256:" + "1" * 64, "sha256:" + "2" * 64], reuse_from=source_root.name)
 
 
@@ -209,7 +222,7 @@ def test_the_scan_prints_the_reuse_suggestion(tmp_path: Path, monkeypatch: pytes
 
 
 def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, inputs: list[str], module: str, requirements_by: str, parts: int = 2) -> str:
-    """A source marked in parts (requirements, batch-001.., merged baseline), stubbed at the seam _marker_source.
+    """A source marked in parts (requirements, batch-001.., merged baseline), stubbed at the seams _run_source and _input_differences.
 
     Its parts all bind the one context receipt of the fresh run, so the callers stub _marker_base to the fresh inputs."""
     from tools import pilot_state
@@ -227,7 +240,8 @@ def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, inputs: list[s
     stages["context-marker:baseline"] = ({"input_digests": [req, inv, ctx], "model_id": "controller:context-marker-merge"}, "sha256:" + "c" * 64)
     fake = {"run_id": source_id, "root": project / ".pilot-runs" / source_id, "state": {}, "attempt": {"attempt_id": "e" * 32, "module": module},
             "stages": stages, "verdict": "ПРИНЯТО", "drift": False}
-    monkeypatch.setattr(pilot_state, "_marker_source", lambda project, run_id: fake if run_id == source_id else (_ for _ in ()).throw(ValueError()))
+    monkeypatch.setattr(pilot_state, "_run_source", lambda project, run_id, whole=True: fake if run_id == source_id else (_ for _ in ()).throw(ValueError()))
+    monkeypatch.setattr(pilot_state, "_input_differences", lambda source, root, attempt: [])
     return source_id
 
 

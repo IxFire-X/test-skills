@@ -1385,7 +1385,7 @@ def _resolve_fresh_context(run_root: Path, fresh_context: bool | None) -> bool:
 
 
 def review_open_step(run_root: Path, attempt_id: str, *, output_dir: Path, model_id: str | None = None, invocation_id: str | None = None,
-                     fresh_context: bool | None = None) -> dict[str, Any]:
+                     fresh_context: bool | None = None, reuse_from: str | None = None) -> dict[str, Any]:
     """Everything before the reviewer's call (``prepare --stage tc-reviewer:canonical``): the candidate published (assemble → validate-canonical, when it
     is not yet), the session start, the package and the boundary, REVIEW_REQUESTED, MODEL_REQUESTED.  It records and computes; the
     model is called by the agent afterwards.  The same call again changes nothing; another reviewer is REVIEW_ALREADY_OPEN."""
@@ -1431,7 +1431,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, output_dir: Path, model
                          and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == REVIEW_STAGE), None)
         if recorded is None:
             request = publish_model_request(Path(run_root), attempt_id, REVIEW_STAGE, model_id=model_id, invocation_id=invocation_id,
-                                            input_digests=[str(boundary["canonical_branch_digest"]), str(boundary["package_digest"])])
+                                            input_digests=[str(boundary["canonical_branch_digest"]), str(boundary["package_digest"])], reuse_from=reuse_from)
         else:
             request = read_model_request(Path(run_root), attempt_id, REVIEW_STAGE, str(recorded["artifact_digest"]))
             if request.get("invocation_id") != invocation_id or request.get("model_id") != model_id:
@@ -1458,7 +1458,7 @@ def _generator_label(run_root: Path, attempt_id: str) -> str:
     return str(read_model_request(Path(run_root), attempt_id, first["stage_instance_id"], str(first["artifact_digest"]))["invocation_id"])
 
 
-def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invocation_id: str | None, fresh_context: bool | None) -> dict[str, Any]:
+def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invocation_id: str | None, fresh_context: bool | None, reuse_from: str | None = None) -> dict[str, Any]:
     """``prepare --stage tc-reviewer:canonical``: the whole opening of the review (``review_open_step``) into ``<run>/published``.  The label is the
     host's: ``--fresh-context yes`` names the reviewer's session or is refused; a session that says «the same» (``no``) takes the generator's label —
     that is the truth, and the comparison of the labels counts it as SELF.  SELF, where the run did not admit it, is refused before anything is written."""
@@ -1473,7 +1473,7 @@ def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invoca
     if not (fresh and label != generator) and not self_review_accepted(Path(run_root)):
         raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора, а прогон не принял SELF; fix: вызови ревьюера отдельной сессией "
                                      "и назови её --invocation-id; только если человек согласен на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review")
-    return review_open_step(run_root, attempt_id, output_dir=published_dir(run_root), model_id=model_id, invocation_id=label, fresh_context=fresh)
+    return review_open_step(run_root, attempt_id, output_dir=published_dir(run_root), model_id=model_id, invocation_id=label, fresh_context=fresh, reuse_from=reuse_from)
 
 
 def review_for_human(run_root: Path, view: Path | str, fresh: bool) -> str:

@@ -895,6 +895,9 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             acceptance = None
         if answer is not None:
             codeword = review_canaries.codeword_state(root, attempt_id, answer)
+    reviewed_from = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("stage") == "tc-reviewer:canonical" and call.get("by") == "reuse"), None)
+    if reviewed_from:  # the review is the source's: the word of this run's generator was never compared with it
+        codeword = "reused"
     unreliable = canaries is not None and canaries.get("status") == "UNRELIABLE"
     if codeword == "named":
         review = "ревью в той же сессии (SELF): ревьюер назвал контрольное слово генератора"
@@ -904,6 +907,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         review = "ревью в свежем контексте" if ((acceptance or {}).get("rework") or {}).get("independent", True) else "ревью в той же сессии (SELF): второй круг шёл в той же сессии"
     else:
         review = None
+    if reviewed_from:
+        review = "; ".join(filter(None, [review, f"ревью из прогона {reviewed_from}"]))
     if any(_boundary_fresh(pilot, root, attempt_id, revision) is False for revision in (1, 2) if attempt_id):  # the automation was reviewed in the session that wrote it
         review = "; ".join(filter(None, [review, "автотесты проверены в той же сессии (SELF); независимость не засчитана"]))
     scope = _scope(root, attempt_id, state)
@@ -953,7 +958,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "reused_calls": sum(1 for call in calls if call.get("by") == "reuse"),
             "reused_input_bytes": sum(int(call.get("saved_bytes") or 0) for call in calls if call.get("by") == "reuse"),
         },
-        "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
+        "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"), "header_date_note": _header_date_note(root, attempt_id, events, calls),
         # the run of the tests was a human's — the package did not reproduce it
         "execution_source": ({**execution["execution_source"], "note": HUMAN_RESULT_NOTE} if execution.get("execution_source") else None),
         "acceptance": acceptance, "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
@@ -970,6 +975,20 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }
     return report, list(status.get("warnings") or [])
+
+
+def _header_date_note(root: Path, attempt_id: str | None, events: Sequence[Mapping[str, Any]], calls: Sequence[Mapping[str, Any]]) -> str | None:
+    """A header dated otherwise than the run began is a plan taken from an earlier run (``prepare --stage plan --reuse-from``): said so, with the run when a stage was reused too."""
+    from tools import pilot_state as pilot
+
+    try:
+        date = str(pilot.read_attempt_receipt(root, str(attempt_id), "generator-header", "ARTIFACT_READ_BACK")["record"]["header"]["metadata"]["date"])
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    if not events or date == str(events[0].get("observed_at"))[:10]:
+        return None
+    source = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("by") == "reuse"), "")
+    return f"дата заголовка {date} — из прошлого прогона" + (f" {source}" if source else "")
 
 
 def model_totals(calls: Sequence[Mapping[str, Any]]) -> dict[str, int]:
@@ -1148,6 +1167,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"- Профиль: {report['policy_profile']}", *([f"- {_test_level_line(report['test_level'])}"] if report.get("test_level") else []),
         f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}",
+        *([f"- Дата заголовка: {report['header_date_note']}"] if report.get("header_date_note") else []),
         *([f"- Результат запуска тестов: {report['execution_source']['note']} (слово команды: {report['execution_source']['challenge']})"]
           if report.get("execution_source") else []), "",
         "## Числа", "",

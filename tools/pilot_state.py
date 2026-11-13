@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import copy
+import fnmatch
 import functools
 import hashlib
 import json
@@ -2246,8 +2247,8 @@ def publish_model_request(
             f"duplicate model request: {stage_instance_id} already has its request;{_codeword_lost_note(root, state, attempt_id, stage_instance_id)} "
             "fix: a repeated prepare gives the same request — the answer goes to submit, its one retry is submit --transport-attempts 2"
         )
-    if reuse_from is not None and stage != "context-marker":
-        raise ValueError("MODEL_REUSE_REFUSED: only a context-marker answer is reused")
+    if reuse_from is not None and reuse_family(stage_instance_id) in (None, "plan"):
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage_instance_id} не переиспользуется; fix: prepare без --reuse-from")
     if stage == "context-marker":
         _context_marker_snapshots(project, root, state, attempt, stage_instance_id, inputs)
     # the inputs the journal fixes, each wrong position named with its right digest and source; publish time only,
@@ -2265,12 +2266,12 @@ def publish_model_request(
     run_id = read_run(root)["manifest"]["run_id"]
     role, role_policy = declaration
     extra: dict[str, Any] = {}
-    if stage == "context-marker":  # the package the answer is made with, so a reuse can require the same package
+    if stage == "context-marker" or reuse_from is not None:  # the package the answer is made with, so a reuse can require the same package
         pack = skill_pack_digest()
         if pack is not None:
             extra["skill_pack_digest"] = pack
         if reuse_from is not None:
-            extra["reuse"] = _reuse_source(project, root, attempt, stage_instance_id, inputs, role_policy, pack, reuse_from)
+            extra["reuse"] = _reuse_source(project, root, state, attempt, stage_instance_id, inputs, role_policy, reuse_from)
     nonce = None
     if stage_instance_id.startswith("tc-generator:BATCH-"):  # the control word of the generator's task — the run keeps its sha256 only
         from tools.review_canaries import nonce_digest
@@ -2694,7 +2695,8 @@ def _publish_model_stage_artifact(
         source = _model_stage_artifact_target(_run_root(Path(root).parent / str(reuse["run_id"]))[1], str(reuse["attempt_id"]), str(reuse["response_digest"]))
         raise ModelReuseMismatch(
             f"MODEL_REUSE_MISMATCH: {stage_instance_id}: ответ {content_digest}, а запрос переиспользует ответ {reuse['response_digest']} "
-            f"прогона {reuse['run_id']}; fix: передай файл ответа источника как есть — --artifact {printed_or(source, '<файл ответа источника>')}, ничего не записано")
+            f"прогона {reuse['run_id']}; fix: ответ этой стадии берёт код из источника — повтори prepare --stage <стадия> --reuse-from <run_id>, "
+            "а не ответ из слота; ничего не записано")
     # digest fields of the answer against the journal before anything is written; the stage keeps its one retry
     mismatches = _response_digest_rows(project, root, state, attempt_id, stage_instance_id, request, value)
     if mismatches:
@@ -5277,7 +5279,7 @@ def _require_next_automation_stage(run_root: Path, attempt_id: str, stage_instan
 
 
 class ModelReuseRefused(ValueError):
-    """The named run is no reuse source for this context-marker request (the reason says why)."""
+    """The named run is no reuse source for this request (the reason says why)."""
 
     code = "MODEL_REUSE_REFUSED"
 
@@ -5286,6 +5288,21 @@ class ModelReuseMismatch(ValueError):
     """The answer to a reuse request is not the source answer byte for byte."""
 
     code = "MODEL_REUSE_MISMATCH"
+
+
+class ReuseSourceInvalid(ValueError):
+    """A file of the reuse source does not read as the journal of that run binds it (the message names the file); nothing is written to the new run."""
+
+    code = "REUSE_SOURCE_INVALID"
+
+
+# the stages ``--reuse-from`` takes — exact patterns, not a prefix (tc-generator:rework-1 and the rounds of the rework are not among them) — and the family
+# whose checks each has (``_checked_source``): a marker needs an accepted source, the plan, the batches and the review the cases accepted whole
+REUSE_STAGES = {"context-marker:*": "marker", "plan": "plan", "tc-generator:BATCH-*": "batch", "tc-reviewer:canonical": "review"}
+
+
+def reuse_family(stage: str) -> str | None:
+    return next((family for pattern, family in REUSE_STAGES.items() if fnmatch.fnmatchcase(stage, pattern)), None)
 
 
 # a marker is reused only from a run whose review accepted the cases; AUTO_FIX_APPLIED fixes human fields only, not the marker
@@ -5315,31 +5332,44 @@ def _has_drifted(root: Path, attempt_id: str) -> bool:
     return _receipt_target(root, attempt_id, "resume-validation").is_file()
 
 
-def _marker_source(project: Path, run_id: str) -> dict[str, Any]:
-    """The recorded context marker of an earlier run: attempt, verdict, drift and every marker stage (request, answer).
+def _strict(run_id: str, name: str, read: Callable[[], Any]) -> Any:
+    """``read()`` of a file of the source: one that does not read as the journal binds it is REUSE_SOURCE_INVALID with its name, never the ordinary way."""
+    try:
+        return read()
+    except ModelReuseRefused:
+        raise
+    except (ValueError, OSError, KeyError, TypeError, StopIteration, OutputConfinementError) as error:
+        raise ReuseSourceInvalid(f"REUSE_SOURCE_INVALID: {name} прогона {run_id}: {str(error)[:200]}") from error
 
-    Reads only: a run with pending journal events is refused, so nothing is recovered or written in the source run."""
+
+def _run_source(project: Path, run_id: str, whole: bool = True) -> dict[str, Any]:
+    """The earlier run with a recorded context marker: attempt, verdict, drift and every model stage it answered (request, answer digest), the whole journal
+    and every answer read strictly (``whole``; the scan looks at the markers of every earlier run and reads the rest of one).  Reads only: a run with pending
+    journal events is refused, so nothing is recovered or written in the source run."""
     root = project / ".pilot-runs" / run_id
     if not re.fullmatch(r"[0-9a-f]{32}", run_id) or not (root / "events.jsonl").is_file():
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: нет прогона {run_id} в {project / '.pilot-runs'}")
     if (root / "pending-events").is_dir() and any((root / "pending-events").glob("*.json")):
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: журнал прогона {run_id} не закрыт")
-    _project, root = _run_root(root)
-    state = derive_state(root)
+    _project, root = _strict(run_id, "run-manifest.json", lambda: _run_root(root))
+    state = _strict(run_id, "events.jsonl", lambda: derive_state(root))
     for attempt in reversed(state["attempts"]):
         attempt_id = str(attempt["attempt_id"])
         stages: dict[str, tuple[Mapping[str, Any], str]] = {}
         for event in state["events"]:
             stage = str(event.get("stage_instance_id") or "")
-            if event.get("attempt_id") != attempt_id or not stage.startswith("context-marker:") or event["event_type"] != "MODEL_RESPONSE_RECEIVED":
+            if event.get("attempt_id") != attempt_id or not stage or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or not (whole or stage.startswith("context-marker:")):
                 continue
-            request = next(item for item in state["events"] if item.get("attempt_id") == attempt_id and item["event_type"] == "MODEL_REQUESTED"
-                           and item.get("stage_instance_id") == stage)
-            stages[stage] = (_read_model_request_with_state(project, root, state, attempt_id, stage, str(request["artifact_digest"])),
+            asked = next((item for item in state["events"] if item.get("attempt_id") == attempt_id and item["event_type"] == "MODEL_REQUESTED"
+                          and item.get("stage_instance_id") == stage), None)
+            stages[stage] = (_strict(run_id, f"model-requests ({stage})", lambda: _read_model_request_with_state(project, root, state, attempt_id, stage, str(asked["artifact_digest"]))),
                              str(event["artifact_digest"]))
         if "context-marker:baseline" in stages:
-            return {"run_id": run_id, "root": root, "state": state, "attempt": attempt, "stages": stages,
-                    "verdict": _review_verdict(project, root, state, attempt_id), "drift": _has_drifted(root, attempt_id)}
+            for stage, (_request, response) in (stages.items() if whole else ()):  # bytes = digest, every answer of the source
+                _strict(run_id, f"model-stage-artifacts ({stage})", lambda: _read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, response))
+            return {"run_id": run_id, "root": root, "state": state, "attempt": attempt, "stages": stages, "pack": stages["context-marker:baseline"][0].get("skill_pack_digest"),
+                    "verdict": _strict(run_id, "model-stage-artifacts (tc-reviewer:canonical)", lambda: _review_verdict(project, root, state, attempt_id)),
+                    "drift": _has_drifted(root, attempt_id)}
     raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {_REUSE_FREE} — в прогоне {run_id} нет записанной разметки")
 
 
@@ -5347,36 +5377,125 @@ def _source_refusal(source: Mapping[str, Any], module: str) -> str | None:
     if source["attempt"].get("module") != module:
         return f"другой модуль ({source['attempt'].get('module')})"
     if source["verdict"] not in ACCEPTED_REVIEW:
-        return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'})"
+        return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'}): частичная приёмка и доработка пока не берутся"
     if source["drift"]:
         return "дрейф: после исполнения источника baseline разошёлся"
     return None
 
 
-def _reuse_source(
-    project: Path, root: Path, attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str], role_policy: str, pack: str | None, run_id: str,
-) -> dict[str, str]:
-    """The reuse record of a context-marker request — only when every condition on the source holds."""
+_BASELINE_INPUTS = {"inventory": lambda b: b["inventory_digest"], "requirements": lambda b: b["requirements"]["digest"],
+                    ".skillsrc": lambda b: (b.get("skillsrc_authority") or {}).get("skillsrc_digest"), "профиль": lambda b: b["policy_profile"], "модуль": lambda b: b["module"]}
+
+
+def _input_differences(source: Mapping[str, Any], root: Path, attempt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """What the new run froze at its scan that the source froze otherwise: the project (its inventory), the requirements, the .skillsrc, the profile, the module."""
+    mine = frozen_baseline(root, attempt)
+    theirs = _strict(source["run_id"], "baselines", lambda: frozen_baseline(source["root"], source["attempt"]))
+    return [{"input": name, "given": get(mine), "source": get(theirs)} for name, get in _BASELINE_INPUTS.items() if get(mine) != get(theirs)]
+
+
+def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, source: dict[str, Any], family: str) -> str | None:
+    """The cases of the source accepted whole: not reworked, the review session completed without evidence, the set published, and the word of the generator not named
+    by a reviewer that said fresh (the word of a new run is another one: the answer would look independent there).  For the review also: the new run holds the very
+    same answers, plan and candidate — the one input of the request that cannot be compared whole is ``package_digest`` (it holds the path of the published set)."""
+    run_id, sroot, satt = source["run_id"], source["root"], str(source["attempt"]["attempt_id"])
+    if _REWORK_STAGE in source["stages"] or _REWORK_REVIEW_STAGE in source["stages"]:
+        return "кейсы дорабатывались (частичная приёмка) — такой набор пока не берётся"
+    from tools.review_canaries import codeword_state
+
+    ledger = _strict(run_id, "reviewer-session-ledgers", lambda: read_reviewer_session_ledger(sroot, satt))
+    boundary = _strict(run_id, "reviewer-session-boundaries", lambda: dict(read_attempt_receipt(sroot, satt, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]))
+    effective = _strict(run_id, "effective-canonicals", lambda: read_effective_canonical_if_present(sroot, satt))
+    if ledger.get("status") != "COMPLETED" or effective is None:
+        return "ревью источника не закрыто принятым набором"
+    if any(str(row.get("event_type", "")).startswith("EVIDENCE") for row in ledger["events"]):
+        return "ревью источника запрашивало файлы (evidence) — такой набор не берётся"
+    source["boundary"] = boundary
+    if boundary["host_isolation"]["fresh_context"]:
+        answer = _strict(run_id, "model-stage-artifacts (tc-reviewer:canonical)", lambda: _read_model_stage_artifact_with_state(
+            project, sroot, source["state"], satt, "tc-reviewer:canonical", source["stages"]["tc-reviewer:canonical"][1])["artifact"])
+        if codeword_state(sroot, satt, answer) == "named":
+            return "ревьюер источника заявил свежий контекст, но назвал слово генератора — такой набор не берётся"
+    if family == "review":
+        mine = {row["stage_instance_id"]: row["artifact_digest"] for row in state["events"] if row.get("attempt_id") == attempt_id and row["event_type"] == "MODEL_RESPONSE_RECEIVED"}
+        for stage, (_request, response) in source["stages"].items():
+            if reuse_family(stage) in ("marker", "batch") and mine.get(stage) != response:
+                return f"ответ {stage} нового прогона не тот, что у источника"
+        for kind in ("plan", "header"):
+            theirs = _strict(run_id, "generator-headers / batch-plans", lambda: _generator_input(project, sroot, source["state"], satt, kind))["digest"]
+            try:
+                same = _generator_input(project, root, state, attempt_id, kind)["digest"] == theirs
+            except ModelInputsMismatch:
+                same = False
+            if not same:
+                return f"{kind} нового прогона иной, чем у источника"
+        from tools.canonical_document import document_sha256
+        from tools.orchestrate_test_case_revision import journal_assembly
+
+        try:
+            candidate = document_sha256(journal_assembly(root, attempt_id)[0])
+        except (KeyError, OSError, TypeError, ValueError):
+            return "пачки нового прогона приняты не все — ревью берётся после них"
+        if candidate != boundary["canonical_branch_digest"]:
+            return "кандидат нового прогона иной, чем у источника"
+    return None
+
+
+def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage: str, run_id: str) -> tuple[dict[str, Any], str]:
+    """The source of ``stage`` with every condition on it checked — reads only, so the caller writes nothing to the new run before they all hold."""
+    family = reuse_family(stage)
+    if family is None:
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку (context-marker:*), plan, пачки генератора "
+                                "(tc-generator:BATCH-*) и tc-reviewer:canonical; fix: prepare без --reuse-from")
     if run_id == root.name:
         raise ModelReuseRefused("MODEL_REUSE_REFUSED: тот же прогон — переиспользуется только прошлый прогон")
-    source = _marker_source(project, run_id)
+    source = _run_source(project, run_id)
+    pack = skill_pack_digest()
     refusal = _source_refusal(source, str(attempt.get("module")))
+    differences = _input_differences(source, root, attempt) if refusal is None and family != "marker" else []  # the marker: its own inputs only, as before
+    if refusal is None and differences:
+        refusal = "входы иные: " + ", ".join(row["input"] for row in differences)
+    if refusal is None and (pack is None or source["pack"] != pack):  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
+        refusal = f"пакет иной: у источника skill_pack_digest {source['pack'] or 'не записан (прогон до FaT-CR)'}, здесь {pack or 'не прочитан'}"
+    if refusal is None and family != "marker":
+        refusal = _cases_refusal(project, root, state, str(attempt["attempt_id"]), source, family)
     if refusal is not None:
-        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: прогон {run_id}: {refusal}")
-    if stage_instance_id not in source["stages"]:
-        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: в прогоне {run_id} нет ответа {stage_instance_id}")
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: прогон {run_id}: {refusal}; fix: prepare без --reuse-from")
+    if family != "plan" and stage not in source["stages"]:
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: в прогоне {run_id} нет ответа {stage}; fix: prepare без --reuse-from")
+    return source, family
+
+
+def check_reuse(run_root: Path, attempt_id: str, stage: str, run_id: str) -> dict[str, Any]:
+    """Every check of the source for ``stage`` before anything is written to the new run (reads only), and what the source says of the label and the statement of the
+    session: the label of its request, and for the review the ``fresh_context`` and the label of its boundary (a SELF review takes the label of the new generator)."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    source, family = _checked_source(project, root, state, next(row for row in state["attempts"] if row["attempt_id"] == attempt_id), stage, run_id)
+    asked = source["stages"].get(stage)
+    told: dict[str, Any] = {"invocation_id": str(asked[0]["invocation_id"]) if asked else None, "fresh_context": None}
+    if family == "review":
+        isolation = source["boundary"]["host_isolation"]
+        told.update(fresh_context=bool(isolation["fresh_context"]), invocation_id=str(source["boundary"]["reviewer_invocation_id"]) if isolation["fresh_context"] else None)
+    return told
+
+
+def _reuse_source(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str], role_policy: str, run_id: str,
+) -> dict[str, str]:
+    """The reuse record of a request — only when every condition on the source holds and the inputs are the source's."""
+    source, family = _checked_source(project, root, state, attempt, stage_instance_id, run_id)
     request, response = source["stages"][stage_instance_id]
-    if list(request["input_digests"]) != list(inputs):
-        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: входы иные: у источника {list(request['input_digests'])}, здесь {list(inputs)}")
-    if pack is None or request.get("skill_pack_digest") != pack or request.get("role_policy") != role_policy:
-        # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
-        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: пакет иной: у источника skill_pack_digest "
-                                f"{request.get('skill_pack_digest') or 'не записан (прогон до FaT-CR)'}, здесь {pack or 'не прочитан'}")
+    if request.get("role_policy") != role_policy:
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: роль иная: у источника {request.get('role_policy')}, здесь {role_policy}; fix: prepare без --reuse-from")
+    given, here = list(request["input_digests"]), list(inputs)
+    if family == "review":  # the second input, package_digest, holds the path of the published set: the run, the answers and the candidate were compared whole above
+        given, here = given[:1], here[:1]
+    if given != here:
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: входы иные: у источника {given}, здесь {here}; fix: prepare без --reuse-from")
     if str(request.get("model_id") or "").startswith("controller:"):
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage_instance_id} источника сделан кодом (merge) — сделай его тем же merge")
-    attempt_id = str(source["attempt"]["attempt_id"])
-    _read_model_stage_artifact_with_state(project, source["root"], source["state"], attempt_id, stage_instance_id, response)  # bytes = digest
-    return {"run_id": run_id, "attempt_id": attempt_id, "request_digest": str(request["digest"]), "response_digest": response}
+    return {"run_id": run_id, "attempt_id": str(source["attempt"]["attempt_id"]), "request_digest": str(request["digest"]), "response_digest": response}
 
 
 def _marker_stage_order(stage: str) -> tuple[int, int]:
@@ -5397,8 +5516,33 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
     return [*baseline[:2], *receipts]
 
 
+def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, source: dict[str, Any], command: Callable[[str], str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The rows the scan adds for the cases of the source — the plan, the batches in the order of the source, the review — or why they are not offered."""
+    try:
+        changed = _input_differences(source, root, next(row for row in state["attempts"] if row["attempt_id"] == attempt_id))  # the cases ask the baseline too: the .skillsrc, the profile, the module
+        reason = "входы иные: " + ", ".join(row["input"] for row in changed) if changed else _cases_refusal(project, root, state, attempt_id, source, "plan")
+    except ReuseSourceInvalid as error:
+        reason = str(error)
+    if reason is not None:
+        return [], {"cases": {"reused": False, "reason": reason}}
+
+    def row(stage: str, **more: Any) -> dict[str, Any]:
+        return {"stage": stage, **more, "command": command(stage)}
+
+    self_review = not source["boundary"]["host_isolation"]["fresh_context"]
+    return [row("plan"), *(row(stage, response_digest=source["stages"][stage][1]) for stage in source["stages"] if reuse_family(stage) == "batch"),
+            row("tc-reviewer:canonical", response_digest=source["stages"]["tc-reviewer:canonical"][1], review="SELF" if self_review else "independent",
+                **({"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"} if self_review else {}))], {}
+
+
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """An earlier run of the project whose context marker this attempt may reuse, with the commands — or why not.
+    with closure_cache():  # the journals of the earlier runs are read many times: once each
+        return _marker_reuse_suggestion(run_root, attempt_id)
+
+
+def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """An earlier run of the project whose context marker — and, when its review accepted the cases whole, the plan, the batches and the review — this attempt may reuse,
+    with the commands — or why not.
 
     A suggestion only: the agent decides; every reused answer still goes through prepare --reuse-from and the same checks as a fresh one."""
     from tools.project_inventory import read_execution_baseline
@@ -5415,7 +5559,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     runs = [path for path in (project / ".pilot-runs").iterdir() if path.name != root.name and (path / "events.jsonl").is_file()]
     for path in sorted(runs, key=lambda item: (item / "events.jsonl").stat().st_mtime, reverse=True):
         try:
-            source = _marker_source(project, path.name)
+            source = _run_source(project, path.name, whole=False)
         except (ValueError, OSError, KeyError, TypeError, StopIteration):
             continue
         refusal = _source_refusal(source, str(attempt.get("module")))
@@ -5426,7 +5570,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
         if len(base) != len(current):
             differences.append({"input": "число квитанций контекста", "given": len(current) - 2, "source": len(base) - 2})
         model_stages = [stage for stage in sorted(source["stages"], key=_marker_stage_order)
-                        if not str(source["stages"][stage][0].get("model_id") or "").startswith("controller:")]
+                        if reuse_family(stage) == "marker" and not str(source["stages"][stage][0].get("model_id") or "").startswith("controller:")]
         if refusal is None and differences:
             refusal = "входы иные"
         if refusal is None and (pack is None or any(source["stages"][stage][0].get("skill_pack_digest") != pack for stage in model_stages)):
@@ -5446,7 +5590,14 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             for stage in model_stages:  # the reuse answers each stage from the source run itself; the merge of the parts follows by code
                 rows.append({"stage": stage, "response_digest": source["stages"][stage][1],
                              "command": f"python -m tools.api prepare --run-root {printed(root)} --stage {stage} --reuse-from {path.name}"})
-            return {"run_id": path.name, "stages": rows}
+            try:
+                whole = _run_source(project, path.name)  # the one source offered is read whole, for its cases
+            except ValueError as error:
+                more, flag = [], {"cases": {"reused": False, "reason": str(error)}}
+            else:
+                more, flag = _cases_rows(project, root, state, attempt_id, whole,
+                                         lambda stage: f"python -m tools.api prepare --run-root {printed(root)} --stage {stage} --reuse-from {path.name}")
+            return {"run_id": path.name, "stages": [*rows, *more], **flag}
         except HostStop:
             first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": "путь файла ответа источника нельзя записать в команде"}
             continue
@@ -5601,7 +5752,7 @@ def plan_ask(root: Path, attempt_id: str, done: bool) -> dict[str, Any]:
     return {"answer": PLAN_FORM, "requirements": len(found["requirements"]), "out_of_scope": len(found["out_of_scope"] or []), "context_receipts": len(found["receipts"])}
 
 
-def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = False) -> dict[str, Any]:
+def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = False, header_date: str | None = None) -> dict[str, Any]:
     """``submit --stage plan``: the header and the plan of the batches built from the journal and the subject the agent named, every check before
     anything is written (``dry_run`` stops there), then the skeleton of an import, the header, the plan and the skeletons of its batches."""
     from tools.batch_assembly import plan_batches_for_project
@@ -5627,7 +5778,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     docs = docs or ([relative_to_project(project.resolve(), request["cases"])] if request.get("cases") else [])  # an import without documents: its CSV is the document of the run
     header = {"schema_version": "1.1.0", "document_id": header_document_id(docs, str(attempt.get("module"))), "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
               "metadata": {"subject": {"kind": "generic", "name": subject.strip()}, "documentation": docs, "project": project.name, "author": "controller",
-                           "date": str(state["events"][0]["observed_at"])[:10]}}  # the date of the run: the journal's, so a repeat gives the same bytes
+                           "date": header_date or str(state["events"][0]["observed_at"])[:10]}}  # the date of the run: the journal's, so a repeat gives the same bytes; a reuse takes the source's
     header_digest = _generator_input_digest(header)
     receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
     plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
@@ -5643,6 +5794,25 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     publish_generator_input(run_root, attempt_id, "header", header)
     published = publish_generator_input(run_root, attempt_id, "plan", dict(plan))
     return {**shown, **({"context": published["context"]} if "context" in published else {})}
+
+
+def reuse_plan(run_root: Path, attempt_id: str, run_id: str) -> dict[str, Any]:
+    """``prepare --stage plan --reuse-from``: the header and the plan of the source — its subject and its date, so the batches keep their ids and the document its digest —
+    built here by the code of the new run and compared with the source's before anything is written."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    source, _family = _checked_source(project, root, state, attempt, "plan", run_id)
+    satt = str(source["attempt"]["attempt_id"])
+    header = _strict(run_id, "generator-headers", lambda: _generator_input(project, source["root"], source["state"], satt, "header"))
+    plan = _strict(run_id, "batch-plans", lambda: _generator_input(project, source["root"], source["state"], satt, "plan"))
+    answer, date = {"subject": header["metadata"]["subject"]["name"]}, header["metadata"]["date"]
+    shown = publish_plan(run_root, attempt_id, answer, dry_run=True, header_date=date)
+    for name, built, kept in (("заголовок", shown["header"]["digest"], header["digest"]), ("план", shown["plan"]["digest"], plan["digest"])):
+        if built != kept:
+            raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: прогон {run_id}: {name} нового прогона иной, чем у источника ({built}, у источника {kept}); fix: prepare без --reuse-from")
+    published = publish_plan(run_root, attempt_id, answer, header_date=date)
+    return {"answered": True, "model_call": False, "reused_from": run_id, "plan": published["plan"]}
 
 
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:

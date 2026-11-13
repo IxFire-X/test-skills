@@ -144,7 +144,7 @@ def _reviewer_steps(root: Path) -> list[dict[str, Any]]:
     from tools.orchestrate_test_case_revision import REVIEW_STAGE, abort_review, abort_rework_review, open_review, open_rework_review, rework_label
 
     steps = [{"stage": REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")), "extra": "evidence",
-              "open": lambda model_id, invocation_id, fresh: open_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
+              "open": lambda model_id, invocation_id, fresh, reuse_from=None: open_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh, reuse_from=reuse_from),
               "abort": lambda reason, dry_run: abort_review(root, attempt_id, reason, dry_run)}]
     from tools.pilot_state import read_effective_canonical_if_present, rework_round_if_present
 
@@ -376,11 +376,12 @@ def _mark_lost_word(project: Path, root: Path, stage: str) -> None:
     confined_output.create_confined_bytes_exclusive(project, root, root / (LOST_WORD_MARK + stage.replace(":", "-")), stage.encode("utf-8"))
 
 
-def _cached(stage: str) -> contextlib.AbstractContextManager:
-    """The automation stages read the journal and its receipts many times in one call: one closure cache for the call (the way ``open_review`` runs)."""
+def _cached(stage: str, reuse: bool = False) -> contextlib.AbstractContextManager:
+    """The automation stages and a reuse (it reads the source run whole, twice) read the journal and its receipts many times in one call: one closure cache for the call
+    (the way ``open_review`` runs)."""
     from tools.project_inventory import inventory_cache
 
-    if not stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
+    if not reuse and not stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
         return contextlib.nullcontext()
     stack = contextlib.ExitStack()
     stack.enter_context(pilot_state.closure_cache())
@@ -390,7 +391,7 @@ def _cached(stage: str) -> contextlib.AbstractContextManager:
 
 def prepare(run_root: Path, stage: str, **kwargs: Any) -> dict[str, Any]:
     """Publish the request of ``stage`` and say what the model reads and where the answer goes (see ``_prepare``)."""
-    with _cached(stage):
+    with _cached(stage, kwargs.get("reuse_from") is not None):
         return _prepare(run_root, stage, **kwargs)
 
 
@@ -407,12 +408,24 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     without it the code's label; ``fresh_context`` is the host's statement for a step that opens a session (the review); ``accept_self_review`` is the
     human's consent to a review in the same session, which the host passes with ``fresh_context`` ``no`` (it is written once for the run, before the review opens)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
-    if accept_self_review and ("open" not in step or fresh_context is not False):  # the consent is the host's word for a review step with «the same session»: nothing is written otherwise
-        raise ValueError("INVALID_ARGUMENT: --accept-self-review — согласие человека на ревью в той же сессии, только с --fresh-context no и только у стадии ревью; "
-                         "fix: prepare --stage <стадия ревью> --fresh-context no --accept-self-review после явного «да» человека (SKILL orchestrate §1)")
+
+    def check_consent() -> None:
+        if accept_self_review and ("open" not in step or fresh_context is not False):  # the consent is the host's word for a review step with «the same session»: nothing is written otherwise
+            raise ValueError("INVALID_ARGUMENT: --accept-self-review — согласие человека на ревью в той же сессии, только с --fresh-context no и только у стадии ревью; "
+                             "fix: prepare --stage <стадия ревью> --fresh-context no --accept-self-review после явного «да» человека (SKILL orchestrate §1)")
+
+    if reuse_from is None:
+        check_consent()
+    elif pilot_state.reuse_family(stage) is None:
+        raise pilot_state.ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку, plan, пачки генератора и ревью кейсов; fix: prepare без --reuse-from")
+    elif fresh_context is not None or invocation_id is not None:  # the statement of the session is the source's: the host does not make it again
+        raise ValueError("INVALID_ARGUMENT: --fresh-context и --invocation-id не идут с --reuse-from — сессия и независимость ревью берутся из источника; fix: prepare --stage "
+                         f"{stage} --reuse-from <run_id>" + (" --accept-self-review (только если источник проверен в той же сессии и человек согласен)" if "open" in step else ""))
     if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
         return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
+        if reuse_from is not None and stage == "plan" and not step["done"]:  # the plan of the source: its subject and date, compared with the source before anything is written
+            return {"stage": stage, **pilot_state.reuse_plan(root, attempt_id, reuse_from)}
         if not step["done"]:
             _refuse_linked_inbox(root)
         asked = step["direct"][0](root, step)
@@ -420,14 +433,22 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
             confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)
         return {"stage": stage, **asked, **({} if step["done"] else {"answer_slot": str(slot(root, stage)), "waiting_for": step["waiting_for"]})}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):
+        asked = _events(state, attempt_id, stage, "MODEL_REQUESTED")
+        reuse = pilot_state.read_model_request(root, attempt_id, stage, str(asked[-1]["artifact_digest"])).get("reuse") if asked and reuse_from is not None else None
+        if isinstance(reuse, Mapping) and reuse.get("run_id") == reuse_from:  # a reuse is one call: one cut after the answer was written (the selection of the review) is finished by the repeat
+            return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse_from, **_accepted(root, stage)}
         return {"stage": stage, "answered": True}
     _refuse_terminal(state, attempt_id)
     _refuse_unready(stage, step)
     if reuse_from is None:
         _refuse_linked_inbox(root)
+    else:  # every condition on the source, before anything is written; the label and the statement of the session are the source's
+        said = pilot_state.check_reuse(root, attempt_id, stage, reuse_from)
+        invocation_id, fresh_context = said["invocation_id"], said["fresh_context"]
+        check_consent()
     if accept_self_review:
         pilot_state.grant_self_review(root, attempt_id)  # before the review it belongs to; a repeat writes nothing
-    opened = step["open"](model_id, invocation_id, fresh_context) if "open" in step else {}  # the session is opened (its request is a part of that) or recognised again
+    opened = step["open"](model_id, invocation_id, fresh_context, **({"reuse_from": reuse_from} if reuse_from else {})) if "open" in step else {}  # the session is opened (its request is a part of that) or recognised again
     state = pilot_state.derive_state(root) if opened else state
     requested = _events(state, attempt_id, stage, "MODEL_REQUESTED")
     if not requested and "before" in step:
