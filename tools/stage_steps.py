@@ -313,12 +313,24 @@ def _events(state: Mapping[str, Any], attempt_id: str, stage: str, kind: str) ->
     return [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage and event["event_type"] == kind]
 
 
+def _no_plan(root: Path, state: Mapping[str, Any], attempt_id: str) -> str | None:
+    """A request of a batch is in the journal and the plan of the batches never was published: a run of an earlier version has no steps; the text says so."""
+    asked = any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED" and str(event.get("stage_instance_id")).startswith("tc-generator:")
+                for event in state["events"])
+    if asked and pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id) is None:
+        return ("STAGE_NO_PLAN: в журнале есть запрос пачки, а плана пачек в прогоне нет (прогон начат версией без опубликованного плана); "
+                "fix: покажи это человеку — прогон не продолжается; новый прогон тем же scan с --new-run")
+    return None
+
+
 def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], str, Mapping[str, Any]]:
     project, root = output_guard.existing_run(run_root)
     state = pilot_state.derive_state(root)
     if not state["attempts"]:
         raise ValueError("STAGE_NO_ATTEMPT: the run has no attempt yet; fix: scan создаёт попытку — повтори scan")
     row = STEPS.get(stage.split(":", 1)[0])
+    if stage.split(":", 1)[0] in ("tc-generator", "tc-reviewer") and (refusal := _no_plan(root, state, str(state["attempts"][-1]["attempt_id"]))):
+        raise ValueError(refusal)
     if stage.split(":", 1)[0] in ("tc-to-autotest", "autotest-reviewer") and state["attempts"][-1]["policy_profile"] == "cases-only-v1":
         raise ValueError(f"MODEL_STAGE_NOT_IN_PROFILE: {stage} is a stage of the automation, and this run is cases-only-v1; fix: прогон только кейсов — "
                          "автотесты строит новый прогон local-pilot-v1 (scan без --profile cases-only-v1) в поставке с режимом Б")
@@ -452,8 +464,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     opened = step["open"](model_id, invocation_id, fresh_context, **({"reuse_from": reuse_from} if reuse_from else {})) if "open" in step else {}  # the session is opened (its request is a part of that) or recognised again
     state = pilot_state.derive_state(root) if opened else state
     requested = _events(state, attempt_id, stage, "MODEL_REQUESTED")
-    if not requested and "before" in step:
-        step["before"]()
+    prior = step["before"]() if "before" in step else None  # the capabilities of the earlier batches: published once, the same value again changes nothing — and the agent sees them in each call
     request = (pilot_state.read_model_request(root, attempt_id, stage, str(requested[-1]["artifact_digest"])) if requested else
                pilot_state.publish_model_request(root, attempt_id, stage, model_id=model_id, invocation_id=invocation_id or step.get("invocation") or stage.replace(":", "-"), input_digests=step["input_digests"],
                                                  reuse_from=reuse_from))
@@ -471,8 +482,11 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
         word = {"nonce_note": pilot_state.codeword_lost_note(root, state, attempt_id, stage).strip()}
         _mark_lost_word(project, root, stage)
     told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "generator_checks") if key in opened}
-    return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": step_size.compact_inputs(root, stage, found)["files_summary"],
-            "budget": _budget(root, step, found), **word, **told}
+    summary = step_size.compact_inputs(root, stage, found)
+    read = {**summary["files_summary"], **{key: summary[key] for key in ("java_level", "junit_params") if key in summary},  # what the automation stages keep to
+            "role_files": [str(path) for path in step_size.role_files(stage.split(":", 1)[0])]}  # the files of the role the stage is done by
+    return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": read,
+            "budget": _budget(root, step, found), **word, **told, **({"prior_capabilities": prior} if prior and stage.startswith("tc-generator:BATCH-") else {})}  # only the batch's: the automation's ``before`` returns the whole view of the document
 
 
 def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry_run: bool = False, transport_attempts: int = 1, abort: str | None = None) -> dict[str, Any]:
@@ -510,6 +524,8 @@ def stage_status(root: Path, family: str) -> dict[str, Any]:
     """What ``status`` says of the marker or the generator: the next verb and the id of the step, who waits, the slot and the size.  Only reads."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
+    if family in ("tc-generator", "tc-reviewer") and (refusal := _no_plan(root, state, attempt_id)):  # no step to name: not the plan (it cannot go on), not the family
+        return {"next": {"verb": None, "stage": None}, "waiting_for": "human", "recovery": refusal}
     parts = STEPS[family][0](root) or (STEPS["plan"][0](root) if family == "tc-generator" else [])  # the generator before its plan: the step of the plan
     if not parts:
         return {}

@@ -146,6 +146,22 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
 }
 
 
+_HELP = {  # what ``--help`` says of the flags of the two commands of the cycle (the words of SKILL orchestrate)
+    ("prepare", "run_root"): "папка прогона: .pilot-runs/<run_id> (её печатает scan)",
+    ("prepare", "stage"): "стадия из next.stage команды status (например tc-generator:<батч>, tc-reviewer:canonical)",
+    ("prepare", "model_id"): "модель сессии, которая делает шаг (метка для отчёта)",
+    ("prepare", "invocation_id"): "метка сессии, делающей шаг; у ревью не равна метке генератора, если --fresh-context yes",
+    ("prepare", "reuse_from"): "run_id из поля reuse вывода scan: стадия отвечается ответом того прогона, submit не нужен; --fresh-context и --invocation-id с ним не давай",
+    ("prepare", "fresh_context"): "только у ревью: yes — ревью в свежей сессии, no — в той же (после согласия человека)",
+    ("prepare", "accept_self_review"): "согласие человека на ревью в той же сессии; только с --fresh-context no",
+    ("submit", "run_root"): "папка прогона: .pilot-runs/<run_id> (её печатает scan)",
+    ("submit", "stage"): "стадия, ответ которой лежит в answer_slot после prepare",
+    ("submit", "transport_attempts"): "1 (по умолчанию) или 2: единственный повтор стадии после отказа ответа",
+    ("submit", "dry_run"): "проверить ответ и ничего не записать",
+    ("submit", "abort"): "завершить стадию без ответа: REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE (ревью), REWORK_UNUSABLE (доработка)",
+}
+
+
 def _parser() -> JsonArgumentParser:
     parser = JsonArgumentParser(prog="python -m tools.api", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -166,6 +182,8 @@ def _parser() -> JsonArgumentParser:
                 command.add_argument(flag, dest=dest, type=rest[0], default=rest[1])
             else:
                 command.add_argument(flag, dest=dest, type=(rest[0] if rest else (Path if flag == "--run-root" else str)), required=True)
+        for action in command._actions:
+            action.help = _HELP.get((name, action.dest), action.help)
         if not any(action.dest == "run_root" for action in command._actions):
             # a command that has no run of its own takes the run as the anchor of its input file and the place of its refusals
             command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="the run: the anchor of the input file; the refusals of the command are journaled there")
@@ -187,6 +205,8 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):  # ``--help`` prints the Russian descriptions before any answer: UTF-8 like the answers, not the encoding of the pipe
+        sys.stdout.reconfigure(encoding="utf-8")
     args = _parser().parse_args(argv)
     handler, _options, invalid = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))

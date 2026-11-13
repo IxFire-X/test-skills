@@ -1436,8 +1436,9 @@ def _scan(args: Any) -> int:
     except ContextStop as stop:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=stop.detail, fix=stop.fix, scope=scope))
         return 2
-    except ContextSelectionError:
-        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", scope=scope))
+    except ContextSelectionError as error:
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", detail=str(error),
+                               **({"fix": error.fix} if error.fix else {}), scope=scope))
         return 2
     except HostStop as stop:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=str(stop), scope=scope,

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -36,7 +37,11 @@ class RuntimeUnavailableError(InventoryError):
 
 
 class ContextSelectionError(ValueError):
-    """A requested context batch is not safely selectable."""
+    """A requested context batch is not safely selectable; ``fix`` is what the human does about it (None: no advice of its own)."""
+
+    def __init__(self, message: str, fix: str | None = None) -> None:
+        super().__init__(message)
+        self.fix = fix
 
 
 _BINARY_SUFFIXES = frozenset({
@@ -1386,11 +1391,32 @@ def _read_context_file(project_root: Path, project_path: str) -> bytes:
     except (OSError, ValueError) as error:
         raise ContextSelectionError("context path confinement failed") from error
     if _is_reparse(candidate) or not candidate.is_file():
-        raise ContextSelectionError("context path reparse status changed")
+        raise _context_file_refusal(candidate, project_path)  # the one check above decides; this only chooses the words
     try:
         return candidate.read_bytes()
     except OSError as error:
-        raise ContextSelectionError("context bytes are unreadable") from error
+        raise ContextSelectionError(f"файл {project_path} не читается: {error.strerror or error}", _UNREADABLE_FIX) from error
+
+
+_VANISHED_FIX = "покажи человеку и повтори scan: файл менялся между описью и чтением; на время scan проект не меняй"
+_LINKED_FIX = ("покажи человеку: проект стоит в облачной или сетевой папке (или файл — симлинк) — перенести проект на локальный диск "
+               "или исключить файл через .skillsrc paths.exclude модуля, затем повторить scan")
+_UNREADABLE_FIX = "покажи человеку: проверить права на файл и его папку; не помогло — исключить файл через .skillsrc paths.exclude модуля и повторить scan"
+
+
+def _context_file_refusal(candidate: Path, project_path: str) -> ContextSelectionError:
+    """The refusal of a context file that the check of ``_read_context_file`` turned down: the file and the reason, always one."""
+    try:
+        details = os.stat(candidate, follow_symlinks=False)
+    except FileNotFoundError:
+        return ContextSelectionError(f"файл {project_path} исчез или изменился после описи", _VANISHED_FIX)
+    except OSError as error:
+        return ContextSelectionError(f"файл {project_path} не читается: {error.strerror or error}", _UNREADABLE_FIX)
+    if candidate.is_symlink() or getattr(details, "st_file_attributes", 0) & 0x400:
+        return ContextSelectionError(f"файл {project_path} — ссылка или reparse-точка (облачная папка, дедупликация, симлинк)", _LINKED_FIX)
+    if not stat.S_ISREG(details.st_mode):
+        return ContextSelectionError(f"файл {project_path} исчез или изменился после описи: теперь это не обычный файл", _VANISHED_FIX)
+    return ContextSelectionError(f"файл {project_path} не прошёл проверку: ссылка, reparse-точка или не обычный файл", _LINKED_FIX)
 
 
 def _asset_rule(project_path: str, contents: bytes) -> str | None:

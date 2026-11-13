@@ -126,7 +126,7 @@ def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monk
     request = next(event for event in state["events"] if event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id", "").startswith("tc-generator:"))
     assert pilot_state.read_model_request(run["run_root"], run["attempt_id"], request["stage_instance_id"], request["artifact_digest"])["input_digests"][2] == plan["digest"]
     # the cycle of the agent does not drive such a run: its steps come from the published plan, which the old flow never had
-    assert prepare_stage(run["run_root"], request["stage_instance_id"])[1]["code"] == "STAGE_UNKNOWN"
+    assert prepare_stage(run["run_root"], request["stage_instance_id"])[1]["code"] == "STAGE_NO_PLAN"
 
 
 def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tmp_path: Path) -> None:

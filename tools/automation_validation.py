@@ -49,7 +49,7 @@ _MESSAGES = {
     "AUTOMATION_MISSING_OPERATION_COVERAGE": "ready step requires an operation relation",
     "AUTOMATION_MISSING_ASSERTION_COVERAGE": "ready assertion requires an assertion relation",
     "AUTOMATION_ORPHAN_SYMBOL": "generated symbol must occur in a relation",
-    "AUTOMATION_ORPHAN_FILE": "generated file must own a related symbol",
+    "AUTOMATION_ORPHAN_FILE": "generated file must own a related symbol: no row of implementation_relations names its file_id (an orphan file has no symbol linked to a case step or assertion)",
     "AUTOMATION_DUPLICATE_MANUAL_DISPOSITION": "manual disposition must be unique",
     "AUTOMATION_UNKNOWN_MANUAL_STEP": "manual disposition step_id does not belong to case_id",
     "AUTOMATION_MANUAL_DISPOSITION_READY": "manual disposition may target only manual-only steps",

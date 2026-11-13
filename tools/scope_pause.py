@@ -49,8 +49,9 @@ def _marker(root: Path, state: Mapping[str, Any], attempt_id: str) -> Mapping[st
         return None
     try:
         return pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", answers[0])["artifact"]
-    except (OSError, KeyError, ValueError):
-        return None
+    except (OSError, KeyError, ValueError) as error:  # the answer is in the journal and its file is not: not «no marker yet»
+        raise ScopeRefused("SCOPE_MARKER_UNREADABLE", "ответ разметки (context-marker:baseline) есть в журнале, но его файл не читается или изменён; "
+                           "fix: покажи это человеку — контекст дрейфовал; прогон не продолжается, новый прогон тем же scan с --new-run") from error
 
 
 def requirements_of(marker: Mapping[str, Any]) -> list[Mapping[str, Any]]:

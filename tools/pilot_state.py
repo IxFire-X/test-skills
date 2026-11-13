@@ -2311,8 +2311,8 @@ def publish_model_request(
     published = dict(read_model_request(root, attempt_id, stage_instance_id, receipt["digest"]))
     if nonce is not None:  # only in this output, never in a file: the agent puts it at the head of the generator's task
         published["nonce"] = nonce
-        published["nonce_note"] = (f"вставь строку «Контрольное слово: {nonce}» в начало задачи генератору; в его ответ и в файлы прогона "
-                                   "слово не копируй — прогон хранит только его sha256; вывод этой команды слово показывает один раз")
+        published["nonce_note"] = (f"вставь строку «Контрольное слово: {nonce}» в начало задачи генератору; если кейсы пишешь ты сам, вставлять некуда — слово просто не используй; "
+                                   "в ответ генератора и в файлы прогона слово не копируй — прогон хранит только его sha256; вывод этой команды слово показывает один раз")
     if not str(model_id or "").startswith("controller:"):  # the merge by the code is no model step
         warning, measure_error = _record_step_size(project, root, run_id, stage_instance_id)
         if warning is not None:  # a warning, never a refusal
@@ -2448,6 +2448,15 @@ def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any])
     _validate_model_stage_artifact(stage_instance_id, value)
 
 
+def _undeclared_capabilities(fragment: Mapping[str, Any]) -> list[str]:
+    """The capabilities the steps of a fragment use and its ``operation_capabilities`` do not declare (those of an earlier batch, not copied)."""
+    declared = {row.get("capability_id") for row in fragment.get("operation_capabilities") or [] if isinstance(row, Mapping)}
+    used = {step["operation"]["capability_id"] for case in fragment.get("test_cases") or [] if isinstance(case, Mapping) for step in case.get("steps") or []
+            if isinstance(step, Mapping) and isinstance(step.get("operation"), Mapping) and step["operation"].get("kind") == "project_action"
+            and isinstance(step["operation"].get("capability_id"), str)}
+    return sorted(used - declared)
+
+
 def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     from tools.schema_validation import schema_diagnostics
 
@@ -2493,11 +2502,14 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
     if diagnostics:  # the same retry_prompt validate_artifact gives, so the one retry needs no second command
         from tools.validate_artifact import retry_prompt
 
+        missing = _undeclared_capabilities(value) if stage_instance_id.startswith("tc-generator:BATCH-") and any(str(row.get("path") or "").endswith("/semantic_type") for row in diagnostics) else []
+        cause = (f"возможная причина semantic_type: capability {', '.join(missing[:5])}{' …' if len(missing) > 5 else ''} нет в operation_capabilities этого фрагмента, а тип берётся из неё; "
+                 "скопируй её слово в слово из входа prior_capabilities (capabilities прошлых пачек) в operation_capabilities этого фрагмента; ") if missing else ""
         raise ModelStageArtifactInvalid(
             f"invalid model stage artifact: {stage_instance_id} does not pass {schema_name}: "
             + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in diagnostics[:3])
             + (f" and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else "")
-            + "; fix: give the role its original input and this retry_prompt, then submit --transport-attempts 2 — "
+            + "; fix: " + cause + "give the role its original input and this retry_prompt, then submit --transport-attempts 2 — "
             "nothing is written; retry_prompt:\n" + retry_prompt(dict(value), diagnostics)
         )
 

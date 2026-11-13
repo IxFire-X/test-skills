@@ -213,7 +213,7 @@ FIXES: dict[str, str] = {
     "SEMANTIC_SECRET_HANDLE_IN_HUMAN_FIELD": "значение секрета в человеческом поле не пишется: ссылка на secret_handle через safe_label",
     "SEMANTIC_UNCOVERED_REQUIREMENT": "у каждого требования должен быть кейс: добавь кейс с его requirement_ids",
     "SEMANTIC_UNKNOWN_CANONICAL_REQUIREMENT": "ссылка на требование, которого нет в requirements: поправь id или добавь требование",
-    "SEMANTIC_UNKNOWN_CAPABILITY": "operation.capability_id ссылается на необъявленную capability: объяви её в operation_capabilities",
+    "SEMANTIC_UNKNOWN_CAPABILITY": "operation.capability_id ссылается на необъявленную capability: объяви её в operation_capabilities этого фрагмента; capability прошлой пачки — копия слово в слово из входа prior_capabilities",
     "SEMANTIC_UNKNOWN_REQUIREMENT": "requirement_ids кейса ссылаются на требование, которого нет в requirements: поправь id",
     "SEMANTIC_UNKNOWN_SOURCE_REQUIREMENT": "mapping ссылается на SREQ, которого нет в плане: возьми id из batch-plan.json",
     "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: step_id шага — STEP-<хвост case_id после TC->-<NN, номер шага в кейсе двумя цифрами> "
@@ -225,6 +225,9 @@ FIXES: dict[str, str] = {
     "OUTPUT_DIR_OUTSIDE_RUN": "каталог публикации прогона `<run>/published` подменён ссылкой (junction) или ведёт за пределы прогона: код ничего туда не записал; агент ничего не правит — человек удаляет эту ссылку (на её месте должна быть обычная папка внутри прогона или её нет) и повторяет ту же команду",
     "INPUT_OUTSIDE_PROJECT": "передай --run-root <run> (или --project) и файл внутри этого проекта; без них — файл внутри прогона <project>/.pilot-runs/<run_id>/",
     # --- the pause after the marker (tools.scope_pause) ---
+    "AUTOMATION_ORPHAN_FILE": "каждый файл из generated_files несёт хотя бы один символ, связанный строкой implementation_relations с шагом или утверждением кейса; файл-помощник без такого символа не принимается — держи помощники внутри тестового класса, а лишний файл убери",
+    "STAGE_NO_PLAN": "в журнале есть запрос пачки, а плана пачек в прогоне нет (прогон начат версией без опубликованного плана): покажи это человеку; прогон не продолжается — новый прогон тем же scan с --new-run",
+    "SCOPE_MARKER_UNREADABLE": "ответ разметки есть в журнале, но его файл не читается или изменён (контекст дрейфовал): покажи это человеку; прогон не продолжается — новый прогон тем же scan с --new-run",
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
     "SCAN_INCOMPLETE": "повтори тот же scan (те же --module, --docs, --profile): он достроит недостающие пачки контекста в этом прогоне",
     "SCOPE_DECISION_INVALID": "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)",
