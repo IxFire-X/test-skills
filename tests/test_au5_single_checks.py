@@ -78,39 +78,28 @@ def _automation_run(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
 
 
 def test_u1_every_refusal_of_the_removed_automation_block_still_holds(tmp_path: Path) -> None:
-    """The removed block refused an automation request whose predecessor is unreadable or whose inputs differ; both stay."""
-    from tests.test_automation_revision_budget import automated_document, automation
-    from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
-    from tools.pilot_state import publish_effective_canonical
+    """The removed block refused an automation request that came out of order; the cycle refuses it by name and writes nothing."""
+    from tests.helpers import prepare_stage
+    from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, GENERATOR, run_generator, run_reviewer
+    from tests.test_automation_revision_budget import automated_document
+    from tests.test_generated_delta import _effective_bundle, _published_reviewer_ledger
+    from tools.pilot_state import publish_effective_canonical, read_effective_canonical
 
-    run_root, attempt_id, run = _automation_run(tmp_path)
-    tmp = run_root / "tmp"
-    generator = ("model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1")
+    run_root, attempt_id, _flags = _automation_run(tmp_path)
     before = _journal(run_root)
-    code, refused = _api(*generator, "--input-digest", "sha256:" + "a" * 64, "--input-digest", "sha256:" + "b" * 64)
+    code, refused = prepare_stage(run_root, GENERATOR, "--model-id", "model-automation")
     assert code != 0 and refused["status"] != "ok" and _journal(run_root) == before, refused  # no effective canonical yet
     assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     document = automated_document()
     publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
-    effective = _api("read-effective", *run)[1]["result"]
-    assert _api(*generator, "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])[0] == 0
-    artifact = automation(document, 1, predecessor=None, correction_review=None, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    assert _api("model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))[0] == 0
-    reviewer = ("model-request", *run, "--stage", "autotest-reviewer:r1", "--model-id", "model-automation-reviewer")
+    run = {"root": run_root, "attempt": attempt_id, "document": document, "answers": {},
+           "bundle": read_effective_canonical(run_root, attempt_id)["effective_bundle_receipt_digest"]}
+    assert prepare_stage(run_root, GENERATOR, "--model-id", "model-automation")[0] == 0
     before = _journal(run_root)
-    code, refused = _api(*reviewer, "--invocation-id", "reviewer-1", "--input-digest", "sha256:" + "a" * 64, "--input-digest", "sha256:" + "b" * 64)
-    assert code != 0 and "OUT_OF_ORDER" not in json.dumps(refused) and _journal(run_root) == before, refused  # no review boundary yet
+    code, refused = prepare_stage(run_root, REVIEWER, *INDEPENDENT)
+    assert code == 2 and refused["code"] == "STAGE_WAITS" and "OUT_OF_ORDER" not in json.dumps(refused) and _journal(run_root) == before, refused  # the generator is not answered
     assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
-    assert _api("automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))[0] == 0
-    assert _api("open-automation-boundary", *run, "--facts", str(tmp / "facts.json"))[0] == 0
-    facts = json.loads((tmp / "facts.json").read_bytes())
-    assert _api("review-requested", *run, "--stage", "autotest-reviewer:r1", "--digest", facts["automation_digest"])[0] == 0
-    boundary = _api("read-receipt", *run, "--kind", "automation-review-boundary-r1", "--event", "ARTIFACT_READ_BACK")[1]["result"]["record"]
-    reviewer = (*reviewer, "--invocation-id", boundary["reviewer_invocation_id"])
-    code, refused = _api(*reviewer, "--input-digest", boundary["digest"], "--input-digest", boundary["automation_digest"])
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "automation-review-boundary-r1" in refused["message"], refused
-    assert _api(*reviewer, "--input-digest", boundary["automation_digest"], "--input-digest", boundary["digest"])[0] == 0
+    assert run_generator(run)[0] == 0 and run_reviewer(run)[0] == 0
 
 
 def test_a_marker_request_over_an_openspec_receipt_is_published(tmp_path: Path) -> None:

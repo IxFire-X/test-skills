@@ -87,51 +87,26 @@ def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> Non
 
 
 def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_path: Path) -> None:
-    from tests.helpers import build_phase_two_baseline
-    from tests.test_automation_revision_budget import automated_document, automation, review
-    from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
-    from tools.pilot_state import publish_effective_canonical
-    from tests.spine_helpers import run_phase_one_spine
+    from tests.helpers import prepare_stage, put_in_slot, submit_stage
+    from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
+    from tests.test_automation_revision_budget import review
+    from tools.automation_validation import automation_sha256
 
-    (tmp_path / "tests").mkdir()
-    identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
-    baseline = build_phase_two_baseline(tmp_path, identity, skill_pack_root=tmp_path / ".pilot-runs")
-    started = run_phase_one_spine(tmp_path, "local-pilot-v1", {"request_id": "digest-traps", "execution_requested": True}, identity, baseline, {})
-    run_root, attempt_id = Path(started["run"]["run_root"]), started["state"]["attempts"][0]["attempt_id"]
-    document = automated_document()
-    publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
-    run, tmp = ("--run-root", str(run_root), "--attempt", attempt_id), run_root / "tmp"
-    code, effective = _api("read-effective", *run)
-    effective = effective["result"]
-    # a wrong source digest in the generator request is named with the right one
-    code, refused = _api("model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
-                         "--input-digest", effective["effective_bundle_receipt_digest"], "--input-digest", effective["document_digest"])
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and "tools.api read-effective" in refused["message"], refused
-    assert _api("model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
-                "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])[0] == 0
-    artifact = automation(document, 1, predecessor=None, correction_review=None, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    assert _api("model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))[0] == 0
-    statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
-    assert _api("automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))[0] == 0
-    assert _api("open-automation-boundary", *run, "--facts", str(tmp / "facts.json"))[0] == 0
-    facts = json.loads((tmp / "facts.json").read_bytes())
-    assert _api("review-requested", *run, "--stage", "autotest-reviewer:r1", "--digest", facts["automation_digest"])[0] == 0
-    code, boundary = _api("read-receipt", *run, "--kind", "automation-review-boundary-r1", "--event", "ARTIFACT_READ_BACK")
-    boundary = boundary["result"]["record"]
-    assert _api("model-request", *run, "--stage", "autotest-reviewer:r1", "--model-id", "model-automation-reviewer",
-                "--invocation-id", boundary["reviewer_invocation_id"], "--input-digest", boundary["automation_digest"], "--input-digest", boundary["digest"])[0] == 0
-    good = review(document, artifact, boundary, "ПРИНЯТО", session_id=boundary["reviewer_session_id"])
+    run = autotest_run(tmp_path)
+    assert run_generator(run)[0] == 0
+    assert prepare_stage(run["root"], REVIEWER, *INDEPENDENT)[0] == 0
+    record, artifact = boundary_of(run), run["answers"][1][0]
+    good = review(run["document"], artifact, record, "ПРИНЯТО", session_id=record["reviewer_session_id"])
     bad = json.loads(json.dumps(good))
-    bad["artifacts"]["autotest_review"]["reviewed_relations_sha256"] = facts["automation_digest"]  # the digest of the artifact, not of relations
-    before = _journal(run_root)
-    response = ("model-response", *run, "--stage", "autotest-reviewer:r1")
-    code, refused = _api(*response, "--artifact", _put(tmp / "review-bad.json", bad))
+    bad["artifacts"]["autotest_review"]["reviewed_relations_sha256"] = automation_sha256(artifact)  # the digest of the artifact, not of relations
+    before = _journal(run["root"])
+    code, refused = submit_stage(run["root"], REVIEWER, bad)
     assert code == 2 and refused["code"] == "MODEL_RESPONSE_DIGEST_MISMATCH", refused
     expected = good["artifacts"]["autotest_review"]["reviewed_relations_sha256"]
     assert "/artifacts/autotest_review/reviewed_relations_sha256" in refused["message"] and expected in refused["message"], refused
-    assert "relations-digest" in refused["message"] and _journal(run_root) == before
-    assert_refused_once(run_root, before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
-    code, answered = _api(*response, "--artifact", _put(tmp / "review.json", good), "--transport-attempts", "2")
+    assert _journal(run["root"]) == before
+    assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
+    code, answered = submit_stage(run["root"], REVIEWER, good, "--transport-attempts", "2")
     assert code == 0, answered
 
 

@@ -1,5 +1,5 @@
-"""FaT-10b: REVIEW_REQUESTED by command (the digest checks), the review of the automation by commands, the fixture of the runs with the generator answers
-published, and the cycle of the review (``prepare`` / ``submit`` of ``tc-reviewer:canonical``): the session, the evidence and the budget."""
+"""FaT-10b: the fixture of the runs with the generator answers published (``_generated_run``), the review of the automation on the cycle (r2 before r1),
+and the cycle of the review (``prepare`` / ``submit`` of ``tc-reviewer:canonical``): the session, the evidence and the budget."""
 from __future__ import annotations
 
 import json
@@ -120,61 +120,21 @@ def _review(run: dict, digest: str, stage: str = "tc-reviewer:canonical") -> tup
     return _api("review-requested", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", stage, "--digest", digest)
 
 
-@pytest.mark.parametrize("stage", ["tc-generator:BATCH-fixture", "tc-to-autotest:r1", "autotest-reviewer:r3", "tc-reviewer:other", "assembly"])
-def test_only_reviewer_stages_take_a_review_request(tmp_path: Path, stage: str) -> None:
-    run = _generated_run(tmp_path)
-    before = _journal(run["run_root"])
-    code, refused = _review(run, run["fragment_digests"][0], stage)
-    assert code == 2 and refused["message"].startswith("REVIEW_STAGE_INVALID"), refused
-    assert _journal(run["run_root"]) == before
-    assert_refused_once(run["run_root"], before, refused["code"], "review-requested")  # J1: the one event the refusal itself added
+def test_the_reviewer_of_r2_before_r1_is_refused_and_r1_is_recorded_once(tmp_path: Path) -> None:
+    from tests.test_autotest_cycle import REVIEWER, autotest_run, next_of, run_generator
+    from tests.test_stage_steps import _events
+    from tests.helpers import prepare_stage
 
-
-def test_the_digest_must_be_the_published_candidate_of_the_reviewed_stage(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
-    before = _journal(run["run_root"])
-    # a generator fragment is a published candidate, but not the assembled one the canonical reviewer reads
-    codes = []
-    for digest in (run["fragment_digests"][0], "sha256:" + "7" * 64):
-        code, refused = _review(run, digest)
-        assert code == 2 and refused["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED"), refused
-        codes.append(refused["code"])
-    code, refused = _review(run, run["fragment_digests"][0], "autotest-reviewer:r1")  # a cases-only-v1 run: the automation is not its stage
-    assert code == 2 and refused["message"].startswith("MODEL_STAGE_NOT_IN_PROFILE"), refused
-    codes.append(refused["code"])
-    code, refused = _review(run, "sha256:short")
-    assert code == 2 and refused["message"].startswith("REVIEW_DIGEST_INVALID"), refused
-    codes.append(refused["code"])
-    assert _journal(run["run_root"]) == before
-    assert_refused_in_order(run["run_root"], before, *(("review-requested", code) for code in codes))  # J1: the four refusals of the test
-
-
-def test_the_automation_review_by_commands(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automated_document, automation, durable_boundary, host_evidence
-    from tests.test_generated_delta import _effective_bundle_digest
-
-    document = automated_document()
-    artifact = automation(document, 1, predecessor=None, correction_review=None, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    evidence = host_evidence("session-1")
-    run_root, attempt_id, _boundary = durable_boundary(tmp_path, artifact, "session-1", evidence, generator=evidence["generator_invocation_id"],
-                                                       reviewer=evidence["reviewer_invocation_id"], policy_profile="local-pilot-v1", document=document)
-    run = {"run_root": run_root, "attempt_id": attempt_id}
-    code, digest = _api("automation-digest", "--automation", _put(run_root / "tmp" / "automation.json", artifact))
-    assert code == 0, digest
-    code, receipt = _api("read-receipt", "--run-root", str(run_root), "--attempt", attempt_id,
-                         "--kind", "automation-review-boundary-r1", "--event", "ARTIFACT_READ_BACK")
-    assert code == 0, receipt
-    request = ("model-request", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", "autotest-reviewer:r1",
-               "--model-id", "model-automation-reviewer", "--invocation-id", evidence["reviewer_invocation_id"],
-               "--input-digest", digest["result"], "--input-digest", receipt["result"]["digest"])
-    code, refused = _api(*request)
-    assert code == 2, refused
-    code, recorded = _review(run, digest["result"], "autotest-reviewer:r2")
-    assert code == 2 and recorded["message"].startswith("REVIEW_CANDIDATE_NOT_PUBLISHED"), recorded
-    code, recorded = _review(run, digest["result"], "autotest-reviewer:r1")
-    assert code == 0 and recorded["result"]["artifact_digest"] == digest["result"], recorded
-    code, requested = _api(*request)
-    assert code == 0 and requested["status"] == "ok", requested
+    run = autotest_run(tmp_path)
+    assert run_generator(run)[0] == 0
+    before = _journal(run["root"])
+    code, refused = prepare_stage(run["root"], "autotest-reviewer:r2", "--invocation-id", "reviewer-1", "--fresh-context", "yes")
+    assert code == 2 and refused["code"] == "STAGE_UNKNOWN" and _journal(run["root"]) == before, refused  # r2 is no stage before r1 is answered
+    assert_refused_once(run["root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
+    assert prepare_stage(run["root"], REVIEWER, "--invocation-id", "reviewer-1", "--fresh-context", "yes")[0] == 0
+    recorded = _events(run["root"])
+    assert prepare_stage(run["root"], REVIEWER, "--invocation-id", "reviewer-1", "--fresh-context", "yes")[0] == 0  # the repeat writes nothing
+    assert _events(run["root"]) == recorded and next_of(run) == ("automation_review", "submit", REVIEWER)
 
 
 # --------------------------------------------------------------------------------------
@@ -194,62 +154,6 @@ def _review_answer(run: dict, verdict: str = "ПРИНЯТО") -> str:
     return _put(run["tmp"] / "review.json", {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report}, "warnings": []})
 
 
-def test_automation_boundary_facts_from_the_journal_by_commands_only(tmp_path: Path) -> None:
-    """FaT-10d: read-effective → model-response tc-to-autotest:r1 → automation-boundary-facts → open-automation-boundary
-    → review-requested → model-request autotest-reviewer:r1; the agent computes and copies nothing."""
-    from tests.helpers import build_phase_two_baseline
-    from tests.test_automation_revision_budget import automated_document, automation
-    from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
-    from tools.pilot_state import publish_effective_canonical
-    from tests.spine_helpers import run_phase_one_spine
-
-    (tmp_path / "tests").mkdir()
-    identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
-    baseline = build_phase_two_baseline(tmp_path, identity, skill_pack_root=tmp_path / ".pilot-runs")
-    started = run_phase_one_spine(tmp_path, "local-pilot-v1", {"request_id": "auto-facts", "execution_requested": True}, identity, baseline, {})
-    run_root, attempt_id = Path(started["run"]["run_root"]), started["state"]["attempts"][0]["attempt_id"]
-    document = automated_document()
-    publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
-    run, tmp = ("--run-root", str(run_root), "--attempt", attempt_id), run_root / "tmp"
-
-    code, effective = _api("read-effective", *run)
-    assert code == 0, effective
-    effective = effective["result"]
-    statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
-    code, refused = _api("automation-boundary-facts", *run, "--revision", "1", *statement)
-    assert code == 2 and refused["message"].startswith("AUTOMATION_RESPONSE_MISSING"), refused
-    code, requested = _api("model-request", *run, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
-                           "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])
-    assert code == 0, requested
-    artifact = automation(document, 1, predecessor=None, correction_review=None, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    code, answered = _api("model-response", *run, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))
-    assert code == 0, answered
-    before = _journal(run_root)
-    code, built = _api("automation-boundary-facts", *run, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))
-    assert code == 0 and _journal(run_root) == before, built  # it writes nothing in the run
-    facts = json.loads((tmp / "facts.json").read_bytes())
-    code, digest = _api("automation-digest", "--automation", str(tmp / "automation.json"))
-    assert code == 0 and facts["automation_digest"] == digest["result"], (facts, digest)
-    assert (facts["effective_canonical_digest"], facts["effective_bundle_receipt_digest"]) == (
-        effective["document_digest"], effective["effective_bundle_receipt_digest"]), facts
-    assert facts["generator_invocation_id"] == "generator-1" and facts["reviewer_invocation_id"] == "automation-reviewer-subagent-1", facts
-    assert facts["host_isolation"]["fresh_context"] is True and facts["host_isolation"]["distinct_invocations"] is True, facts
-    # the statement is the host's: "no" in a run without SELF is refused with the SELF fix, nothing written
-    code, refused = _api("automation-boundary-facts", *run, "--revision", "1", "--fresh-context", "no", "--reviewer-invocation-id", "x-1")
-    assert code == 2 and refused["code"] == "INDEPENDENCE_UNVERIFIED" and "--accept-self-review" in refused["message"], refused
-    assert _journal(run_root) == before
-    code, opened = _api("open-automation-boundary", *run, "--facts", str(tmp / "facts.json"))
-    assert code == 0, opened
-    code, recorded = _review({"run_root": run_root, "attempt_id": attempt_id}, facts["automation_digest"], "autotest-reviewer:r1")
-    assert code == 0, recorded
-    code, boundary = _api("read-receipt", *run, "--kind", "automation-review-boundary-r1", "--event", "ARTIFACT_READ_BACK")
-    assert code == 0, boundary
-    code, reviewer = _api("model-request", *run, "--stage", "autotest-reviewer:r1", "--model-id", "model-automation-reviewer",
-                          "--invocation-id", boundary["result"]["record"]["reviewer_invocation_id"],
-                          "--input-digest", boundary["result"]["record"]["automation_digest"], "--input-digest", boundary["result"]["record"]["digest"])
-    assert code == 0 and reviewer["status"] == "ok", reviewer
-
-
 # --------------------------------------------------------------------------------------
 # the review on the cycle of the agent: the session, the verdict, the evidence, the budget
 # --------------------------------------------------------------------------------------
@@ -264,15 +168,17 @@ def _opened_reviewed(tmp_path: Path, verdict: str = "ПРИНЯТО") -> dict:
     return run
 
 
-def test_prepare_and_submit_complete_the_session_and_read_effective_gives_the_set(tmp_path: Path) -> None:
+def test_prepare_and_submit_complete_the_session_and_the_effective_canonical_is_the_set(tmp_path: Path) -> None:
     from tests.test_review_two_commands import _ledger
 
     run = _opened_reviewed(tmp_path)
     ledger = _ledger(run)
     assert ledger["status"] == "COMPLETED" and [event["event_type"] for event in ledger["events"]] == [
         "REVIEW_SESSION_STARTED", "AUTHORITATIVE_VERDICT", "REVIEW_SESSION_COMPLETED"], ledger
-    code, effective = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
-    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
+    from tools import pilot_state
+
+    effective = pilot_state.read_effective_canonical(run["run_root"], run["attempt_id"])
+    assert effective["document_digest"].startswith("sha256:"), effective
 
 
 def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path: Path) -> None:
@@ -280,8 +186,10 @@ def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path
 
     run = _opened_reviewed(tmp_path, "ТРЕБУЕТ ДОРАБОТКИ")
     assert _ledger(run)["events"][1]["verdict"] == "REJECTED"
-    code, effective = _api("read-effective", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"])
-    assert code == 0 and effective["result"]["effective"] is None, effective
+    from tools import pilot_state
+
+    effective = pilot_state.effective_canonical_or_reason(run["run_root"], run["attempt_id"])
+    assert effective["effective"] is None, effective
 
 
 def test_evidence_beyond_the_budget_is_refused_as_context_limit_and_the_abort_closes_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import MODULE_PYTHON
+from tests.helpers import MODULE_PYTHON, answer_stage
 from tests.p4_flow import run_the_build
 from tests.test_review_canaries import _answer, _boundary_and_removed, _finding, _ids, _open, _select
 from tests.test_review_requested import _api, _generated_run, _put
@@ -48,7 +48,7 @@ def _fixture_run(monkeypatch: pytest.MonkeyPatch) -> None:
 def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | None, capsys: pytest.CaptureFixture[str], *, rework: bool, abort: bool = False) -> dict:
     """Two cases generated, the first sent back by the reviewer; ``rework``: it goes back to the generator once and passes the second round (r3: both cases, display_order
     [1, 2]), else the rework is off (``rework_rounds`` 0) and the set is r2 (the second one, display_order [2]); its automation accepted."""
-    from tests.test_automation_revision_budget import review
+    from tests.test_autotest_cycle import run_reviewer
     from tests.test_profile_flows import _automation_answer
     from tests.test_review_requested import _generated_run
     from tools import orchestrate_test_case_revision as orchestrate, pilot_state
@@ -76,12 +76,9 @@ def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: 
             assert _api("submit", "--run-root", str(root), "--stage", "tc-reviewer:rework-1")[0] == 0
     else:
         assert first["effective_source"]["revision"] == 2
-    flags, tmp = ("--run-root", str(root), "--attempt", attempt), root / "tmp"
-    document = pilot_state.read_effective_canonical(root, attempt)["document"]
+    effective = pilot_state.read_effective_canonical(root, attempt)
+    document = effective["document"]
     assert [case["display_order"] for case in document["test_cases"]] == ([1, 2] if rework and not abort else [2]) and document["revision"] == (3 if rework and not abort else 2)
-    effective = _api("read-effective", *flags)[1]["result"]
-    assert _api("model-request", *flags, "--stage", "tc-to-autotest:r1", "--model-id", "model-automation", "--invocation-id", "generator-1",
-                "--input-digest", effective["document_digest"], "--input-digest", effective["effective_bundle_receipt_digest"])[0] == 0
     artifact = _automation_answer(document, effective)
     if rework and not abort:  # both cases are back: the helper relates the first one, the second one is related the same way
         step = document["test_cases"][1]["steps"][0]
@@ -92,19 +89,9 @@ def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: 
     if content is not None:
         file = artifact["artifacts"]["generated_files"][0]
         file.update(content=content, content_digest="sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest())
-    assert _api("model-response", *flags, "--stage", "tc-to-autotest:r1", "--artifact", _put(tmp / "automation.json", artifact))[0] == 0
-    statement = ("--fresh-context", "yes", "--reviewer-invocation-id", "automation-reviewer-subagent-1")
-    assert _api("automation-boundary-facts", *flags, "--revision", "1", *statement, "--out", str(tmp / "facts.json"))[0] == 0
-    assert _api("open-automation-boundary", *flags, "--facts", str(tmp / "facts.json"))[0] == 0
-    digest = json.loads((tmp / "facts.json").read_bytes())["automation_digest"]
-    assert _api("review-requested", *flags, "--stage", "autotest-reviewer:r1", "--digest", digest)[0] == 0
-    record = _api("read-receipt", *flags, "--kind", "automation-review-boundary-r1", "--event", "ARTIFACT_READ_BACK")[1]["result"]["record"]
-    assert _api("model-request", *flags, "--stage", "autotest-reviewer:r1", "--model-id", "model-automation-reviewer",
-                "--invocation-id", record["reviewer_invocation_id"], "--input-digest", record["automation_digest"], "--input-digest", record["digest"])[0] == 0
-    verdict = review(document, artifact, record, "ПРИНЯТО", session_id=record["reviewer_session_id"])
-    for key in ("automation_sha256", "reviewed_relations_sha256", "host_isolation_sha256"):
-        del verdict["artifacts"]["autotest_review"][key]
-    assert _api("model-response", *flags, "--stage", "autotest-reviewer:r1", "--artifact", _put(tmp / "review.json", verdict))[0] == 0
+    assert answer_stage(root, "tc-to-autotest:r1", artifact, prepare=("--model-id", "model-automation"))[0] == 0
+    autotests = {"root": root, "attempt": attempt, "document": document, "bundle": effective["effective_bundle_receipt_digest"], "answers": {1: [artifact]}}
+    assert run_reviewer(autotests)[0] == 0  # the independent review: prepare opens the boundary and the request, the answer in the slot, submit
     return run
 
 
