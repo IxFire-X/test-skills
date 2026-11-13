@@ -473,15 +473,6 @@ flowchart TD
 [Открыть файл](../skills/orchestrate/SKILL.md)
 
 
-### `skills/orchestrate/references/orchestration-contract.md`
-
-**Подробные правила ведения работы.**
-
-Раскрывает порядок действий из главной инструкции: как создавать записи, передавать результат следующему шагу, ограничивать исправления и закрывать работу. Точные правила вынесены сюда, чтобы не перегружать саму точку входа.
-
-[Открыть файл](../skills/orchestrate/references/orchestration-contract.md)
-
-
 ### `skills/tc-generator/SKILL.md`
 
 **Инструкция автору тест-кейсов.**

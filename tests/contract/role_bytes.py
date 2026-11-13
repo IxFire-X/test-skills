@@ -9,7 +9,7 @@ from __future__ import annotations
 BUDGET = {
     "autotest-reviewer": (12474, 13097),
     "context-marker": (13660, 14343),
-    "orchestrate": (71792, 74792),  # V8: the SKILL is a map (52 348 -> 24 KB), the details are in references; was (90298, 93298)
+    "orchestrate": (46408, 48728),  # V8-W2: SKILL 15 149 + references 31 259 (the contract is gone, mode-b 10 995); was (71792, 74792)
     "tc-generator": (35783, 37572),
     "tc-reviewer": (19349, 20316),
     "tc-to-autotest": (17470, 18343),

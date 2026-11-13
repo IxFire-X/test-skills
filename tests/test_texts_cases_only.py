@@ -167,8 +167,8 @@ def _help(pack: Path, module: str, sub: str | None) -> tuple[int, str]:
 
 def test_every_command_the_texts_name_exists_in_the_cases_only_pack_with_the_flags_the_text_gives(cases_only_pack: Path) -> None:
     texts = {name: text for name, text in _profile_texts().items()
-             if name in {"README.md", "HOW-TO-USE.md", "skills/orchestrate/SKILL.md", "skills/orchestrate/references/orchestration-contract.md",
-                         "skills/orchestrate/references/fragment-sample.md"}}
+             if name in {"README.md", "HOW-TO-USE.md", "skills/orchestrate/SKILL.md", "skills/orchestrate/references/fragment-sample.md",
+                         "skills/orchestrate/references/scan.md", "skills/orchestrate/references/import.md", "skills/orchestrate/references/review.md"}}
     problems, seen = [], set()
     for name, text in texts.items():
         for module, sub, flags in sorted(_span_commands(text), key=repr):

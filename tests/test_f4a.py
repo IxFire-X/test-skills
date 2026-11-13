@@ -11,9 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
-CONTRACT = ROOT / "skills" / "orchestrate" / "references" / "orchestration-contract.md"
 GENERATOR = ROOT / "skills" / "tc-generator" / "SKILL.md"
-SKILL_BYTES_LIMIT = 24_560  # SKILL.md of orchestrate after V8 (52 492 after PT2): the agent at work reads it whole; the limit only goes down
+SKILL_BYTES_LIMIT = 15_906  # SKILL.md of orchestrate after V8-W2 (15 149 B + 5 %; 24 548 before, 52 492 after PT2): the agent at work reads it whole; the limit only goes down
 GENERATOR_ROLE_BYTES_LIMIT = 35_826  # tc-generator SKILL + references before F4a
 
 
@@ -49,12 +48,11 @@ def test_submit_prints_a_receipt_without_the_body_and_the_text_says_so() -> None
 # ---- A5-2 + A5-4: the review is two commands everywhere -------------------------------------------------------------------
 
 
-def test_the_map_of_calls_and_how_to_use_describe_the_review_through_prepare_and_submit() -> None:
-    rows = [row for row in CONTRACT.read_text(encoding="utf-8").splitlines() if row.startswith("| ") and ("Ревью" in row or "review" in row.lower())]
-    table = "\n".join(rows)
-    assert "`tools.api prepare --stage tc-reviewer:canonical`" in table and "`tools.api submit --stage tc-reviewer:canonical`" in table
+def test_the_skill_and_how_to_use_describe_the_review_through_prepare_and_submit() -> None:
+    skill = _flat(SKILL)
+    assert "`prepare --stage tc-reviewer:canonical" in skill and "`submit --stage tc-reviewer:canonical`" in skill
     for old in ("session-start", "review-requested", "complete-review"):
-        assert old not in table, old
+        assert old not in skill, old
     how = _flat(ROOT / "HOW-TO-USE.md")
     assert "девяти команд" not in how and "deprecated" not in how and "v0.1" not in how
     assert "`prepare --stage tc-reviewer:canonical`" in how and "`submit --dry-run`" in how

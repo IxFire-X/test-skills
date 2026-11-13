@@ -13,8 +13,8 @@ from tools import stages
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
-MAP_LINES = 181  # V8: 419 lines / 52 KB before; the limit only goes down
-REFERENCES = ("openspec.md", "review.md", "import.md")
+MAP_LINES = 99  # V8-W2: 94 lines (181 before, 419 / 52 KB at PT2); the limit only goes down
+REFERENCES = ("openspec.md", "review.md", "import.md", "scan.md")
 
 
 def _text() -> str:

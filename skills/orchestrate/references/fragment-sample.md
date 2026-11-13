@@ -86,6 +86,19 @@
 
 Типы обеих сторон `equals` совместимы (integer с integer, string со string); `contains` — только строка в строке.
 
+## Три отказа, которые встречаются чаще всего
+
+1. **Пачка 2 и дальше: capabilities прошлых пачек.** Шаг, который вызывает capability из пачки 1, требует её описания в `operation_capabilities` этой же пачки: код берёт тип результата только оттуда.
+   Без копии отказ — ошибка схемы `semantic_type`. Скопируй capability из входа `prior_capabilities` слово в слово (другой байт — `BATCH_CAPABILITY_CONFLICT`): в `operation_capabilities` пачки 2 стоит
+   `{"capability_id": "CAP-B1-count", "action": "<имя операции>", "adapter": "<адаптер из входов>", "arguments": [], "results": [{"name": "count", "semantic_type": {"kind": "json", "type": "integer"}}], "provenance": ["<фраза источника>"]}` — как в пачке 1.
+
+2. **Ссылка на выход шага — только на шаг выше** (`SEMANTIC_FORWARD_STEP_OUTPUT`). Ожидание шага 2 может сослаться (в `expected`) на выход шага 1 — `{"kind": "step_output", "step_id": "STEP-B1-003-01", "output_id": "owner_id"}`; утверждение о выходе собственного шага — это `actual` вида `http_status`, `http_header`, `http_body` или `project_result`, не `step_output`.
+
+3. **Группа вариантов `param_group`** (`SEMANTIC_PARAM_GROUP_MISMATCH`). Кейсы одной группы различаются только значениями литералов, `case_id`, названием, целью и текстами шагов; `requirement_ids`, `priority`, `categories`,
+   предусловия, `operation`, операторы, число шагов и ссылки между ними — одни и те же.
+
+Проекции входа: список `read` называет файлы `<run>/review-views/` (опись — `inventory-view-v1`, план пачек — `plan-view-v1` без текстов требований: они в ответе разметки, `requirements[].text` по `source_requirement_id`). Читай их, а не `inventories/` и `batch-plans/`.
+
 ## Как собрать фрагмент на десятки кейсов
 
 1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id шагов и проверок ставит код по схеме выше, `case_id` у тебя уникальны в пачке.
