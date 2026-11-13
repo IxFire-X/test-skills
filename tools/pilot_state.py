@@ -451,8 +451,42 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
     return manifest, receipt
 
 
-def _self_review_accepted_at(project: Path, root: Path) -> bool:
-    return _run_boundary(project, root)[1].get("accept_self_review") is True
+SELF_MARK = "self-review-accepted.json"  # the human's consent to a review in the same session, given at the step of the review
+SELF_BATCH = "self-review-v1"  # the events of the mark carry it
+
+
+def _self_mark_bytes(attempt_id: str) -> bytes:
+    return json.dumps({"attempt_id": attempt_id, "reason": "SELF_REVIEW_ACCEPTED"}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+
+
+def _self_consent_given(project: Path, root: Path, state: Mapping[str, Any] | None = None) -> bool:
+    """The consent counts only with its ARTIFACT_READ_BACK in the journal (``bind_bytes``, batch ``self-review-v1``) and the bytes the code writes —
+    a file an agent put there is no consent."""
+    try:
+        data = read_confined_bytes(project, root, root / SELF_MARK)
+        value = json.loads(data) if data is not None else None
+    except (OutputConfinementError, ValueError):
+        return False
+    if not isinstance(value, Mapping) or not isinstance(value.get("attempt_id"), str) or data != _self_mark_bytes(value["attempt_id"]):
+        return False
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    return any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == value["attempt_id"] and event.get("batch_id") == SELF_BATCH
+               and event.get("artifact_digest") == digest for event in (state if state is not None else derive_state(root))["events"])
+
+
+def _self_review_accepted_at(project: Path, root: Path, state: Mapping[str, Any] | None = None) -> bool:
+    return _run_boundary(project, root)[1].get("accept_self_review") is True or _self_consent_given(project, root, state)
+
+
+def grant_self_review(run_root: Path, attempt_id: str) -> bool:
+    """The human's consent to a review in the same session, given at the step of the review: one mark of the run, written before the review it belongs to
+    (``bind_bytes``: the bytes are the code's, a repeat writes nothing, a cut one is finished).  ``False`` where the run admitted SELF already."""
+    project, root = _run_root(run_root)
+    if _self_review_accepted_at(project, root):
+        return False
+    data = _self_mark_bytes(attempt_id)
+    bind_bytes(root, attempt_id, root / SELF_MARK, data, digest="sha256:" + hashlib.sha256(data).hexdigest(), batch_id=SELF_BATCH, label="self-review mark")
+    return True
 
 
 def _disposition_policy_at(project: Path, root: Path) -> str:
@@ -466,7 +500,7 @@ def disposition_policy(run_root: Path) -> str:
 
 
 def self_review_accepted(run_root: Path) -> bool:
-    """The run admits a review without a fresh context (`scan --accept-self-review`)."""
+    """The run admits a review without a fresh context (`scan --accept-self-review`, or the consent given at the step of the review)."""
     project, root = _run_root(run_root)
     return _self_review_accepted_at(project, root)
 
@@ -2503,7 +2537,7 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
     if review_canaries.codeword_state(root, attempt_id, value) == "named" and not _self_review_accepted_at(_run_root(root)[0], root):
         raise ValueError("REVIEW_CODEWORD_NAMED: ревьюер назвал контрольное слово генератора — он видел задачу генератора, это ревью в той же "
                          "сессии; fix: проведи ревью в новой сессии (/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её "
-                         "ответ как есть; ничего не записано. Ревью в той же сессии допустимо, только если прогон начат с scan --accept-self-review")
+                         "ответ как есть; ничего не записано. Ревью в той же сессии допустимо, только если человек согласен: prepare с --fresh-context no --accept-self-review")
     try:
         review_decision(candidate, value, imported=_run_imported(root, attempt_id), canaries=canaries)
     except OrchestrationError as error:
@@ -3268,7 +3302,7 @@ def _terminal_reviewer_evidence_with_state(
         )},
         "isolation": "verified" if verified else "independence_unverified",
     }
-    if not verified and _self_review_accepted_at(project, root):
+    if not verified and _self_review_accepted_at(project, root, state):
         evidence["self_accepted"] = True
     return evidence
 
@@ -3839,7 +3873,7 @@ def _validate_factual_receipt(
                 and (
                     ledger["host_isolation"].get("fresh_context") is True
                     and ledger["host_isolation"].get("distinct_invocations") is True
-                    or _self_review_accepted_at(project, root)
+                    or _self_review_accepted_at(project, root, state)
                 )
                 and ledger["host_isolation"].get("role_policy") == "canonical-reviewer-v1"
                 and isinstance(ledger.get("events"), list)
@@ -3906,7 +3940,7 @@ def _validate_factual_receipt(
             or set(isolation) != {"fresh_context", "distinct_invocations", "evidence_digest"}
             or not isinstance(isolation.get("fresh_context"), bool)
             or not isinstance(isolation.get("distinct_invocations"), bool)
-            or not (isolation["fresh_context"] and isolation["distinct_invocations"] or _self_review_accepted_at(project, root))
+            or not (isolation["fresh_context"] and isolation["distinct_invocations"] or _self_review_accepted_at(project, root, state))
             or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
             or isolation.get("evidence_digest") != isolation_digest
         ):
@@ -4980,19 +5014,19 @@ def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapp
 
 
 class IndependenceUnverified(ValueError):
-    """The host states no fresh context in a run without ``scan --accept-self-review``."""
+    """The host states no fresh context in a run that admitted no SELF (``scan --accept-self-review`` or ``prepare --accept-self-review``)."""
 
     code = "INDEPENDENCE_UNVERIFIED"
 
 
 def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None:
-    """``fresh_context`` is the host's statement; ``no`` needs SELF admitted at scan, ``yes`` is left to the protocol."""
+    """``fresh_context`` is the host's statement; ``no`` needs SELF admitted (at scan or at the step of the review), ``yes`` is left to the protocol."""
     if type(fresh_context) is not bool:
         raise ValueError("fresh_context must be the host's yes or no")
     if not fresh_context and not self_review_accepted(run_root):
         raise IndependenceUnverified(
             "INDEPENDENCE_UNVERIFIED: ревьюер без свежего контекста, а прогон не принял SELF; fix: только если человек согласен "
-            "на ревью в той же сессии, повтори scan этого запроса с --accept-self-review; иначе вызови ревьюера отдельным "
+            "на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review; иначе вызови ревьюера отдельным "
             "субагентом без истории генерации и укажи --fresh-context yes"
         )
 

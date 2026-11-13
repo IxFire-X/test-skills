@@ -640,7 +640,7 @@ def open_rework_review(run_root: Path, attempt_id: str, *, model_id: str | None,
         label = invocation_id or generator
         if label == generator and not self_review_accepted(Path(run_root)):
             raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора доработки, а прогон не принял SELF; fix: ревью доработки — отдельной "
-                                         "сессией: --fresh-context yes --invocation-id <метка новой сессии>; только если человек согласен на ревью в той же сессии, повтори scan с --accept-self-review")
+                                         "сессией: --fresh-context yes --invocation-id <метка новой сессии>; только если человек согласен на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review")
         prior = rework_label(run_root, attempt_id, REWORK_REVIEW_STAGE)
         if prior is not None and prior != label:
             raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью доработки уже открыто с ревьюером {prior}; второй сессии нет; fix: повтори prepare с тем же --invocation-id")
@@ -1374,7 +1374,7 @@ def _resolve_fresh_context(run_root: Path, fresh_context: bool | None) -> bool:
         if not self_review_accepted(Path(run_root)):
             raise ReviewRefused("FRESH_CONTEXT_REQUIRED", "prepare без --fresh-context: прогон не принимал ревью в той же сессии; "
                                 "fix: --fresh-context yes — ревьюер отдельный субагент или вызов без истории генерации; ревью в той же "
-                                "сессии — прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)")
+                                "сессии — человек согласен: --fresh-context no --accept-self-review (или review.self: true в .skillsrc)")
         fresh_context = False
     require_fresh_context_statement(Path(run_root), fresh_context)
     return fresh_context
@@ -1469,7 +1469,7 @@ def open_review(run_root: Path, attempt_id: str, *, model_id: str | None, invoca
     label = invocation_id or generator
     if not (fresh and label != generator) and not self_review_accepted(Path(run_root)):
         raise IndependenceUnverified("INDEPENDENCE_UNVERIFIED: метка ревьюера та же, что у генератора, а прогон не принял SELF; fix: вызови ревьюера отдельной сессией "
-                                     "и назови её --invocation-id; только если человек согласен на ревью в той же сессии, повтори scan с --accept-self-review")
+                                     "и назови её --invocation-id; только если человек согласен на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review")
     return review_open_step(run_root, attempt_id, output_dir=Path(run_root) / "published", model_id=model_id, invocation_id=label, fresh_context=fresh)
 
 

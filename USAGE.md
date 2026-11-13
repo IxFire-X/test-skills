@@ -263,8 +263,8 @@ Candidate revision 1 записывается в журнал с расчётн�
 После этого открывается одна fresh role-isolated reviewer session для полного canonical
 branch. Внутри неё допустимы bounded C-lite evidence requests, но:
 
-- ревью без свежего контекста принимается только в прогоне, созданном с
-  `scan --accept-self-review` (явное согласие человека); итог помечается
+- ревью без свежего контекста принимается только по явному согласию человека (`prepare --fresh-context no --accept-self-review`
+  на шаге ревью или `scan --accept-self-review`); итог помечается
   `review_independence: "SELF"`, и local-pilot `PASS` с ним может быть `accepted=true`.
   Отсутствие поля значит «не принято через SELF», а не доказательство изоляции: факт изоляции —
   `evidence.reviewer_isolation_state`. Без флага такое ревью закрывается `INDEPENDENCE_UNVERIFIED`;

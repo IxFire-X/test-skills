@@ -255,7 +255,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
 
     if fresh_context is None and not pilot_state.self_review_accepted(root):  # a run that admitted SELF needs no statement: the session is the same
         raise ReviewRefused("FRESH_CONTEXT_REQUIRED", "prepare без --fresh-context: прогон не принимал ревью в той же сессии; fix: --fresh-context yes — ревьюер отдельный субагент или "
-                            "вызов без истории генерации; ревью в той же сессии — прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)")
+                            "вызов без истории генерации; ревью в той же сессии — человек согласен: --fresh-context no --accept-self-review (или review.self: true в .skillsrc)")
     fresh = bool(fresh_context)
     pilot_state.require_fresh_context_statement(root, fresh)
     stage, generator_stage = f"autotest-reviewer:r{revision}", f"tc-to-autotest:r{revision}"
@@ -398,11 +398,15 @@ def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], **kwarg
 
 
 def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocation_id: str | None = None, reuse_from: str | None = None,
-            fresh_context: bool | None = None) -> dict[str, Any]:
+            fresh_context: bool | None = None, accept_self_review: bool = False) -> dict[str, Any]:
     """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run.
     ``invocation_id`` is the host's label of the session that does the work (the review compares it with the reviewer's: same label, no independence);
-    without it the code's label; ``fresh_context`` is the host's statement for a step that opens a session (the review)."""
+    without it the code's label; ``fresh_context`` is the host's statement for a step that opens a session (the review); ``accept_self_review`` is the
+    human's consent to a review in the same session, which the host passes with ``fresh_context`` ``no`` (it is written once for the run, before the review opens)."""
     project, root, state, attempt_id, step = _locate(run_root, stage)
+    if accept_self_review and ("open" not in step or fresh_context is not False):  # the consent is the host's word for a review step with «the same session»: nothing is written otherwise
+        raise ValueError("INVALID_ARGUMENT: --accept-self-review — согласие человека на ревью в той же сессии, только с --fresh-context no и только у стадии ревью; "
+                         "fix: prepare --stage <стадия ревью> --fresh-context no --accept-self-review после явного «да» человека (SKILL orchestrate §1)")
     if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
         return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
@@ -418,6 +422,8 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     _refuse_unready(stage, step)
     if reuse_from is None:
         _refuse_linked_inbox(root)
+    if accept_self_review:
+        pilot_state.grant_self_review(root, attempt_id)  # before the review it belongs to; a repeat writes nothing
     opened = step["open"](model_id, invocation_id, fresh_context) if "open" in step else {}  # the session is opened (its request is a part of that) or recognised again
     state = pilot_state.derive_state(root) if opened else state
     requested = _events(state, attempt_id, stage, "MODEL_REQUESTED")

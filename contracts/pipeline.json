@@ -80,6 +80,7 @@
     {"path": "step-sizes.jsonl", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.step_size:RECORD"},
     {"path": "output-sizes.jsonl", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.step_size:OUTPUT_SIZES"},
     {"path": "left-before-review.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:LEFT_MARK"},
+    {"path": "self-review-accepted.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.pilot_state:SELF_MARK"},
     {"path": "report.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},
     {"path": "report.json", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},
     {"path": "questions-for-analyst.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},

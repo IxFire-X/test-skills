@@ -77,7 +77,7 @@ Run остаётся связан с исходной project/module identity.
 1. `prepare --stage tc-to-autotest:rN` печатает `read`, `answer_slot`, `budget`. В слот — полный V5-артефакт; `source.*`, `content_digest` и digest предшественника ставит `submit`.
    `submit --dry-run` проверяет смысл ответа и совместимость с раннером модуля до записи; отказ ничего не пишет — исправь слот и повтори (`--transport-attempts 2` — единственный повтор).
 2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <метка>]`: граница, `REVIEW_REQUESTED` и запрос — один вызов (повтор довершает оборванное). `yes` — ревьюер отдельной
-   сессией, `--invocation-id` — его метка: не метка генератора и, для r2, не метка ревью r1. `no` — ревью в той же сессии, только в прогоне с SELF (`scan --accept-self-review`), метку не называй:
+   сессией, `--invocation-id` — его метка: не метка генератора и, для r2, не метка ревью r1. `no` — ревью в той же сессии, только после согласия человека на SELF (§1), метку не называй:
    независимость не засчитывается, отчёт это скажет. В выводе `read`, `answer_slot`, `for_human`, `generator_checks` (что код уже проверил). Digest-поля ответа ревьюера (`automation_sha256`,
    `reviewed_relations_sha256`, `host_isolation_sha256`, `reviewed_files[].content_digest`) ставит `submit`, ревьюер их не заполняет. Разрешены initial + одна complete correction.
 3. После ревью `status` называет `materialize` (принято), `prepare --stage tc-to-autotest:r2` (`AUTO_FIX_APPLIED`; после `materialize` r2 запрещена) или `finish` (отказ).

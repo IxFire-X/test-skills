@@ -358,7 +358,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         "evidence_path": str(root / "run-manifest.json"),
         "policy_profile": run["manifest"]["policy_profile"],
         **{key: run["manifest"][key] for key in ("requested_policy_profile", "execution_skipped") if key in run["manifest"]},
-        **({"self_review_accepted": True} if run["authorization"].get("accept_self_review") is True else {}),
+        **({"self_review_accepted": True} if pilot.self_review_accepted(root) else {}),  # at scan or at the step of the review
         **({"disposition_policy": "cleanup"} if run["authorization"].get("disposition_policy") == "cleanup" else {}),
         **(_quarantine_summary(root, attempt["attempt_id"]) if attempt else {}),
         "warnings": [], "warning_evidence_path": None, "evidence_errors": [],

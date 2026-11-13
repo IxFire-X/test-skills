@@ -38,11 +38,11 @@ FIXES: dict[str, str] = {
     "ORCHESTRATION_VERIFICATION": "проверка выбранной редакции не прошла: ничего не правь руками, повтори `tools.api submit --stage tc-reviewer:canonical`; "
                                   "повторный отказ — сообщи код и run_id владельцу пакета",
     "INDEPENDENCE_UNVERIFIED": "ревью требует свежего контекста: передай --fresh-context yes, если ревьюер запущен новым "
-                               "сеансом; нового сеанса нет — прогон должен начинаться с scan --accept-self-review",
+                               "сеансом; нового сеанса нет — человек согласен на ревью в той же сессии: повтори prepare с --fresh-context no --accept-self-review",
     "ATTEMPT_TERMINAL": "попытка закрыта, итог — report.md прогона; новая работа — новый прогон (scan --new-run)",
     # --- the review in two commands ---
     "FRESH_CONTEXT_REQUIRED": "--fresh-context yes — ревьюер отдельный субагент или вызов без истории генерации; ревью в той же сессии — "
-                              "прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)",
+                              "человек согласен на ревью в той же сессии: --fresh-context no --accept-self-review (или review.self: true в .skillsrc)",
     "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори `prepare --stage tc-reviewer:canonical` с теми же --invocation-id и --fresh-context или иди "
                            "дальше — ответ ревьюера в слот и `submit --stage tc-reviewer:canonical`",
     "REVIEW_LEDGER_UNBOUND": "файл леджера ревьюера лежит без событий и это не та ревизия, что публикуется: повтори ту же команду с теми же входами "
@@ -59,7 +59,7 @@ FIXES: dict[str, str] = {
                                 "ответ единственным повтором стадии (--transport-attempts 2)",
     "REVIEW_CODEWORD_NAMED": "ревьюер назвал контрольное слово генератора — он видел задачу генератора: проведи ревью в новой сессии "
                              "(/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её ответ; ревью в той же сессии — "
-                             "только если прогон начат с scan --accept-self-review",
+                             "только если человек согласен: prepare с --fresh-context no --accept-self-review",
     "MODEL_OUTPUT_TRUNCATED": "повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без "
                               "отступов и переносов; дальше — finish, если повтор тоже оборван",
     "ANSWER_FILE_UNREADABLE": "--artifact — путь к файлу ответа модели, который лежит на диске; запиши ответ в файл (стадия по циклу — в слот `incoming/`) и подай его путь",

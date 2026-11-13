@@ -119,7 +119,8 @@ def _yes_no(value: str) -> bool:
 # --------------------------------------------------------------------------------------
 
 def _cmd_prepare(a):
-    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from, fresh_context=a.fresh_context)
+    return stage_steps.prepare(a.run_root, a.stage, model_id=a.model_id, invocation_id=a.invocation_id, reuse_from=a.reuse_from, fresh_context=a.fresh_context,
+                               accept_self_review=a.accept_self_review)
 
 
 def _cmd_submit(a):
@@ -139,7 +140,7 @@ def _diagnostics(result: Any) -> bool:
 # name: (handler, options, invalid-when)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
     "prepare": (_cmd_prepare, ("--run-root", "--stage", ("--model-id", str, None), ("--invocation-id", str, None),
-                                                 ("--reuse-from", str, None), ("--fresh-context", _yes_no, None)), None),
+                                                 ("--reuse-from", str, None), ("--fresh-context", _yes_no, None), ("--accept-self-review", "flag")), None),
     "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag"), ("--abort", str, None)), None),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics),
 }
