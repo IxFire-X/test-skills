@@ -24,6 +24,8 @@ OLD_SKILL_BYTES = 61838  # skills/orchestrate/SKILL.md before PT: the agent at w
 ALLOWED = (
     "автотесты (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.",
     "Режим автотестов (режим Б) входит в поставку профиля `mode-b`; в поставку `cases-only` он не входит. Профиль называет `doctor`.",
+    # V8-W3: HOW-TO-USE.md is the same in both deliveries; this is the one place that names the file of mode B, true with and without it
+    "Если в папке пакета есть файл `HOW-TO-USE-MODE-B.md`, в вашей поставке есть и режим автотестов (режим Б): начните с этого файла; если файла нет, поставка — только для кейсов.",
 )
 MODE_B_WORDS = [
     r"local-pilot", r"rerun-retained", r"run_pipeline exec", r"service_url_env", r"SERVICE_URL", r"SERVICE_UNREACHABLE", r"стенд", r"maven",
@@ -113,6 +115,19 @@ def test_how_to_use_covers_the_pause_the_section_the_fresh_session_and_the_weak_
                    "ревью ненадёжно (`REVIEW_UNRELIABLE`)", "published/", "плейсхолдером `<…>`"):
         assert needle in text, needle
     assert "ссылкой на переменную" not in text
+
+
+def test_how_to_use_names_the_file_of_mode_b_once_and_in_the_allowed_words_only() -> None:
+    text = (ROOT / "HOW-TO-USE.md").read_text(encoding="utf-8")
+    assert " ".join(ALLOWED[2].split()) in " ".join(text.split())
+    assert _flat(text).lower().count("mode-b") == 0 and text.count("HOW-TO-USE-MODE-B.md") == 1
+
+
+def test_how_to_use_has_the_doctor_call_and_the_abandoned_runs_and_no_flag_the_agent_has_lost() -> None:
+    text = " ".join((ROOT / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
+    for needle in ("tools.doctor --root .", "`abandoned_runs`", "| `OUTPUT_DIR_OUTSIDE_RUN` |"):
+        assert needle in text, needle
+    assert "--output-dir" not in text
 
 
 def test_the_readme_has_the_line_about_the_skill_header() -> None:
