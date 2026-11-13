@@ -5313,8 +5313,9 @@ class ReuseSourceInvalid(ValueError):
 
 # the stages ``--reuse-from`` takes — exact patterns, not a prefix (tc-generator:rework-1 and the rounds of the rework are not among them) — and the family
 # whose checks each has (``_checked_source``): a marker needs an accepted source, the plan, the batches and the review the cases accepted whole, the autotests
-# the same project and execution and the review of revision 1 that accepted them
-REUSE_STAGES = {"context-marker:*": "marker", "plan": "plan", "tc-generator:BATCH-*": "batch", "tc-reviewer:canonical": "review", "tc-to-autotest:r1": "automation"}
+# the same project and execution and the review of revision 1 that accepted them, the rework and its second round the cases the first review accepted in part
+REUSE_STAGES = {"context-marker:*": "marker", "plan": "plan", "tc-generator:BATCH-*": "batch", "tc-reviewer:canonical": "review", "tc-to-autotest:r1": "automation",
+                _REWORK_STAGE: "rework", _REWORK_REVIEW_STAGE: "rework_review"}
 
 
 def reuse_family(stage: str) -> str | None:
@@ -5393,7 +5394,11 @@ def _source_refusal(source: Mapping[str, Any], module: str, family: str = "marke
     if source["attempt"].get("module") != module:
         return f"другой модуль ({source['attempt'].get('module')})"
     if family != "automation" and source["verdict"] not in ACCEPTED_REVIEW:  # the autotests are bound to the cases by the input of the request, not by the verdict
-        return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'}): частичная приёмка и доработка пока не берутся"
+        from tools.orchestrate_test_case_revision import rework_state
+
+        state = _strict(source["run_id"], "rework-round", lambda: rework_state(source["root"], str(source["attempt"]["attempt_id"]))) if source["verdict"] == "ТРЕБУЕТ ДОРАБОТКИ" else None
+        if state != "reviewed":  # accepted in part: taken with the rework and its second round, both answered
+            return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'})" + ("; доработка не завершена" if state else "")
     if source["drift"]:
         return "дрейф: после исполнения источника baseline разошёлся"
     return None
@@ -5415,8 +5420,6 @@ def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_
     by a reviewer that said fresh (the word of a new run is another one: the answer would look independent there).  For the review also: the new run holds the very
     same answers, plan and candidate — the one input of the request that cannot be compared whole is ``package_digest`` (it holds the path of the published set)."""
     run_id, sroot, satt = source["run_id"], source["root"], str(source["attempt"]["attempt_id"])
-    if _REWORK_STAGE in source["stages"] or _REWORK_REVIEW_STAGE in source["stages"]:
-        return "кейсы дорабатывались (частичная приёмка) — такой набор пока не берётся"
     from tools.review_canaries import codeword_state
 
     ledger = _strict(run_id, "reviewer-session-ledgers", lambda: read_reviewer_session_ledger(sroot, satt))
@@ -5480,7 +5483,7 @@ def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt
     family = reuse_family(stage)
     if family is None:
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку (context-marker:*), plan, пачки генератора "
-                                "(tc-generator:BATCH-*), tc-reviewer:canonical и tc-to-autotest:r1; fix: prepare без --reuse-from")
+                                "(tc-generator:BATCH-*), tc-reviewer:canonical, доработку (tc-generator:rework-1) и её ревью (tc-reviewer:rework-1) и tc-to-autotest:r1; fix: prepare без --reuse-from")
     if run_id == root.name:
         raise ModelReuseRefused("MODEL_REUSE_REFUSED: тот же прогон — переиспользуется только прошлый прогон")
     source = _run_source(project, run_id)
@@ -5513,6 +5516,8 @@ def check_reuse(run_root: Path, attempt_id: str, stage: str, run_id: str) -> dic
     if family == "review":
         isolation = source["boundary"]["host_isolation"]
         told.update(fresh_context=bool(isolation["fresh_context"]), invocation_id=str(source["boundary"]["reviewer_invocation_id"]) if isolation["fresh_context"] else None)
+    elif family == "rework_review":  # the second round has no boundary: its independence is the labels of its request and of the rework's
+        told["fresh_context"] = told["invocation_id"] != str(source["stages"][_REWORK_STAGE][0]["invocation_id"])
     return told
 
 
@@ -5570,6 +5575,10 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
     rows = [row("plan"), *(row(stage, response_digest=source["stages"][stage][1]) for stage in source["stages"] if reuse_family(stage) == "batch"),
             row("tc-reviewer:canonical", response_digest=source["stages"]["tc-reviewer:canonical"][1], review="SELF" if self_review else "independent",
                 **({"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"} if self_review else {}))]
+    stages = source["stages"]
+    if _REWORK_REVIEW_STAGE in stages:  # the rework and its second round (a source with the rework unfinished is refused above); the independence is the labels of the source
+        same = stages[_REWORK_REVIEW_STAGE][0]["invocation_id"] == stages[_REWORK_STAGE][0]["invocation_id"]
+        rows += [row(_REWORK_STAGE, response_digest=stages[_REWORK_STAGE][1]), row(_REWORK_REVIEW_STAGE, response_digest=stages[_REWORK_REVIEW_STAGE][1], review="SELF" if same else "independent")]
     if "tc-to-autotest:r1" not in source["stages"]:
         return rows, {}
     try:  # the autotests, after the cases: the same project and execution, accepted by the review of revision 1
@@ -5606,9 +5615,9 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     for path in sorted(runs, key=lambda item: (item / "events.jsonl").stat().st_mtime, reverse=True):
         try:
             source = _run_source(project, path.name, whole=False)
+            refusal = _source_refusal(source, str(attempt.get("module")))  # a run whose files do not read is skipped, the search goes on
         except (ValueError, OSError, KeyError, TypeError, StopIteration):
             continue
-        refusal = _source_refusal(source, str(attempt.get("module")))
         base = _marker_base(source)
         differences = [{"input": name, "given": given, "source": other} for name, given, other in
                        zip(["requirements", "inventory", *(f"квитанция контекста {index}" for index in range(1, len(current) - 1))], current, base)

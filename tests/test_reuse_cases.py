@@ -242,11 +242,9 @@ def test_a_review_that_asked_for_evidence_is_not_taken(tmp_path: Path) -> None:
     assert "evidence" in str(_refused(run, run["stages"][0]))
 
 
-def test_the_rework_stage_is_no_stage_of_the_reuse(accepted: dict) -> None:
-    run = _follow(accepted)
-    with pytest.raises(pilot_state.ModelReuseRefused):  # the exact list of the stages, not the prefix tc-generator:
-        pilot_state.publish_model_request(run["run_root"], run["attempt_id"], "tc-generator:rework-1", model_id="m", invocation_id="x", input_digests=["sha256:" + "1" * 64],
-                                          reuse_from=run["source"])
+@pytest.mark.parametrize("stage", ["tc-generator:rework-2", "tc-reviewer:rework-2", "tc-to-autotest:r2", "autotest-reviewer:r1"])
+def test_a_stage_beside_the_list_is_no_stage_of_the_reuse(stage: str) -> None:
+    assert pilot_state.reuse_family(stage) is None  # the exact names of the list, not the prefix tc-generator: (the rework of V5b-2 and the first revision of the autotests are in it)
 
 
 @pytest.mark.parametrize("change", ["file", "package"])

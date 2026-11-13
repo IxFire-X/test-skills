@@ -118,14 +118,10 @@ def test_a_source_is_refused_unless_every_condition_holds(tmp_path: Path, case: 
     assert expected in str(refused.value), str(refused.value)
 
 
-def test_reuse_takes_the_stages_of_the_list_only(tmp_path: Path) -> None:
-    from tools.pilot_state import ModelReuseRefused, publish_model_request
+def test_reuse_takes_the_stages_of_the_list_only() -> None:
+    from tools.pilot_state import reuse_family
 
-    source_root, _attempt = _source(tmp_path)
-    run_root, attempt_id, _inputs = _fresh(tmp_path)
-    with pytest.raises(ModelReuseRefused):  # the rework of the cases is no stage of the list: the exact names, not the prefix tc-generator:
-        publish_model_request(run_root, attempt_id, "tc-generator:rework-1", model_id="reuse", invocation_id="x",
-                              input_digests=["sha256:" + "1" * 64, "sha256:" + "2" * 64], reuse_from=source_root.name)
+    assert reuse_family("tc-generator:rework-2") is None and reuse_family("tc-generator:rework-1") == "rework"  # the exact names, not the prefix tc-generator:
 
 
 def test_a_fresh_marker_request_records_its_role_and_no_reuse(tmp_path: Path) -> None:

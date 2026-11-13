@@ -153,7 +153,7 @@ def _reviewer_steps(root: Path) -> list[dict[str, Any]]:
     if answered and (reviewed or read_effective_canonical_if_present(root, attempt_id) is None):  # the rework is answered and the set is not published (or the answer of the second round stands): the second round, on the reworked cases only
         steps.append({"stage": REWORK_REVIEW_STAGE, "input_digests": [], "done": bool(_events(state, attempt_id, REWORK_REVIEW_STAGE, "MODEL_RESPONSE_RECEIVED")),
                       "invocation": rework_label(root, attempt_id, REWORK_STAGE),  # no label from the host: the generator's of the rework (the same session)
-                      "open": lambda model_id, invocation_id, fresh: open_rework_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
+                      "open": lambda model_id, invocation_id, fresh, reuse_from=None: open_rework_review(root, attempt_id, model_id=model_id, invocation_id=invocation_id, fresh_context=fresh),
                       "abort": lambda reason, dry_run: abort_rework_review(root, attempt_id, reason, dry_run)})
     return steps
 
@@ -430,7 +430,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     if reuse_from is None:
         check_consent()
     elif pilot_state.reuse_family(stage) is None:
-        raise pilot_state.ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку, plan, пачки генератора, ревью кейсов и автотесты r1; fix: prepare без --reuse-from")
+        raise pilot_state.ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку, plan, пачки генератора, ревью кейсов, доработку с её ревью и автотесты r1; fix: prepare без --reuse-from")
     elif fresh_context is not None or invocation_id is not None:  # the statement of the session is the source's: the host does not make it again
         raise ValueError("INVALID_ARGUMENT: --fresh-context и --invocation-id не идут с --reuse-from — сессия и независимость ревью берутся из источника; fix: prepare --stage "
                          f"{stage} --reuse-from <run_id>" + (" --accept-self-review (только если источник проверен в той же сессии и человек согласен)" if "open" in step else ""))
