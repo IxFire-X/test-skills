@@ -9,7 +9,7 @@ pytestmark = pytest.mark.contract
 
 
 def _copy_runtime(pack_root: Path, destination: Path) -> Path:
-    for relative in ("contracts", "schemas", "skills", "tools", "evals"):
+    for relative in ("contracts", "schemas", "skills", "tools"):
         shutil.copytree(pack_root / relative, destination / relative)
     return destination
 
@@ -28,9 +28,7 @@ def test_release_manifest_binds_exact_runtime_bytes_and_stays_unverified(pack_ro
     assert manifest["pipeline_contract"] == {"version": "4.0", "path": "contracts/pipeline.json", "digest": contract_row["digest"]}
     assert manifest["stage_registry"] == contract["stage_registry"]
     assert manifest["projection_profiles"] == contract["projection_profiles"]
-    assert manifest["compatibility_contract_version"] == "portable-cli-v1"
     assert manifest["execution_profile_version"] == "v1"
-    assert manifest["release_eval"]["policy"] == "adaptive-1-3-5-v1"
     assert manifest["qualification"] == {"state": "implemented_unverified", "ready_tuple": None}
     paths = [row["path"] for row in manifest["registry"]]
     assert paths == sorted(paths)

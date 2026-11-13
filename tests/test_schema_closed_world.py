@@ -74,11 +74,11 @@ def test_pipeline_schema_rejects_empty_registry_identifier(pack_root: Path) -> N
 def test_pipeline_schema_rejects_false_release_readiness(pack_root: Path) -> None:
     schema = json.loads((pack_root / "schemas" / "pipeline.schema.json").read_text(encoding="utf-8"))
     contract = _contract(pack_root)
-    next(row for row in contract["artifact_registry"] if row["id"] == "compatibility_evidence")["semantic_ready"] = False
+    next(row for row in contract["artifact_registry"] if row["id"] == "release_manifest")["semantic_ready"] = False
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(contract)
     contract = _contract(pack_root)
-    next(row for row in contract["schema_registry"] if row["id"] == "release-eval-receipt.schema.json")["semantic_ready"] = False
+    next(row for row in contract["schema_registry"] if row["id"] == "release-manifest.schema.json")["semantic_ready"] = False
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(contract)
     contract = _contract(pack_root)
@@ -125,7 +125,7 @@ def test_phase_seven_closure_schemas_are_versioned_draft_closed(pack_root: Path,
     assert _known_boundaries_are_closed(schema)
 
 
-@pytest.mark.parametrize("name", ["compatibility-evidence.schema.json", "release-eval-run.schema.json", "release-eval-receipt.schema.json", "release-manifest.schema.json"])
+@pytest.mark.parametrize("name", ["release-manifest.schema.json"])
 def test_phase_eight_schemas_are_versioned_draft_closed(pack_root: Path, name: str) -> None:
     schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"

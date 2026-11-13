@@ -128,7 +128,7 @@ def test_a_run_that_does_not_exist_keeps_the_plain_refusal(tmp_path: Path) -> No
 
 def _pack_copy(tmp_path: Path) -> Path:
     pack = tmp_path / "pack"
-    for name in ("contracts", "schemas", "skills", "tools", "evals", "release"):
+    for name in ("contracts", "schemas", "skills", "tools", "release"):
         shutil.copytree(ROOT / name, pack / name, ignore=shutil.ignore_patterns("__pycache__"))
     from tools.release_manifest import _canonical, build_release_manifest
 

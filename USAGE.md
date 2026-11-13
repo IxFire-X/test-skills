@@ -9,7 +9,7 @@
 ## 1. Подключите пакет
 
 Поместите папку пакета в обычный рабочий проект, сохранив `contracts/`, `schemas/`,
-`skills/`, `tools/`, `evals/` и `release/`. Проект уже должен иметь рабочие JDK/Maven,
+`skills/`, `tools/` и `release/`. Проект уже должен иметь рабочие JDK/Maven,
 Gradle или Python/pytest environment. Пайплайн ничего не устанавливает.
 
 Удобное место — `<project>/.tools/test-skills/`. Все пути пакета разрешаются от этой
@@ -391,22 +391,13 @@ python -m tools.ci_gate --root <папка поставки или git archive> 
 ```
 
 Это maintainer/release-команды, а не шаги обычного production run. Runtime не запускает
-полный repository test suite, `ci_gate` или release eval автоматически.
+полный repository test suite и `ci_gate` автоматически.
 
 `release/manifest.json` — persisted machine authority для package version, exact runtime
-registry/digest, pipeline contract, profiles, adapters и release-eval suite. Он исключён
+registry/digest, pipeline contract, profiles и adapters. Он исключён
 из собственного runtime digest, чтобы не создавать self-cycle.
 
-Текущий package state — `implemented_unverified`. Claim
-`core-pilot-ready for <exact verified tuple>` разрешён только после одного smoke и
-трёх fresh runs каждого critical scenario. Instability или protocol violation навсегда
-блокирует readiness текущей campaign; evaluator сохраняет append-only receipt в
-`.pilot-runs/release-eval-ledger`, и следующая clean campaign автоматически требует
-пять fresh runs каждого critical scenario. `--predecessor-evaluation` нужен только для
-импорта валидного внешнего predecessor; отсутствие флага не сбрасывает уже записанную
-эскалацию.
-Эта adaptive campaign запускается отдельно для release qualification; production run
-не вызывает её и не повторяет model stages ради квалификации.
+Текущий package state — `implemented_unverified`: зелёный локальный gate не доказывает связку CLI/хост/модель/проект.
 В обычном run каждая model stage записывает `MODEL_RESPONSE_RECEIVED.transport_attempts=1|2`;
 `2` означает единственный повтор после ошибки схемы или валидации ответа (по `retry_prompt`
 из `validate_artifact`). C-lite cardinality читается из evidence pairs reviewer ledger.
@@ -415,8 +406,7 @@ registry/digest, pipeline contract, profiles, adapters и release-eval suite. О
 --run <id>` пишет в каталог прогона `report.md`, `report.json` и `questions-for-analyst.md`. В отчёте
 шаги со временем (часы машины, не проверяются), длительность и размер входа каждого вызова модели
 против бюджета шага, `transport_attempts`, коды остановок, числа, карантин (файл, метод, ref) и
-окружение — без кода, текста спеки, кейсов и ответов модели. `questions-for-analyst.md` также
-появляется рядом с опубликованным набором кейсов.
+окружение — без кода, текста спеки, кейсов и ответов модели.
 Ревью может принять кейсы с замечаниями `WARNING`/`INFO` (FaT-RN): в `report.md` — раздел «Замечания ревью»
 (severity, код-идентификатор, ID кейсов из итогового документа), текст — в `questions-for-analyst.md`,
 в выводе `finish`/`status` — `review_notes` (число и путь к ответу ревью). Кейсы код не меняет.

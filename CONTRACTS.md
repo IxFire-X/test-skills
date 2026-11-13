@@ -79,11 +79,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `pre_finalization_trace` | `7` | `IMPLEMENTED` | `True` | `-` |
 | `terminal_result` | `7` | `IMPLEMENTED` | `True` | `-` |
 | `derived_terminal_trace` | `7` | `IMPLEMENTED` | `True` | `-` |
-| `compatibility_evidence` | `8` | `IMPLEMENTED` | `True` | `-` |
 | `retained_native_rerun_receipt` | `8` | `IMPLEMENTED` | `True` | `-` |
 | `scenario_observation_receipt` | `8` | `IMPLEMENTED` | `True` | `-` |
-| `release_eval_run` | `8` | `IMPLEMENTED` | `True` | `-` |
-| `release_eval_receipt` | `8` | `IMPLEMENTED` | `True` | `-` |
 | `release_manifest` | `8` | `IMPLEMENTED` | `True` | `-` |
 
 ## Schema registry
@@ -127,11 +124,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `release-eval-run.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `release-eval-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `release-manifest.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 
 

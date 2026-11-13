@@ -53,12 +53,9 @@ def test_the_registry_carries_the_generated_documents_and_the_cases_only_profile
 
     kept = set(pack_registry.profile_paths(paths, "cases-only"))
     left = paths - kept
-    assert {"tools/ci_gate.py", "tools/compatibility_contract.py", "tools/contract_check.py", "tools/render_contract_docs.py",
-            "tools/release_manifest.py", "evals/release_eval.py", "evals/scenarios/pilot-critical.json",
-            "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json",
-            "schemas/compatibility-evidence.schema.json"} <= left
+    assert {"tools/ci_gate.py", "tools/contract_check.py", "tools/render_contract_docs.py", "tools/release_manifest.py"} <= left
     assert "schemas/scenario-observation-receipt.schema.json" in kept  # V0a: a second ``finish`` writes it in a delivery of cases too
-    assert not [path for path in kept if path.startswith("evals/")] and {"CONTRACTS.md", "PIPELINE.md", "tools/doctor.py", "tools/pack_registry.py"} <= kept
+    assert {"CONTRACTS.md", "PIPELINE.md", "tools/doctor.py", "tools/pack_registry.py"} <= kept
     assert {row["id"]: row for row in manifest["delivery_profiles"]}["cases-only"]["skill_pack_digest"] == pack_registry.digest_bytes(
         pack_registry.canonical([row for row in manifest["registry"] if row["path"] in kept]))
 
@@ -103,7 +100,7 @@ def test_a_pack_without_a_manifest_says_so_in_one_line(tmp_path: Path) -> None:
 
 # ---- the exact set of files ----------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("extra", ["tools/evil.py", "tools/exec_commands.py", "tools/notes.txt", "skills/orchestrate/run.sh", "evals/release_eval.py", "tools/x.pyc",
+@pytest.mark.parametrize("extra", ["tools/evil.py", "tools/exec_commands.py", "tools/notes.txt", "skills/orchestrate/run.sh", "tools/x.pyc",
                                    "schemas/extra.schema.json"])
 def test_an_extra_file_is_refused_with_its_name_and_a_fix(tmp_path: Path, extra: str) -> None:
     pack = copy_profile(tmp_path / "pack", "cases-only")
@@ -268,8 +265,6 @@ def test_the_files_of_a_delivery_import_and_name_only_files_of_the_profile(profi
         for schema in set(re.findall(r"schemas/([A-Za-z0-9_-]+\.schema\.json)", text)) if path != "tools/pack_registry.py" else ():  # it names what it leaves out
             if f"schemas/{schema}" not in kept:
                 problems.append((path, f"schemas/{schema}"))
-        if path.endswith(".py") and path != "tools/pack_registry.py" and re.search(r"evals/|import evals|from evals", text):  # V4b: no maintainer file is read by a runtime one
-            problems.append((path, "evals"))
     assert problems == []
 
 
@@ -281,7 +276,7 @@ def test_a_copy_of_a_delivery_imports_every_module_of_the_profile(tmp_path: Path
     modules = [path[:-3].replace("/", ".") for path in pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile)
                if path.startswith("tools/") and path.endswith(".py") and path != "tools/__init__.py"]
     script = ("import importlib, sys\n"
-              "blocked = ('evals', 'tools.ci_gate', 'tools.contract_check', 'tools.compatibility_contract', 'tools.release_manifest', 'tools.render_contract_docs')\n"
+              "blocked = ('tools.ci_gate', 'tools.contract_check', 'tools.release_manifest', 'tools.render_contract_docs')\n"
               "for name in blocked: sys.modules[name] = None\n"
               "failed = []\n"
               "for name in sys.argv[1:]:\n"
@@ -301,7 +296,7 @@ def test_the_version_is_written_once_in_the_contract_and_read_from_there(tmp_pat
 
     contract = json.loads((ROOT / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
     version = contract["release_qualification"]["package_version"]
-    literals = [path.relative_to(ROOT).as_posix() for folder in ("tools", "schemas", "skills", "evals") for path in (ROOT / folder).rglob("*")
+    literals = [path.relative_to(ROOT).as_posix() for folder in ("tools", "schemas", "skills") for path in (ROOT / folder).rglob("*")
                 if path.is_file() and path.suffix in {".py", ".json", ".md"} and version in path.read_text(encoding="utf-8")]
     assert literals == [], literals
 
@@ -351,14 +346,14 @@ def test_the_list_of_a_delivery_is_the_index_by_profile_and_never_an_untracked_f
     cases = delivery_files(repo, "cases-only")
     assert cases == sorted(cases) and "tools/draft.py" not in cases
     assert {"README.md", "HOW-TO-USE.md", ".skillsrc.example", "requirements.txt", "release/manifest.json", "CONTRACTS.md", "PIPELINE.md"} <= set(cases)
-    assert not [path for path in cases if path.startswith(("tests/", "docs/", ".github/", "evals/")) or path in {"USAGE.md", "RELEASE.md", "requirements-dev.txt", "tools/ci_gate.py", "tools/release_manifest.py"}]
+    assert not [path for path in cases if path.startswith(("tests/", "docs/", ".github/")) or path in {"USAGE.md", "RELEASE.md", "requirements-dev.txt", "tools/ci_gate.py", "tools/release_manifest.py"}]
     mode_b = delivery_files(repo, "mode-b")
     assert {"tools/exec_commands.py", "tools/exec_runner.py", "tools/run_tests.py", "skills/orchestrate/references/mode-b.md", "requirements.txt",
             ".skillsrc.example", "release/manifest.json"} <= set(mode_b)
-    assert not [path for path in mode_b if path.startswith(("tests/", "docs/", ".github/", "evals/")) or path in {
+    assert not [path for path in mode_b if path.startswith(("tests/", "docs/", ".github/")) or path in {
         "USAGE.md", "RELEASE.md", "requirements-dev.txt", "tools/ci_gate.py", "tools/release_manifest.py", "tools/contract_check.py"}]
     universal = delivery_files(repo, "universal", "HEAD")
-    assert "evals/release_eval.py" in universal and "tools/release_manifest.py" in universal and "tests/test_x.py" not in universal
+    assert "tools/contract_check.py" in universal and "tools/release_manifest.py" in universal and "tests/test_x.py" not in universal
     listed = set(cases) - set(DELIVERY_DOCS)
     assert listed == set(pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(repo)], "cases-only")) - {"tools/draft.py"}
     with pytest.raises(ValueError, match="invalid commit"):
@@ -445,10 +440,7 @@ def test_the_mode_b_profile_has_the_files_of_mode_b_and_no_tool_of_development()
     assert {"tools/exec_commands.py", "tools/exec_runner.py", "tools/execution_gate.py", "tools/run_tests.py", "tools/execution_adapters.py",
             "tools/pilot_state.py", "tools/doctor.py", "tools/pack_registry.py", "skills/orchestrate/references/mode-b.md", "skills/tc-to-autotest/SKILL.md",
             "skills/autotest-reviewer/SKILL.md", "schemas/scenario-observation-receipt.schema.json", "CONTRACTS.md", "PIPELINE.md"} <= kept
-    assert not kept & {"tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
-                       "tools/render_contract_docs.py", "schemas/compatibility-evidence.schema.json",
-                       "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json", "requirements-dev.txt"}
-    assert not [path for path in kept if path.startswith("evals/")]
+    assert not kept & {"tools/ci_gate.py", "tools/release_manifest.py", "tools/contract_check.py", "tools/render_contract_docs.py", "requirements-dev.txt"}
     assert kept < paths and set(pack_registry.profile_paths(paths, "cases-only")) < kept  # cases-only is a part of mode B, which is a part of the repository
     profiles = {row["id"]: row for row in manifest["delivery_profiles"]}
     assert list(profiles) == ["mode-b", "cases-only"]
@@ -465,7 +457,7 @@ def test_a_mode_b_copy_is_recognised_whole_and_passes_the_three_checks(tmp_path:
         assert done.returncode == 0, (module, done.stdout, done.stderr)
 
 
-@pytest.mark.parametrize("extra", ["tools/ci_gate.py", "tools/release_manifest.py", "evals/release_eval.py", "tools/contract_check.py"])
+@pytest.mark.parametrize("extra", ["tools/ci_gate.py", "tools/release_manifest.py", "tools/contract_check.py"])
 def test_a_file_of_development_in_a_mode_b_copy_is_refused_with_its_name(tmp_path: Path, extra: str) -> None:
     pack = copy_profile(tmp_path / "pack", "mode-b")
     (pack / extra).parent.mkdir(parents=True, exist_ok=True)

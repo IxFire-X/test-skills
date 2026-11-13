@@ -42,8 +42,8 @@ ALLOWED_PRIMITIVES = {
 
 
 def _runtime_files() -> list[Path]:
-    """Every ``.py`` the pack can carry: the tools and the evals of the registry (the tests are not part of the package)."""
-    return sorted([*TOOLS.glob("*.py"), *(ROOT / "evals").glob("*.py")])
+    """Every ``.py`` the pack can carry: the tools of the registry (the tests are not part of the package)."""
+    return sorted(TOOLS.glob("*.py"))
 
 
 def _primitives_of(tree: ast.AST) -> set[str]:

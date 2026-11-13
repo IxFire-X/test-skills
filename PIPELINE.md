@@ -98,8 +98,6 @@ Version: `4.0`
 ## Release qualification
 
 - package: `0.5.0-pilot` via `release/manifest.json`
-- compatibility contract: `portable-cli-v1`
 - execution profile: `v1`
-- release eval: `adaptive-1-3-5-v1` / `pilot-critical-v1`
 - component state: `implemented_unverified`; ready tuple: `null`
 - core-pilot N/A: `company_runner, zephyr_tenant, production_rollback`

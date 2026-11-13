@@ -7,8 +7,7 @@
 **Previous known-good:** none recorded
 
 `release/manifest.json` binds the exact runtime registry/digest, Pipeline `4.0`,
-compatibility contract `portable-cli-v1`, execution profile `v1`, policies, adapters,
-model-stage registry and `pilot-critical-v1` release-eval suite. The manifest is
+execution profile `v1`, policies, adapters and the model-stage registry. The manifest is
 persisted but excluded from its own runtime registry to avoid a self-digest cycle.
 
 `implemented_unverified` is deliberate: a green local implementation gate does not
@@ -54,34 +53,6 @@ before making a platform verification claim.
 
 `.gitattributes` keeps text checkout bytes as LF on both platforms. Do not normalize
 runtime bytes while hashing: the manifest and receipts continue to bind exact bytes.
-
-## Exact-tuple release gate
-
-The release environment supplies one authorized real project and immutable compatible
-CLI campaign:
-
-```powershell
-python -m evals.release_eval `
-  --campaign-dir $env:PILOT_EVAL_CAMPAIGN `
-  --project $env:PILOT_E2E_PROJECT `
-  --module $env:PILOT_E2E_MODULE `
-  --policy local-pilot-v1 `
-  --require-real-execution `
-  --require-independent-review
-```
-
-The gate fails closed on absent/tampered evidence, tuple drift, missing real execution,
-unverified reviewer isolation or a protocol violation. Policy `adaptive-1-3-5-v1`
-requires one smoke plus three fresh runs for every critical scenario. Instability or a
-protocol violation permanently disqualifies that campaign. After the cause is fixed,
-start a new clean campaign. The evaluator keeps its append-only controller-owned
-history under `.pilot-runs/release-eval-ledger`, automatically carries the active
-escalation forward, and requires five fresh runs for every critical scenario.
-`--predecessor-evaluation` only imports a valid external predecessor into that same
-history; omitting the option cannot clear an already recorded escalation.
-
-The first previous-known-good promotion requires a separate explicit human approval
-receipt. Do not invent a rollback SHA or infer it from local Git state.
 
 ## N/A for core pilot
 

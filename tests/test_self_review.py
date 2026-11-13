@@ -254,17 +254,6 @@ def test_a_verified_review_cannot_be_marked_self() -> None:
         terminal_result(_local() | {"review_independence": "SELF"}, "local-pilot-v1")
 
 
-# ------------------------------------------------------------------ 7: compatibility
-
-
-def test_compatibility_names_a_self_accepted_review() -> None:
-    from tools.compatibility_contract import reviewer_independence
-
-    assert reviewer_independence({"isolation": "verified"}) == "verified"
-    assert reviewer_independence({"isolation": "independence_unverified"}) == "independence_unverified"
-    assert reviewer_independence({"isolation": "independence_unverified", "self_accepted": True}) == "self_accepted"
-
-
 # ------------------------------------------------------------------ finish without the flag (4a gap)
 
 

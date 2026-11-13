@@ -99,7 +99,6 @@ flowchart LR
 | `schemas/` | Правила формы данных: какие поля должны быть в документе и какие значения допустимы |
 | `contracts/pipeline.json` | Общие правила работы: порядок шагов, ограничения и условия принятия результата |
 | `tests/` | Проверки самого пайплайна и небольшие примеры для этих проверок |
-| `evals/` | Проверка того, насколько надёжно весь пайплайн работает с конкретными моделями и окружением |
 | `release/` | Состав выпуска и сведения о его проверенности |
 | `docs/` и документы в корне | Руководства, презентация, принятые решения и результаты пилота |
 
@@ -679,22 +678,6 @@ flowchart TD
 </details>
 
 
-### `tools/compatibility_contract.py`
-
-**Проверка возможностей программы, управляющей моделью.**
-
-Проверяет, что внешняя программа действительно выполнила нужные шаги: передала модели правильные входы, сохранила ответы, отделила ревью от генерации и корректно продолжила прерванную работу. Для этого читает записи реального запуска. Одного заявления «я совместим с пайплайном» недостаточно.
-
-[Открыть файл](../tools/compatibility_contract.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `evidence_digest`, `validate_compatibility_evidence`.
-
-</details>
-
-
 ### `tools/confined_output.py`
 
 **Безопасная работа с файлами.**
@@ -1042,7 +1025,7 @@ Markdown сверяется при публикации, но не входит 
 
 **Основные определения в коде:** `build_release_manifest`, `verify_release_manifest`, `load_release_manifest`, `delivery_files`, `main`.
 
-Сборщик манифеста для разработки; реестр, профили и сверка копии — в `tools/pack_registry.py`. В реестр входят файлы из `contracts/`, `schemas/`, `skills/`, `tools/`, `evals/` и `CONTRACTS.md`, `PIPELINE.md`. `--list cases-only` печатает файлы поставки «только кейсы» из индекса git. В эту поставку файл не входит.
+Сборщик манифеста для разработки; реестр, профили и сверка копии — в `tools/pack_registry.py`. В реестр входят файлы из `contracts/`, `schemas/`, `skills/`, `tools/` и `CONTRACTS.md`, `PIPELINE.md`. `--list cases-only` печатает файлы поставки «только кейсы» из индекса git. В эту поставку файл не входит.
 
 </details>
 
@@ -1277,47 +1260,6 @@ Markdown сверяется при публикации, но не входит 
 проверяет, достаточно ли их для обоснованного вывода.
 
 
-### `evals/__init__.py`
-
-**Служебный файл раздела проверочных прогонов.**
-
-Обозначает папку evals как Python-пакет и коротко поясняет её назначение. Сам проверки не запускает.
-
-[Открыть файл](../evals/__init__.py)
-
-
-### `evals/release_eval.py`
-
-**Подведение итогов реальных проверочных прогонов.**
-
-Читает результаты серии запусков и проверяет, достаточно ли данных для вывода о работе пайплайна с выбранными моделями и средой. Учитывает обязательные сценарии, повторы и нарушения правил. Сам к модели не обращается и тесты не генерирует.
-
-[Открыть файл](../evals/release_eval.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `ReleaseEvalError`, `evaluate_campaign`, `main`.
-
-</details>
-
-
-### `evals/scenarios/pilot-critical.json`
-
-**План проверки надёжности всего процесса.**
-
-Перечисляет пробный запуск и 13 важных сценариев: например, прерывание, продолжение работы, отказ ревью или ошибка записи тестов. Для каждого задан ожидаемый результат. Такой заранее составленный список не позволяет оценивать надёжность только по удобным успешным примерам.
-
-[Открыть файл](../evals/scenarios/pilot-critical.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-Политика `adaptive-1-3-5-v1`: сначала один пробный запуск, затем три повтора каждого обязательного сценария; при нестабильности или нарушении протокола количество увеличивается до пяти. Нарушение протокола блокирует вывод о готовности.
-
-</details>
-
-
 ## Правила формы данных
 
 Схему удобно понимать как описание бланка: какие разделы и поля в нём должны
@@ -1421,22 +1363,6 @@ Markdown сверяется при публикации, но не входит 
 <summary>Технические подробности</summary>
 
 **Обязательные поля верхнего уровня:** `schema_version`, `content_locale`, `document_id`, `revision`, `parent_sha256`, `metadata`, `operation_capabilities`, `source_requirements`, `requirements`, `source_to_canonical_mappings`, `test_cases`. Ограничения вложенных объектов и веток заданы в самой схеме.
-
-</details>
-
-
-### `schemas/compatibility-evidence.schema.json`
-
-**Сведения о возможностях управляющей программы.**
-
-Задаёт форму данных, которыми внешняя программа подтверждает выполнение нужных шагов: обращений к модели, отдельного ревью, сохранения результатов и продолжения после перерыва. Затем эти сведения проверяются по записям реальной работы.
-
-[Открыть файл](../schemas/compatibility-evidence.schema.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Обязательные поля верхнего уровня:** `schema_version`, `compatibility_version`, `release_manifest_digest`, `host`, `role_policy`, `profile`, `branch`, `registry`, `durable_context`, `stages`, `resume`, `review_bindings`, `digest`. Ограничения вложенных объектов и веток заданы в самой схеме.
 
 </details>
 
@@ -1729,38 +1655,6 @@ Markdown сверяется при публикации, но не входит 
 </details>
 
 
-### `schemas/release-eval-receipt.schema.json`
-
-**Вывод о серии проверочных прогонов.**
-
-Описывает, какую комбинацию моделей и среды проверяли, сколько нужных сценариев выполнили, какие ошибки заметили и какой вывод получили. Позволяет проверить обоснованность вывода, а не довольствоваться общей фразой «всё работает».
-
-[Открыть файл](../schemas/release-eval-receipt.schema.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Обязательные поля верхнего уровня:** `schema_version`, `policy`, `campaign_id`, `tuple`, `scenario_suite`, `scenario_counts`, `smoke_runs`, `critical_runs`, `required_critical_runs`, `instability_observed`, `protocol_violations`, `require_real_execution`, `require_independent_review`, `ready`, `predecessor_evaluation_digest`, `evaluated_run_digests`, `digest`. Ограничения вложенных объектов и веток заданы в самой схеме.
-
-</details>
-
-
-### `schemas/release-eval-run.schema.json`
-
-**Один прогон в серии проверок.**
-
-Задаёт сведения об отдельном запуске: его сценарий, номер, рабочую попытку и подтверждающие результаты. Это нужно, чтобы не посчитать копию одного успешного отчёта несколькими независимыми прогонами.
-
-[Открыть файл](../schemas/release-eval-run.schema.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Обязательные поля верхнего уровня:** `schema_version`, `campaign_id`, `suite_id`, `suite_digest`, `scenario_id`, `run_id`, `attempt_id`, `sequence`, `kind`, `compatibility_evidence`, `scenario_checks`, `digest`. Ограничения вложенных объектов и веток заданы в самой схеме.
-
-</details>
-
-
 ### `schemas/release-manifest.schema.json`
 
 **Формат описания выпуска.**
@@ -1772,7 +1666,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Обязательные поля верхнего уровня:** `schema_version`, `package_version`, `skill_pack_digest`, `pipeline_contract`, `compatibility_contract_version`, `execution_profile_version`, `policy_profiles`, `adapter_registry`, `stage_registry`, `projection_profiles`, `release_eval`, `registry`, `qualification`, `digest`. Ограничения вложенных объектов и веток заданы в самой схеме.
+**Обязательные поля верхнего уровня:** `schema_version`, `package_version`, `skill_pack_digest`, `pipeline_contract`, `execution_profile_version`, `policy_profiles`, `adapter_registry`, `stage_registry`, `projection_profiles`, `registry`, `qualification`, `digest`. Ограничения вложенных объектов и веток заданы в самой схеме.
 
 </details>
 
@@ -2196,15 +2090,6 @@ Markdown сверяется при публикации, но не входит 
 [Открыть файл](../tests/test_ci_gate.py)
 
 
-### `tests/test_compatibility_contract.py`
-
-**Проверка заявлений о совместимости.**
-
-Проверяет, что внешняя программа подтверждает свои возможности записями реальной работы. Поддельные сведения о вызове модели, независимом ревью или продолжении работы должны быть отклонены.
-
-[Открыть файл](../tests/test_compatibility_contract.py)
-
-
 ### `tests/test_context_selection.py`
 
 **Правильные данные для модели.**
@@ -2385,15 +2270,6 @@ Markdown сверяется при публикации, но не входит 
 [Открыть файл](../tests/test_pilot_state.py)
 
 
-### `tests/test_pipeline_acceptance.py`
-
-**Подтверждение повторного обращения к итогу.**
-
-Проверяет, что при оценке выпуска используется реальная запись о повторном обращении к уже завершённой попытке. Такое обращение не должно превращаться в новый запуск тестов.
-
-[Открыть файл](../tests/test_pipeline_acceptance.py)
-
-
 ### `tests/test_preexecution_finalization.py`
 
 **Отказ ещё до запуска тестов.**
@@ -2428,15 +2304,6 @@ Markdown сверяется при публикации, но не входит 
 Сравнивает CONTRACTS.md и PIPELINE.md с тем, что должно получиться из главного файла правил. Проверяет, что устаревшее описание действительно обнаруживается.
 
 [Открыть файл](../tests/test_projection_drift.py)
-
-
-### `tests/test_release_eval_policy.py`
-
-**Обоснованность вывода о надёжности.**
-
-Проверяет обязательные сценарии, количество повторов, реальные подтверждения и обработку нестабильных результатов. Не позволяет объявить успех по выбранным удобным примерам или неподтверждённому отчёту.
-
-[Открыть файл](../tests/test_release_eval_policy.py)
 
 
 ### `tests/test_release_manifest.py`
@@ -2541,7 +2408,7 @@ Markdown сверяется при публикации, но не входит 
 
 Основные схемы в начале документа показывают последовательность работы.
 Ниже находится более подробная карта для тех, кто разбирается в исходниках:
-в ней перечислены все **33 Python-файла** из tools/ и evals/ и **105 связей**.
+в ней перечислены все **30 Python-файлов** из tools/ и **94 связей**.
 
 Стрелка от A к B означает, что в программе A есть импорт кода из B. Это может
 быть общий помощник, проверка данных или действие, вызываемое только в особой
@@ -2556,15 +2423,12 @@ Markdown сверяется при публикации, но не входит 
 
 ```mermaid
 flowchart LR
-    m0["evals/__init__.py"]
-    m1["evals/release_eval.py"]
     m3["tools/automation_validation.py"]
     m4["tools/batch_assembly.py"]
     m5["tools/build_context.py"]
     m6["tools/build_trace_document.py"]
     m7["tools/canonical_document.py"]
     m8["tools/ci_gate.py"]
-    m10["tools/compatibility_contract.py"]
     m11["tools/confined_output.py"]
     m12["tools/contract_check.py"]
     m13["tools/discover_project.py"]
@@ -2589,12 +2453,6 @@ flowchart LR
     m37["tools/test_case_projections.py"]
     m38["tools/trace_check.py"]
     m39["tools/validate_artifact.py"]
-    m1 --> m10
-    m1 --> m11
-    m1 --> m25
-    m1 --> m26
-    m1 --> m28
-    m1 --> m34
     m3 --> m7
     m3 --> m25
     m3 --> m34
@@ -2608,11 +2466,6 @@ flowchart LR
     m6 --> m32
     m6 --> m34
     m7 --> m34
-    m10 --> m3
-    m10 --> m25
-    m10 --> m26
-    m10 --> m28
-    m10 --> m34
     m12 --> m23
     m12 --> m25
     m12 --> m28
@@ -2706,15 +2559,12 @@ flowchart LR
 
 | Модуль | Импортирует внутри пакета |
 |---|---|
-| [evals/__init__.py](../evals/__init__.py) | Нет |
-| [evals/release_eval.py](../evals/release_eval.py) | [compatibility_contract](../tools/compatibility_contract.py), [confined_output](../tools/confined_output.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [release_manifest](../tools/release_manifest.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/automation_validation.py](../tools/automation_validation.py) | [canonical_document](../tools/canonical_document.py), [pilot_state](../tools/pilot_state.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/batch_assembly.py](../tools/batch_assembly.py) | [canonical_document](../tools/canonical_document.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/build_context.py](../tools/build_context.py) | [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/build_trace_document.py](../tools/build_trace_document.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [json_cli](../tools/json_cli.py), [run_tests](../tools/run_tests.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/canonical_document.py](../tools/canonical_document.py) | [schema_validation](../tools/schema_validation.py) |
 | [tools/ci_gate.py](../tools/ci_gate.py) | Нет |
-| [tools/compatibility_contract.py](../tools/compatibility_contract.py) | [automation_validation](../tools/automation_validation.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [release_manifest](../tools/release_manifest.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/confined_output.py](../tools/confined_output.py) | Нет |
 | [tools/contract_check.py](../tools/contract_check.py) | [json_cli](../tools/json_cli.py), [pilot_state](../tools/pilot_state.py), [release_manifest](../tools/release_manifest.py), [render_contract_docs](../tools/render_contract_docs.py) |
 | [tools/discover_project.py](../tools/discover_project.py) | [confined_output](../tools/confined_output.py), [schema_validation](../tools/schema_validation.py), [stack_catalog](../tools/stack_catalog.py) |
@@ -2766,7 +2616,6 @@ flowchart LR
 | Связи требований и результатов | Программы сборки и проверки отчёта | Ответить, чем подтверждено каждое требование |
 | Решения по созданным файлам и окончательный итог | Программы работы с файлами и завершения | Завершить работу с понятным результатом и известной судьбой каждого файла |
 | Запись о повторном запуске сохранённых тестов | Команда повторного запуска и журнал состояния | Зафиксировать новый факт, сохранив прежний итог неизменным |
-| Результаты серии проверочных прогонов | Управляющая программа и раздел evals/ | Сделать обоснованный вывод о работе пайплайна с выбранными моделями и средой |
 
 ## Где искать нужное изменение
 
@@ -2789,7 +2638,6 @@ flowchart LR
 | Продолжение после обрыва | pilot_state.py и run_pipeline.py |
 | Окончательный статус работы | finalize_attempt.py, pilot_state.py и общие правила |
 | Подключение отдельного сервиса компании | Сначала узнать API и правила этого сервиса; готового адаптера в пакете нет |
-| Проверку другой модели или среды | compatibility_contract.py и evals/release_eval.py |
 
 У каждого из этих участков уже есть проверки в tests/. Их назначение описано
 выше: можно выбрать те, которые относятся к изменению. Например, проблему с

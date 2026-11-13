@@ -2,11 +2,11 @@
 
 A pack is one of three builds, told apart by the exact set of its registry files (never by a flag):
 
-* ``universal`` — the repository: every runtime file, the maintainer registry ``evals/`` and the tools of development;
+* ``universal`` — the repository: every runtime file and the tools of development;
 * ``mode-b`` — the delivery with automated tests: the files of mode B (``materialize``/``ingest``, the adapters, the roles) but
-  no tool of development (``ci_gate`` and ``release_manifest`` run ``git``) and no maintainer file; no file of it starts a process;
+  no tool of development (``ci_gate`` and ``release_manifest`` run ``git``); no file of it starts a process;
 * ``cases-only`` — the delivery for cases without a project run: no ``tools/exec_*.py`` (the commands of mode B), no file of mode B,
-  no maintainer files and no tool of development.
+  and no tool of development.
 
 ``doctor`` (in every delivery) and ``release_manifest`` (development only: it builds the manifest and lists a delivery)
 share this module.  It only reads: no process, no network, no write.
@@ -27,8 +27,6 @@ from typing import Any, Mapping
 from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
 
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
-MAINTAINER_ROOTS = ("evals",)
-REGISTRY_ROOTS = RUNTIME_ROOTS + MAINTAINER_ROOTS
 # The files of the root a pack carries, so that the check covers them: the two documents generated from the contract, the texts a
 # human follows (README, HOW-TO-USE), what ``pip`` would read (``requirements*.txt``) and the example of ``.skillsrc``.
 ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "requirements.txt", "requirements-dev.txt",
@@ -37,12 +35,10 @@ RUNTIME_SUFFIXES = {".json", ".md", ".py"}
 PROFILES = ("universal", "mode-b", "cases-only")
 
 # What a cases-only delivery does not carry, and why: development tools (checks of the contract, its rendering, the gate, the
-# builder of this manifest), the schemas read only by the release evaluation, and everything that starts or measures a run.
+# builder of this manifest), and everything that starts or measures a run.
 CASES_ONLY_EXCLUDED_FILES = (
-    "tools/ci_gate.py", "tools/compatibility_contract.py", "tools/contract_check.py", "tools/release_manifest.py",
+    "tools/ci_gate.py", "tools/contract_check.py", "tools/release_manifest.py",
     "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
-    "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
-    "schemas/release-eval-run.schema.json",
     "requirements-dev.txt", "HOW-TO-USE-MODE-B.md",  # the text of mode B for the human: only the delivery of mode B
     # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b``
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
@@ -52,18 +48,15 @@ CASES_ONLY_EXCLUDED_FILES = (
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a
 # delivery of cases does not carry (PT).
-CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/autotest-reviewer/")
+CASES_ONLY_EXCLUDED_PREFIXES = ("skills/tc-to-autotest/", "skills/autotest-reviewer/")
 
-# What the delivery of mode B leaves out: the tools of development and the maintainer files.  ``ci_gate`` and ``release_manifest``
-# run ``git`` and write the manifest; the others check the contract, render its documents and keep the evidence of the release
-# evaluation.  ``scenario-observation-receipt`` stays, in the delivery of cases too: a second ``finish`` writes it in either.
+# What the delivery of mode B leaves out: the tools of development.  ``ci_gate`` and ``release_manifest`` run ``git`` and write the
+# manifest; the others check the contract and render its documents.  ``scenario-observation-receipt`` stays, in the delivery of cases too: a second ``finish`` writes it in either.
 MODE_B_EXCLUDED_FILES = (
-    "tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
-    "tools/render_contract_docs.py", "requirements-dev.txt",
-    "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json", "schemas/release-eval-run.schema.json",
+    "tools/ci_gate.py", "tools/release_manifest.py", "tools/contract_check.py", "tools/render_contract_docs.py", "requirements-dev.txt",
 )
 MODE_B_EXCLUDED_PATTERNS: tuple[str, ...] = ()
-MODE_B_EXCLUDED_PREFIXES = ("evals/",)
+MODE_B_EXCLUDED_PREFIXES: tuple[str, ...] = ()
 
 # The one file of a delivery that is not in the registry: it holds the digests of the others.
 DELIVERY_FILES = ("release/manifest.json",)
@@ -136,7 +129,7 @@ def scan_disk(root: Path) -> tuple[list[str], list[str]]:
     profile check says what is missing."""
     registry: list[str] = []
     stray: list[str] = []
-    for directory in REGISTRY_ROOTS:
+    for directory in RUNTIME_ROOTS:
         base = root / directory
         if not base.is_dir():
             continue
@@ -190,8 +183,8 @@ def delivery_profiles(registry: list[Mapping[str, str]]) -> list[dict[str, Any]]
     return result
 
 
-def assemble_manifest(registry: list[dict[str, str]], contract: Mapping[str, Any], suite: Mapping[str, Any]) -> dict[str, Any]:
-    """The manifest from its facts.  ``contract`` and ``suite`` are validated by the caller (development); this only arranges them."""
+def assemble_manifest(registry: list[dict[str, str]], contract: Mapping[str, Any]) -> dict[str, Any]:
+    """The manifest from its facts.  ``contract`` is validated by the caller (development); this only arranges it."""
     by_path = {row["path"]: row["digest"] for row in registry}
     qualification = contract["release_qualification"]
     manifest: dict[str, Any] = {
@@ -199,13 +192,11 @@ def assemble_manifest(registry: list[dict[str, str]], contract: Mapping[str, Any
         "package_version": package_version(contract),
         "skill_pack_digest": digest_bytes(canonical(registry)),
         "pipeline_contract": {"version": contract.get("version"), "path": "contracts/pipeline.json", "digest": by_path["contracts/pipeline.json"]},
-        "compatibility_contract_version": qualification["compatibility_contract_version"],
         "execution_profile_version": qualification["execution_profile_version"],
         "policy_profiles": [{"id": row["id"], "version": row["version"]} for row in contract.get("policy_profiles", [])],
         "adapter_registry": [{"id": row["id"], "version": row["version"]} for row in contract.get("adapter_registry", [])],
         "stage_registry": [dict(row) for row in contract.get("stage_registry", [])],
         "projection_profiles": [dict(row) for row in contract.get("projection_profiles", [])],
-        "release_eval": {"suite_id": suite["suite_id"], "suite_digest": suite["digest"], "policy": suite["policy"]},
         "delivery_profiles": delivery_profiles(registry),
         "registry": registry,
         "qualification": {"state": "implemented_unverified", "ready_tuple": None},
@@ -263,10 +254,7 @@ def verify_pack(root: Path, manifest: Mapping[str, Any] | None = None) -> tuple[
         raise ValueError("release manifest registry does not match runtime bytes")
     try:
         contract = load_json_strict(root / "contracts" / "pipeline.json")
-        suite_path = root / "evals" / "scenarios" / "pilot-critical.json"
-        suite = load_json_strict(suite_path) if suite_path.is_file() else None
-        expected = assemble_manifest(stored, contract, suite if isinstance(suite, Mapping) else {
-            "suite_id": value["release_eval"]["suite_id"], "digest": value["release_eval"]["suite_digest"], "policy": value["release_eval"]["policy"]})
+        expected = assemble_manifest(stored, contract)
     except (OSError, UnicodeDecodeError, StrictJsonError, KeyError, TypeError) as error:
         raise ValueError("release runtime metadata is unreadable") from error
     if value != expected:

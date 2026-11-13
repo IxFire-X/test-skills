@@ -1,7 +1,7 @@
 """Build and verify the deterministic portable skill-pack release manifest, and list the files of a delivery (development tool).
 
 The registry, the profiles and the check of a copy live in ``tools.pack_registry`` (every delivery carries it, ``doctor`` uses
-it).  This file is the builder: it validates the contract and the release suite, writes ``release/manifest.json`` and, for a
+it).  This file is the builder: it validates the contract, writes ``release/manifest.json`` and, for a
 kit, prints the files of a delivery profile from Git's index.  It runs ``git`` and writes the manifest, so a delivery of
 cases does not carry it.
 """
@@ -16,11 +16,9 @@ from typing import Any, Mapping
 
 from tools import pack_registry
 from tools.json_cli import JsonArgumentParser
-from tools.pack_registry import ARCHIVE_SUFFIXES, DELIVERY_FILES, PROFILES, REGISTRY_ROOTS, ROOT_FILES, RUNTIME_SUFFIXES
+from tools.pack_registry import ARCHIVE_SUFFIXES, DELIVERY_FILES, PROFILES, ROOT_FILES, RUNTIME_ROOTS, RUNTIME_SUFFIXES
 from tools.pack_registry import canonical as _canonical
 from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
-
-_digest_bytes = pack_registry.digest_bytes
 
 
 def _runtime_registry(root: Path) -> list[dict[str, str]]:
@@ -30,14 +28,11 @@ def _runtime_registry(root: Path) -> list[dict[str, str]]:
 def build_release_manifest(root: Path) -> dict[str, Any]:
     root = root.resolve()
     registry = _runtime_registry(root)
-    if not (root / "evals").is_dir():
-        raise ValueError("release runtime root is missing: evals")
     try:
         contract = load_json_strict(root / "contracts" / "pipeline.json")
-        suite = load_json_strict(root / "evals" / "scenarios" / "pilot-critical.json")
     except (OSError, UnicodeDecodeError, StrictJsonError) as error:
         raise ValueError("release runtime metadata is unreadable") from error
-    if not isinstance(contract, Mapping) or not isinstance(suite, Mapping):
+    if not isinstance(contract, Mapping):
         raise ValueError("release runtime metadata is invalid")
     if schema_diagnostics(contract, root / "schemas" / "pipeline.schema.json", root):
         raise ValueError("pipeline contract schema is invalid")
@@ -45,10 +40,7 @@ def build_release_manifest(root: Path) -> dict[str, Any]:
 
     if validate_pipeline_contract(contract, root, check_drift=False)["status"] != "passed":
         raise ValueError("pipeline contract semantics are invalid")
-    suite_body = {key: item for key, item in suite.items() if key != "digest"}
-    if suite.get("digest") != _digest_bytes(_canonical(suite_body)):
-        raise ValueError("release scenario suite digest is invalid")
-    return pack_registry.assemble_manifest(registry, contract, suite)
+    return pack_registry.assemble_manifest(registry, contract)
 
 
 def verify_release_manifest(root: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -97,7 +89,7 @@ def delivery_files(root: Path, profile: str, commit: str | None = None) -> list[
     for path in tracked:
         if path in ROOT_FILES:
             registry.append(path)
-        elif path.split("/", 1)[0] in REGISTRY_ROOTS:
+        elif path.split("/", 1)[0] in RUNTIME_ROOTS:
             (registry if Path(path).suffix in RUNTIME_SUFFIXES and "__pycache__" not in path else stray).append(path)
     if stray:
         raise ValueError(f"tracked files of the registry roots that no pack may carry: {stray[:5]}")

@@ -80,18 +80,6 @@ def test_the_manifest_schema_knows_no_git_tree_and_the_receipt_schema_knows_the_
     text = json.dumps(receipt)
     assert "dirty-git-preservation" not in text and "DIRTY_GIT_TREE" not in text and "RUN_PRESERVING_DIRTY_TREE" not in text and "GIT_TREE" not in text
     assert "tree-preservation" in text and "PROJECT_TREE" in text and "RUN_PRESERVING_TREE" in text
-    for name in ("release-eval-run.schema.json",):
-        assert "tree-preservation" in (ROOT / "schemas" / name).read_text(encoding="utf-8")
-
-
-def test_the_suite_and_the_evaluator_name_the_new_scenario_and_the_old_name_is_gone() -> None:
-    suite = json.loads((ROOT / "evals" / "scenarios" / "pilot-critical.json").read_text(encoding="utf-8"))
-    assert "tree-preservation" in suite["critical_scenarios"] and "dirty-git-preservation" not in suite["critical_scenarios"]
-    assert suite["scenario_contracts"]["tree-preservation"]["check_id"] == "tree-preserved"
-    from evals import release_eval
-
-    assert "tree-preservation" in release_eval._OBSERVATION_SCENARIOS and "dirty-git-preservation" not in release_eval._OBSERVATION_SCENARIOS
-    assert release_eval._load_scenario_suite(ROOT / "evals" / "scenarios" / "pilot-critical.json")  # the sealed digest is the file's own
 
 
 def test_a_manifest_with_the_old_git_tree_state_is_not_a_manifest(tmp_path: Path) -> None:
@@ -173,8 +161,8 @@ def test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observat
 FINALIZE_IN_A_COPY = """
 import json, sys
 from pathlib import Path
-for name in ("evals", "tools.ci_gate", "tools.release_manifest", "tools.contract_check", "tools.compatibility_contract", "tools.render_contract_docs"):
-    sys.modules[name] = None  # the maintainer files and the tools of development: not in a delivery of mode B
+for name in ("tools.ci_gate", "tools.release_manifest", "tools.contract_check", "tools.render_contract_docs"):
+    sys.modules[name] = None  # the tools of development: not in a delivery of mode B
 from tools.finalize_attempt import finalize_durable_execution_attempt
 finalized = finalize_durable_execution_attempt(Path(sys.argv[1]), sys.argv[2])
 print(json.dumps(sorted(finalized["scenario_observation_receipts"])))

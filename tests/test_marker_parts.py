@@ -187,17 +187,15 @@ def test_plan_names_a_part_over_budget_because_of_its_requirements(tmp_path: Pat
     assert requirements["content_digest"] in json.dumps(steps)
 
 
-def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The same durable run as test_compatibility_contract, with the marker made in parts: the checks are unchanged."""
-    from tests.test_compatibility_contract import _durable_evidence
+def test_a_merged_marker_is_the_one_the_reviewer_package_binds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same durable run as the review tests, with the marker made in parts: the merged answer is bound into the reviewer package, its request names every part answer."""
     from tests.test_execution_receipt import _execution_facts
-    from tools.compatibility_contract import validate_compatibility_evidence
     from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
     from tools.context_marker_parts import merge_parts
-    from tools.release_manifest import build_release_manifest
 
     real_request, real_artifact = pilot_state.publish_model_request, pilot_state.publish_model_stage_artifact
     pending: dict = {}
+    parts_inputs: list = []
 
     def request(run_root, attempt_id, stage, **options):
         if stage != "context-marker:baseline" or options.get("model_id", "").startswith("controller:"):
@@ -210,6 +208,7 @@ def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: P
             return real_artifact(run_root, attempt_id, stage, value)
         inputs = pending.pop("input_digests")
         pending.clear()
+        parts_inputs.extend(inputs)
         real_request(run_root, attempt_id, "context-marker:requirements", model_id="model-context", invocation_id=f"req-{attempt_id}", input_digests=inputs[:2])
         requirements = real_artifact(run_root, attempt_id, "context-marker:requirements",
                                      {**value, "artifacts": {**value["artifacts"], "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}, "warnings": []})
@@ -224,20 +223,14 @@ def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: P
     monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", artifact)
     run_root, attempt_id, _report, _request, _durable = _execution_facts(tmp_path)
     monkeypatch.undo()
-    manifest = build_release_manifest(pack_root)
-    evidence = _durable_evidence(manifest, run_root, attempt_id)
-    event = next(event for event in pilot_state.derive_state(run_root)["events"]
-                 if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_REQUESTED")
-    merge_request = pilot_state.read_model_request(run_root, attempt_id, "context-marker:baseline", event["artifact_digest"])
-    row = next(row for row in evidence["stages"] if row["stage"] == "context-marker")
-    row.update(model_id=merge_request["model_id"], invocation_id=merge_request["invocation_id"], input_digests=merge_request["input_digests"])
-    from tests.test_compatibility_contract import _digest
-
-    evidence.pop("digest")
-    evidence["digest"] = _digest(evidence)
-    assert validate_compatibility_evidence(evidence, manifest, pack_root=pack_root, run_root=run_root) == {
-        "level": "compatible", "independence": "verified", "errors": [],
-    }
+    events = [event for event in pilot_state.derive_state(run_root)["events"] if event.get("stage_instance_id") == "context-marker:baseline"]
+    answer = next(event for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED")["artifact_digest"]
+    asked = next(event for event in events if event["event_type"] == "MODEL_REQUESTED")
+    assert pilot_state.read_reviewer_session_ledger(run_root, attempt_id)["package_binding"]["context_marker_output_digest"] == answer
+    assert pilot_state.read_model_stage_artifact(run_root, attempt_id, "context-marker:baseline", answer)["content_digest"] == answer
+    merged = pilot_state.read_model_request(run_root, attempt_id, "context-marker:baseline", asked["artifact_digest"])["input_digests"]
+    assert parts_inputs and merged[:len(parts_inputs)] == parts_inputs  # the request keeps the inputs of the marker ...
+    assert len(merged) == len(parts_inputs) + 1 + len(parts_inputs[2:])  # ... and names the answer of the requirements and of every batch part
 
 
 def test_a_merge_over_part_of_the_receipts_is_rejected(tmp_path: Path) -> None:

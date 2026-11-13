@@ -61,9 +61,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     pipeline.extend([
         "", "## Release qualification", "",
         f"- package: `{release['package_version']}` via `{release['manifest_path']}`",
-        f"- compatibility contract: `{release['compatibility_contract_version']}`",
         f"- execution profile: `{release['execution_profile_version']}`",
-        f"- release eval: `{release['release_eval_policy']}` / `{release['scenario_suite']}`",
         f"- component state: `{release['component_state']}`; ready tuple: `{json.dumps(release['ready_tuple'])}`",
         f"- core-pilot N/A: `{', '.join(release['not_applicable'])}`",
     ])

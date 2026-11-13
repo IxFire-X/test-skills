@@ -3,7 +3,7 @@
   "$id": "schemas/release-manifest.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "package_version", "skill_pack_digest", "pipeline_contract", "compatibility_contract_version", "execution_profile_version", "policy_profiles", "adapter_registry", "stage_registry", "projection_profiles", "release_eval", "delivery_profiles", "registry", "qualification", "digest"],
+  "required": ["schema_version", "package_version", "skill_pack_digest", "pipeline_contract", "execution_profile_version", "policy_profiles", "adapter_registry", "stage_registry", "projection_profiles", "delivery_profiles", "registry", "qualification", "digest"],
   "properties": {
     "schema_version": {"const": "1.0.0"},
     "package_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9.]+)?$"},
@@ -13,17 +13,11 @@
       "required": ["version", "path", "digest"],
       "properties": {"version": {"const": "4.0"}, "path": {"const": "contracts/pipeline.json"}, "digest": {"$ref": "#/$defs/digest"}}
     },
-    "compatibility_contract_version": {"const": "portable-cli-v1"},
     "execution_profile_version": {"const": "v1"},
     "policy_profiles": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/versioned_id"}},
     "adapter_registry": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/versioned_id"}},
     "stage_registry": {"type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": {"$ref": "#/$defs/stage"}},
     "projection_profiles": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/projection_profile"}},
-    "release_eval": {
-      "type": "object", "additionalProperties": false,
-      "required": ["suite_id", "suite_digest", "policy"],
-      "properties": {"suite_id": {"const": "pilot-critical-v1"}, "suite_digest": {"$ref": "#/$defs/digest"}, "policy": {"const": "adaptive-1-3-5-v1"}}
-    },
     "delivery_profiles": {
       "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true,
       "items": {

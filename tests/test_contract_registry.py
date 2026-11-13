@@ -31,8 +31,7 @@ SCHEMA_ROWS = [
     ("run-tests-output.schema.json", 6, "IMPLEMENTED", "5.0.0"), ("resume-validation-receipt.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("trace-document.schema.json", 7, "IMPLEMENTED", "5.0.0"),
     ("trace-audit-output.schema.json", 7, "IMPLEMENTED", "5.0.0"), ("pre-finalization-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
     ("derived-terminal-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
-    ("compatibility-evidence.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-eval-run.schema.json", 8, "IMPLEMENTED", "1.0.0"),
-    ("release-eval-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-manifest.schema.json", 8, "IMPLEMENTED", "1.0.0"),
+    ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-manifest.schema.json", 8, "IMPLEMENTED", "1.0.0"),
 ]
 
 ARTIFACT_IDS = [
@@ -41,7 +40,7 @@ ARTIFACT_IDS = [
     "normalized_requirements", "canonical_candidate", "batch_plan", "candidate_fragment", "canonical_header", "assembly_receipt", "pre_review_audit",
     "authoritative_verdict", "candidate_bundle_receipt", "successor_bundle_receipt", "effective_canonical", "effective_bundle_receipt", "projection_bundle", "reviewer_session", "reviewer_evidence_transfer",
     "automation", "automation_static_review", "execution_inputs", "generated_delta", "generated_file", "materialization_receipt", "disposition_receipt",
-    "execution_receipt", "framework_evidence", "environment_receipt", "resume_validation_receipt", "execution_trace", "trace_audit", "orchestrator_output", "pre_finalization_trace", "terminal_result", "derived_terminal_trace", "compatibility_evidence", "retained_native_rerun_receipt", "scenario_observation_receipt", "release_eval_run", "release_eval_receipt", "release_manifest",
+    "execution_receipt", "framework_evidence", "environment_receipt", "resume_validation_receipt", "execution_trace", "trace_audit", "orchestrator_output", "pre_finalization_trace", "terminal_result", "derived_terminal_trace", "retained_native_rerun_receipt", "scenario_observation_receipt", "release_manifest",
 ]
 
 STAGE_ROWS = [
@@ -84,9 +83,7 @@ def test_frozen_registries_are_complete_ordered_and_truthful(pack_root: Path) ->
         {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
     ]
     assert contract["release_qualification"] == {
-        "package_version": "0.5.0-pilot", "compatibility_contract_version": "portable-cli-v1",
-        "execution_profile_version": "v1", "release_eval_policy": "adaptive-1-3-5-v1",
-        "scenario_suite": "pilot-critical-v1", "manifest_path": "release/manifest.json",
+        "package_version": "0.5.0-pilot", "execution_profile_version": "v1", "manifest_path": "release/manifest.json",
         "component_state": "implemented_unverified", "ready_tuple": None,
         "not_applicable": ["company_runner", "zephyr_tenant", "production_rollback"],
     }
@@ -198,7 +195,7 @@ def _copy_of_the_pack(pack_root: Path, destination: Path) -> Path:
     import shutil
 
     contract = _contract(pack_root)
-    for relative in ("contracts", "schemas", "skills", "tools", "evals", "release"):
+    for relative in ("contracts", "schemas", "skills", "tools", "release"):
         shutil.copytree(pack_root / relative, destination / relative)
     for relative in (*contract["projections"].values(), *pack_registry.ROOT_FILES):  # V4b: the texts and the requirements are in the registry
         (destination / relative).parent.mkdir(parents=True, exist_ok=True)

@@ -30,7 +30,7 @@ SCHEMA_ROWS = [
     ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","5.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","1.0.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","5.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-command-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
     ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),
-    ("compatibility-evidence.schema.json",8,"IMPLEMENTED","1.0.0"),("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-run.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
+    ("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
 ]
 ARTIFACT_ROWS = [
     ("run_manifest",1,"IMPLEMENTED"),("run_authorization_receipt",1,"IMPLEMENTED"),("attempt",1,"IMPLEMENTED"),("event_journal",1,"IMPLEMENTED"),("event",1,"IMPLEMENTED"),("model_request",1,"IMPLEMENTED"),("structured_result",1,"IMPLEMENTED"),("finalization_receipt",1,"IMPLEMENTED"),
@@ -39,7 +39,7 @@ ARTIFACT_ROWS = [
     ("authoritative_verdict",4,"IMPLEMENTED"),("candidate_bundle_receipt",4,"IMPLEMENTED"),("successor_bundle_receipt",4,"IMPLEMENTED"),("effective_canonical",4,"IMPLEMENTED"),("effective_bundle_receipt",4,"IMPLEMENTED"),("projection_bundle",4,"IMPLEMENTED"),("reviewer_session",4,"IMPLEMENTED"),("reviewer_evidence_transfer",4,"IMPLEMENTED"),
     ("automation",5,"IMPLEMENTED"),("automation_static_review",5,"IMPLEMENTED"),("execution_inputs",5,"IMPLEMENTED"),("generated_delta",5,"IMPLEMENTED"),("generated_file",5,"IMPLEMENTED"),("materialization_receipt",5,"IMPLEMENTED"),("disposition_receipt",5,"IMPLEMENTED"),
     ("execution_receipt",6,"IMPLEMENTED"),("framework_evidence",6,"IMPLEMENTED"),("environment_receipt",6,"IMPLEMENTED"),("resume_validation_receipt",7,"IMPLEMENTED"),("execution_trace",7,"IMPLEMENTED"),("trace_audit",7,"IMPLEMENTED"),("orchestrator_output",7,"IMPLEMENTED"),("pre_finalization_trace",7,"IMPLEMENTED"),("terminal_result",7,"IMPLEMENTED"),("derived_terminal_trace",7,"IMPLEMENTED"),
-    ("compatibility_evidence",8,"IMPLEMENTED"),("retained_native_rerun_receipt",8,"IMPLEMENTED"),("scenario_observation_receipt",8,"IMPLEMENTED"),("release_eval_run",8,"IMPLEMENTED"),("release_eval_receipt",8,"IMPLEMENTED"),("release_manifest",8,"IMPLEMENTED"),
+    ("retained_native_rerun_receipt",8,"IMPLEMENTED"),("scenario_observation_receipt",8,"IMPLEMENTED"),("release_manifest",8,"IMPLEMENTED"),
 ]
 ADAPTERS = ["pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"]
 POLICIES = ["cases-only-v1", "local-pilot-v1"]
@@ -56,10 +56,7 @@ PROJECTION_ROWS = [
     {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
 ]
 RELEASE_QUALIFICATION = {  # package_version is the contract's own (the one place), checked by format
-    "compatibility_contract_version": "portable-cli-v1",
     "execution_profile_version": "v1",
-    "release_eval_policy": "adaptive-1-3-5-v1",
-    "scenario_suite": "pilot-critical-v1",
     "manifest_path": "release/manifest.json",
     "component_state": "implemented_unverified",
     "ready_tuple": None,
@@ -179,7 +176,7 @@ def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: l
         path = root / "schemas" / str(name)
         if status in {"IMPLEMENTED", "MIGRATION_PENDING"}:
             if not path.is_file():
-                if _left_out_by_profile(root, f"schemas/{name}"):  # a schema only the release evaluation reads: not in a cases-only pack
+                if _left_out_by_profile(root, f"schemas/{name}"):  # a schema a delivery profile leaves out
                     continue
                 errors.append(f"{status.lower()} schema missing: {name}")
                 continue
