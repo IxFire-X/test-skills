@@ -430,7 +430,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     if reuse_from is None:
         check_consent()
     elif pilot_state.reuse_family(stage) is None:
-        raise pilot_state.ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку, plan, пачки генератора и ревью кейсов; fix: prepare без --reuse-from")
+        raise pilot_state.ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку, plan, пачки генератора, ревью кейсов и автотесты r1; fix: prepare без --reuse-from")
     elif fresh_context is not None or invocation_id is not None:  # the statement of the session is the source's: the host does not make it again
         raise ValueError("INVALID_ARGUMENT: --fresh-context и --invocation-id не идут с --reuse-from — сессия и независимость ревью берутся из источника; fix: prepare --stage "
                          f"{stage} --reuse-from <run_id>" + (" --accept-self-review (только если источник проверен в той же сессии и человек согласен)" if "open" in step else ""))
@@ -472,7 +472,8 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     if isinstance(reuse, Mapping):  # the answer is the source run's, read from it — the slot is not looked at
         source = pilot_state.read_model_stage_artifact(project / ".pilot-runs" / output_guard.run_name(reuse["run_id"]), reuse["attempt_id"], stage,
                                                        reuse["response_digest"])
-        pilot_state.publish_model_stage_artifact(root, attempt_id, stage, source["artifact"])
+        pilot_state.publish_model_stage_artifact(root, attempt_id, stage, source["artifact"],
+                                                 before_write=(lambda value: _automation_check(root, stage, value)) if stage == "tc-to-autotest:r1" else None)  # the checks of a submit
         return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse["run_id"], **_accepted(root, stage)}
     if not (root / SLOT_DIR).is_dir():
         confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)

@@ -2655,7 +2655,10 @@ def _publish_model_stage_artifact(
         value = hash_codeword(value)
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
-        if not isinstance(prior.get("reuse"), Mapping):  # a reused answer is passed as it is
+        reused = prior.get("reuse")
+        if isinstance(reused, Mapping) and stage_instance_id == _REUSED_AUTOMATION:  # but for the one field that holds the path of the run, which is put again like any binding
+            value, reused = _rebound(value, None), None
+        if not isinstance(reused, Mapping):  # a reused answer is passed as it is
             if (stage_instance_id.startswith("tc-generator:BATCH-") and isinstance(value, dict) and value.get("status") == "COMPLETE"
                     and value.get("context_receipt") in (None, "")):
                 # the context receipt of the batch — by the digest the published plan binds to this batch (never the digest the answer
@@ -2701,7 +2704,7 @@ def _publish_model_stage_artifact(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
     reuse = request.get("reuse")
-    if isinstance(reuse, Mapping) and content_digest != reuse["response_digest"]:  # a reused answer is not changed
+    if isinstance(reuse, Mapping) and not _is_source_answer(root, reuse, stage_instance_id, value, content_digest):  # a reused answer is not changed
         from tools.run_pipeline import printed_or
 
         source = _model_stage_artifact_target(_run_root(Path(root).parent / str(reuse["run_id"]))[1], str(reuse["attempt_id"]), str(reuse["response_digest"]))
@@ -5309,8 +5312,9 @@ class ReuseSourceInvalid(ValueError):
 
 
 # the stages ``--reuse-from`` takes — exact patterns, not a prefix (tc-generator:rework-1 and the rounds of the rework are not among them) — and the family
-# whose checks each has (``_checked_source``): a marker needs an accepted source, the plan, the batches and the review the cases accepted whole
-REUSE_STAGES = {"context-marker:*": "marker", "plan": "plan", "tc-generator:BATCH-*": "batch", "tc-reviewer:canonical": "review"}
+# whose checks each has (``_checked_source``): a marker needs an accepted source, the plan, the batches and the review the cases accepted whole, the autotests
+# the same project and execution and the review of revision 1 that accepted them
+REUSE_STAGES = {"context-marker:*": "marker", "plan": "plan", "tc-generator:BATCH-*": "batch", "tc-reviewer:canonical": "review", "tc-to-autotest:r1": "automation"}
 
 
 def reuse_family(stage: str) -> str | None:
@@ -5385,10 +5389,10 @@ def _run_source(project: Path, run_id: str, whole: bool = True) -> dict[str, Any
     raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {_REUSE_FREE} — в прогоне {run_id} нет записанной разметки")
 
 
-def _source_refusal(source: Mapping[str, Any], module: str) -> str | None:
+def _source_refusal(source: Mapping[str, Any], module: str, family: str = "marker") -> str | None:
     if source["attempt"].get("module") != module:
         return f"другой модуль ({source['attempt'].get('module')})"
-    if source["verdict"] not in ACCEPTED_REVIEW:
+    if family != "automation" and source["verdict"] not in ACCEPTED_REVIEW:  # the autotests are bound to the cases by the input of the request, not by the verdict
         return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'}): частичная приёмка и доработка пока не берутся"
     if source["drift"]:
         return "дрейф: после исполнения источника baseline разошёлся"
@@ -5453,23 +5457,43 @@ def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_
     return None
 
 
+_AUTOMATION_REVIEW = "autotest-reviewer:r1"
+
+
+def _automation_refusal(project: Path, source: Mapping[str, Any], attempt: Mapping[str, Any]) -> str | None:
+    """The autotests of the source for a new run of the same project and execution (the baseline of the attempts says both): the review of revision 1 accepted them;
+    a set accepted on revision 2 answers the digests of the source's own revision 1 and is not taken."""
+    if source["attempt"].get("baseline_digest") != attempt.get("baseline_digest"):
+        return "исполнение или проект иные: baseline прогона не тот"
+    if "tc-to-autotest:r1" not in source["stages"]:
+        return "автотесты в прогоне не писались"
+    reviewed = source["stages"].get(_AUTOMATION_REVIEW)
+    verdict = _strict(source["run_id"], f"model-stage-artifacts ({_AUTOMATION_REVIEW})", lambda: _read_model_stage_artifact_with_state(
+        project, source["root"], source["state"], str(source["attempt"]["attempt_id"]), _AUTOMATION_REVIEW, reviewed[1])["artifact"]["artifacts"]["autotest_review"]["verdict"]) if reviewed else None
+    if verdict == "ПРИНЯТО":
+        return None
+    return "автотесты принимались на ревизии 2 — берутся только принятые на ревизии 1" if "autotest-reviewer:r2" in source["stages"] else f"ревью автотестов r1 не принято ({verdict or 'ревью нет'})"
+
+
 def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage: str, run_id: str) -> tuple[dict[str, Any], str]:
     """The source of ``stage`` with every condition on it checked — reads only, so the caller writes nothing to the new run before they all hold."""
     family = reuse_family(stage)
     if family is None:
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage} не переиспользуется — --reuse-from берёт разметку (context-marker:*), plan, пачки генератора "
-                                "(tc-generator:BATCH-*) и tc-reviewer:canonical; fix: prepare без --reuse-from")
+                                "(tc-generator:BATCH-*), tc-reviewer:canonical и tc-to-autotest:r1; fix: prepare без --reuse-from")
     if run_id == root.name:
         raise ModelReuseRefused("MODEL_REUSE_REFUSED: тот же прогон — переиспользуется только прошлый прогон")
     source = _run_source(project, run_id)
     pack = skill_pack_digest()
-    refusal = _source_refusal(source, str(attempt.get("module")))
-    differences = _input_differences(source, root, attempt) if refusal is None and family != "marker" else []  # the marker: its own inputs only, as before
+    refusal = _source_refusal(source, str(attempt.get("module")), family)
+    differences = _input_differences(source, root, attempt) if refusal is None and family not in ("marker", "automation") else []  # the marker: its own inputs only, as before
     if refusal is None and differences:
         refusal = "входы иные: " + ", ".join(row["input"] for row in differences)
     if refusal is None and (pack is None or source["pack"] != pack):  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
         refusal = f"пакет иной: у источника skill_pack_digest {source['pack'] or 'не записан (прогон до FaT-CR)'}, здесь {pack or 'не прочитан'}"
-    if refusal is None and family != "marker":
+    if refusal is None and family == "automation":
+        refusal = _automation_refusal(project, source, attempt)
+    elif refusal is None and family != "marker":
         refusal = _cases_refusal(project, root, state, str(attempt["attempt_id"]), source, family)
     if refusal is not None:
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: прогон {run_id}: {refusal}; fix: prepare без --reuse-from")
@@ -5501,7 +5525,7 @@ def _reuse_source(
     if request.get("role_policy") != role_policy:
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: роль иная: у источника {request.get('role_policy')}, здесь {role_policy}; fix: prepare без --reuse-from")
     given, here = list(request["input_digests"]), list(inputs)
-    if family == "review":  # the second input, package_digest, holds the path of the published set: the run, the answers and the candidate were compared whole above
+    if family in ("review", "automation"):  # the second input holds the path of the published set (package_digest; the receipt of the bundle): compared whole above, or put again
         given, here = given[:1], here[:1]
     if given != here:
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: входы иные: у источника {given}, здесь {here}; fix: prepare без --reuse-from")
@@ -5529,9 +5553,10 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
 
 
 def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, source: dict[str, Any], command: Callable[[str], str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The rows the scan adds for the cases of the source — the plan, the batches in the order of the source, the review — or why they are not offered."""
+    """The rows the scan adds for the cases of the source — the plan, the batches in the order of the source, the review, the autotests — or why they are not offered."""
+    attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
     try:
-        changed = _input_differences(source, root, next(row for row in state["attempts"] if row["attempt_id"] == attempt_id))  # the cases ask the baseline too: the .skillsrc, the profile, the module
+        changed = _input_differences(source, root, attempt)  # the cases ask the baseline too: the .skillsrc, the profile, the module
         reason = "входы иные: " + ", ".join(row["input"] for row in changed) if changed else _cases_refusal(project, root, state, attempt_id, source, "plan")
     except ReuseSourceInvalid as error:
         reason = str(error)
@@ -5542,9 +5567,18 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
         return {"stage": stage, **more, "command": command(stage)}
 
     self_review = not source["boundary"]["host_isolation"]["fresh_context"]
-    return [row("plan"), *(row(stage, response_digest=source["stages"][stage][1]) for stage in source["stages"] if reuse_family(stage) == "batch"),
+    rows = [row("plan"), *(row(stage, response_digest=source["stages"][stage][1]) for stage in source["stages"] if reuse_family(stage) == "batch"),
             row("tc-reviewer:canonical", response_digest=source["stages"]["tc-reviewer:canonical"][1], review="SELF" if self_review else "independent",
-                **({"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"} if self_review else {}))], {}
+                **({"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"} if self_review else {}))]
+    if "tc-to-autotest:r1" not in source["stages"]:
+        return rows, {}
+    try:  # the autotests, after the cases: the same project and execution, accepted by the review of revision 1
+        skipped = _automation_refusal(project, source, attempt)
+    except ReuseSourceInvalid as error:
+        skipped = str(error)
+    if skipped is not None:
+        return rows, {"automation": {"reused": False, "reason": skipped}}
+    return [*rows, row("tc-to-autotest:r1", response_digest=source["stages"]["tc-to-autotest:r1"][1])], {}
 
 
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -6100,6 +6134,28 @@ def _response_digest_rows(
         if given != expected:
             rows.append((pointer, given, expected, source))
     return rows
+
+
+_REUSED_AUTOMATION = "tc-to-autotest:r1"
+_REUSE_REBOUND = "effective_bundle_receipt_digest"  # the one field of a reused answer that holds the path of the run (the digest of the bundle published in it)
+
+
+def _rebound(value: Mapping[str, Any], to: Any) -> dict[str, Any]:
+    """A copy of the autotest answer with the field ``_REUSE_REBOUND`` of its ``source`` set to ``to``."""
+    copy = json.loads(json.dumps(value))
+    if isinstance(copy.get("artifacts"), dict) and isinstance(copy["artifacts"].get("source"), dict):
+        copy["artifacts"]["source"][_REUSE_REBOUND] = to
+    return copy
+
+
+def _is_source_answer(root: Path, reuse: Mapping[str, Any], stage_instance_id: str, value: Mapping[str, Any], content_digest: str) -> bool:
+    """The answer of a reuse request is the source answer byte for byte — the autotests but for ``_REUSE_REBOUND``, which is the new run's."""
+    if content_digest == reuse["response_digest"]:
+        return True
+    if stage_instance_id != _REUSED_AUTOMATION:
+        return False
+    source = read_model_stage_artifact(Path(root).parent / str(reuse["run_id"]), str(reuse["attempt_id"]), stage_instance_id, str(reuse["response_digest"]))["artifact"]
+    return _model_stage_artifact_bytes(_rebound(source, None)) == _model_stage_artifact_bytes(_rebound(value, None))
 
 
 def _fill_response_bindings(
