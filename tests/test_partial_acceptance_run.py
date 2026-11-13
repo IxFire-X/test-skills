@@ -45,7 +45,7 @@ def _fixture_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(batch, "_fragment", lambda *args: _automated(fragment(*args)))
 
 
-def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | None, capsys: pytest.CaptureFixture[str], *, rework: bool, abort: bool = False) -> dict:
+def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | None, capsys: pytest.CaptureFixture[str], *, rework: bool, abort: bool = False, give_up: bool = False) -> dict:
     """Two cases generated, the first sent back by the reviewer; ``rework``: it goes back to the generator once and passes the second round (r3: both cases, display_order
     [1, 2]), else the rework is off (``rework_rounds`` 0) and the set is r2 (the second one, display_order [2]); its automation accepted."""
     from tests.test_autotest_cycle import run_reviewer
@@ -67,6 +67,10 @@ def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: 
         from tests.test_rework_review import _answer as second_answer, _answered, _open as open_second
 
         assert first["status"] == "REWORK_PENDING" and pilot_state.read_effective_canonical_if_present(root, attempt) is None
+        if give_up:  # the generator gives the rework up after its request: the set is r2 and the request without an answer waits for nothing
+            assert _api("prepare", "--run-root", str(root), "--stage", "tc-generator:rework-1")[0] == 0
+            assert _api("submit", "--run-root", str(root), "--stage", "tc-generator:rework-1", "--abort", "REWORK_UNUSABLE")[0] == 0
+    if rework and not give_up:
         _answered(run, capsys)
         assert open_second(run, capsys)[0] == 0
         if abort:  # the second round is given up: the set is r2 and the rework nobody finished waits for nothing
@@ -74,13 +78,13 @@ def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: 
         else:
             _put(root / "incoming" / "tc-reviewer-rework-1.json", second_answer(run))
             assert _api("submit", "--run-root", str(root), "--stage", "tc-reviewer:rework-1")[0] == 0
-    else:
+    elif not rework:
         assert first["effective_source"]["revision"] == 2
     effective = pilot_state.read_effective_canonical(root, attempt)
     document = effective["document"]
-    assert [case["display_order"] for case in document["test_cases"]] == ([1, 2] if rework and not abort else [2]) and document["revision"] == (3 if rework and not abort else 2)
+    assert [case["display_order"] for case in document["test_cases"]] == ([1, 2] if rework and not abort and not give_up else [2]) and document["revision"] == (3 if rework and not abort and not give_up else 2)
     artifact = _automation_answer(document, effective)
-    if rework and not abort:  # both cases are back: the helper relates the first one, the second one is related the same way
+    if rework and not abort and not give_up:  # both cases are back: the helper relates the first one, the second one is related the same way
         step = document["test_cases"][1]["steps"][0]
         where = {"case_id": document["test_cases"][1]["case_id"], "step_id": step["step_id"], "file_id": "FILE-products", "symbol_id": "SYMBOL-products"}
         expectation = step["expectations"][0]
@@ -135,6 +139,17 @@ def test_a_set_whose_second_round_was_aborted_runs_through_the_automation_and_th
     from tools.pilot_state import read_terminal_result
 
     run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=True, abort=True)
+    code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
+    assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
+    assert read_terminal_result(run["run_root"], run["attempt_id"])["verification"] == "PASS"
+
+
+def test_a_set_whose_rework_was_given_up_runs_through_the_automation_and_the_build_and_the_journal_is_accepted(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """V7d: the rework asked and given up (``submit --abort``): the attempt stays open, the automation runs over r2, the journal takes the start of the execution."""
+    from tools.pilot_state import read_terminal_result
+
+    run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=True, give_up=True)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
     assert read_terminal_result(run["run_root"], run["attempt_id"])["verification"] == "PASS"

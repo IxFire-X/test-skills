@@ -514,7 +514,8 @@ def check_rework_answer(run_root: Path, attempt_id: str, value: Mapping[str, Any
 
 
 REWORK_FIX = ("ответ — {schema_version: \"1.0.0\", status: \"COMPLETE\", batch_id: \"rework-1\", test_cases: [...]} с ровно отклонёнными кейсами; у каждого те же case_id, "
-              "requirement_ids, display_order и param_group, что в виде; исправь ответ и отдай единственным повтором стадии (--transport-attempts 2), ничего не записано")
+              "requirement_ids, display_order и param_group, что в виде; исправь ответ и отдай единственным повтором стадии (--transport-attempts 2), ничего не записано; "
+              "не получается — submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE: набор выйдет без доработки, прогон пойдёт дальше")
 
 
 def rework_asked(run_root: Path, attempt_id: str) -> bool:
@@ -715,6 +716,20 @@ def select_rework_review(run_root: Path, attempt_id: str, *, review: Mapping[str
             _publish_final(run_root, attempt_id, data, final)
         published = Path(run_root) / "published"
         return {**told, "files": sorted(path.name for path in published.iterdir()) if published.is_dir() else []}
+
+
+def abort_rework(run_root: Path, attempt_id: str, reason: str, dry_run: bool) -> dict[str, Any]:
+    """``submit --stage tc-generator:rework-1 --abort``: the agent gives the rework up; the set is published as for a rework nobody finished («Доработка не завершена.»), the attempt stays
+    open and ``status`` names what follows a partial acceptance.  Not after the answer of the rework is recorded: the second round (or its ``--abort``) follows."""
+    if reason != "REWORK_UNUSABLE":
+        raise ValueError(f"REVIEWER_ABORT_REASON_INVALID: {reason}; fix: --abort REWORK_UNUSABLE (доработку не удалось сделать)")
+    _require_open_attempt(run_root, attempt_id)
+    data = rework_round_data(run_root, attempt_id)
+    if data["answer"] is not None:
+        raise ValueError("REWORK_ANSWERED: the answer of the rework is recorded; fix: дальше второй круг — prepare tc-reviewer:rework-1 (или submit --abort у него)")
+    if not dry_run:
+        close_pending_rework(run_root, attempt_id)
+    return {"outcome": "ABORTED", "rework": {"accepted": 0, "not_accepted": len(data["outcome"]["rejected"]) + len(data["outcome"]["with_group"]), "ignored": 0}}
 
 
 def abort_rework_review(run_root: Path, attempt_id: str, reason: str, dry_run: bool) -> dict[str, Any]:

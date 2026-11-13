@@ -384,3 +384,72 @@ def test_a_reworked_case_without_its_own_display_order_is_refused_as_a_change_of
     before = _events(root)
     code, out = _call(capsys, "submit", root, STAGE)
     assert code == 2 and out["code"] == "REWORK_CASE_IDENTITY" and _events(root) == before
+
+
+# ---- V7d: the agent gives the rework up (submit --abort): the set is published as for a rework nobody finished and the attempt stays open ----
+
+ABORT = ("--abort", "REWORK_UNUSABLE")
+
+
+def _unfinished_text(run: dict) -> str:
+    return next(path for path in (run["run_root"] / "published").glob("*.REJECTED-CASES.md")).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("before", ["no_request", "request_only", "refused_answer"])
+def test_the_rework_given_up_publishes_the_set_as_for_an_unfinished_rework_and_the_attempt_stays_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                               capsys: pytest.CaptureFixture[str], before: str) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    if before != "no_request":
+        _call(capsys, "prepare", root, STAGE)
+    if before == "refused_answer":
+        _put(root, STAGE, _reworked(run, requirement_ids=["CREQ-X"]))
+        assert _call(capsys, "submit", root, STAGE)[0] == 2
+    code, out = _call(capsys, "submit", root, STAGE, "--dry-run", *ABORT)
+    assert code == 0 and out["result"]["outcome"] == "ABORTED" and _published(run) == [] and pilot_state.read_effective_canonical_if_present(root, run["attempt_id"]) is None
+    code, out = _call(capsys, "submit", root, STAGE, *ABORT)
+    assert code == 0 and out["result"]["outcome"] == "ABORTED", out
+    assert ("доработка не запускалась" if before == "no_request" else "доработка не завершена") in _unfinished_text(run) and pilot_state.read_effective_canonical_if_present(root, run["attempt_id"]) is not None
+    assert _status(root)["next"]["verb"] == "finish"  # the attempt is open: the cases mode names finish (the mode with autotests names the automation: test_partial_acceptance_run)
+    files, before_events = _published(run), _events(root)
+    assert _call(capsys, "submit", root, STAGE, *ABORT)[0] == 2 and _published(run) == files and _events(root)[: len(before_events)] == before_events  # the step is gone: nothing is written
+
+
+def test_the_rework_given_up_after_its_answer_is_recorded_is_refused_and_nothing_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    _call(capsys, "prepare", root, STAGE)
+    _put(root, STAGE, _reworked(run))
+    assert _call(capsys, "submit", root, STAGE)[0] == 0
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, STAGE, *ABORT)
+    assert code == 2 and out["code"] == "REWORK_ANSWERED" and "tc-reviewer:rework-1" in out["fix"] and _events(root) == before and _published(run) == []
+
+
+def test_an_answer_put_in_the_slot_after_the_rework_was_given_up_is_refused_before_it_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    assert _call(capsys, "submit", root, STAGE, *ABORT)[0] == 0
+    _put(root, STAGE, _reworked(run))
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, STAGE)
+    assert code == 2 and out["code"] == "STAGE_UNKNOWN" and _events(root) == before
+
+
+def test_the_rework_given_up_in_a_closed_attempt_is_refused_and_a_reason_outside_the_list_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    code, out = _call(capsys, "submit", root, STAGE, "--abort", "WHATEVER")
+    assert code == 2 and out["code"] == "REVIEWER_ABORT_REASON_INVALID" and "REWORK_UNUSABLE" in out["fix"] and _published(run) == []
+    _finish(run, capsys)  # the attempt is closed by the real finish
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, STAGE, *ABORT)
+    assert code == 2 and out["code"] in {"ATTEMPT_TERMINAL", "STAGE_UNKNOWN"} and _events(root) == before
+
+
+def test_a_request_of_the_rework_without_an_answer_and_without_the_result_stops_the_start_of_the_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    assert _call(capsys, "prepare", run["run_root"], STAGE)[0] == 0
+    with pytest.raises(ValueError, match="invalid event journal"):
+        pilot_state._append_event(run["project"], run["run_root"], "EXECUTION_STARTED", actor="controller", attempt_id=run["attempt_id"], batch_id=None, artifact_digest="sha256:" + "1" * 64)
+        pilot_state.derive_state(run["run_root"])

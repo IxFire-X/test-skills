@@ -89,7 +89,9 @@ def _rework_step(root: Path, attempt_id: str, answered: bool) -> dict[str, Any] 
 
     if rework_round_if_present(root, attempt_id) is None or read_effective_canonical_if_present(root, attempt_id) is not None:
         return None
-    return {"stage": REWORK_STAGE, "input_digests": [], "done": answered, "invocation": "tc-generator-rework-1"}
+    from tools.orchestrate_test_case_revision import abort_rework
+
+    return {"stage": REWORK_STAGE, "input_digests": [], "done": answered, "invocation": "tc-generator-rework-1", "abort": lambda reason, dry_run: abort_rework(root, attempt_id, reason, dry_run)}
 
 
 def _manual_share(root: Path, document: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -455,7 +457,7 @@ def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry
     project, root, state, attempt_id, step = _locate(run_root, stage)
     if abort is not None:  # a step that can end without an answer says how
         if "abort" not in step:
-            raise ValueError(f"STAGE_NO_ABORT: {stage} не прерывается; fix: --abort только у ревью (REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE)")
+            raise ValueError(f"STAGE_NO_ABORT: {stage} не прерывается; fix: --abort только у ревью (REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE) и у доработки (REWORK_UNUSABLE)")
         return {"stage": stage, **step["abort"](abort, dry_run)}
     if "direct" in step:  # a recorded answer stands without a file; where the step rechecks, a file there is checked again
         if step["done"] and not (step.get("recheck") and slot(root, stage).is_file()):

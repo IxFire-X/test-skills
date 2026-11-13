@@ -577,8 +577,8 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
             if event_type == "EXECUTION_STARTED":
                 if attempt_id in execution_started or any(
                     key[0] == attempt_id and key not in model_responses
-                    # the second round closed by --abort has no answer; the automation of the attempt exists only after the effective canonical (the request reads it), so the result was published
-                    and not (key[1] == _REWORK_REVIEW_STAGE and (attempt_id, "tc-to-autotest:r1") in model_responses)
+                    # the rework or its second round closed by --abort has no answer; the automation of the attempt exists only after the effective canonical (the request reads it), so the result was published
+                    and not (key[1] in (_REWORK_STAGE, _REWORK_REVIEW_STAGE) and (attempt_id, "tc-to-autotest:r1") in model_responses)
                     for key in model_requests
                 ):
                     raise ValueError("invalid event journal")

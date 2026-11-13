@@ -124,7 +124,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 
 Скажи человеку по `outcome` ответа `submit`: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые лежат отдельно
 (`*.REJECTED-CASES.*`, в Zephyr не импортировать), пробелы покрытия — в итоге; если `status` называет `prepare tc-generator:rework-1`, отклонённые кейсы идут на доработку
-один раз — `prepare`/`submit` `tc-generator:rework-1`, затем `tc-reviewer:rework-1` (метка и `--fresh-context` как у первого ревью; `no` — без метки); итог выходит после него, `finish` до этого не зови. `REWORK` — набор отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай
+один раз — `prepare`/`submit` `tc-generator:rework-1`, затем `tc-reviewer:rework-1` (метка и `--fresh-context` как у первого ревью; `no` — без метки); итог выходит после него, `finish` до этого не зови. Доработка не получается — `submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE`: набор выйдет без неё, прогон идёт дальше (не `finish`). `REWORK` — набор отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай
 (`independence_unverified`).
 
 ## 5. Закрой попытку
