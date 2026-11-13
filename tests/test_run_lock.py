@@ -146,7 +146,7 @@ def test_a_wait_that_is_too_long_is_concurrent_writer_with_its_fix(tmp_path: Pat
 def test_a_corrupt_journal_is_journal_corrupt_with_its_fix_not_input_invalid(tmp_path: Path) -> None:
     root = _run(tmp_path)
     (root / "events" / "0000000001.json").write_bytes(b"x")
-    answer = _cli("tools.api", "read-effective", "--run-root", str(root), "--attempt", "a")
+    answer = _cli("tools.api", "prepare", "--run-root", str(root), "--stage", "tc-generator:b1")
     assert answer["code"] == "JOURNAL_CORRUPT"
     assert answer["fix"] == fixes.FIXES["JOURNAL_CORRUPT"]
     assert _cli("tools.run_pipeline", "status", "--project", str(tmp_path), "--run", root.name)["code"] == "JOURNAL_CORRUPT"
@@ -155,8 +155,8 @@ def test_a_corrupt_journal_is_journal_corrupt_with_its_fix_not_input_invalid(tmp
 def test_a_corrupt_journal_stays_the_refusal_after_the_refusal_is_recorded(tmp_path: Path) -> None:
     root = _run(tmp_path)
     (root / "events" / "0000000001.json").write_bytes(b"x")
-    _cli("tools.api", "read-effective", "--run-root", str(root), "--attempt", "a")
-    assert _cli("tools.api", "read-effective", "--run-root", str(root), "--attempt", "a")["code"] == "JOURNAL_CORRUPT"
+    _cli("tools.api", "prepare", "--run-root", str(root), "--stage", "tc-generator:b1")
+    assert _cli("tools.api", "prepare", "--run-root", str(root), "--stage", "tc-generator:b1")["code"] == "JOURNAL_CORRUPT"
 
 
 def test_a_missing_journal_or_run_is_still_an_input_error(tmp_path: Path) -> None:
@@ -164,7 +164,7 @@ def test_a_missing_journal_or_run_is_still_an_input_error(tmp_path: Path) -> Non
     assert _cli("tools.run_pipeline", "status", "--project", str(tmp_path), "--run", "0" * 32)["code"] == "EXECUTION_COORDINATES"
     (root / "events.jsonl").unlink()
     assert _cli("tools.run_pipeline", "status", "--project", str(tmp_path), "--run", root.name)["code"] == "EXECUTION_COORDINATES"
-    assert _cli("tools.api", "read-effective", "--run-root", str(root), "--attempt", "a")["code"] == "INPUT_INVALID"
+    assert _cli("tools.api", "prepare", "--run-root", str(root), "--stage", "tc-generator:b1")["code"] == "INPUT_INVALID"
 
 
 def test_a_publication_that_cannot_be_proved_is_publication_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,7 +271,7 @@ def _commands(project: Path, root: Path) -> dict[str, tuple[str, list[str]]]:
         "report": ("tools.run_pipeline", ["report", *run]),
         "exec_commands": ("tools.run_pipeline", ["materialize", *run]),
         "ingest": ("tools.run_pipeline", ["ingest", *run, "--no-reports", "--reason", "BUILD_FAILED"]),
-        "api": ("tools.api", ["read-effective", "--run-root", name, "--attempt", "a"]),
+        "api": ("tools.api", ["prepare", "--run-root", name, "--stage", "tc-generator:b1"]),
         "review_view": ("tools.review_view", [*run, "--effective"]),
         "step_size": ("tools.step_size", ["--project", str(project), "--run", root.name, "--stage", "tc-generator:b1"]),
         "zephyr_template_export": ("tools.zephyr_template_export", [*run, "--cases", name]),

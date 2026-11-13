@@ -100,9 +100,9 @@ def _ledger(run: dict) -> dict:
 
 
 def _boundary(run: dict) -> dict:
-    code, read = _api("read-receipt", *_flags(run), "--kind", "reviewer-session-boundary", "--event", "ARTIFACT_READ_BACK")
-    assert code == 0, read
-    return read["result"]["record"]
+    from tools import pilot_state
+
+    return pilot_state.read_attempt_receipt(run["run_root"], run["attempt_id"], "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
 
 
 # --------------------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def test_dry_run_after_the_selection_writes_nothing_either(tmp_path: Path) -> No
 # --------------------------------------------------------------------------------------
 
 def test_prepare_publishes_the_candidate_of_an_answer_with_a_mixed_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The answer of a batch that lists requirement ids and categories out of order is stored in order (model-response) and assembled
+    """The answer of a batch that lists requirement ids and categories out of order is stored in order (submit) and assembled
     in order (assemble_candidate); prepare, which assembles from the journal, publishes it and opens the review — the one
     assembly per process does not go round the normalization."""
     import copy

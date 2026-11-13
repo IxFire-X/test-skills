@@ -95,14 +95,15 @@ def render_markdown_section(report: dict) -> str:
 
 
 def test_the_output_large_warning_of_the_report_is_judged_by_the_stored_answer_and_the_raw_size_is_printed_as_the_agents(tmp_path: Path, capsys, monkeypatch) -> None:
-    from tests.test_f1 import _batch_request, _flags, _main, _report
+    from tests.helpers import answer_stage
+    from tests.test_f1 import _batch_request, _report
     from tests.test_review_requested import _generated_run
     from tools import step_size
 
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10_000_000)
     run = _generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
-    code, answered = _main(capsys, ["model-response", *_flags(run), "--stage", stage, "--artifact", str(fragment)])
+    code, answered = answer_stage(run["run_root"], stage, fragment)
     assert code == 0 and answered["result"]["warning"] is None, answered
     sizes = Path(run["run_root"]) / "output-sizes.jsonl"
     rows = [json.loads(line) for line in sizes.read_text(encoding="utf-8").splitlines()]

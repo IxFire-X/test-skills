@@ -88,7 +88,9 @@ def test_submit_again_after_the_set_was_written_but_not_journaled_finishes_the_j
     code, again = _select_verdict(run, answer)
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
     assert {path.name: path.read_bytes() for path in _files(run, "*.*") if path.name in written} == written
-    assert _api("read-effective", *_flags(run))[1]["result"]["document_digest"]
+    from tools.pilot_state import read_effective_canonical
+
+    assert read_effective_canonical(run["run_root"], run["attempt_id"])["document_digest"]
 
 
 def test_a_file_that_is_not_the_set_blocks_the_publication_of_the_accepted_set(tmp_path: Path) -> None:
@@ -117,8 +119,10 @@ def test_status_report_and_the_reviewer_step_work_before_the_verdict_with_no_set
     assert _files(run, "*.json") == []
     code, status = _run(capsys, "status", run["project"], run["run_root"])
     assert code == 0 and status["status"] == "ok", status
-    code, inputs = _api("step-inputs", *_flags(run)[:2], "--stage", "tc-reviewer:canonical")
-    assert code == 0 and inputs["result"]["unresolved"] == [], inputs
+    from tools.step_size import request_files
+
+    inputs = request_files(run["run_root"], "tc-reviewer:canonical")  # the list of reading of the reviewer's step: every input found
+    assert not inputs.get("unresolved"), inputs
     report, markdown = _report(run)
     reviewer = next(call for call in report["model_calls"] if call["stage"] == "tc-reviewer:canonical")
     assert reviewer["size_complete"] and report["canon"]["cases"] > 0 and "кандидат" in markdown and "канона нет" not in markdown

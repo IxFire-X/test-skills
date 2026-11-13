@@ -38,13 +38,13 @@ def test_an_error_s_own_code_and_fix_win() -> None:
 
 
 def _api(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: Exception) -> tuple[int, dict]:
-    from tools import api, pilot_state
+    from tools import api, stage_steps
 
     def refuse(*_args, **_kwargs):
         raise error
 
-    monkeypatch.setattr(pilot_state, "attempt_receipt_or_reason", refuse)
-    code = api.main(["read-receipt", "--run-root", "x", "--attempt", "a" * 32, "--kind", "execution-receipt", "--event", "ARTIFACT_READ_BACK"])
+    monkeypatch.setattr(stage_steps, "prepare", refuse)
+    code = api.main(["prepare", "--run-root", "x", "--stage", "tc-generator:b1"])
     return code, json.loads(capsys.readouterr().out)
 
 

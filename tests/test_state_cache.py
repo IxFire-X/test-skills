@@ -51,14 +51,13 @@ def test_an_edit_of_the_journal_files_is_not_hidden_by_the_closure(tmp_path: Pat
         pilot_state.derive_state(run["run_root"])  # whichever call meets it, the closure ends with the full check
 
 
-def test_no_command_leaves_a_state_file_in_tmp(tmp_path: Path) -> None:
-    import json
+def test_no_command_leaves_a_state_file_in_tmp(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.run_pipeline import main
 
     run = _generated_run(tmp_path)
-    digest = json.loads(Path(run["context"]).read_bytes())["digest"]
     journal = _journal(run["run_root"])
-    code, read = _api("read-receipt", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--kind", "batch-plan", "--event", "ARTIFACT_READ_BACK")
-    assert code == 0, read
+    assert main(["status", "--project", str(run["project"]), "--run", run["run_root"].name]) == 0
+    capsys.readouterr()
     assert not (run["run_root"] / "tmp" / "state-cache.json").exists() and _journal(run["run_root"]) == journal
 
 

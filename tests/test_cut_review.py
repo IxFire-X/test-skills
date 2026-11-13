@@ -19,6 +19,20 @@ from tests.test_review_two_commands import _autofix, _cycle, _flags, _open, _sel
 LEDGER = "reviewer-ledger-v1"
 
 
+def _effective(run: dict) -> dict:
+    """The effective canonical the review selected: read by the library (the agent has no command for it)."""
+    from tools.pilot_state import read_effective_canonical
+
+    return read_effective_canonical(run["run_root"], run["attempt_id"])
+
+
+def _effective_or_reason(run: dict) -> dict:
+    """What the journal says of it: the selection, or «not yet»; a refusal where the file is gone."""
+    from tools.pilot_state import effective_canonical_or_reason
+
+    return effective_canonical_or_reason(run["run_root"], run["attempt_id"])
+
+
 def _crash_nth(monkeypatch, owner, name: str, when=lambda *a, **k: True, nth: int = 1) -> None:
     """The nth call of ``owner.name`` that satisfies ``when`` raises OSError once; every other call runs the real function."""
     real = getattr(owner, name)
@@ -133,8 +147,8 @@ def test_submit_cut_before_the_effective_canonical(tmp_path: Path, monkeypatch, 
         assert code == 2, first
     code, again = _select_verdict(run, verdict)
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
+    effective = _effective(run)
+    assert effective["document_digest"].startswith("sha256:"), effective
 
 
 @pytest.mark.parametrize("point", ["effective-file-written", "effective-published"])
@@ -149,8 +163,8 @@ def test_submit_cut_between_the_effective_canonical_file_and_its_events(tmp_path
     assert (run["run_root"] / "effective-canonicals" / f"{run['attempt_id']}.json").exists(), "the probe expects the effective canonical file on disk"
     code, again = _select_verdict(run, verdict)
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", f"{point}: {again}"
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
+    effective = _effective(run)
+    assert effective["document_digest"].startswith("sha256:"), effective
 
 
 # --------------------------------------------------------------------------------------
@@ -310,15 +324,15 @@ def test_a_closed_ledger_cut_before_the_effective_canonical_says_not_yet(tmp_pat
     with monkeypatch.context() as broken:
         _crash_once(broken, pilot_state, "publish_effective_canonical")
         assert _select_verdict(run, verdict)[0] == 2
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 0 and effective["result"]["effective"] is None, effective
+    effective = _effective_or_reason(run)
+    assert effective["effective"] is None, effective
     status = _status(capsys, run)
     assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "submit", status
 
 
 def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_not_yet_and_the_repeat_closes_it(tmp_path: Path, monkeypatch, capsys) -> None:
     """J1 (backlog of F2): the write order of AUTO_FIX_APPLIED is the COMPLETED ledger, the r2 bundle, then the effective canonical.  A cut after
-    the bundle is «ещё нет» for status and read-effective (not a refusal, not a new run), and the same submit writes the rest: the
+    the bundle is «ещё нет» for status and the reader of the effective canonical (not a refusal, not a new run), and the same submit writes the rest: the
     publisher of the r2 bundle is run again on the very same document and the effective canonical is published once."""
     from tools import pilot_state
 
@@ -332,16 +346,16 @@ def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_
         assert code == 2, first
     written = sorted(str(path.relative_to(published)) for path in published.rglob("*") if path.is_file())
     assert len(list(published.rglob("*"))) > len(before)  # the r2 bundle is on the disk: the cut is after it
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 0 and effective["result"]["effective"] is None, effective
+    effective = _effective_or_reason(run)
+    assert effective["effective"] is None, effective
     status = _status(capsys, run)
     assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and status["state"] == "review" and status["next"]["verb"] == "submit", status
     code, again = _select_verdict(run, answer)
     assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
     assert sorted(str(path.relative_to(published)) for path in published.rglob("*") if path.is_file()) == written  # no second bundle
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
-    assert sum(row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") is None and row.get("artifact_digest") == effective["result"]["digest"]
+    effective = _effective(run)
+    assert effective["document_digest"].startswith("sha256:"), effective
+    assert sum(row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") is None and row.get("artifact_digest") == effective["digest"]
                for row in _events(run["run_root"])) == 1  # the effective canonical is bound once
 
 
@@ -355,8 +369,8 @@ def test_a_fully_closed_review_whose_effective_file_is_gone_is_still_a_refusal(t
     status = _status(capsys, run)
     assert status.get("stop_reason") == "EVIDENCE_UNVERIFIED", status
     assert any("effective-canonicals" in str(row.get("path")) for row in status.get("evidence_errors") or []), status.get("evidence_errors")
-    code, effective = _main(capsys, ["read-effective", *_flags(run)])
-    assert code == 2 and effective["status"] == "error", effective
+    with pytest.raises(ValueError):  # a file gone where the journal recorded the acceptance: the refusal that status and the report name
+        _effective_or_reason(run)
     report = build_report(run["project"], run["run_root"].name)[0]
     assert any("EFFECTIVE_CANON_UNREADABLE" in str(item) for item in report["warnings"]), report["warnings"]
 
