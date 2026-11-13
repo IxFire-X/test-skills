@@ -319,3 +319,68 @@ def test_a_planted_receipt_file_and_a_forged_event_open_no_rework(tmp_path: Path
     with pytest.raises(ValueError):
         pilot_state.publish_model_request(root, run["attempt_id"], STAGE, model_id=None, invocation_id="x", input_digests=[])
     assert not any(row.startswith("MODEL_REQUESTED:tc-generator:rework") for row in _events(root))
+
+
+# ---- V7c: the case of the rework is written like a case of a batch — the code puts the mechanics, the identity of the case stays the model's ----
+
+_MECHANICS = frozenset({"step_id", "input_id", "output_id", "expectation_id", "assertion_id", "display_order", "semantic_type", "sensitive", "automation_blockers"})
+
+
+def _thin(value):
+    """A step as the model writes it: without the ids, orders and types the code puts (``manual_only`` is the model's word, as in a batch)."""
+    if isinstance(value, dict):
+        return {key: _thin(item) for key, item in value.items() if key not in _MECHANICS}
+    return [_thin(item) for item in value] if isinstance(value, list) else value
+
+
+def _thin_answer(run: dict, new_steps: int = 2) -> dict:
+    """The case as the reviewer saw it (its steps with their ids stay) and ``new_steps`` steps added without any service field."""
+    case = copy.deepcopy(_ids(run)[0])
+    case["steps"] += [_thin(case["steps"][0]) for _ in range(new_steps)]
+    return {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1", "test_cases": [case]}
+
+
+def test_a_reworked_case_with_new_steps_and_no_service_fields_is_accepted_and_recorded_complete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.orchestrate_test_case_revision import rework_round_data
+
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    _call(capsys, "prepare", root, STAGE)
+    _put(root, STAGE, _thin_answer(run))
+    code, out = _call(capsys, "submit", root, STAGE, "--dry-run")
+    assert code == 0, [row["message"] for row in out.get("diagnostics", [])]
+    code, out = _call(capsys, "submit", root, STAGE)
+    assert code == 0, out
+    data = rework_round_data(root, run["attempt_id"], need_answer=True)
+    case = data["r3"]["test_cases"][0]
+    steps = [step for case in data["r3"]["test_cases"] if case["case_id"] == _ids(run)[0]["case_id"] for step in case["steps"]]
+    assert [step["display_order"] for step in steps] == list(range(1, len(steps) + 1)) and len({step["step_id"] for step in steps}) == len(steps) == 3
+    other = _ids(run)[1]  # the case the review accepted stays as it was, byte for byte
+    assert next(item for item in data["r3"]["test_cases"] if item["case_id"] == other["case_id"]) == other and case
+    from tests.test_rework_review import _open as open_second
+
+    code, opened = open_second(run, capsys)  # the second round sees the case with the fields the code put
+    shown = json.loads(Path(opened["result"]["reviewer_view"]).read_text(encoding="utf-8"))["cases"][0]["steps"]
+    assert code == 0 and [step["step_id"] for step in shown] == [step["step_id"] for step in steps]
+
+
+def test_the_full_form_of_the_answer_of_the_rework_is_left_as_it_is_and_the_thin_one_becomes_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.batch_assembly import fill_rework_mechanics
+
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    filled, summary = fill_rework_mechanics(_thin_answer(run))
+    assert summary and set(filled) == {"schema_version", "status", "batch_id", "test_cases"}  # no ``diagnostics`` of a batch in the answer
+    assert fill_rework_mechanics(filled) == (filled, [])  # written in full, the answer is the same one
+
+
+def test_a_reworked_case_without_its_own_display_order_is_refused_as_a_change_of_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    root = run["run_root"]
+    _call(capsys, "prepare", root, STAGE)
+    answer = _thin_answer(run)
+    del answer["test_cases"][0]["display_order"]  # the code puts the order of the steps, not the place of the case
+    _put(root, STAGE, answer)
+    before = _events(root)
+    code, out = _call(capsys, "submit", root, STAGE)
+    assert code == 2 and out["code"] == "REWORK_CASE_IDENTITY" and _events(root) == before

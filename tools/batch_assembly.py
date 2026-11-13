@@ -802,6 +802,25 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
     return value, [f"{name} ×{counts[name]}" for name in order if name in counts]
 
 
+def fill_rework_mechanics(answer: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """The mechanics of the cases of the rework — those of a batch, by the same function.  What is the identity of a case (its own ``display_order``) and the form of the
+    answer (no ``diagnostics``) stays as the model wrote it, for ``check_rework``."""
+    if not isinstance(answer, dict) or not isinstance(answer.get("test_cases"), list):
+        return answer, []
+    held = deepcopy(answer)
+    held.setdefault("diagnostics", [])
+    for case in held["test_cases"]:
+        if isinstance(case, dict):
+            case.setdefault("display_order", 0)  # present: the place of the case is not filled in
+    filled, summary = fill_fragment_mechanics(held)
+    if "diagnostics" not in answer:
+        filled.pop("diagnostics", None)
+    for given, case in zip(answer["test_cases"], filled["test_cases"]):
+        if isinstance(given, dict) and "display_order" not in given:
+            case.pop("display_order", None)
+    return filled, summary
+
+
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
     """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
     plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given

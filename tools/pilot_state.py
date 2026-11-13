@@ -2624,6 +2624,10 @@ def _publish_model_stage_artifact(
 
         value, normalized = normalize_fragment(value)
         value, mechanics = fill_fragment_mechanics(value)  # ids, display_order, defaults, the types the code can take
+    if stage_instance_id == _REWORK_STAGE:  # a case of the rework is written like a case of a batch: the ids and orders of its steps are the code's
+        from tools.batch_assembly import fill_rework_mechanics
+
+        value, mechanics = fill_rework_mechanics(value)
     if stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):  # the control word the reviewer names is kept as its sha256 only
         from tools.review_canaries import hash_codeword
 
