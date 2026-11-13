@@ -20,8 +20,8 @@
 
 Тем же циклом, что кейсы: `status` → `prepare --run-root <run> --stage <id>` → ответ в `answer_slot` → `submit` → `status`; `<id>` с номером ревизии (`tc-to-autotest:r1`) называет `status`.
 
-1. `prepare --stage tc-to-autotest:rN` печатает `read`, `answer_slot`, `budget`; в `read` — `java_level` (уровень Java модуля) и `junit_params` (есть ли junit-jupiter-params для `param_group`): передай их как ограничение API. В слот — полный артефакт;
-   `source.*`, `content_digest` и digest предшественника ставит `submit`. `submit --dry-run` проверяет ответ и совместимость с раннером модуля до записи; отказ ничего не пишет — исправь слот и повтори (`--transport-attempts 2` — единственный повтор).
+1. `prepare --stage tc-to-autotest:rN` печатает `read`, `answer_slot`, `budget`; в `read` — `java_level` (уровень Java модуля) и `junit_params` (есть ли junit-jupiter-params для `param_group`): передай их как ограничение API. В слот — полный артефакт: `source.document_id` и `source.revision` пишет модель — как в виде набора из `read`;
+   `source_digest`, `effective_bundle_receipt_digest`, `content_digest` и digest предшественника ставит `submit`. `submit --dry-run` проверяет ответ и совместимость с раннером модуля до записи; отказ ничего не пишет — исправь слот и повтори (`--transport-attempts 2` — единственный повтор).
 2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <метка>]`: граница, `REVIEW_REQUESTED` и запрос — один вызов (повтор довершает оборванное). `yes` — ревьюер отдельной сессией, `--invocation-id` — его метка: не метка генератора и,
    для r2, не метка ревью r1. `no` — та же сессия, только после согласия человека на SELF (§1 `SKILL.md`), метку не называй. В выводе `read`, `answer_slot`, `for_human`, `generator_checks`. Digest-поля ответа ревьюера ставит `submit`, ревьюер их не заполняет.
    Разрешены initial + одна complete correction.

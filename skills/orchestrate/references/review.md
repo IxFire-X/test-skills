@@ -3,7 +3,7 @@
 Стадия — §4 `skills/orchestrate/SKILL.md`, согласие на ревью в той же сессии (SELF) — его §1; флаги — `python -m tools.api prepare --help`, `submit --help`.
 
 **Свежая сессия.** `prepare --stage tc-reviewer:canonical` печатает `for_human` — инструкцию человеку (новая сессия или `/clear`, вставить «проведи ревью test-skills
-<run_id>», ответ ревьюера — файл в `answer_slot`): покажи как есть и жди файла, затем `submit`. Контрольные ошибки код вставил в вид ревьюера:
+<run_id>», ответ ревьюера — файл в `answer_slot`): покажи как есть и жди файла, затем `submit`. Ревьюер — субагент (ниже): `for_human` человеку не показывай и файла не жди, субагент пишет ответ в `answer_slot` сам. Контрольные ошибки код вставил в вид ревьюера:
 карту канареек не читай и ревьюеру не показывай. Ревьюер называет слово в `codeword_seen`; `submit` сообщает `review_canaries` и
 `codeword`. Отказ `REVIEW_ONLY_CANARY_FIXES` — правки держатся на контрольных ошибках: ревьюер оставляет их находками `INFO`; `REVIEW_CANARY_MISMATCH` — свои файлы не подставляй, повтори `prepare`. «Ревью слабое: пропущено N из M» и
 `REVIEW_UNRELIABLE` — человеку перечитать набор самому.
@@ -16,5 +16,7 @@
 вход проверь тем же `step_size`; третьей попытки нет — стоп. В сессии допустимы нуль и больше C-lite `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED`;
 запрещены per-batch/hierarchical reviewers, вторая сессия и больше одного authoritative verdict. Не хватает бюджета на evidence — `submit --abort REVIEW_CONTEXT_LIMIT`;
 ответ дважды не прошёл проверку, а сессия ждёт вердикта — то же с `REVIEW_UNUSABLE`; затем `finish`.
+
+**Исход и вердикт.** Исход (`ACCEPTED_WHOLE`/`PARTIAL`/`REWORK`) определяют BLOCKING-замечания к настоящим кейсам набора. Замечание к контрольной ошибке (канарейке) кейс не отклоняет, поэтому вердикт ревьюера «ТРЕБУЕТ ДОРАБОТКИ» при исходе `ACCEPTED_WHOLE` совместим: это не твоя ошибка и не повод повторять ревью.
 
 **SELF заранее.** Согласие человека на ревью в той же сессии можно дать до `prepare` ревью: `scan --accept-self-review` (в выводе — `details.self_review_scan`) или `review: {"self": true}` в `.skillsrc` (его ставит человек).

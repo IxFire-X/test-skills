@@ -17,7 +17,7 @@ permissions:
 
 Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `state` и `next` в `status`.
 До работы — `python -m tools.doctor --root <pack-root>`. tools вызывай с cwd пакета и абсолютным `--project`; функции пакета не импортируй.
-Шаг — `python -m tools.api <команда> --run-root <run> …` (`prepare`, `submit` — ещё `--stage <id>`): одна строка JSON, `status: ok` и `result`,
+`prepare` и `submit` — `python -m tools.api <команда> --run-root <run> --stage <id>`; `scan`, `status`, `finish`, `report` — `python -m tools.run_pipeline <имя>` (ниже — целиком). Ответ — одна строка JSON: `status: ok` и `result`,
 `invalid` (код 1) или `error` (код 2: `code`, `message`, `fix`). Писать можно только в `<project>/.pilot-runs/`, `.skillsrc` и `<run>/published`.
 В `model_id` пиши фактический ID модели твоей CLI. Clone, worktree, sandbox, dependency, CI/cron, commit, push и PR не создавай.
 
@@ -33,7 +33,7 @@ permissions:
 ## 1. Run и режим ревью
 
 Объём для OpenSpec — [openspec.md](references/openspec.md). Каждый пробел — в `warnings` с четырьмя частями: требование и источник; недостающее условие;
-заблокированные проверки; вопрос. Неопределённое требование остаётся в наборе; существенный пробел запрещает заявлять полный объём. `scan` создаёт run (`run_id` — последняя строка вывода; файлы и события run руками не пиши).
+заблокированные проверки; вопрос. Неопределённое требование остаётся в наборе; существенный пробел запрещает заявлять полный объём. `python -m tools.run_pipeline scan --project <abs> --docs <путь> [--docs …] --profile <профиль> [--module <ID>]` создаёт run (`run_id` — последняя строка вывода; файлы и события run руками не пиши).
 `SCAN_RUN_IN_PROGRESS` — продолжи по `fix`; `--new-run` — только по просьбе человека или если `fix` его называет. Незакрытый прогон, у которого файлы проекта изменились (дрейф), `scan` не продолжает: он начинает новый и называет прошлый в `abandoned_runs`.
 Документацию внешних зависимостей сам не ищи и в дерево проекта не сохраняй: бери то, что дал человек; не хватает — одна строка человеку.
 
@@ -49,9 +49,9 @@ permissions:
 
 Цикл каждой стадии модели: `python -m tools.api prepare --run-root <run> --stage <id>` печатает `read` — сводку файлов модели `files_summary` с `list_path` (один вызов размера
 на пачку; замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `python -m tools.api submit --run-root <run> --stage <id>` принимает его (`--dry-run` — только проверки; `--transport-attempts 2` —
-единственный повтор) и печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело. `<id>` с номером ревизии (`…:r1`) называет `status`.
+единственный повтор) и печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело. `<id>` с номером ревизии (`…:r1`) называет `status`. Роль стадии — `skills/<роль>/SKILL.md` (контракт и схема ответа — там): `context-marker`, `tc-generator`, `tc-reviewer`.
 
-1. **Разметка.** `context-marker:baseline`, либо частями `:requirements`, затем `:batch-NNN`. Импорт — [import.md](references/import.md).
+1. **Разметка.** `context-marker:baseline`, либо частями `:requirements`, затем `:batch-NNN`. Digest источника — `digest` строки списка `list_path`, не свой `sha256sum`. Импорт — [import.md](references/import.md).
 2. **Пауза.** Пробелы без канала наблюдения, ожидаемого результата или доступа — `state: scope_pause` (`scope_gaps`). `prepare --stage scope` печатает пробелы и формы ответа.
    Остановись: покажи человеку список, спроси «исключить или продолжать»; его слова — в `answer_slot`, затем `submit --stage scope`. Без ответа `submit --stage plan`
    отказывает `SCOPE_PENDING`. Решение за человеком (исключить можно и без пробелов, до плана), другое — новый прогон; `scan --no-pause` просит человек, ты его не добавляешь.
@@ -71,7 +71,7 @@ permissions:
    Карту канареек не читай и ревьюеру не показывай; роль, канарейки, бюджет — [review.md](references/review.md).
 3. `submit --stage tc-reviewer:canonical` кладёт набор в `<run>/published`. Ревью не довести до вердикта — `submit --abort REVIEW_CONTEXT_LIMIT` или `REVIEW_UNUSABLE`, затем `finish`.
 
-По `outcome` ответа `submit` скажи человеку: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые отдельно (`*.REJECTED-CASES.*`, в Zephyr не импортировать);
+По `outcome` ответа `submit` (его определяют BLOCKING к настоящим кейсам; замечание к контрольной ошибке кейс не отклоняет: «ТРЕБУЕТ ДОРАБОТКИ» при `ACCEPTED_WHOLE` возможен) скажи человеку: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые отдельно (`*.REJECTED-CASES.*`, в Zephyr не импортировать);
 если `status` называет `prepare tc-generator:rework-1` — один круг доработки (`tc-generator:rework-1`, затем `tc-reviewer:rework-1`, метка и `--fresh-context` как у первого ревью), `finish` до него не зови; не получается —
 `submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE`: набор выйдет без доработки, прогон идёт дальше. `REWORK` — отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай (`independence_unverified`).
 
