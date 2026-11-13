@@ -236,10 +236,12 @@ _UNMATERIALIZABLE_FIX = ("ревью приняло автоматизацию, 
 
 
 def _not_prepared_fix(root: Path, attempt_id: str) -> str:
-    from tools.finalize_attempt import automation_next
+    from tools.finalize_attempt import automation_next, correction_offered
 
     try:
         outcome, detail = automation_next(root, attempt_id)
+        if outcome == "AUTOMATION_REJECTED" and correction_offered(root, attempt_id):
+            return _REVISION_FIX + "; не берёшься за правку — finish закроет попытку"
     except (KeyError, OSError, TypeError, ValueError):
         return _NOT_PREPARED_FIX
     if outcome == "PENDING":

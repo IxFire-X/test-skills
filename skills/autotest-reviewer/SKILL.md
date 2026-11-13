@@ -52,7 +52,7 @@ provenance evidence, not generator conversation. Do not inspect generator dialog
    case's Expected says that nothing changed; of `AT_SELF_COMPUTED` whether the expected value is written down in the
    case or taken from the code under test.
 3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
-4. One fresh role-isolated reviewer invocation serves each automation version. `prepare` makes and reads back the attempt-owned `automation-review-boundary-r1` or `-r2` before the review. Do not fill `automation_sha256`, `reviewed_relations_sha256`, `host_isolation_sha256` and `reviewed_files[].content_digest`: the code sets them (a placeholder is refused as `MODEL_RESPONSE_DIGEST_MISMATCH`). A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` permits only one complete revision-2 regeneration and fresh second review; it never authorizes the old artifact or regeneration after runtime `FAIL`.
+4. One fresh role-isolated reviewer invocation serves each automation version. `prepare` makes and reads back the attempt-owned `automation-review-boundary-r1` or `-r2` before the review. Do not fill `automation_sha256`, `reviewed_relations_sha256`, `host_isolation_sha256` and `reviewed_files[].content_digest`: the code sets them (a placeholder is refused as `MODEL_RESPONSE_DIGEST_MISMATCH`). A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` and `ТРЕБУЕТ ДОРАБОТКИ` each permit only one complete revision-2 regeneration and fresh second review (the agent may finish instead); neither authorizes the old artifact or regeneration after runtime `FAIL`.
 
 This is static review. It does not compile, execute, or claim a runtime result.
 An accepted verdict permits the controller to form and materialize the generated delta;
@@ -64,8 +64,8 @@ For acceptance keep corrections empty; findings may hold only `WARNING`/`INFO` t
 (naming, a comment, an imprecision that does not change what a test checks); `BLOCKING`
 with `ПРИНЯТО` is a schema error. A weak assertion, a wrong expected value, «any exception»
 instead of the specific refusal, or a false PASS (a test that passes on wrong behavior) is
-never a note: it is `ТРЕБУЕТ ДОРАБОТКИ` with a `BLOCKING` finding, or `AUTO_FIX_APPLIED`
-when the fix is mechanical. Code shows the notes to the person and never acts on them.
+never a note: it is `ТРЕБУЕТ ДОРАБОТКИ` with a `BLOCKING` finding (a compile error too; `corrections` empty), or `AUTO_FIX_APPLIED`
+when the fix is mechanical (`corrections` ≥ 1, no `BLOCKING`). The code applies nothing in either case: the generator regenerates once (r2) from your findings or corrections. Code shows the notes to the person and never acts on them.
 Retain concise answers to the three
 questions in the existing top-level warnings as `REVIEW_EVIDENCE` notes (format below).
 These notes document source review, not execution or proof of complete semantic coverage.

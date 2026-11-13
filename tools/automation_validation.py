@@ -70,7 +70,7 @@ _MESSAGES = {
     "AUTOMATION_REVIEW_CADENCE": "each automation version requires exactly one static review",
     "AUTOMATION_CORRECTION_PREDECESSOR": "corrected automation must bind the exact prior automation digest",
     "AUTOMATION_CORRECTION_REVIEW": "corrected automation must bind the exact prior review digest",
-    "AUTOMATION_CORRECTION_VERDICT": "only AUTO_FIX_APPLIED may authorize one corrected automation version",
+    "AUTOMATION_CORRECTION_VERDICT": "only AUTO_FIX_APPLIED or ТРЕБУЕТ ДОРАБОТКИ may authorize one corrected automation version",
     "AUTOMATION_RUNTIME_FAIL_REGENERATION": "runtime FAIL never authorizes automation regeneration",
     "AUTOTEST_REVIEW_SOURCE": "Review source must match the selected effective document.",
     "AUTOTEST_REVIEW_AUTOMATION_DIGEST": "Review must bind the complete automation artifact.",
@@ -538,7 +538,7 @@ def validate_automation_revision_chain(versions: Sequence[Any], reviews: Sequenc
                 rows.append(_diagnostic("AUTOMATION_CORRECTION_PREDECESSOR", _pointer("versions", index, "artifacts", "predecessor_automation_sha256")))
             if generated["correction_review_sha256"] != autotest_review_sha256(previous_review):
                 rows.append(_diagnostic("AUTOMATION_CORRECTION_REVIEW", _pointer("versions", index, "artifacts", "correction_review_sha256")))
-            if previous_review["artifacts"]["autotest_review"]["verdict"] != "AUTO_FIX_APPLIED":
+            if previous_review["artifacts"]["autotest_review"]["verdict"] not in ("AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"):
                 rows.append(_diagnostic("AUTOMATION_CORRECTION_VERDICT", _pointer("reviews", 0, "artifacts", "autotest_review", "verdict")))
     return sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
 

@@ -1178,9 +1178,20 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
                 return "AUTOMATION_BLOCKED", None
             refusal = execution_gate.load_mode_b("generated_delta").materialization_refusal(run_root, attempt_id)
             return ("AUTOMATION_NOT_MATERIALIZABLE", refusal) if refusal is not None else ("ACCEPTED", None)
-        if verdict != "AUTO_FIX_APPLIED":
+        taken = revision == 1 and verdict == "ТРЕБУЕТ ДОРАБОТКИ" and "MODEL_REQUESTED" in stages.get("tc-to-autotest:r2", {})  # V7e: the one correction was taken
+        if verdict != "AUTO_FIX_APPLIED" and not taken:
             return "AUTOMATION_REJECTED", None
     return "AUTOMATION_REJECTED", None
+
+
+def correction_offered(run_root: Path, attempt_id: str) -> bool:
+    """The review of r1 said ``ТРЕБУЕТ ДОРАБОТКИ`` and r2 is not requested: the agent may take the one correction or ``finish`` (the outcome stays REJECTED until it does)."""
+    stages = pilot_state.model_lifecycle_projection(run_root, attempt_id)["stages"]
+    answered = stages.get("autotest-reviewer:r1", {}).get("MODEL_RESPONSE_RECEIVED")
+    if answered is None or "MODEL_REQUESTED" in stages.get("tc-to-autotest:r2", {}):
+        return False
+    reviewed = pilot_state.read_model_stage_artifact(run_root, attempt_id, "autotest-reviewer:r1", str(answered["artifact_digest"]))["artifact"]
+    return reviewed["artifacts"]["autotest_review"]["verdict"] == "ТРЕБУЕТ ДОРАБОТКИ"
 
 
 # the closed list of `finish --abandon` codes and the state each one closes

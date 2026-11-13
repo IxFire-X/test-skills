@@ -25,7 +25,7 @@
 2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <метка>]`: граница, `REVIEW_REQUESTED` и запрос — один вызов (повтор довершает оборванное). `yes` — ревьюер отдельной сессией, `--invocation-id` — его метка: не метка генератора и,
    для r2, не метка ревью r1. `no` — та же сессия, только после согласия человека на SELF (§1 `SKILL.md`), метку не называй. В выводе `read`, `answer_slot`, `for_human`, `generator_checks`. Digest-поля ответа ревьюера ставит `submit`, ревьюер их не заполняет.
    Разрешены initial + одна complete correction.
-3. После ревью `status` называет `materialize` (принято), `prepare --stage tc-to-autotest:r2` (`AUTO_FIX_APPLIED`; после `materialize` r2 запрещена) или `finish` (отказ).
+3. После ревью `status` называет `materialize` (принято) или, после `AUTO_FIX_APPLIED` либо `ТРЕБУЕТ ДОРАБОТКИ` ревью r1, `prepare --stage tc-to-autotest:r2` — одна коррекция по замечаниям ревью r1, затем ревью r2 (метка и `--fresh-context` — п. 2); после ревью r2 и после `materialize` третьей ревизии нет. Не берёшься за r2 — `finish` закрывает попытку (`AUTOMATION_REJECTED`). Взял r2 и не довёл — `finish --abandon` с кодом из `fix`.
 
 ## 4. `materialize`
 

@@ -199,7 +199,8 @@ def _automation_steps(root: Path, family: str) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     for revision in (1, 2):
         generator, reviewer = f"tc-to-autotest:r{revision}", f"autotest-reviewer:r{revision}"
-        taken = revision == 1 or bool(_events(state, attempt_id, generator, "MODEL_REQUESTED")) or (waits == generator and not _materialization_began(root, attempt_id))
+        taken = (revision == 1 or bool(_events(state, attempt_id, generator, "MODEL_REQUESTED")) or (waits == generator and not _materialization_began(root, attempt_id))
+                 or finalize_attempt.correction_offered(root, attempt_id))  # r2 after «ТРЕБУЕТ ДОРАБОТКИ» is the agent's to take
         if not taken:
             break
         answered = bool(_events(state, attempt_id, generator, "MODEL_RESPONSE_RECEIVED"))

@@ -438,11 +438,11 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             elif stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
                 next_artifact = "canonical reviewer package and boundary"  # the last answer assembled the candidate; prepare of the review publishes it from the journal
             if stage_id.startswith("autotest-reviewer:"):
-                from tools.finalize_attempt import automation_next
+                from tools.finalize_attempt import automation_next, correction_offered
 
                 outcome = automation_next(root, attempt_id)[0]
                 next_artifact = ("review disposition and materialization" if outcome == "ACCEPTED"
-                                 else "automation revision" if outcome == "PENDING" else "automation refused")
+                                 else "automation revision" if outcome == "PENDING" or correction_offered(root, attempt_id) else "automation refused")
             record(digest, stage_id, next_artifact, publication["path"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)

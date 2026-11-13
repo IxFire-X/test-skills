@@ -461,10 +461,13 @@ def test_a_correction_leads_to_the_second_revision_and_its_acceptance_to_materia
     assert _status(run["root"])["next"]["verb"] == "materialize"
 
 
-def test_a_rejected_review_leads_to_finish(tmp_path: Path) -> None:
+def test_a_rejection_of_the_last_revision_leads_to_finish(tmp_path: Path) -> None:
+    """V7e: the first rejection no longer ends the chain (it offers r2: ``test_automation_second_try``); the rejection of r2 does."""
     run = autotest_run(tmp_path)
     run_generator(run)
-    run_reviewer(run, "ТРЕБУЕТ ДОРАБОТКИ")
+    run_reviewer(run, "AUTO_FIX_APPLIED")
+    run_generator(run, 2)
+    run_reviewer(run, "ТРЕБУЕТ ДОРАБОТКИ", 2, "--invocation-id", "autotest-reviewer-subagent-2", "--fresh-context", "yes")
     status = _status(run["root"])
     assert (status["state"], status["next"]["verb"]) == ("closure", "finish")
 

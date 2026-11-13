@@ -170,20 +170,21 @@ def test_exec_names_a_vanished_runtime(tmp_path: Path) -> None:
 # 2.7 / 2.8 / 2.9 state, next and fix by the verdict
 # --------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize(("verdict", "state", "verb"), [("ПРИНЯТО", "materialize", "materialize"), ("ТРЕБУЕТ ДОРАБОТКИ", "closure", "finish")])
+@pytest.mark.parametrize(("verdict", "state", "verb", "stage"), [("ПРИНЯТО", "materialize", "materialize", None),
+                                                                ("ТРЕБУЕТ ДОРАБОТКИ", "automation", "prepare", "tc-to-autotest:r2")])  # V7e: the rework verdict leaves one correction
 def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, capsys: pytest.CaptureFixture[str],
-                                                          verdict: str, state: str, verb: str) -> None:
+                                                          verdict: str, state: str, verb: str, stage: str | None) -> None:
     from tests.test_exec_prepares import _project
     from tools.run_pipeline import cmd_status
 
     project, run_root, _attempt_id = _project(tmp_path, static_verdict=verdict)
     cmd_status(SimpleNamespace(project=str(project), run=run_root.name))
     status = json.loads(capsys.readouterr().out)
-    assert (status["state"], status["next"]["verb"]) == (state, verb), status
+    assert (status["state"], status["next"]["verb"], status["next"].get("stage")) == (state, verb, stage), status
 
 
-def test_materialize_after_a_refused_static_review_points_to_finish_not_to_another_review(tmp_path: Path,
-                                                                                          capsys: pytest.CaptureFixture[str]) -> None:
+def test_materialize_after_a_rework_verdict_of_the_review_names_the_second_revision_and_finish(tmp_path: Path,
+                                                                                            capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import flow_args
     from tests.test_exec_prepares import _project
     from tools.exec_commands import cmd_materialize
@@ -192,7 +193,21 @@ def test_materialize_after_a_refused_static_review_points_to_finish_not_to_anoth
     assert cmd_materialize(flow_args(project, run_root)) == 2
     output = json.loads(capsys.readouterr().out)
     assert output["reason"] == "EXECUTION_NOT_PREPARED"
-    assert "finish" in output["fix"] and "next_run" in output["fix"] and "снова materialize" not in output["fix"] and "ПРИНЯТО" not in output["fix"]
+    assert "tc-to-autotest:r2" in output["fix"] and "finish" in output["fix"] and "снова materialize" not in output["fix"] and "ПРИНЯТО" not in output["fix"]
+
+
+def test_materialize_after_the_review_of_the_last_revision_refused_points_to_finish_not_to_another_review(tmp_path: Path) -> None:
+    """The hunt-2 guard, moved from the first review to the last one: after the rejection of r2 no revision is named."""
+    from tests.test_autotest_cycle import autotest_run, run_generator, run_reviewer
+    from tools.exec_commands import _not_prepared_fix
+
+    run = autotest_run(tmp_path)
+    run_generator(run)
+    run_reviewer(run, "ТРЕБУЕТ ДОРАБОТКИ")
+    run_generator(run, 2)
+    run_reviewer(run, "ТРЕБУЕТ ДОРАБОТКИ", 2, "--invocation-id", "autotest-reviewer-subagent-2", "--fresh-context", "yes")
+    fix = _not_prepared_fix(run["root"], run["attempt"])
+    assert "finish" in fix and "next_run" in fix and "tc-to-autotest" not in fix and "снова materialize" not in fix and "ПРИНЯТО" not in fix, fix
 
 
 # --------------------------------------------------------------------------------------
