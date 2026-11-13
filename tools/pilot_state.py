@@ -2663,11 +2663,11 @@ def _publish_model_stage_artifact(
             raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
         if not requests:
-            if stage_instance_id == "tc-reviewer:canonical":  # the request of the reviewer is the work of review-open
+            if stage_instance_id == "tc-reviewer:canonical":  # the request of the reviewer is the work of prepare
                 from tools.fixes import REVIEW_CHAIN
 
                 raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
-                                 "the stage has none; fix: запрос ревьюера пишет review-open (повтори его с тем же --invocation-id, если он уже был), "
+                                 "the stage has none; fix: запрос ревьюера пишет `prepare --stage tc-reviewer:canonical` (повтори его с тем же --invocation-id, если он уже был), "
                                  "руками model-request не нужен — " + REVIEW_CHAIN)
             raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
                              "the stage has none; fix: tools.api model-request for this stage first, then model-response")
@@ -4469,7 +4469,7 @@ def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_
     """The answer of ``read-receipt`` — the receipt as ``read_attempt_receipt`` gives it, or ``{"receipt": None, "reason": …}`` while the
     journal says there is none yet.  A file that is there is read the strict way.  The journal binds a receipt by its digest alone (the
     events of a fixed receipt carry no kind), so «not yet» is decided only where the journal fixes it: the boundary of the reviewer
-    session exists from ``review-open`` on, and ``review-open`` opens the ledger (events ``reviewer-ledger-v1``) — no such event, no boundary
+    session exists from ``prepare`` of the review on, and it opens the ledger (events ``reviewer-ledger-v1``) — no such event, no boundary
     yet.  The journal knows the boundary but the file is gone — a refusal with a code and a fix; every other kind without its file is a
     refusal with a code and a fix too (no «not yet» is claimed for a kind whose events cannot be told apart)."""
     project, root = _run_root(run_root)
@@ -4479,7 +4479,7 @@ def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_
     if _receipt_target(root, attempt_id, kind).exists():
         return _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, event_type)
     if kind == "reviewer-session-boundary" and not any(event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1" for event in state["events"]):
-        return {"receipt": None, "reason": "ещё нет: ревью не открыто (граница ревьюера появляется на review-open)"}
+        return {"receipt": None, "reason": "ещё нет: ревью не открыто (граница ревьюера появляется на `prepare --stage tc-reviewer:canonical`)"}
     raise ValueError(f"RECEIPT_MISSING: the receipt {kind} of the attempt is not in the run" + (
         "; fix: журнал знает ревью, а файла границы нет — прогон повреждён, ничего не восстанавливай руками: run_pipeline status называет потерю, дальше scan --new-run"
         if kind == "reviewer-session-boundary" else
@@ -4914,12 +4914,12 @@ def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[st
     recorded = any(event.get("event_type") == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id
                    and event.get("stage_instance_id") == "tc-reviewer:canonical" for event in state["events"])
     if not recorded:
-        return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (review-select --verdict)"}
-    not_yet = {"effective": None, "reason": "ещё нет: ответ ревьюера записан, ревизия не выбрана — повтори review-select (тот же --verdict или без него)"}
-    # the order of the writes of review-select decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
+        return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (`submit --stage tc-reviewer:canonical`)"}
+    not_yet = {"effective": None, "reason": "ещё нет: ответ ревьюера записан, ревизия не выбрана — повтори `submit --stage tc-reviewer:canonical`"}
+    # the order of the writes of the selection (``submit`` of the review) decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
     # canonical (orchestrate_revision: validate_reviewer_session, then publish_effective_canonical).  So a latest revision still waiting for its
     # READ_BACK, a ledger still WAITING (no verdict), and a closed accepting ledger with no attempt-level receipt read back after it all mean the
-    # effective canonical was not published yet — a repeat of review-select does it.  Only a published selection whose file is gone is a refusal.
+    # effective canonical was not published yet — a repeat of ``submit`` does it.  Only a published selection whose file is gone is a refusal.
     try:
         ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None)
         confirmed = True
@@ -5771,10 +5771,10 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
     if len(inputs) > len(expected):
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
     order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
-    if stage_instance_id.startswith("tc-reviewer:"):  # the reviewer's request is the work of review-open, one fix for the whole chain
+    if stage_instance_id.startswith("tc-reviewer:"):  # the reviewer's request is the work of prepare, one fix for the whole chain
         from tools.fixes import REVIEW_CHAIN
 
-        return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет review-open "
+        return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет `prepare --stage tc-reviewer:canonical` "
                                    "(он знает оба digest сам), руками он не нужен — " + REVIEW_CHAIN)
     return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + f"; fix: повтори model-request с {order}")
 

@@ -142,7 +142,7 @@ def test_c_an_accepted_review_without_selection_names_the_selection(tmp_path: Pa
     _published_reviewer_ledger(root, attempt_id, automated_document())
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED", finish
-    # FaT-AB: a session with a verdict is closed — review-abort refuses it, so the fix does not send there
+    # FaT-AB: a session with a verdict is closed — submit --abort refuses it, so the fix does not send there
     assert "effective" in finish["fix"] and "--new-run" in finish["fix"] and "--reason" not in finish["fix"], finish
 
 

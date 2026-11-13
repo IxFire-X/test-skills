@@ -76,7 +76,7 @@ def _events(run_root: Path) -> list[dict]:
 
 def _shape(run_root: Path, without: str | None = None) -> list[tuple]:
     """Event type, stage and batch of every event; the batch ids of two runs differ, so they are numbered in order of appearance.
-    ``without`` — the digest of a receipt whose event pair is left out (P7: ``review-open`` binds the canary receipt, the nine do not)."""
+    ``without`` — the digest of a receipt whose event pair is left out (P7: ``prepare`` binds the canary receipt)."""
     batches: dict[str, int] = {}
 
     def name(value):

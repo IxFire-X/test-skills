@@ -170,7 +170,7 @@ def test_every_exec_file_on_disk_is_listed_by_the_gate_and_left_out_of_the_cases
     assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in on_disk)
     # F6: the gate stays in the profile (the core reaches the left-out files only through it); every file of its closed lists is left out
     assert not pack_registry.is_cases_only_excluded("tools/execution_gate.py")
-    for listed in (execution_gate.MODE_B_MODULES, execution_gate.LEGACY_MODULES):
+    for listed in (execution_gate.MODE_B_MODULES,):
         assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in listed), listed
 
 

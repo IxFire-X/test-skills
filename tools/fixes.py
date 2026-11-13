@@ -22,25 +22,20 @@ _STAGES = "context-marker, tc-generator, tc-reviewer, tc-to-autotest, autotest-r
 _DELETE_FIELD = "удали поле {name} из ответа — код поставит его сам"
 
 # the whole review in one sentence — the fix of the refusals of its stage and the way out of `status` (item 5)
-REVIEW_CHAIN = ("ревью — две команды: `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> "
-                "--invocation-id <id вызова ревьюера> --fresh-context yes|no` → вызов ревьюера по пакету → `tools.api review-select "
-                "--run-root <run> --attempt <id> --output-dir <dir> --verdict <файл ответа ревьюера>`")
+REVIEW_CHAIN = ("ревью — `tools.api prepare --run-root <run> --stage tc-reviewer:canonical --fresh-context yes|no [--invocation-id <метка сессии ревьюера>]` → вызов ревьюера по пакету, его ответ — в `incoming/tc-reviewer-canonical.json` прогона → `tools.api submit --run-root <run> --stage tc-reviewer:canonical`")
 
 FIXES: dict[str, str] = {
     # --- the review layer (moved from orchestrate_test_case_revision._FIXES) ---
-    "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
-                            "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови review-select без --verdict; вердикт уже записан — "
-                            "начни новый прогон (scan --new-run) и открой ревью заново командой `tools.api review-open`",
-    "ORCHESTRATION_RECEIPT_SHAPE": "--candidate-receipt — файл candidate_bundle_receipt из вывода publish (его поля как есть)",
-    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: повтори `tools.api review-open` / `review-select` без файлов пакета — код берёт входы из журнала",
-    "ORCHESTRATION_INPUT": "входы ревью не прошли проверку: передай файлы, которые отдали publish и open-session, без правок; "
-                           "их перечень называет diagnostics",
+    "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api submit --run-root <run> --stage tc-reviewer:canonical "
+                            "--abort REVIEW_CONTEXT_LIMIT`; вердикт уже записан — начни новый прогон (scan --new-run) и открой ревью заново командой `tools.api prepare --stage tc-reviewer:canonical`",
+    "ORCHESTRATION_RECEIPT_SHAPE": "квитанции ревью код берёт из журнала, файлов у агента нет: повтори `tools.api submit --stage tc-reviewer:canonical`",
+    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: повтори `tools.api prepare` / `submit` со стадией `tc-reviewer:canonical` — код берёт входы из журнала",
+    "ORCHESTRATION_INPUT": "входы ревью не прошли проверку: их перечень называет diagnostics; файлов у агента нет — повтори `tools.api submit --stage tc-reviewer:canonical`",
     "ORCHESTRATION_PUBLICATION": "публикация не прочиталась обратно: ничего не правь руками, повтори команду; повторный отказ — "
                                  "сообщи код и run_id владельцу пакета",
-    "ORCHESTRATION_RECEIPT": "квитанция не та: --candidate-receipt — candidate_bundle_receipt из вывода publish, остальные — "
-                             "из журнала (`tools.api read-receipt`), без правок",
-    "ORCHESTRATION_SELECTION": "выбор редакции отказан: смотри diagnostics, исправь названное в ответе ревьюера и повтори select",
-    "ORCHESTRATION_VERIFICATION": "проверка выбранной редакции не прошла: ничего не правь руками, повтори select; "
+    "ORCHESTRATION_RECEIPT": "квитанция не та: ничего не правь руками, квитанции берутся из журнала (`tools.api read-receipt`); повтори `tools.api submit --stage tc-reviewer:canonical`",
+    "ORCHESTRATION_SELECTION": "выбор редакции отказан: смотри diagnostics, исправь названное в ответе ревьюера и повтори `tools.api submit --stage tc-reviewer:canonical`",
+    "ORCHESTRATION_VERIFICATION": "проверка выбранной редакции не прошла: ничего не правь руками, повтори `tools.api submit --stage tc-reviewer:canonical`; "
                                   "повторный отказ — сообщи код и run_id владельцу пакета",
     "INDEPENDENCE_UNVERIFIED": "ревью требует свежего контекста: передай --fresh-context yes, если ревьюер запущен новым "
                                "сеансом; нового сеанса нет — прогон должен начинаться с scan --accept-self-review",
@@ -48,8 +43,8 @@ FIXES: dict[str, str] = {
     # --- the review in two commands ---
     "FRESH_CONTEXT_REQUIRED": "--fresh-context yes — ревьюер отдельный субагент или вызов без истории генерации; ревью в той же сессии — "
                               "прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)",
-    "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори review-open с теми же --model-id, --invocation-id и --fresh-context или иди "
-                           "дальше — review-select --verdict <файл ответа ревьюера>",
+    "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори `prepare --stage tc-reviewer:canonical` с теми же --invocation-id и --fresh-context или иди "
+                           "дальше — ответ ревьюера в слот и `submit --stage tc-reviewer:canonical`",
     "REVIEW_LEDGER_UNBOUND": "файл леджера ревьюера лежит без событий и это не та ревизия, что публикуется: повтори ту же команду с теми же входами "
                              "(она допишет события), иные входы — новое ревью, новый прогон (scan --new-run)",
     "RECEIPT_FILE_UNBOUND": "файл квитанции лежит без событий журнала, а его байты не те, что публикуются: повтори команду с теми же входами, что дали "
@@ -57,7 +52,7 @@ FIXES: dict[str, str] = {
     "BASELINE_UNBOUND": "baseline прогона не сходится с записью попытки (файл подменён или прогон повреждён): начни новый прогон тем же scan с --new-run",
     "REVIEW_CLOSED": "ревью закрыто (сессия прервана или завершена), вердикт в него не добавить; новое ревью — новый прогон (scan --new-run)",
     "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией review-canaries журнала: ничего не правь руками; "
-                              "вид и карту строит `tools.api review-open` (или `python -m tools.review_view --candidate`) — если файлы "
+                              "вид и карту строит `tools.api prepare --stage tc-reviewer:canonical` (или `python -m tools.review_view --candidate`) — если файлы "
                               "испорчены или удалены, начни прогон заново (scan --new-run) и сообщи код и run_id владельцу пакета",
     "REVIEW_ONLY_CANARY_FIXES": "все правки ответа — по контрольным ошибкам, которые код поставил в вид ревьюера: оставь эти находки с "
                                 "severity INFO, правки по ним убери, вердикт вынеси по остальному (ПРИНЯТО, если больше ничего); отдай "
@@ -67,15 +62,12 @@ FIXES: dict[str, str] = {
                              "только если прогон начат с scan --accept-self-review",
     "MODEL_OUTPUT_TRUNCATED": "повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без "
                               "отступов и переносов; дальше — finish, если повтор тоже оборван",
-    "ANSWER_FILE_UNREADABLE": "--artifact/--verdict — путь к файлу ответа модели, который лежит на диске; запиши ответ в файл и подай его путь",
+    "ANSWER_FILE_UNREADABLE": "--artifact — путь к файлу ответа модели, который лежит на диске; запиши ответ в файл (стадия по циклу — в слот `incoming/`) и подай его путь",
     "ANSWER_JSON_INVALID": "файл ответа — один JSON-объект в UTF-8 без комментариев и дублей ключей; исправь файл и подай его единственным "
                            "повтором стадии (--transport-attempts 2)",
-    "COMMAND_NOT_IN_PACKAGE": "ревью — две команды: tools.api review-open … → вызов ревьюера → tools.api review-select --verdict <файл ответа ревьюера>",
-    "LEGACY_REVIEW_NOT_IN_PACKAGE": "ревью — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → вызов "
-                                    "ревьюера → tools.api review-select --verdict <файл ответа ревьюера>",
     "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
-    "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: tools.api review-select --verdict <файл ответа ревьюера> записывает его и "
-                                 "выбирает ревизию; ревьюера ещё не вызывали — " + REVIEW_CHAIN,
+    "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: положи его в `incoming/tc-reviewer-canonical.json` и повтори `tools.api submit --stage tc-reviewer:canonical`; "
+                                 "ревьюера ещё не вызывали — " + REVIEW_CHAIN,
     # --- the model stages of the journal ---
     "MODEL_REQUEST_INVALID": "model-request --stage <стадия>:<экземпляр>; стадии: " + _STAGES + "; --attempt — attempt_id этого "
                              "прогона (run_pipeline status); --input-digest на каждый вход стадии по порядку",
@@ -122,7 +114,7 @@ FIXES: dict[str, str] = {
     "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
     "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
                                    "ячейки CSV и повторите scan --cases --new-run",
-    "ZEPHYR_CSV_PROFILE": "--csv-profile — zephyr-scale-step-row-24-v5 (по умолчанию, текст человека) или zephyr-scale-step-row-24-v4 "
+    "ZEPHYR_CSV_PROFILE": "профиль CSV — zephyr-scale-step-row-24-v5 (по умолчанию, текст человека) или zephyr-scale-step-row-24-v4 "
                           "(плюс машинные колонки шагов); профили v1–v3 только читаются; других значений нет",
     # --- the host (HostStop without a fix at its raise site) ---
     "FINISH_FACT_UNDETERMINED": "у прогона нет попытки: finish закрывает попытку, а её нет — сначала дойди до model-request "
@@ -282,17 +274,17 @@ FIXES: dict[str, str] = {
                            "без управляющих символов, других ключей нет; исправь файл и повтори `submit --stage plan`",
     "GENERATOR_INPUT_CONFLICT": "у попытки уже есть другой такой вход (скелет, capabilities, план или header): продолжай с опубликованным, "
                                 "`status` покажет следующий шаг; другое содержимое — новый прогон (`scan --new-run`)",
-    "REVIEWER_SESSION_CLOSED": "сессия ревью закрыта: вердикт в неё не добавить; `review-select` без --verdict выберет по записанному, "
+    "REVIEWER_SESSION_CLOSED": "сессия ревью закрыта: вердикт в неё не добавить; повтор `submit --stage tc-reviewer:canonical` выберет по записанному, "
                                "новое ревью — новый прогон (`scan --new-run`)",
-    "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (`review-evidence --path <путь в проекте>`) или закрой сессию "
-                                      "`review-abort --reason REVIEW_CONTEXT_LIMIT`",
-    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (`read-ledger` называет уже выданные)",
-    "REVIEWER_EVIDENCE_DUPLICATE": "эти файлы уже выданы ревьюеру: возьми их из `read-ledger`, а новые пути — отдельным запросом",
-    "REVIEWER_ABORT_REASON_INVALID": "`review-abort --reason` — REVIEW_CONTEXT_LIMIT (не хватило бюджета на evidence) или REVIEW_UNUSABLE "
+    "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (ключ `evidence` с путями в проекте в слоте ответа, затем `submit`) или закрой сессию "
+                                      "`submit --stage tc-reviewer:canonical --abort REVIEW_CONTEXT_LIMIT`",
+    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (уже выданные называет `status`)",
+    "REVIEWER_EVIDENCE_DUPLICATE": "эти файлы уже выданы ревьюеру: не проси их снова, а новые пути — отдельным запросом",
+    "REVIEWER_ABORT_REASON_INVALID": "`submit --abort` — REVIEW_CONTEXT_LIMIT (не хватило бюджета на evidence) или REVIEW_UNUSABLE "
                                      "(ответ дважды не прошёл проверку)",
-    "REVIEW_UNUSABLE": "ревью не может закончиться вердиктом: закрой сессию `review-abort --reason REVIEW_UNUSABLE`, затем `finish`; "
+    "REVIEW_UNUSABLE": "ревью не может закончиться вердиктом: закрой сессию `submit --stage tc-reviewer:canonical --abort REVIEW_UNUSABLE`, затем `finish`; "
                        "следующий заход — команда `next_run` из его вывода",
-    "REVIEW_CANDIDATE_NOT_PUBLISHED": "этот кандидат не тот, что опубликован журналом: не подставляй свои файлы, повтори `review-open` — "
+    "REVIEW_CANDIDATE_NOT_PUBLISHED": "этот кандидат не тот, что опубликован журналом: повтори `prepare --stage tc-reviewer:canonical` — "
                                       "он возьмёт кандидата из журнала",
     "REVIEW_ALREADY_REQUESTED": "ревью этой стадии уже запрошено для другого кандидата: продолжи его (`status` → state, next), новое — новый прогон",
     "REVIEW_INPUTS_UNAVAILABLE": "попытки нет в прогоне: проверь --run-root и --attempt (`status` называет текущую попытку)",

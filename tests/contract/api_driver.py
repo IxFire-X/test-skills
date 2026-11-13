@@ -143,7 +143,6 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         assert review(run, "submit", "--dry-run")[0] == 0
         assert review(run, "submit")[0] == 0
         assert rr._api("read-effective", *_flags(run))[0] == 0
-        assert rr._api("read-ledger", *_flags(run))[0] == 0  # V4b-C: the command goes away with its line here
         assert rr._review(run, rr._digest_of(run["tmp"] / "candidate.json"))[0] == 0  # the same digest again: the recorded request
         assert rr._api("read-receipt", *_flags(run), "--kind", "reviewer-session-boundary", "--event", "ARTIFACT_READ_BACK")[0] == 0
 

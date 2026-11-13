@@ -1,4 +1,4 @@
-"""P7: canaries in the reviewer's view — seeded by code, bound to the journal, counted at ``review-select``.
+"""P7: canaries in the reviewer's view — seeded by code, bound to the journal, counted at ``submit`` of the review.
 
 - ``seed`` is a pure function of the candidate: 0..3 control errors, none in a parameter group, "assertion removed" first; the
   candidate, its bundles and its journal events stay as they are, only the reviewer's view shows them;
@@ -604,7 +604,7 @@ def test_a_real_blocking_finding_in_the_step_of_a_canary_about_something_else_ma
 
 def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_canaries_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The files agree with each other (count 0, an empty map, a view without control errors) and the journal has no event of them:
-    review-open does not take them for a cut-short seeding — they are not what the seeding of the journal's candidate gives."""
+    prepare of the review does not take them for a cut-short seeding — they are not what the seeding of the journal's candidate gives."""
     from tools import review_canaries
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import _PROFILE, journal_assembly, publish_command

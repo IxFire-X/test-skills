@@ -53,21 +53,6 @@
    "run_id",
    "schema_version"
   ],
-  "read-ledger": [
-   "boundary_digest",
-   "context_budget_bytes",
-   "digest",
-   "events",
-   "generator_invocation_id",
-   "generator_role",
-   "host_isolation",
-   "package_binding",
-   "reviewer_invocation_id",
-   "reviewer_role",
-   "schema_version",
-   "session_id",
-   "status"
-  ],
   "read-model-artifact": [
    "artifact",
    "byte_count",
@@ -131,13 +116,6 @@
   "validate-canonical": "array"
  },
  "not_driven": {
-  "complete-review": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework",
-  "review-abort": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "review-evidence": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "review-open": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "review-publish": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "review-select": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line",
-  "session-start": "old command of the review: the tests drive prepare / submit now; V4b-C removes the command and this line"
+  "open-automation-boundary": "mode B: the fixture run (tests.test_finish) has the boundary of revision 1 open already; opening another needs a run in rework"
  }
 }

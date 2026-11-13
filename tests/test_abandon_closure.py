@@ -181,7 +181,7 @@ def test_c_before_the_review_finish_and_scan_name_the_same_new_run(tmp_path: Pat
     assert code == 2 and refused["reason"] == "FINISH_FACT_UNDETERMINED" and "до ревью кейсов" in refused["message"], refused
     command = refused["next_run"]["command"]
     assert command.endswith("--new-run") and " scan " in command and command in refused["fix"], refused
-    assert "<" not in command and "review-abort" not in refused["fix"], refused
+    assert "<" not in command and "--abort" not in refused["fix"], refused
 
     code, blocked = _scan(project, monkeypatch)  # the block stays (FaT-G); its fix names the same command
     assert code == 2 and blocked["reason"] == "SCAN_RUN_IN_PROGRESS" and command in blocked["fix"], blocked

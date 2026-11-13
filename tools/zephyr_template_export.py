@@ -242,7 +242,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     except Exception:  # noqa: BLE001 - a document that cannot build its bundle is not a document to export
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
     if expected != cases_bytes:
-        raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", f"{bundle_csv}: файл не соответствует документу рядом (.json); пересоберите bundle: review-select --verdict")
+        raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", f"{bundle_csv}: файл не соответствует документу рядом (.json); пересоберите bundle: submit --stage tc-reviewer:canonical")
     data = build_import_csv(cases_bytes, document, template, automated_case_ids=automated)
     target = bundle_csv.with_name(base + ".zephyr-import.csv")
     _install(project, root, target, data)

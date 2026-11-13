@@ -43,7 +43,7 @@ CASES_ONLY_EXCLUDED_FILES = (
     "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
     "schemas/release-eval-run.schema.json",
-    "tools/review_legacy.py", "requirements-dev.txt", "HOW-TO-USE-MODE-B.md",  # the text of mode B for the human: only the delivery of mode B
+    "requirements-dev.txt", "HOW-TO-USE-MODE-B.md",  # the text of mode B for the human: only the delivery of mode B
     # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b``
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
     "tools/autotest_hints.py", "tools/trace_check.py", "tools/build_trace_document.py", "tools/quarantine.py", "tools/code_slices.py",
@@ -59,7 +59,7 @@ CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/auto
 # evaluation.  ``scenario-observation-receipt`` stays, in the delivery of cases too: a second ``finish`` writes it in either.
 MODE_B_EXCLUDED_FILES = (
     "tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
-    "tools/render_contract_docs.py", "tools/review_legacy.py", "requirements-dev.txt",
+    "tools/render_contract_docs.py", "requirements-dev.txt",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json", "schemas/release-eval-run.schema.json",
 )
 MODE_B_EXCLUDED_PATTERNS: tuple[str, ...] = ()

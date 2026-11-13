@@ -1,6 +1,6 @@
 """F8: the schema layer does the work once per process — the snapshot of the schemas, the errors of an instance, the error objects of a valid one.
 
-Measured on the Petclinic v0.3 run (review-select, 61 validations): 7 ms of every small one was the snapshot of 44 schema files, a 700 KB candidate was
+Measured on the Petclinic v0.3 run (the selection of the review, 61 validations): 7 ms of every small one was the snapshot of 44 schema files, a 700 KB candidate was
 validated four times because an instance over 64 KB was never cached, and the engine built 20 790 error objects to find out that the candidate is valid.
 The cache lives in the memory of the process; its key is the exact bytes (the schemas as read, the instance as canonical JSON), never a path of a run.
 """

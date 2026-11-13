@@ -29,3 +29,15 @@ def test_scan_of_the_delivery_of_cases_has_no_disposition_policy(cases_only_pack
 
 def test_the_development_build_keeps_the_disposition_policy() -> None:
     assert "--disposition-policy" in _help(ROOT, "tools.run_pipeline", "scan")
+
+
+OLD_REVIEW_COMMANDS = ("review-open", "review-select", "review-publish", "review-evidence", "review-abort", "read-ledger", "session-start", "complete-review")
+
+
+def test_the_old_commands_of_the_review_are_not_commands_of_the_api() -> None:
+    from tools import api
+
+    assert not set(OLD_REVIEW_COMMANDS) & set(api.COMMANDS)
+    assert not (ROOT / "tools" / "review_legacy.py").exists()
+    flags = {option if isinstance(option, str) else option[0] for _handler, options, _check in api.COMMANDS.values() for option in options}
+    assert not flags & {"--output-dir", "--verdict", "--candidate", "--session-start", "--reviewer-session", "--csv-profile"}

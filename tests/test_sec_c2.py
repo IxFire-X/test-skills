@@ -47,11 +47,6 @@ PATH_FLAGS = {
     "release_manifest.py": {"--root": "maintainer"},
     "render_contract_docs.py": {"--root": "maintainer"},
     "review_edits.py": {"--candidate": "guard", "--edits": "guard"},
-    "review_legacy.py": {"--candidate": "legacy", "--output-dir": "legacy", "--run-root": "legacy", "--out": "legacy",
-                         "--candidate-receipt": "legacy", "--assembly-receipt": "legacy", "--inventory-receipt": "legacy",
-                         "--context-receipt": "legacy", "--context-marker-output": "legacy", "--generator-fragment": "legacy",
-                         "--session-start": "legacy", "--reviewer-session": "legacy", "--evidence-receipt": "legacy",
-                         "--review": "legacy"},
     "review_view.py": {"--project": "parser", "--run": "run", "--candidate": "guard"},
     "run_pipeline.py": {"--cases": "guard", "--reference": "guard", "--new-run": "run", "--run": "run",
                         "--project": "parser", "--docs": "guard"},
@@ -78,10 +73,8 @@ def test_the_path_flags_of_every_parser_are_the_registered_ones() -> None:
 
 
 # the file flags of the commands of ``tools.api``, read by ``_read_inputs`` (``output_guard.input_file``) or judged by their text and
-# anchor (``--project``, ``--run-root``, ``--output-dir``: ``output_guard.existing_run`` / ``run_output_directory``)
-_API_FILE_FLAGS = {"--assembly-receipt", "--automation", "--candidate", "--candidate-receipt", "--canonical", "--context-marker-output",
-                   "--context-receipt", "--document", "--facts", "--generator-fragment",
-                   "--inventory-receipt", "--module-root", "--output-dir", "--relations", "--review", "--reviewer-session", "--session-start"}
+# anchor (``--project``, ``--run-root``: ``output_guard.existing_run``)
+_API_FILE_FLAGS = {"--automation", "--canonical", "--document", "--facts", "--module-root", "--relations"}
 
 
 def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:

@@ -40,7 +40,6 @@ SPECIFIC = {
     ("module_ids.py", "current"): "id made by module_id_for: [A-Za-z0-9_/-] or hex",
     ("ready.py", "target"): "the text of the STOP row for the --target the person typed, not a command to run",
     ("ready.py", "profile"): "a choice of the parser (cases-only-v1 | local-pilot-v1)",
-    ("review_legacy.py", "new"): "a literal of the table _RENAMED",
     ("finalize_attempt.py", "code"): "an abandon code of a closed table",
     ("skillsrc_manifest.py", "python"): "set from printed() or the literal template on the lines above",
     ("skillsrc_manifest.py", "where"): "set from printed() or the literal template on the lines above",
@@ -117,32 +116,6 @@ def test_a_module_id_that_no_shell_takes_is_refused_by_the_skillsrc() -> None:
     for bad in NASTY:
         with pytest.raises(SkillsrcError):
             parse_skillsrc_bytes(skillsrc(bad))
-
-
-def test_the_command_of_review_open_is_quoted_and_a_directory_no_shell_takes_stops_before_anything_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_canaries import _fake_seed
-    from tests.test_review_requested import _generated_run
-    from tools import review_canaries
-    from tools.orchestrate_test_case_revision import review_open_step
-    from tools.pilot_state import read_attempt_receipt
-
-    monkeypatch.setattr(review_canaries, "seed", _fake_seed)
-    run = _generated_run(tmp_path)
-
-    def opened(directory: Path) -> dict:
-        return review_open_step(run["run_root"], run["attempt_id"], files={}, output_dir=directory, model_id="model-reviewer",
-                                invocation_id="reviewer-subagent-1", fresh_context=True)
-
-    with pytest.raises(HostStop) as stopped:
-        opened(run["project"] / "bundles & more")
-    assert stopped.value.code == "COMMAND_NOT_PRINTABLE"
-    with pytest.raises((KeyError, ValueError)):  # nothing was opened: no boundary of a reviewer session
-        read_attempt_receipt(run["run_root"], run["attempt_id"], "reviewer-session-boundary", "ARTIFACT_READ_BACK")
-    directory = run["project"] / "bundles two"
-    result = opened(directory)
-    select = result["next_step"].split("затем ", 1)[1]
-    assert f'--output-dir "{directory}"' in select and "--run-root " in select and select.endswith("<файл ответа ревьюера>")
-    assert f'--output-dir "{directory}"' in result["for_human"]
 
 
 def test_ingest_before_materialize_in_a_project_no_shell_takes_stops_instead_of_printing_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import canonical_document, confined_output, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, stage_steps, step_size
+from tools import canonical_document, confined_output, execution_gate, output_guard, pilot_state, stage_steps, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -159,79 +159,6 @@ def _cmd_validate_canonical(a):
     return candidate_rows(a.document) or canonical_document.validate_canonical_document(a.document)
 
 
-def _review_files(a):
-    """The reviewer-package files the agent passed — compared with the journal, never the source."""
-    return {"candidate": getattr(a, "candidate", None), "candidate_receipt": getattr(a, "candidate_receipt", None), "assembly_receipt": getattr(a, "assembly_receipt", None),
-            "inventory_receipt": getattr(a, "inventory_receipt", None), "context_receipts": getattr(a, "context_receipt", None),
-            "context_marker_output": getattr(a, "context_marker_output", None), "generator_fragments": getattr(a, "generator_fragment", None)}
-
-
-def _cmd_session_start(a):
-    return orchestrate_test_case_revision.review_step("session-start", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
-                                                      csv_profile=a.csv_profile, fresh_context=a.fresh_context,
-                                                      reviewer_invocation_id=a.reviewer_invocation_id)
-
-
-def _cmd_review_publish(a):
-    return orchestrate_test_case_revision.review_step("publish", a.run_root, a.attempt, files={"candidate": getattr(a, "candidate", None)},
-                                                      output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE))
-
-
-def _refuse_legacy_flags(a, *names: str) -> None:
-    """A flag of the nine commands where their old CLI is not — a refusal with the way in, not a failure deep in the old path."""
-    if execution_gate.legacy_available():
-        return
-    given = [f"--{name.replace('_', '-')}" for name in names if getattr(a, name, None) is not None]
-    if given:
-        raise ValueError(f"LEGACY_REVIEW_NOT_IN_PACKAGE: {', '.join(given)} — флаг прежнего порядка ревью, которого в этой поставке нет; "
-                         "fix: ревью — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → вызов ревьюера → "
-                         "tools.api review-select --verdict <файл ответа ревьюера>")
-
-
-def _refuse_canonical_review_request(a) -> None:
-    """MB1: where mode B keeps ``review-requested`` but the old CLI of the review is not, the command is for the review of the automation
-    only (``autotest-reviewer:rN``); the review of the cases has one way in."""
-    if a.stage == orchestrate_test_case_revision.REVIEW_STAGE and not execution_gate.legacy_available():
-        raise ValueError(f"LEGACY_REVIEW_NOT_IN_PACKAGE: {a.stage} — в этой поставке review-requested только для autotest-reviewer:rN; "
-                         "fix: ревью кейсов — две команды: tools.api review-open --model-id … --invocation-id … --fresh-context yes|no → "
-                         "вызов ревьюера → tools.api review-select --verdict <файл ответа ревьюера>")
-
-
-def _cmd_review_open(a):
-    """Without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
-    command of the nine, as before — one package function either way."""
-    return orchestrate_test_case_revision.review_open_step(
-        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE), model_id=a.model_id,
-        invocation_id=a.invocation_id, fresh_context=a.fresh_context, session_start=getattr(a, "session_start", None))
-
-
-def _cmd_review_select(a):
-    """``--verdict`` records the answer and selects; ``--reviewer-session`` (the nine) is optional — the last revision of the
-    ledger when it is not given; ``--dry-run`` writes nothing."""
-    verdict = a.verdict
-    return orchestrate_test_case_revision.review_select_step(
-        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=getattr(a, "csv_profile", PROFILE),
-        verdict=None if verdict is None else verdict.value, verdict_bytes=None if verdict is None else verdict.raw_bytes,
-        transport_attempts=a.transport_attempts, reviewer_session=getattr(a, "reviewer_session", None), review=getattr(a, "review", None),
-        dry_run=a.dry_run)
-
-
-def _cmd_complete_review(a):
-    return orchestrate_test_case_revision.complete_reviewer_session(a.run_root, a.attempt)
-
-
-def _cmd_review_evidence(a):
-    return orchestrate_test_case_revision.provide_reviewer_evidence(a.run_root, a.attempt, a.path)
-
-
-def _cmd_review_abort(a):
-    return orchestrate_test_case_revision.abort_reviewer_session(a.run_root, a.attempt, a.reason)
-
-
-def _cmd_read_ledger(a):
-    return pilot_state.read_reviewer_session_ledger(a.run_root, a.attempt, a.digest, unconfirmed_ok=True)
-
-
 def _cmd_read_effective(a):
     """PT2: before the verdict there is no effective document — that is an answer (``effective: null``), not a refusal that the
     journal of refusals counts; a run or an attempt that does not exist is still a refusal."""
@@ -273,11 +200,6 @@ def _cmd_step_inputs(a):
 
 
 RUN = ("--run-root", "--attempt")
-# the reviewer-package files — optional, compared with the journal when given
-REVIEW_FILES = (("--candidate", _json, None), ("--candidate-receipt", Path, None), ("--assembly-receipt", _json, None),
-                ("--inventory-receipt", _json, None), ("--context-receipt", _json, "append", "optional"),
-                ("--context-marker-output", _json, None), ("--generator-fragment", _json, "append", "optional"))
-PROFILE = orchestrate_test_case_revision._PROFILE
 
 
 def _diagnostics(result: Any) -> bool:
@@ -298,22 +220,6 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None]] = {
                                                  ("--reuse-from", str, None), ("--fresh-context", _yes_no, None)), None),
     "submit": (_cmd_submit, ("--run-root", "--stage", ("--transport-attempts", int, 1), ("--dry-run", "flag"), ("--abort", str, None)), None),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics),
-    "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None),
-    "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),
-                                           ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None),
-    # the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
-    "review-publish": (_cmd_review_publish, (*RUN, ("--candidate", _json, None), ("--output-dir", Path),
-                                             ("--csv-profile", str, PROFILE)), None),
-    # review-open [--model-id --invocation-id --fresh-context] opens the whole review; review-select [--verdict] [--dry-run] closes it
-    "review-open": (_cmd_review_open, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
-                                       ("--session-start", _json, None), ("--model-id", str, None), ("--invocation-id", str, None),
-                                       ("--fresh-context", _yes_no, None)), None),
-    "review-select": (_cmd_review_select, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
-                                           ("--reviewer-session", _json, None), ("--review", _json, None), ("--verdict", str, None),
-                                           ("--transport-attempts", int, 1), ("--dry-run", "flag")), None),
-    "complete-review": (_cmd_complete_review, RUN, None),
-    "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None),
-    "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None),
     "read-effective": (_cmd_read_effective, RUN, None),
     "automation-boundary-facts": (_cmd_automation_boundary_facts, (*RUN, ("--revision", int), ("--fresh-context", _yes_no),
                                                                      "--reviewer-invocation-id"), None),
@@ -334,19 +240,7 @@ _AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary",
 if not execution_gate.execution_available():
     for _name in _AUTOMATION_COMMANDS:
         COMMANDS.pop(_name, None)
-# the review of a delivery of cases has one way in — review-open, review-select; the three commands of the nine stay where the old CLI is.
-# MB1: review-requested also stays where mode B is (its text asks for it on autotest-reviewer:rN); there it refuses the canonical review
-_LEGACY_REVIEW_COMMANDS = ("session-start", "complete-review") + (() if execution_gate.execution_available() else ("review-requested",))
-if not execution_gate.legacy_available():
-    for _name in _LEGACY_REVIEW_COMMANDS:
-        COMMANDS.pop(_name, None)
-    # nor the flags of that way in on the commands that stay — package files the code takes from the journal, and the profile of the nine;
-    # `--session-start`, `--reviewer-session` and `--review` stay: a text of before names them, and they are refused with the way in
-    _LEGACY_REVIEW_FLAGS = frozenset(("--candidate", "--candidate-receipt", "--assembly-receipt", "--inventory-receipt", "--context-receipt",
-                                      "--context-marker-output", "--generator-fragment", "--csv-profile"))
-    for _name in ("review-publish", "review-open", "review-select"):
-        _function, _specs, _check = COMMANDS[_name]
-        COMMANDS[_name] = (_function, tuple(spec for spec in _specs if (spec if isinstance(spec, str) else spec[0]) not in _LEGACY_REVIEW_FLAGS), _check)
+    COMMANDS.pop("review-requested", None)  # the command of the review of the automation (mode B): a delivery of cases has none
 
 
 def _parser() -> JsonArgumentParser:
@@ -403,40 +297,14 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None))
 
 
-# the review in two commands; the nine of before work one more release and say so
-_REVIEW_OPEN_NOW = "tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> --fresh-context yes|no"
-_REVIEW_SELECT_NOW = "tools.api review-select --verdict <файл ответа ревьюера> --run-root <run> --attempt <id> --output-dir <dir>"
-
-
-def _deprecated(args: argparse.Namespace) -> str | None:
-    """``deprecated: "tools.api review-open …"`` for a command of the nine of the canonical review, the one that replaces it."""
-    stage = getattr(args, "stage", None)
-    reviewer = stage == orchestrate_test_case_revision.REVIEW_STAGE
-    if args.command == "session-start" or (args.command == "review-open" and args.session_start is not None) or (
-            args.command in {"review-requested", "model-request"} and reviewer):
-        return _REVIEW_OPEN_NOW
-    if args.command == "complete-review" or (args.command == "model-response" and reviewer) or (
-            args.command == "review-select" and args.reviewer_session is not None):
-        return _REVIEW_SELECT_NOW
-    return None
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     handler, _options, invalid = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))
     try:
-        if args.command == "review-open":  # before the guards below — the flag is refused for what it is
-            _refuse_legacy_flags(args, "session_start")
-        elif args.command == "review-select":
-            _refuse_legacy_flags(args, "reviewer_session", "review")
-        elif args.command == "review-requested":
-            _refuse_canonical_review_request(args)
         _read_inputs(args)
         run_root = getattr(args, "run_root", None)
         out = _out_target(args.out, run_root) if args.out is not None else None
-        if getattr(args, "output_dir", None) is not None:  # the publication directory: inside the project of the run, never in .git
-            output_guard.run_output_directory(args.output_dir, run_root)
         result = handler(args)
     except Exception as error:
         # the refusal's own code and fix; the one envelope {status, code, message, fix, next}
@@ -450,9 +318,6 @@ def main(argv: list[str] | None = None) -> int:
     payload: dict[str, Any] = {"status": status, "command": args.command}
     if dry_run:
         payload["dry_run"] = True
-    deprecated = _deprecated(args)
-    if deprecated is not None:
-        payload["deprecated"] = deprecated
     if out is not None:
         payload.update(_write(out, plain(result), run_root))
     else:

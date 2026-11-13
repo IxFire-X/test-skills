@@ -63,7 +63,6 @@ def _is_exec_file(name: str) -> bool:
 
 # The uses outside the execution files that are left; every package that takes one away takes it off this list.
 EXCEPTIONS: dict[tuple[str, str, str], int] = {
-    ("api", "orchestrate_test_case_revision", "_PROFILE"): 1,
     ("automation_validation", "pilot_state", "_read_attempt_receipt_with_state"): 1,
     ("automation_validation", "pilot_state", "_read_effective_canonical_with_state"): 1,
     ("automation_validation", "pilot_state", "_run_root"): 1,
@@ -93,16 +92,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("review_canaries", "pilot_state", "_receipt_target"): 1,
     ("review_canaries", "pilot_state", "_run_root"): 5,
     ("review_canaries", "review_view", "_assertion"): 2,
-    ("review_legacy", "api", "_out_target"): 1,
-    ("review_legacy", "api", "_write"): 1,
-    ("review_legacy", "orchestrate_test_case_revision", "_FIXES"): 1,
-    ("review_legacy", "orchestrate_test_case_revision", "_PROFILE"): 3,
-    ("review_legacy", "orchestrate_test_case_revision", "_PROFILES"): 2,
-    ("review_legacy", "orchestrate_test_case_revision", "_canary_report"): 1,
-    ("review_legacy", "orchestrate_test_case_revision", "_diag"): 4,
-    ("review_legacy", "orchestrate_test_case_revision", "_load_receipt"): 1,
-    ("review_legacy", "orchestrate_test_case_revision", "_read_existing_context_receipts"): 2,
-    ("review_legacy", "orchestrate_test_case_revision", "_receipt_json"): 2,
     ("run_pipeline", "pilot_state", "_frozen_inventory"): 1,
     ("run_pipeline", "pilot_state", "_generator_input"): 1,
     ("run_pipeline", "pilot_state", "_read_artifact"): 1,

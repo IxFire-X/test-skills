@@ -125,8 +125,8 @@ def test_output_dir_through_a_link_out_of_the_published_directory_is_refused(tmp
 
 # ---- every entry point -------------------------------------------------------------------------------------------
 
-FLAGS = {"--out", "--output-dir"}
-ENTRY_POINTS = {"tools/api.py", "tools/review_legacy.py"}  # F4b: the old CLI of the review lives in review_legacy.py
+FLAGS = {"--out"}
+ENTRY_POINTS = {"tools/api.py"}  # V4b: the one CLI that takes the flag; ``--output-dir`` has no command any more
 
 
 def _flag_files() -> dict[str, ast.Module]:
@@ -143,8 +143,6 @@ def test_only_the_known_entry_points_take_the_flags_and_each_checks_them() -> No
     found = _flag_files()
     assert set(found) == ENTRY_POINTS, "a new --out / --output-dir needs tools.output_guard and a place in ENTRY_POINTS"
     for relative, tree in found.items():
-        used = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "output_guard"}
-        assert {"run_output_directory"} <= used, relative
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert "_out_target(" in text or "out_file(" in text, relative
 

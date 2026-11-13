@@ -1273,18 +1273,18 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
 
 
 # the ways out of an attempt finish cannot close yet; each names its exact abort code
-_REVIEW_ABORT = ("python -m tools.api review-abort --run-root <run> --attempt <attempt_id> --reason {code} "
-                 "--out <run>/tmp/session.json, затем python -m tools.api review-select без --verdict (сессию он берёт из журнала)")
+_REVIEW_ABORT = ("python -m tools.api submit --run-root <run> --stage tc-reviewer:canonical --abort {code} "
+                 "(сессию он берёт из журнала и сам выбирает по ней)")
 _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (state, next); "
                     "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
                     + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
-                    "select отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")
+                    "submit отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")
 # select checks the decision before it closes the ledger, so a closed session without an effective document is
 # an interrupted select — the same session and answer again is safe
-_UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api review-select "
-                   "--run-root <run> --attempt <attempt_id> --output-dir <dir> (без --verdict) — "
+_UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api submit "
+                   "--run-root <run> --stage tc-reviewer:canonical (слот ответа тот же) — "
                    "сессия закрыта с тем же ответом, повтор безопасен (проверка — python -m tools.api read-effective), затем finish; "
-                   "review-select отказывает и после повтора — прогон оставь, scan с --new-run начнёт новый")
+                   "submit отказывает и после повтора — прогон оставь, scan с --new-run начнёт новый")
 
 
 def finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: str | None = None) -> Mapping[str, Any]:
@@ -1311,8 +1311,8 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: s
     return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
 
 
-_SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api review-select --run-root <run> --attempt <attempt_id> "
-               "--output-dir <dir> без --verdict (запись ответа ревьюера, сессию и входы пакета он берёт из журнала); "
+_SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api submit --run-root <run> --stage tc-reviewer:canonical "
+               "(ответ ревьюера лежит в слоте, сессию и входы пакета он берёт из журнала); "
                "затем снова finish")
 
 
@@ -1343,7 +1343,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
     except (KeyError, StopIteration, TypeError, ValueError) as error:
         answered = _reviewer_answer(run_root, attempt_id)
         if answered is not None:  # the reviewer answered, the selection is the missing step — say so, with its command
-            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: ревью кейсов ответило, но select не выполнен ({error})",
+            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: ревью кейсов ответило, но выбор (submit) не выполнен ({error})",
                                     fix=_SELECT_FIX.format(review=answered)) from error
         raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})",
                                 fix=_OPEN_REVIEW_FIX) from error

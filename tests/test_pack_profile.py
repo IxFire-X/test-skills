@@ -446,7 +446,7 @@ def test_the_mode_b_profile_has_the_files_of_mode_b_and_no_tool_of_development()
             "tools/pilot_state.py", "tools/doctor.py", "tools/pack_registry.py", "skills/orchestrate/references/mode-b.md", "skills/tc-to-autotest/SKILL.md",
             "skills/autotest-reviewer/SKILL.md", "schemas/scenario-observation-receipt.schema.json", "CONTRACTS.md", "PIPELINE.md"} <= kept
     assert not kept & {"tools/ci_gate.py", "tools/release_manifest.py", "tools/compatibility_contract.py", "tools/contract_check.py",
-                       "tools/render_contract_docs.py", "tools/review_legacy.py", "schemas/compatibility-evidence.schema.json",
+                       "tools/render_contract_docs.py", "schemas/compatibility-evidence.schema.json",
                        "schemas/release-eval-run.schema.json", "schemas/release-eval-receipt.schema.json", "requirements-dev.txt"}
     assert not [path for path in kept if path.startswith("evals/")]
     assert kept < paths and set(pack_registry.profile_paths(paths, "cases-only")) < kept  # cases-only is a part of mode B, which is a part of the repository

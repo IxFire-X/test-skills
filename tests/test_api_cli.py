@@ -75,7 +75,7 @@ def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsy
 
     assert set(api.COMMANDS) >= {
         "model-request", "model-response", "read-model-artifact", "prepare", "submit",
-        "validate-canonical", "read-ledger",
+        "validate-canonical",
         "read-effective", "open-automation-boundary", "read-receipt", "automation-digest", "relations-digest",
         "validate-automation", "runner-compat",
     }

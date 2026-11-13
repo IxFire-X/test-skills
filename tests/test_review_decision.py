@@ -2,7 +2,7 @@
 
 Before: select published the COMPLETED ledger (validate_reviewer_session) and only then checked the decision
 (validate_review_decision / the successor). An answer valid by schema but wrong by meaning (ПРИНЯТО without every case,
-AUTO_FIX with a DESTRUCTIVE correction) left select → REVIEW_REWORK_REQUIRED, review-abort → REVIEWER_SESSION_CLOSED,
+AUTO_FIX with a DESTRUCTIVE correction) left select → REVIEW_REWORK_REQUIRED, submit --abort → REVIEWER_SESSION_CLOSED,
 finish → FINISH_FACT_UNDETERMINED: a dead end that blocked every scan.
 Now: submit of the review refuses it before the write (the stage keeps its one retry); the selection checks it before
 the ledger, so ``submit --abort`` still closes the session; an AUTO_FIX of an import may not touch the human fields."""

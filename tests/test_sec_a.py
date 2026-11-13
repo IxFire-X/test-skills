@@ -227,7 +227,6 @@ UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required one
     "release_manifest": ["--root", SHARE],
     "render_contract_docs": ["--root", SHARE],
     "review_edits": ["--candidate", "c.json", "--edits", "//pg1-no-such-host.invalid/share/e.json"],
-    "review_legacy": ["publish", "--candidate", "c.json", "--output-dir", SHARE, "--run-root", "r", "--attempt-id", "a"],
     "review_view": ["--project", "p", "--run", "r", "--candidate", SHARE + r"\c.json"],
     "run_pipeline": ["scan", "--profile", "cases-only-v1", "--docs", "x.md", "--project", SHARE + r"\p"],
     "step_size": ["--project", "p", "--files", "a.md", SHARE + r"\b.md"],

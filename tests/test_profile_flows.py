@@ -6,12 +6,12 @@ by the test (the marker, the fragments, the verdicts) and the run of the tests i
 
 - ``cases-only``: ``ready``, ``scan``, the marker (``prepare`` / ``submit``), the pause on a
   gap, the plan of the batches (``prepare`` / ``submit --stage plan``), the answers of the generator by batches (``prepare`` / ``submit``, the last one assembles),
-  ``review-open``, ``review-select``, ``finish``, ``report`` — no module of mode B is there (CO1:
+  ``prepare`` / ``submit`` of the review, ``finish``, ``report`` — no module of mode B is there (CO1:
   the first ``model-response`` refused ``MODE_B_NOT_IN_PACKAGE``);
 - ``mode-b``: the same cases part, then the review of the automation by the commands of the text (``references/mode-b.md`` §5) —
   ``read-effective``, ``model-response tc-to-autotest``, ``automation-boundary-facts``, ``open-automation-boundary``, ``review-requested``,
-  the reviewer's request and answer, ``materialize``, the human run, ``ingest``, ``report`` — no ``review_legacy`` is there (MB1: no
-  ``review-requested``).
+  the reviewer's request and answer, ``materialize``, the human run, ``ingest``, ``report`` (MB1: no
+  ``review-requested`` in a delivery of cases).
 """
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ def test_the_two_profiles_leave_out_what_the_flows_below_must_not_need() -> None
 
     paths = [row["path"] for row in pack_registry.registry_rows(ROOT)]
     cases_only, mode_b = (set(pack_registry.profile_paths(paths, name)) for name in ("cases-only", "mode-b"))
-    assert not {"tools/automation_validation.py", "tools/run_tests.py", "tools/review_legacy.py"} & cases_only
-    assert "tools/review_legacy.py" not in mode_b and "tools/automation_validation.py" in mode_b and "tools/exec_commands.py" in mode_b
+    assert not {"tools/automation_validation.py", "tools/run_tests.py"} & cases_only
+    assert "tools/automation_validation.py" in mode_b and "tools/exec_commands.py" in mode_b
 
 
 # ---- the front half of a path: ready → scan → the marker → the plan of the batches --------------------------------------
@@ -255,7 +255,7 @@ def test_cases_only_delivery_walks_from_ready_to_the_report(tmp_path: Path, case
     _writes_stay_in_bounds(pack, run)
 
 
-# ---- mode-b: the whole path, from ready to report: the cases, the review of the automation without review_legacy, the human run -----
+# ---- mode-b: the whole path, from ready to report: the cases, the review of the automation, the human run -----
 
 def _automated(fragment: dict) -> dict:
     """The one case of the fragment with an automated step: a GET of the product list answered by 200."""
@@ -301,7 +301,7 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     from tests.test_review_two_commands import _flags
 
     pack = mode_b_pack
-    assert not (pack / "tools" / "review_legacy.py").exists() and (pack / "tools" / "exec_commands.py").is_file()
+    assert (pack / "tools" / "exec_commands.py").is_file()
     front = _front(pack, tmp_path, "local-pilot-v1")
     effective = _cases_to_effective(pack, front)
     _status(pack, front["project"], front["run_root"].name, "automation", "model-request")  # after the canonical review the automation is next
@@ -337,9 +337,6 @@ def test_mode_b_delivery_walks_from_ready_to_the_report(tmp_path: Path, mode_b_p
     code, accepted = _api(pack, "model-response", *run, "--stage", "autotest-reviewer:r1", "--artifact", _put(tmp / "autotest-review.json", verdict))
     assert code == 0 and all(f"/artifacts/autotest_review/{key}" in accepted["result"]["filled"] for key in left_to_the_code), accepted
     _status(pack, project, run_root.name, "materialize", "materialize")
-    # the canonical review has one way in a delivery without review_legacy: review-open / review-select
-    code, refused = _api(pack, "review-requested", *run, "--stage", "tc-reviewer:canonical", "--digest", automation_digest)
-    assert code == 2 and refused["code"] == "LEGACY_REVIEW_NOT_IN_PACKAGE" and "review-open" in refused["fix"] and "review-select" in refused["fix"], refused
     # materialize → the person runs the printed command → ingest → report
     shared = ("--project", str(project), "--run", run_root.name, "--module", "python-pytest")
     code, printed = _cli(pack, "tools.run_pipeline", "materialize", *shared)

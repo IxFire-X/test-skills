@@ -49,7 +49,7 @@ def _events(run_root: Path) -> list[dict]:
 def _evidence_verdict(run: dict, *paths: str) -> str:
     """The answer of the reviewer with the ``evidence`` key of the slot."""
     answer = json.loads(Path(_verdict(run)).read_bytes())
-    return _put(run["tmp"] / "review-evidence.json", {**answer, "evidence": list(paths)})
+    return _put(run["tmp"] / "review-answer-with-evidence.json", {**answer, "evidence": list(paths)})
 
 
 def _ledger_events(run: dict) -> list[str]:

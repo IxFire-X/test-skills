@@ -286,7 +286,7 @@ def _read_canaries(run_root: Path, attempt_id: str, events: list[dict[str, Any]]
 
 def resume_binding(run_root: Path, attempt_id: str, expected: Any) -> bool:
     """Finish the binding of a seeding that was cut short.  The receipt file is there (the journal may lack one or both of its events).
-    Files that agree with each other are no proof — an agent can write a receipt, a map and a view of its own before ``review-open`` —
+    Files that agree with each other are no proof — an agent can write a receipt, a map and a view of its own before ``prepare`` of the review —
     so the bytes are compared with what the seeding gives now: *expected* is a function returning ``(facts, view, map)``, the seeding of
     the candidate of the journal (it is deterministic).  Equal byte for byte → the missing events are appended, ``True``.  No receipt
     file → ``False`` (nothing to finish; the seeding starts over).  Anything else is ``REVIEW_CANARY_MISMATCH``."""

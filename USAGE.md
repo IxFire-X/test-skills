@@ -171,7 +171,7 @@ ID (`O01`, `X02`), иначе раздел `#`/`##` документа. Груп
 статус, снята проверка состояния) — в копию кейсов для вида; кандидат, бандлы и журнал не меняются. Карта лежит рядом:
 `review-views/<sha>.canaries.json`, её digest, digest вида и кандидата связаны квитанцией `review-canaries` в журнале; карта, вид или
 квитанция, не совпавшие с журналом, — отказ `REVIEW_CANARY_MISMATCH` (не «0 попаданий»); прогон без квитанции (открыт до P7) —
-`NOT_SEEDED` и предупреждение `REVIEW_UNMEASURED`. `review-select` и `report.json` (`review_canaries`) называют, сколько поймано: 0 —
+`NOT_SEEDED` и предупреждение `REVIEW_UNMEASURED`. `submit` ревью и `report.json` (`review_canaries`) называют, сколько поймано: 0 —
 `REVIEW_UNRELIABLE` (вердикт стоит, `accepted=false`), часть — «ревью слабое: пропущено N из M, классы …». Правка с `old` = мутированному
 тексту в канон не идёт; правки, державшиеся только на контрольных ошибках, — отказ до записи (`REVIEW_ONLY_CANARY_FIXES`); блокирующая находка на контрольной
 ошибке кейс не отклоняет. Канарейки — сигнал качества ревью, не защита: агент может прочитать карту в `<run>`. Кодовое слово:
@@ -277,8 +277,7 @@ branch. Внутри неё допустимы bounded C-lite evidence requests,
 
 Canonical human fields пишутся по-русски. JSON остаётся единственным semantic source;
 HTML, Markdown и CSV — derived exports. Профиль CSV по умолчанию —
-`zephyr-scale-step-row-24-v5` (только человеческие поля шага); прежний v4 включается
-явным `--csv-profile zephyr-scale-step-row-24-v4`.
+`zephyr-scale-step-row-24-v5` (только человеческие поля шага).
 
 ## 6. `cases-only-v1`
 
