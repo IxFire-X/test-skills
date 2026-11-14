@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_reuse_cases import REVIEW, _follow, _journal, _new, _reuse, _scanned, _source, accepted  # noqa: F401  (the fixture)
+from tests.test_reuse_cases import REVIEW, _all, _follow, _journal, _new, _reuse, _scanned, _source, accepted  # noqa: F401  (the fixture)
+from tests.test_review_canaries import _acceptance, _answer, _fake_seed, _select
+from tests.test_review_requested import _generated_run
 from tools import api, pilot_state, stage_steps
 from tools.json_cli import error_envelope
 
@@ -173,3 +175,101 @@ def test_a_stage_outside_the_list_is_refused_by_prepare_and_nothing_is_written(a
     with pytest.raises(pilot_state.ModelReuseRefused, match="не переиспользуется"):
         _reuse(run, run["stages"][0])
     assert _journal(run["run_root"]) == before
+
+
+# ---- reuse4: a source whose reviewer caught a control error says ТРЕБУЕТ ДОРАБОТКИ and its outcome is ACCEPTED_WHOLE -------------------------------
+
+@pytest.fixture(scope="module")
+def caught(tmp_path_factory: pytest.TempPathFactory) -> dict:
+    """The cycle of the agent with a real seeding: the one BLOCKING finding stands on the place of the control error (case, step, expectation), no real case is rejected."""
+    from tools import review_canaries
+
+    run = _generated_run(tmp_path_factory.mktemp("caught"))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(review_canaries, "seed", _fake_seed)  # the two cases of the fixture seed nothing of their own
+        stage_steps.prepare(run["run_root"], REVIEW, invocation_id="reviewer-subagent-1", fresh_context=True)
+    place = review_canaries.verify(run["run_root"], run["attempt_id"])[0]
+    finding = {"severity": "BLOCKING", "code": "ORACLE_MISSING", "message": "Граница названа неверно: 6.", "evidence": ["REQ"], "related_ids": [place["case_id"], place["step_id"], place["expectation_id"]]}
+    assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[finding]))["outcome"] == "ACCEPTED_WHOLE"
+    return run
+
+
+@pytest.fixture
+def seeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import review_canaries
+
+    monkeypatch.setattr(review_canaries, "seed", _fake_seed)  # a pure function of the candidate: the new run seeds what the source did
+
+
+def test_the_scan_offers_a_source_whose_reviewer_caught_a_control_error(caught: dict) -> None:
+    run_root, attempt_id = _scanned(caught)
+    offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert offered["run_id"] == caught["run_root"].name and "cases" not in offered, offered  # no refusal named for the cases
+    assert [row["stage"] for row in offered["stages"]][-1] == REVIEW and "plan" in [row["stage"] for row in offered["stages"]], offered
+
+
+def test_every_stage_of_such_a_source_is_taken_by_prepare(caught: dict, seeded: None) -> None:
+    run = _follow(caught)
+    assert _all(run)["status"] == "EFFECTIVE_SELECTED"
+
+
+def test_the_new_run_ends_as_the_source_did_with_the_same_control_errors(caught: dict, seeded: None) -> None:
+    from tools import review_canaries
+
+    run = _follow(caught)
+    _all(run)
+    assert _acceptance(run)["outcome"] == _acceptance(caught)["outcome"] == "ACCEPTED_WHOLE"
+    assert review_canaries.verify(run["run_root"], run["attempt_id"]) == review_canaries.verify(caught["run_root"], caught["attempt_id"])  # the places are the source's
+    assert review_canaries.summary(run["run_root"], run["attempt_id"]) == review_canaries.summary(caught["run_root"], caught["attempt_id"])  # caught and missed
+
+
+def test_a_source_that_rejected_a_real_case_is_not_taken_and_the_scan_names_the_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import orchestrate_test_case_revision as orchestrate, review_canaries
+    from tests.test_review_canaries import _finding, _ids
+
+    monkeypatch.setattr(review_canaries, "seed", _fake_seed)
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # one case of the two of the fixture goes out: PARTIAL
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # and goes back nowhere
+    src = _generated_run(tmp_path)
+    stage_steps.prepare(src["run_root"], REVIEW, invocation_id="reviewer-subagent-1", fresh_context=True)
+    one, _two = _ids(src)
+    assert _select(src, _answer(src, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")]))["outcome"] == "PARTIAL"
+    run_root, attempt_id = _scanned(src)
+    offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert offered["run_id"] is None and "исход PARTIAL" in offered["reason"], offered
+
+
+def test_a_source_of_another_package_is_named_so_even_with_the_review_that_needs_its_outcome(caught: dict, monkeypatch: pytest.MonkeyPatch, seeded: None) -> None:
+    run = _follow(caught)
+    monkeypatch.setattr(pilot_state, "skill_pack_digest", lambda: "sha256:" + "e" * 64)
+    path, kept = _damaged(caught["run_root"], "model-stage-artifacts", b"test_cases")  # what a reader of today does not take of a past version
+    try:
+        with pytest.raises(pilot_state.ModelReuseRefused, match="пакет иной"):  # not REUSE_SOURCE_INVALID: the outcome is worked out after the package
+            _reuse(run, run["stages"][0])
+    finally:
+        path.write_bytes(kept)
+
+
+def test_the_scan_does_not_work_out_the_outcome_of_a_run_whose_inputs_differ(caught: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import orchestrate_test_case_revision as orchestrate
+
+    asked: list[str] = []
+    real = orchestrate.acceptance_summary
+    monkeypatch.setattr(orchestrate, "acceptance_summary", lambda *args: asked.append("outcome") or real(*args))
+    added = caught["project"] / "src" / "added_for_reuse4.py"
+    added.write_text("x = 1\n", encoding="utf-8")
+    try:
+        run_root, attempt_id = _new(caught["project"])
+        offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    finally:
+        added.unlink()
+    assert offered["run_id"] is None and asked == []  # the project holds other runs too (their reasons come first): only the outcome is the point here
+
+
+def test_the_scan_names_the_files_of_the_project_that_changed_since_the_source(tmp_path: Path) -> None:
+    src = _source(tmp_path)
+    (src["project"] / "src" / "added_one.py").write_text("x = 1\n", encoding="utf-8")
+    run_root, attempt_id = _new(src["project"])
+    offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert offered["run_id"] is None and offered["files"] == {"added": {"count": 1, "paths": ["src/added_one.py"]}}, offered
+    assert offered["reason"] == "входы иные: в проекте изменились файлы — появились 1: src/added_one.py"

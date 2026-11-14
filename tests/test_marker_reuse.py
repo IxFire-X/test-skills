@@ -163,7 +163,7 @@ def test_the_scan_suggestion_says_which_input_differs(tmp_path: Path) -> None:
     source_root, _attempt = _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path, changed=True)
     reuse = marker_reuse_suggestion(run_root, attempt_id)
-    assert reuse["run_id"] is None and reuse["source_run_id"] == source_root.name and reuse["reason"] == "входы иные"
+    assert reuse["run_id"] is None and reuse["source_run_id"] == source_root.name and reuse["reason"].startswith("входы иные: в проекте изменились файлы") and reuse["files"]["added"]["paths"] == ["tests/added_since.py"]
     names = [row["input"] for row in reuse["differences"]]
     assert names[0] == "inventory", names
     assert reuse["differences"][0]["given"] == inputs[1] and reuse["differences"][0]["source"] != inputs[1]

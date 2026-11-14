@@ -5393,14 +5393,25 @@ def _run_source(project: Path, run_id: str, whole: bool = True) -> dict[str, Any
 def _source_refusal(source: Mapping[str, Any], module: str, family: str = "marker") -> str | None:
     if source["attempt"].get("module") != module:
         return f"другой модуль ({source['attempt'].get('module')})"
-    if family != "automation" and source["verdict"] not in ACCEPTED_REVIEW:  # the autotests are bound to the cases by the input of the request, not by the verdict
-        from tools.orchestrate_test_case_revision import rework_state
-
-        state = _strict(source["run_id"], "rework-round", lambda: rework_state(source["root"], str(source["attempt"]["attempt_id"]))) if source["verdict"] == "ТРЕБУЕТ ДОРАБОТКИ" else None
-        if state != "reviewed":  # accepted in part: taken with the rework and its second round, both answered
-            return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'})" + ("; доработка не завершена" if state else "")
+    if family != "automation" and source["verdict"] not in (*ACCEPTED_REVIEW, "ТРЕБУЕТ ДОРАБОТКИ"):  # the autotests are bound to the cases by the input of the request, not by the verdict
+        return f"ревью кейсов не принято ({source['verdict'] or 'ревью нет'})"
     if source["drift"]:
         return "дрейф: после исполнения источника baseline разошёлся"
+    return None
+
+
+def _outcome_refusal(source: Mapping[str, Any], family: str = "marker") -> str | None:
+    """The last of the cheap refusals, for a source otherwise good: a ТРЕБУЕТ ДОРАБОТКИ review accepted the cases whole by its outcome (the control errors it caught reject nothing) or by the rework."""
+    if family == "automation" or source["verdict"] != "ТРЕБУЕТ ДОРАБОТКИ":
+        return None
+    from tools.orchestrate_test_case_revision import acceptance_summary, rework_state
+    from tools.review_canaries import recorded_answer
+
+    root, attempt_id = source["root"], str(source["attempt"]["attempt_id"])
+    outcome = (_strict(source["run_id"], "review-outcome", lambda: acceptance_summary(root, attempt_id, recorded_answer(root, attempt_id))) or {}).get("outcome")
+    state = _strict(source["run_id"], "rework-round", lambda: rework_state(root, attempt_id))
+    if outcome != "ACCEPTED_WHOLE" and state != "reviewed":
+        return f"ревью кейсов не принято (ТРЕБУЕТ ДОРАБОТКИ{', исход ' + outcome if outcome else ''})" + ("; доработка не завершена" if state else "")
     return None
 
 
@@ -5499,6 +5510,7 @@ def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt
     if refusal is None and differences:
         refusal = "входы иные: " + ", ".join(row["input"] for row in differences)
     refusal = refusal or _other_pack(source, stage, pack)  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
+    refusal = refusal or _outcome_refusal(source, family)  # the last of the cheap ones: it builds the candidate of the source
     if refusal is None and family == "marker" and stage in source["stages"]:  # its own answer, strictly: the marker of a source whose later answers are damaged is still taken
         _strict(run_id, f"model-stage-artifacts ({stage})", lambda: _read_model_stage_artifact_with_state(project, source["root"], source["state"], str(source["attempt"]["attempt_id"]), stage, source["stages"][stage][1]))
     elif refusal is None and family != "marker":
@@ -5600,6 +5612,19 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
     return [*rows, row("tc-to-autotest:r1", response_digest=source["stages"]["tc-to-autotest:r1"][1])], {}
 
 
+def _changed_files(project: Path, root: Path, attempt: Mapping[str, Any], source: Mapping[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """The files of the project that differ between the inventory of this run and the source's — paths and counts (at most 10 paths of each kind), and the words of it."""
+    files = lambda base, owner: {row["project_path"]: row["content_digest"] for row in _frozen_inventory(project, base, str(frozen_baseline(base, owner)["inventory_digest"]))["files"]}  # noqa: E731
+    try:
+        mine, theirs = files(root, attempt), files(source["root"], source["attempt"])
+    except (ValueError, OSError, KeyError, TypeError):
+        return "", None
+    rows = (("added", "появились", sorted(mine.keys() - theirs.keys())), ("removed", "пропали", sorted(theirs.keys() - mine.keys())),
+            ("changed", "изменились", sorted(path for path in mine.keys() & theirs.keys() if mine[path] != theirs[path])))
+    found = {kind: {"count": len(paths), "paths": paths[:10]} for kind, _word, paths in rows if paths}
+    return ": в проекте изменились файлы — " + "; ".join(f"{word} {len(paths)}: {', '.join(paths[:10])}{' …' if len(paths) > 10 else ''}" for _kind, word, paths in rows if paths), found
+
+
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     with closure_cache():  # the journals of the earlier runs are read many times: once each
         return _marker_reuse_suggestion(run_root, attempt_id)
@@ -5640,9 +5665,14 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             refusal = "входы иные"
         if refusal is None and (pack is None or any(source["stages"][stage][0].get("skill_pack_digest") != pack for stage in model_stages)):
             refusal = "пакет иной (skill_pack_digest не совпал или не записан: прогон до FaT-CR)"
+        try:
+            refusal = refusal or _outcome_refusal(source)  # the last of the cheap ones: only for a run that is otherwise good
+        except (ValueError, OSError, KeyError, TypeError, StopIteration):
+            continue
         if refusal is not None:
-            first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": refusal,
-                                              **({"differences": differences} if refusal == "входы иные" else {})}
+            said, files = _changed_files(project, root, attempt, source) if refusal == "входы иные" and any(row["input"] == "inventory" for row in differences) else ("", None)
+            first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": refusal + said,
+                                              **({"differences": differences, **({"files": files} if files else {})} if refusal == "входы иные" else {})}
             continue
         from tools.run_pipeline import HostStop, printed
 
