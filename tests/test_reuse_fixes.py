@@ -9,6 +9,7 @@ import pytest
 from tests.test_reuse_cases import REVIEW, _all, _follow, _journal, _new, _reuse, _scanned, _source, accepted  # noqa: F401  (the fixture)
 from tests.test_review_canaries import _acceptance, _answer, _fake_seed, _select
 from tests.test_review_requested import _generated_run
+from tests.test_reuse_rework import accepted as reworked  # noqa: F401  (the fixture: the first review sent a case back, the rework and its second round accepted it)
 from tools import api, pilot_state, stage_steps
 from tools.json_cli import error_envelope
 
@@ -273,3 +274,58 @@ def test_the_scan_names_the_files_of_the_project_that_changed_since_the_source(t
     offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     assert offered["run_id"] is None and offered["files"] == {"added": {"count": 1, "paths": ["src/added_one.py"]}}, offered
     assert offered["reason"] == "входы иные: в проекте изменились файлы — появились 1: src/added_one.py"
+
+
+# ---- reuse4f: the order of the refusals, the files named once, the finding addressed to the step -----------------------------------------------
+
+def test_the_marker_of_a_source_with_a_finished_rework_and_a_damaged_batch_is_taken(reworked: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The source is good by its rework, the outcome is not what decides.  The limits and the seeding are those the source was built under: without them its outcome is ``None`` before the
+    candidate is read (the limit of the rejection differs from the one of the select), and the test would stand on that."""
+    from tools import orchestrate_test_case_revision as orchestrate, review_canaries
+    from tools.review_canaries import recorded_answer
+
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
+    monkeypatch.setattr(review_canaries, "seed", _fake_seed)
+    source, attempt = reworked["run_root"], reworked["attempt_id"]
+    assert orchestrate.acceptance_summary(source, attempt, recorded_answer(source, attempt))["outcome"] == "ACCEPTED_WHOLE"  # the outcome is there to be read
+    run_root, attempt_id = _scanned(reworked)
+    path, kept = _damaged(source, "model-stage-artifacts", json.loads(Path(reworked["plan"]).read_bytes())["batches"][0]["batch_id"].encode())  # the answer of the first batch
+    try:
+        assert pilot_state.marker_reuse_suggestion(run_root, attempt_id)["run_id"] == source.name  # the scan does not skip the run
+        assert stage_steps.prepare(run_root, MARKER, reuse_from=source.name)["answered"] is True
+    finally:
+        path.write_bytes(kept)
+
+
+def test_the_files_of_the_project_are_compared_once_for_the_first_refusal_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    src = _source(tmp_path)
+    _all(_follow(src))  # a second earlier run, taken whole from the first: its review accepted, its inputs are what the file changes
+    (src["project"] / "src" / "added_two.py").write_text("x = 1" + chr(10), encoding="utf-8")
+    run_root, attempt_id = _new(src["project"])
+    asked: list[str] = []
+    real = pilot_state._changed_files
+    monkeypatch.setattr(pilot_state, "_changed_files", lambda *args: asked.append("files") or real(*args))
+    offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert offered["files"]["added"]["paths"] == ["src/added_two.py"] and asked == ["files"], asked
+
+
+def test_a_finding_addressed_to_the_step_of_a_removed_check_is_the_canary_s_and_the_source_is_taken(tmp_path: Path) -> None:
+    """The form V8-W7 allows: the case and the step of the canary in ``related_ids``, the id of its expectation in ``evidence`` (the second canary of ``_fake_seed`` removes a check)."""
+    from tools import review_canaries
+
+    src = _generated_run(tmp_path)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(review_canaries, "seed", _fake_seed)
+        stage_steps.prepare(src["run_root"], REVIEW, invocation_id="reviewer-subagent-1", fresh_context=True)
+        place = review_canaries.verify(src["run_root"], src["attempt_id"])[1]
+        assert place["class"] == "assertion_removed"
+        finding = {"severity": "BLOCKING", "code": "ORACLE_MISSING", "message": "Нет проверки.", "evidence": [place["expectation_id"]], "related_ids": [place["case_id"], place["step_id"]]}
+        assert _select(src, _answer(src, "ТРЕБУЕТ ДОРАБОТКИ", findings=[finding]))["outcome"] == "ACCEPTED_WHOLE"
+        run_root, attempt_id = _scanned(src)
+        offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+        assert offered["run_id"] == src["run_root"].name and "cases" not in offered, offered
+        run = _follow(src)
+        assert _all(run)["status"] == "EFFECTIVE_SELECTED"
+        assert _acceptance(run)["outcome"] == _acceptance(src)["outcome"] == "ACCEPTED_WHOLE"
+        assert review_canaries.summary(run["run_root"], run["attempt_id"]) == review_canaries.summary(src["run_root"], src["attempt_id"])

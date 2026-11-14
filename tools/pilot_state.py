@@ -5408,9 +5408,9 @@ def _outcome_refusal(source: Mapping[str, Any], family: str = "marker") -> str |
     from tools.review_canaries import recorded_answer
 
     root, attempt_id = source["root"], str(source["attempt"]["attempt_id"])
-    outcome = (_strict(source["run_id"], "review-outcome", lambda: acceptance_summary(root, attempt_id, recorded_answer(root, attempt_id))) or {}).get("outcome")
     state = _strict(source["run_id"], "rework-round", lambda: rework_state(root, attempt_id))
-    if outcome != "ACCEPTED_WHOLE" and state != "reviewed":
+    outcome = None if state == "reviewed" else (_strict(source["run_id"], "review-outcome", lambda: acceptance_summary(root, attempt_id, recorded_answer(root, attempt_id))) or {}).get("outcome")
+    if state != "reviewed" and outcome != "ACCEPTED_WHOLE":  # the rework answered twice decides, the outcome is worked out only without it
         return f"ревью кейсов не принято (ТРЕБУЕТ ДОРАБОТКИ{', исход ' + outcome if outcome else ''})" + ("; доработка не завершена" if state else "")
     return None
 
@@ -5670,7 +5670,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
         except (ValueError, OSError, KeyError, TypeError, StopIteration):
             continue
         if refusal is not None:
-            said, files = _changed_files(project, root, attempt, source) if refusal == "входы иные" and any(row["input"] == "inventory" for row in differences) else ("", None)
+            said, files = _changed_files(project, root, attempt, source) if first_refusal is None and refusal == "входы иные" and any(row["input"] == "inventory" for row in differences) else ("", None)
             first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": refusal + said,
                                               **({"differences": differences, **({"files": files} if files else {})} if refusal == "входы иные" else {})}
             continue
