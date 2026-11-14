@@ -414,6 +414,18 @@ def submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], **kwarg
         return _submit(run_root, stage, load, **kwargs)
 
 
+def _recorded_reuse(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str) -> str | None:
+    """The run a recorded request of ``stage`` reuses (its answer is that run's), None for an ordinary one."""
+    asked = _events(state, attempt_id, stage, "MODEL_REQUESTED")
+    reuse = pilot_state.read_model_request(root, attempt_id, stage, str(asked[-1]["artifact_digest"])).get("reuse") if asked else None
+    return str(reuse["run_id"]) if isinstance(reuse, Mapping) else None
+
+
+def _stuck(stage: str, run_id: str, why: str = "") -> pilot_state.ReuseSourceInvalid:
+    return pilot_state.ReuseSourceInvalid(f"REUSE_SOURCE_INVALID: запрос стадии {stage} уже записан как повтор из прогона {run_id}" + (f"; причина: {why[:200]}" if why else "") + "; fix: повтори prepare с тем же --reuse-from, "
+                                          "а если источник не проходит проверки — обычным путём её не ответить: оставь прогон (finish --abandon LEFT_BEFORE_REVIEW, если ревью ещё не открывалось) и начни новый: scan с --new-run")
+
+
 def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocation_id: str | None = None, reuse_from: str | None = None,
             fresh_context: bool | None = None, accept_self_review: bool = False) -> dict[str, Any]:
     """Publish the request of ``stage`` and say what the model reads and where the answer goes; a reuse answers it from the source run.
@@ -438,6 +450,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
         return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
         if reuse_from is not None and stage == "plan" and not step["done"]:  # the plan of the source: its subject and date, compared with the source before anything is written
+            _refuse_terminal(state, attempt_id)  # as the submit of the plan does
             return {"stage": stage, **pilot_state.reuse_plan(root, attempt_id, reuse_from)}
         if not step["done"]:
             _refuse_linked_inbox(root)
@@ -446,9 +459,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
             confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)
         return {"stage": stage, **asked, **({} if step["done"] else {"answer_slot": str(slot(root, stage)), "waiting_for": step["waiting_for"]})}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):
-        asked = _events(state, attempt_id, stage, "MODEL_REQUESTED")
-        reuse = pilot_state.read_model_request(root, attempt_id, stage, str(asked[-1]["artifact_digest"])).get("reuse") if asked and reuse_from is not None else None
-        if isinstance(reuse, Mapping) and reuse.get("run_id") == reuse_from:  # a reuse is one call: one cut after the answer was written (the selection of the review) is finished by the repeat
+        if reuse_from is not None and _recorded_reuse(root, state, attempt_id, stage) == reuse_from:  # a reuse is one call: one cut after the answer was written (the selection of the review) is finished by the repeat
             return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse_from, **_accepted(root, stage)}
         return {"stage": stage, "answered": True}
     _refuse_terminal(state, attempt_id)
@@ -456,7 +467,12 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     if reuse_from is None:
         _refuse_linked_inbox(root)
     else:  # every condition on the source, before anything is written; the label and the statement of the session are the source's
-        said = pilot_state.check_reuse(root, attempt_id, stage, reuse_from)
+        try:
+            said = pilot_state.check_reuse(root, attempt_id, stage, reuse_from)
+        except (pilot_state.ModelReuseRefused, pilot_state.ReuseSourceInvalid) as refused:
+            if recorded := _recorded_reuse(root, state, attempt_id, stage):
+                raise _stuck(stage, recorded, str(refused).partition("; fix:")[0]) from refused
+            raise
         invocation_id, fresh_context = said["invocation_id"], said["fresh_context"]
         check_consent()
     if accept_self_review:
@@ -470,8 +486,10 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
                                                  reuse_from=reuse_from))
     reuse = request.get("reuse")
     if isinstance(reuse, Mapping):  # the answer is the source run's, read from it — the slot is not looked at
-        source = pilot_state.read_model_stage_artifact(project / ".pilot-runs" / output_guard.run_name(reuse["run_id"]), reuse["attempt_id"], stage,
-                                                       reuse["response_digest"])
+        try:
+            source = pilot_state.read_model_stage_artifact(project / ".pilot-runs" / output_guard.run_name(reuse["run_id"]), reuse["attempt_id"], stage, reuse["response_digest"])
+        except (ValueError, OSError) as error:
+            raise _stuck(stage, reuse["run_id"], str(error)) from error
         pilot_state.publish_model_stage_artifact(root, attempt_id, stage, source["artifact"],
                                                  before_write=(lambda value: _automation_check(root, stage, value)) if stage == "tc-to-autotest:r1" else None)  # the checks of a submit
         return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse["run_id"], **_accepted(root, stage)}
@@ -507,6 +525,8 @@ def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry
     _refuse_unready(stage, step)
     if not _events(state, attempt_id, stage, "MODEL_REQUESTED"):
         raise ValueError(f"STAGE_NOT_PREPARED: {stage} has no request yet; fix: prepare --stage {stage}, затем модель, затем submit")
+    if recorded := _recorded_reuse(root, state, attempt_id, stage):  # the answer of this stage is the source's, not the slot's
+        raise _stuck(stage, recorded)
     _refuse_terminal(state, attempt_id)  # a closed attempt takes no answer: refused before the slot is read, nothing written
     if stage == "tc-reviewer:canonical":  # a session that was closed takes none either
         from tools.orchestrate_test_case_revision import refuse_closed_review

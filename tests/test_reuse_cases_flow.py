@@ -105,9 +105,9 @@ def test_a_changed_file_of_the_project_cancels_the_reuse_and_the_scan_says_so(pa
 def test_a_damaged_answer_of_the_source_is_refused_with_its_name(pack: Path, source: dict) -> None:
     scanned = _scan(pack, source["project"])
     artifacts = Path(source["run_root"]) / "model-stage-artifacts"
-    target = next(path for path in sorted(artifacts.rglob("*.json")) if b"test_cases" in path.read_bytes())
+    target = next(path for path in sorted(artifacts.rglob("*.json")) if b"source_code_and_diff" in path.read_bytes())  # the marker answer: the stage asked for below
     data = target.read_bytes()
-    target.write_bytes(data.replace(b"test_cases", b"test_casex", 1))
+    target.write_bytes(data.replace(b"source_code_and_diff", b"source_code_and_difx", 1))
     try:
         code, refused = _step(pack, scanned, "context-marker:baseline", "--reuse-from", source["run_root"].name)
         assert code == 2 and refused["code"] == "REUSE_SOURCE_INVALID" and "model-stage-artifacts" in refused["message"], refused

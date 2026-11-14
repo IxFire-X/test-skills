@@ -5478,6 +5478,12 @@ def _automation_refusal(project: Path, source: Mapping[str, Any], attempt: Mappi
     return "автотесты принимались на ревизии 2 — берутся только принятые на ревизии 1" if "autotest-reviewer:r2" in source["stages"] else f"ревью автотестов r1 не принято ({verdict or 'ревью нет'})"
 
 
+def _other_pack(source: Mapping[str, Any], stage: str, pack: str | None) -> str | None:
+    """Why the package differs: the fingerprint of the request of ``stage`` itself, the one of the source's marker where the request has none (the requests before V5b-1)."""
+    have = (source["stages"].get(stage) or ({},))[0].get("skill_pack_digest") or source["pack"]
+    return None if pack is not None and have == pack else f"пакет иной: у источника skill_pack_digest {have or 'не записан (прогон до FaT-CR)'}, здесь {pack or 'не прочитан'}"
+
+
 def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage: str, run_id: str) -> tuple[dict[str, Any], str]:
     """The source of ``stage`` with every condition on it checked — reads only, so the caller writes nothing to the new run before they all hold."""
     family = reuse_family(stage)
@@ -5486,14 +5492,18 @@ def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt
                                 "(tc-generator:BATCH-*), tc-reviewer:canonical, доработку (tc-generator:rework-1) и её ревью (tc-reviewer:rework-1) и tc-to-autotest:r1; fix: prepare без --reuse-from")
     if run_id == root.name:
         raise ModelReuseRefused("MODEL_REUSE_REFUSED: тот же прогон — переиспользуется только прошлый прогон")
-    source = _run_source(project, run_id)
+    source = _run_source(project, run_id, whole=False)  # the journal, the markers and the verdict: what the refusals that need no answer read
     pack = skill_pack_digest()
     refusal = _source_refusal(source, str(attempt.get("module")), family)
     differences = _input_differences(source, root, attempt) if refusal is None and family not in ("marker", "automation") else []  # the marker: its own inputs only, as before
     if refusal is None and differences:
         refusal = "входы иные: " + ", ".join(row["input"] for row in differences)
-    if refusal is None and (pack is None or source["pack"] != pack):  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
-        refusal = f"пакет иной: у источника skill_pack_digest {source['pack'] or 'не записан (прогон до FaT-CR)'}, здесь {pack or 'не прочитан'}"
+    refusal = refusal or _other_pack(source, stage, pack)  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
+    if refusal is None and family == "marker" and stage in source["stages"]:  # its own answer, strictly: the marker of a source whose later answers are damaged is still taken
+        _strict(run_id, f"model-stage-artifacts ({stage})", lambda: _read_model_stage_artifact_with_state(project, source["root"], source["state"], str(source["attempt"]["attempt_id"]), stage, source["stages"][stage][1]))
+    elif refusal is None and family != "marker":
+        source = _run_source(project, run_id)  # the whole journal and every answer, strictly — after the refusals that need none
+        refusal = _other_pack(source, stage, pack)
     if refusal is None and family == "automation":
         refusal = _automation_refusal(project, source, attempt)
     elif refusal is None and family != "marker":

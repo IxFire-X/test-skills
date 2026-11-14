@@ -987,7 +987,7 @@ def _header_date_note(root: Path, attempt_id: str | None, events: Sequence[Mappi
         return None
     if not events or date == str(events[0].get("observed_at"))[:10]:
         return None
-    source = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("by") == "reuse"), "")
+    source = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("by") == "reuse" and str(call.get("stage")).startswith(("tc-generator:BATCH-", "tc-reviewer:canonical"))), "")  # the plan is the input of these two only
     return f"дата заголовка {date} — из прошлого прогона" + (f" {source}" if source else "")
 
 
