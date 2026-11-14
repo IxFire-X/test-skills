@@ -344,7 +344,8 @@ def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, stric
             return False
         if canary.get("class") == "assertion_removed":  # the view shows the step without the removed checks: nothing to quote, the place is the hit
             place = {str(canary[key]) for key in ("expectation_id", "assertion_id") if canary.get(key)} or specific
-            return bool(ids & place)
+            named_ids = set(re.findall(r"(?<![\w.:-])(?:STEP|EXP|ASSERT)-[\w.:-]*\w", text))  # a finding to the step is the canary's when it names the canary's expectation or assertion, and no other one
+            return bool(ids & place) or (str(canary["step_id"]) in ids and bool(named_ids & place) and named_ids <= specific)
         return bool(ids & specific) and named
     if ids & specific or any(_has_id(text, item) for item in specific):
         return True

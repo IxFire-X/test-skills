@@ -1510,8 +1510,8 @@ def select_review(run_root: Path, attempt_id: str, *, review: Mapping[str, Any] 
         told = {key: selected[key] for key in ("status", "effective_source", "review_canaries", "codeword", "review_warnings")}
         told.update(outcome=outcome, independence="verified" if isolation["fresh_context"] and isolation["distinct_invocations"] and selected["codeword"]["state"] != "named"
                     else "independence_unverified")
-        if dry_run:
-            return {**told, "would_publish": {"reviewer_ledger": {"status": _plain(session).get("status")}, "effective_source": selected["effective_source"]}}
+        if dry_run:  # a trial run does not say what the canaries caught or whether the word was named: the answer would be fitted to it
+            return {**{key: told[key] for key in ("status", "effective_source", "outcome")}, "would_publish": {"reviewer_ledger": {"status": _plain(session).get("status")}, "effective_source": selected["effective_source"]}}
         return {**told, "files": sorted(path.name for path in published.iterdir()) if published.is_dir() else []}
 
 

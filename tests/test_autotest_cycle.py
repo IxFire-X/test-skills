@@ -204,6 +204,33 @@ def test_an_answer_that_is_wrong_by_its_meaning_is_refused_before_it_is_written(
     assert code == 2 and out["code"] == "MODEL_STAGE_ARTIFACT_INVALID" and out["fix"] and _events(run["root"]) == before
 
 
+def _refused_fix(tmp_path: Path, spoil) -> str:
+    from tests.test_automation_revision_budget import automation
+
+    run = autotest_run(tmp_path)
+    prepare_stage(run["root"], GENERATOR)
+    artifact = automation(run["document"], effective_bundle_receipt_digest=run["bundle"])
+    spoil(artifact["artifacts"])
+    put_in_slot(run["root"], GENERATOR, artifact)
+    code, out = submit_stage(run["root"], GENERATOR, None)
+    assert code == 2 and out["code"] == "MODEL_STAGE_ARTIFACT_INVALID", out
+    return out["fix"]
+
+
+def test_a_file_without_a_test_symbol_is_refused_with_the_fix_of_its_code(tmp_path: Path) -> None:
+    def spoil(artifacts: dict) -> None:
+        artifacts["generated_files"].append({**artifacts["generated_files"][0], "file_id": "FILE-helper", "path": "Helper.py"})
+
+    assert "несёт хотя бы один символ" in _refused_fix(tmp_path, spoil)
+
+
+def test_relations_out_of_order_are_refused_with_the_order(tmp_path: Path) -> None:
+    def spoil(artifacts: dict) -> None:
+        artifacts["implementation_relations"].reverse()
+
+    assert "операции (operation) раньше строк проверок" in _refused_fix(tmp_path, spoil)
+
+
 def test_code_that_the_runner_cannot_take_is_refused_before_it_is_written(tmp_path: Path) -> None:
     import hashlib
 

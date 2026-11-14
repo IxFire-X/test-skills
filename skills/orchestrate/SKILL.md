@@ -72,7 +72,7 @@ permissions:
 3. `submit --stage tc-reviewer:canonical` кладёт набор в `<run>/published`. Ревью не довести до вердикта — `submit --abort REVIEW_CONTEXT_LIMIT` или `REVIEW_UNUSABLE`, затем `finish`.
 
 По `outcome` ответа `submit` (его определяют BLOCKING к настоящим кейсам; замечание к контрольной ошибке кейс не отклоняет: «ТРЕБУЕТ ДОРАБОТКИ» при `ACCEPTED_WHOLE` возможен) скажи человеку: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые отдельно (`*.REJECTED-CASES.*`, в Zephyr не импортировать);
-если `status` называет `prepare tc-generator:rework-1` — один круг доработки (`tc-generator:rework-1`, затем `tc-reviewer:rework-1`, метка и `--fresh-context` как у первого ревью), `finish` до него не зови; не получается —
+если `status` называет `prepare tc-generator:rework-1` — один круг доработки (`tc-generator:rework-1`, затем `tc-reviewer:rework-1`, `--fresh-context` как у первого, при `no` без метки), `finish` до него не зови; не получается —
 `submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE`: набор выйдет без доработки, прогон идёт дальше. `REWORK` — отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай (`independence_unverified`).
 
 ## 5. Закрытие и отчёт

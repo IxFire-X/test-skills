@@ -368,15 +368,25 @@ def test_an_edit_with_the_mutated_text_is_dropped_and_the_canon_keeps_the_origin
     answer = _answer(run, "AUTO_FIX_APPLIED", edits=[_canary_edit(run), real], corrections=[_correction("FIX-1"), _correction("FIX-2")],
                      effective={"document_id": successor["document_id"], "revision": successor["revision"], "document_sha256": document_sha256(successor)})
     selected = _select(run, answer, dry_run=True)
-    assert selected["status"] == "EFFECTIVE_SELECTED" and selected["review_canaries"]["caught"] == 1
-    assert selected["review_canaries"]["hits"] == {"CAN-1": "edit"}
+    assert selected["status"] == "EFFECTIVE_SELECTED"
     done = _select(run, answer)
+    assert done["review_canaries"]["hits"] == {"CAN-1": "edit"}
     from tools.pilot_state import read_effective_canonical
 
     effective = read_effective_canonical(*_flags(run))["document"]
     assert effective["test_cases"][0]["title"].endswith("(уточнено)")
     assert effective["test_cases"][0]["steps"][0]["expectations"][0]["text"] == one["steps"][0]["expectations"][0]["text"]  # not the mutated text
     assert done["review_canaries"]["caught"] == 1
+
+
+def test_a_trial_run_does_not_tell_what_the_canaries_and_the_word_caught(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, _two = _ids(run)
+    answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [one["steps"][0]["expectations"][0]["expectation_id"]], "Нет проверки.")])
+    trial = _select(run, answer, dry_run=True)
+    assert {"review_canaries", "codeword", "review_warnings", "independence"}.isdisjoint(trial) and trial["status"] == "REWORK"
+    assert {"review_canaries", "codeword"} <= set(_select(run, answer))  # the count and the word are for the real call
 
 
 def test_an_answer_whose_only_edits_act_on_canaries_is_refused_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -674,3 +684,25 @@ def test_a_boundary_finding_on_the_place_without_the_value_is_not_a_canary() -> 
 
 def test_a_foreign_expectation_in_related_ids_is_no_canary_in_any_class() -> None:
     assert not _is_canary(_canary(), _blocking(["EXP-S1", "EXP-S2"], "Называется 6."))
+
+
+def test_a_blocking_finding_addressed_to_the_step_that_names_the_expectation_is_the_canary_s() -> None:
+    step = _blocking(["TC-S", "STEP-S1"], "Шаг без проверок.")
+    assert _is_canary(_canary(**REMOVED), {**step, "evidence": ["STEP-S1", "EXP-S1"]}, {"TC-S"})
+    assert _is_canary(_canary(**REMOVED), {**step, "message": "Шаг без проверок: ожидание EXP-S1."}, {"TC-S"})
+
+
+def test_a_finding_addressed_to_the_step_with_no_expectation_named_is_not_a_canary() -> None:
+    assert not _is_canary(_canary(**REMOVED), _blocking(["TC-S", "STEP-S1"], "Шаг без проверок."), {"TC-S"})
+    assert not _is_canary(_canary(**REMOVED), {**_blocking(["TC-S", "STEP-S1"]), "evidence": ["EXP-S10"]}, {"TC-S"})  # S1 is not S10
+
+
+def test_a_finding_addressed_to_the_step_that_names_another_step_or_expectation_is_not_a_canary() -> None:
+    step = _blocking(["TC-S", "STEP-S1"])
+    assert not _is_canary(_canary(**REMOVED), {**step, "evidence": ["EXP-S1", "EXP-S2"]}, {"TC-S"})
+    assert not _is_canary(_canary(**REMOVED), {**step, "message": "Шаг без проверок; то же в STEP-S2.", "evidence": ["EXP-S1"]}, {"TC-S"})
+    assert not _is_canary(_canary(**REMOVED), {**step, "evidence": ["EXP-S1", "ASSERT-S2-1"]}, {"TC-S"})
+
+
+def test_a_finding_that_names_the_expectation_but_not_the_step_in_related_ids_is_not_a_canary_by_text_alone() -> None:
+    assert not _is_canary(_canary(**REMOVED), {**_blocking(["TC-S"]), "evidence": ["EXP-S1"]}, {"TC-S"})

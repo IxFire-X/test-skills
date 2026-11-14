@@ -106,7 +106,7 @@ def test_a_wrong_word_counts_as_not_named_and_is_said_so(tmp_path: Path, monkeyp
     _with_words(monkeypatch)
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
-    done = _select(run, _answer(run, codeword="выдумано"), dry_run=True)
+    done = _select(run, _answer(run, codeword="выдумано"))
     assert done["codeword"]["state"] == "wrong" and "REVIEWER_NAMED_CODEWORD" not in done["review_warnings"]
 
 

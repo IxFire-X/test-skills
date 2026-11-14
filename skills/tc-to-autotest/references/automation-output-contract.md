@@ -13,7 +13,7 @@ The generator must not recover request values from human `action`, `test_data`, 
 Keep generated tests readable as ordinary project tests. Use descriptive method and
 local variable names, retaining case IDs in comments or display names and exact
 locators in the artifact. For Java, factor repeated request, readback or assertion mechanics
-into small private helpers in the generated class when that removes actual duplication;
+into private helpers in the generated class (a helper-only file is refused: each file needs a test symbol) if that removes duplication;
 pass each assertion ID through to its failure message. Keep concrete scenario inputs,
 operation order and expected values visible at the call site. Preserve every selected
 canonical assertion and its atomic relation, including setup checks: excess canonical

@@ -9,16 +9,12 @@
    "stage"
   ],
   "submit --dry-run": [
-   "codeword",
    "content_digest",
    "dry_run",
    "effective_source",
    "filled",
-   "independence",
    "normalized",
    "outcome",
-   "review_canaries",
-   "review_warnings",
    "status",
    "would_publish"
   ],

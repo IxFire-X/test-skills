@@ -237,9 +237,12 @@ def _automation_check(root: Path, stage: str, value: Mapping[str, Any]) -> None:
             root.parents[1] / str(attempt["module"]), language, document, value, materialized=False)
         rows = list(compatibility.diagnostics)
     if rows:
+        from tools.fixes import fix_for
+
+        own = "; ".join(dict.fromkeys(text for row in rows[:3] if (text := fix_for(row["code"]))))  # what the code of each refusal asks, before the general way out
         raise pilot_state.ModelStageArtifactInvalid(
             f"invalid model stage artifact: {stage}: " + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in rows[:3]) + (f" and {len(rows) - 3} more" if len(rows) > 3 else "")
-            + "; fix: исправь ответ в слоте по этим строкам и повтори submit (--dry-run проверяет, ничего не записывая); ничего не записано, "
+            + "; fix: " + (own + "; " if own else "") + "исправь ответ в слоте по этим строкам и повтори submit (--dry-run проверяет, ничего не записывая); ничего не записано, "
             "единственный повтор стадии — submit --transport-attempts 2")
 
 
