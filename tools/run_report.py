@@ -375,6 +375,7 @@ def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                       and first_generator is not None and event["seq"] < first_generator["seq"]), None)
     review_request = _find(ordered, "REVIEW_REQUESTED", "tc-reviewer:")
     review_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "tc-reviewer:", last=True)
+    autotest_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "autotest-reviewer:", last=True)
     last_candidate = _find(ordered, "CANDIDATE_PUBLISHED", "tc-generator:BATCH-", last=True)
     rows: list[dict[str, Any]] = []
 
@@ -382,7 +383,7 @@ def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         rows.append({"phase": name, "from": start.get("event_type") if start else None, "to": end.get("event_type") if end else None,
                      "batch": batch, "sec": _seconds(start.get("observed_at"), end.get("observed_at")) if start and end else None})
 
-    phase("подготовка", ordered[0] if ordered else None, _find(ordered, "CONTEXT_SELECTED", last=True))
+    phase("подготовка", ordered[0] if ordered else None, _find(ordered, "CONTEXT_SELECTED"))
     phase("разметка", _find(ordered, "MODEL_REQUESTED", "context-marker:"), marker_response)
     phase("план и заголовок", marker_response, plan_read)
     for request in (event for event in ordered if event["event_type"] == "MODEL_REQUESTED"
@@ -392,7 +393,9 @@ def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         phase("генерация", request, published, str(request.get("batch_id") or request.get("stage_instance_id")))
     phase("сборка и пакет ревью", last_candidate, review_request)
     phase("ревью", review_request, review_response)
-    phase("закрытие", review_response, _find(ordered, "ATTEMPT_TERMINAL", last=True))
+    if autotest_response:  # the cases review is over: the generator and the review of the autotests are a phase of their own, not the closing
+        phase("автотесты", review_response, autotest_response)
+    phase("закрытие", autotest_response or review_response, _find(ordered, "ATTEMPT_TERMINAL", last=True))
     return rows
 
 
@@ -964,6 +967,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "acceptance": acceptance, "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
+        "execution_stats": execution.get("stats"),
         "quarantine": [{key: row[key] for key in ("file", "method", "ref", "failed_rows", "disabled_passed_rows") if key in row}
                        for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
@@ -1108,6 +1112,18 @@ def _canary_lines(report: Mapping[str, Any]) -> list[str]:
     return lines + [""]
 
 
+def _tests_clause(report: Mapping[str, Any]) -> str:
+    """The words of the first line about the tests of a run with automation (the numbers of the run of the human and the quarantine) and about the run as a whole."""
+    counts, stats = report.get("counts") or {}, report.get("execution_stats") or {}
+    if not counts.get("automation"):
+        return ""
+    failed, quarantine = stats.get("failed", 0) + stats.get("errors", 0), len(report.get("quarantine") or [])
+    tests = ("тесты не запустились (сборка или окружение)" if counts.get("execution") == "NOT_RUNNABLE" else
+             f"прошли {stats['passed']} из {stats['total']}" if counts.get("execution") == "PASS" and stats else
+             f"упали {failed} из {stats['total']}" + (f", в карантине {quarantine}" if quarantine else "") if stats else "запуск не выполнен")
+    return f"Автотесты: {tests}. Прогон {'принят' if counts.get('accepted') else 'не принят'}."
+
+
 def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     """The «Итог» block at the top: the outcome of the review in a line, the warning when the reviewer missed a control error and, for a partial
     acceptance, the numbers, the files to work with and the requirements left without a case."""
@@ -1118,16 +1134,16 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if not acc:
         return []
     total, accepted, removed, rework = acc["generated"], acc["accepted"], acc["removed"], acc.get("rework")
-    left = total - accepted  # the cases not in the set
+    left, tests = total - accepted, _tests_clause(report)  # the cases not in the set
     if acc["outcome"] == "ACCEPTED_WHOLE":
         after = f" ({rework['accepted']} — после доработки)" if rework and rework["accepted"] else ""
-        head = f"**ПРИНЯТ: {total} из {total} кейсов{after}.**"
+        head = f"**Кейсы: принято {total} из {total}{after}. {tests}**" if tests else f"**ПРИНЯТ: {total} из {total} кейсов{after}.**"
     elif acc["outcome"] == "PARTIAL":
         state = rework["state"] if rework else ""
         words = {"reviewed": ("кейс не прошёл ревью после доработки и в набор не вошёл", "кейса не прошли ревью после доработки и в набор не вошли", "кейсов не прошли ревью после доработки и в набор не вошли")}.get(
             state, ("кейс не дорабатывался", "кейса не дорабатывались", "кейсов не дорабатывались"))
         said = f"Доработка {left} {'кейса' if left % 10 == 1 and left % 100 != 11 else 'кейсов'} не завершена." if state == "unfinished" else f"{left} {plural(left, *words)}."
-        head = f"**ПРИНЯТ ЧАСТИЧНО: {accepted} из {total} кейсов.** {said}"
+        head = f"**ПРИНЯТ ЧАСТИЧНО: {accepted} из {total} кейсов.** {said} {tests}".rstrip()
     elif acc["reason"] == "OVER_SHARE":
         head = f"**ТРЕБУЕТ ДОРАБОТКИ:** отклонено {removed} из {total} кейсов — больше допустимого ({acc['share']} %)."
     else:

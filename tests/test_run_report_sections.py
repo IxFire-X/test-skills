@@ -197,3 +197,23 @@ def test_the_report_carries_the_command_for_the_shell_and_says_cmd_beside_it(tmp
     assert usage["remove_command"] == 'rm -rf ".pilot-runs/my o\'run/tmp"' and "remove_command_cmd" not in usage
     assert "в cmd" not in "\n".join(run_report._tmp_lines({"tmp": usage}))
     assert (root / "tmp" / "a.json").is_file()  # the report removes nothing
+
+
+def _phases_of_a_run_with_automation() -> dict[str, float | None]:
+    """The journal of the live run pq1-v05d in outline: the context is selected again when the review opens, the automation follows the review of the cases."""
+    from tools.run_report import phases
+
+    rows = [("RUN_CREATED", None, 0), ("CONTEXT_SELECTED", None, 1), ("MODEL_REQUESTED", "context-marker:baseline", 5), ("MODEL_RESPONSE_RECEIVED", "context-marker:baseline", 100),
+            ("REVIEW_REQUESTED", "tc-reviewer:canonical", 1000), ("CONTEXT_SELECTED", None, 1100), ("MODEL_RESPONSE_RECEIVED", "tc-reviewer:canonical", 1101),
+            ("MODEL_RESPONSE_RECEIVED", "autotest-reviewer:r1", 1700), ("ATTEMPT_TERMINAL", None, 1800)]
+    events = [{"seq": number, "event_type": kind, "stage_instance_id": stage, "observed_at": f"2026-11-14T12:{second // 60:02d}:{second % 60:02d}Z"} for number, (kind, stage, second) in enumerate(rows, 1)]
+    return {row["phase"]: row["sec"] for row in phases(events)}
+
+
+def test_the_preparation_ends_at_the_first_selection_of_the_context() -> None:
+    assert _phases_of_a_run_with_automation()["подготовка"] == 1
+
+
+def test_the_closing_does_not_hold_the_automation_of_the_run() -> None:
+    result = _phases_of_a_run_with_automation()
+    assert result["автотесты"] == 599 and result["закрытие"] == 100

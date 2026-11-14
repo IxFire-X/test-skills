@@ -63,7 +63,8 @@
 
 Каждое ожидание — только то, что выражают операторы схемы (`equals`, `contains` — строка в строке, `greater_*`, `length_equals`, …) над
 выходами шага. Слабая замена (`greater_than`, «число дат») ревьюер возвращает как BLOCKING. Если проверку нельзя выразить так, не подменяй
-её слабой: оставь шаг `manual_only` с `manual_reason` или блокером (`automation_blockers`).
+её слабой: оставь шаг `manual_only` с `manual_reason` или блокером (`automation_blockers`). Ручной шаг: `"manual_only": true, "manual_reason": "<почему>", "operation": null, "inputs": [], "outputs": []`
+и `"assertions": []` у ожиданий — схема требует эти ключи и у него.
 
 1. **«Ровно на N»** — capability сама считает разность и отдаёт её отдельным результатом `delta` (тип integer):
 
@@ -95,7 +96,8 @@
 2. **Ссылка на выход шага — только на шаг выше** (`SEMANTIC_FORWARD_STEP_OUTPUT`). Ожидание шага 2 может сослаться (в `expected`) на выход шага 1 — `{"kind": "step_output", "step_id": "STEP-B1-003-01", "output_id": "owner_id"}`; утверждение о выходе собственного шага — это `actual` вида `http_status`, `http_header`, `http_body` или `project_result`, не `step_output`.
 
 3. **Группа вариантов `param_group`** (`SEMANTIC_PARAM_GROUP_MISMATCH`). Кейсы одной группы различаются только значениями литералов, `case_id`, названием, целью и текстами шагов; `requirement_ids`, `priority`, `categories`,
-   предусловия, `operation`, операторы, число шагов и ссылки между ними — одни и те же.
+   предусловия, `operation`, операторы, число шагов и ссылки между ними — одни и те же. Группа — кейсы с одним меняющимся параметром дизайна: в `design_refs` у каждого свой класс одного `parameter`, остальные `design_refs` равны
+   (`SEMANTIC_PARAM_GROUP_PARAMETER`). «Поле × значение» (разные поля — разные параметры) одной группой не делается.
 
 Проекции входа: список `read` называет файлы `<run>/review-views/` (опись — `inventory-view-v1`, план пачек — `plan-view-v1` без текстов требований: они в ответе разметки, `requirements[].text` по `source_requirement_id`). Читай их, а не `inventories/` и `batch-plans/`.
 

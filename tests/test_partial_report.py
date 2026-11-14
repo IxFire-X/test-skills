@@ -63,3 +63,32 @@ def test_no_gap_line_says_there_is_none() -> None:
 @pytest.mark.parametrize("accepted, words", [(1, "1 кейс"), (2, "2 кейса"), (5, "5 кейсов"), (11, "11 кейсов"), (21, "21 кейс"), (54, "54 кейса")])
 def test_the_number_of_cases_of_the_import_file_is_declined_as_in_the_line_of_the_outcome(accepted: int, words: str) -> None:
     assert f"- Набор для импорта в Zephyr: published/TCDOC-x.r2.zephyr-scale.csv ({words})" in _lines(_acceptance(accepted=accepted, generated=accepted + 1))
+
+
+def _first_line(execution: str | None, accepted: bool | None, stats: dict | None, quarantine: int = 0, automation: bool = True) -> str:
+    from tools.run_report import _acceptance_lines
+
+    report = {"acceptance": _acceptance(outcome="ACCEPTED_WHOLE", accepted=76, generated=76, removed=0), "review_canaries": None, "reviewer_isolation_state": "verified",
+              "counts": {"automation": automation, "execution": execution, "accepted": accepted}, "execution_stats": stats, "quarantine": [{}] * quarantine}
+    return _acceptance_lines(report)[2]
+
+
+def test_a_failed_run_of_the_tests_is_not_called_accepted_in_the_first_line() -> None:
+    line = _first_line("FAIL", False, {"total": 75, "passed": 57, "failed": 18, "errors": 0}, quarantine=18)
+    assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75, в карантине 18. Прогон не принят.**"
+
+
+def test_a_green_run_of_the_tests_is_accepted_in_the_first_line() -> None:
+    assert _first_line("PASS", True, {"total": 75, "passed": 75, "failed": 0, "errors": 0}) == "**Кейсы: принято 76 из 76. Автотесты: прошли 75 из 75. Прогон принят.**"
+
+
+def test_a_run_closed_before_the_tests_says_the_tests_did_not_run() -> None:
+    assert _first_line(None, False, None) == "**Кейсы: принято 76 из 76. Автотесты: запуск не выполнен. Прогон не принят.**"
+
+
+def test_tests_that_did_not_start_are_said_so_in_the_first_line() -> None:
+    assert _first_line("NOT_RUNNABLE", False, None) == "**Кейсы: принято 76 из 76. Автотесты: тесты не запустились (сборка или окружение). Прогон не принят.**"
+
+
+def test_a_run_of_the_cases_only_keeps_its_first_line() -> None:
+    assert _first_line(None, True, None, automation=False) == "**ПРИНЯТ: 76 из 76 кейсов.**"
