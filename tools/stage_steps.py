@@ -287,6 +287,8 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
     if boundary["reviewer_invocation_id"] != label or boundary["host_isolation"]["fresh_context"] != fresh:
         raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью автотестов уже открыто с ревьюером {boundary['reviewer_invocation_id']} (fresh_context={boundary['host_isolation']['fresh_context']}); "
                             "fix: повтори prepare с теми же --invocation-id и --fresh-context или иди дальше: submit")
+    digest = str(boundary["automation_digest"])
+    step_size.automation_text_rows(root.parents[1], root, [root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json")], digest, True)  # the reviewer's files, before its request
     pilot_state.request_review(root, attempt_id, stage, str(boundary["automation_digest"]))
     asked = _events(pilot_state.derive_state(root), attempt_id, stage, "MODEL_REQUESTED")
     if not asked:

@@ -469,6 +469,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             continue
         if position in views:
             files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
+        elif position == 0 and stage.startswith("autotest-reviewer:") and (text := automation_text_rows(project, root, journal.files.get(digest, []), digest, write_views)) is not None:
+            files.extend(text)  # the answer of the automation as files of code and tables, not its JSON
         elif digest == journal.inventory_digest:  # the model reads the projection of the inventory, not the receipt
             data = inventory_view_bytes(project, root, digest)
             target = inventory_view_path(root, digest)
@@ -594,6 +596,21 @@ def _write_view(project: Path, root: Path, target: Path, data: bytes, write: boo
         current = None
     if current != data:
         atomic_write_confined_bytes_at_root(project, root, target, data)
+
+
+def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], digest: str, write: bool) -> list[dict[str, Any]] | None:
+    """The rows of ``tools.automation_text`` for the answer ``digest``, written like the other views; None: its JSON stays (not one file, bytes not its digest, no render)."""
+    paths = [path for path in paths if path.is_file()]
+    try:
+        from tools.execution_gate import from_mode_b
+        render, = from_mode_b("automation_text", "render")
+        raw = paths[0].read_bytes() if len(paths) == 1 else b""
+        parts = render(json.loads(raw), digest) if "sha256:" + hashlib.sha256(raw).hexdigest() == digest else None
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError, AttributeError):  # RuntimeError: a delivery without mode B
+        return None
+    for name, _basis, data in parts or []:
+        _write_view(project, root, Path(root) / "review-views" / name, data, write)
+    return [{"digest": digest, "path": str(Path(root) / "review-views" / name), "bytes": len(data), "basis": basis} for name, basis, data in parts or []] or None
 
 
 LIST_HEAD = 5  # names of the files printed in the summary; the whole list is in the file

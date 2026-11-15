@@ -16,7 +16,7 @@ Consume the selected effective canonical document, V5 automation artifact, and e
 
 ## Procedure
 
-`read` of your `prepare` lists what you read: the view of the effective document, the generator's answer and the receipt of the review boundary `automation-review-boundary-rN`
+`read` of your `prepare` lists what you read: the view of the effective document, the generator's answer (code: one file per `FILE-…`, byte for byte; `*.tables.txt`: other fields as JSON, symbols and relations as tables of the same whole ids) and the receipt of the review boundary `automation-review-boundary-rN`
 (`N` is the automation revision; its `reviewer_session_id`, `generator_invocation_id` and `reviewer_invocation_id` go into your answer exactly as written there). This is required
 provenance evidence, not generator conversation. Do not inspect generator dialogue, transport logs or unrelated runs; the only command you run is the hint check below.
 

@@ -69,7 +69,7 @@ def test_every_exec_module_is_left_out_and_the_gate_of_the_core_is_not() -> None
     assert not any(pack_registry.is_cases_only_excluded(name) for name in ("tools/execution_gate.py", "tools/java_text.py"))
     assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in (
         "run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
-        "build_trace_document", "quarantine", "code_slices"))
+        "build_trace_document", "quarantine", "code_slices", "automation_text"))
     assert pack_registry.profile_paths([*names, "tools/api.py"], "cases-only") == ["tools/api.py"]
 
 

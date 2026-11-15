@@ -20,7 +20,7 @@ from typing import Any
 
 EXEC_MODULES = ("exec_commands", "exec_runner")
 MODE_B_MODULES = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
-                  "build_trace_document", "quarantine", "code_slices")
+                  "build_trace_document", "quarantine", "code_slices", "automation_text")
 LOCAL_PILOT = "local-pilot-v1"
 CASES_ONLY = "cases-only-v1"
 
