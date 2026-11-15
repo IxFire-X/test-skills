@@ -1807,8 +1807,26 @@ def _execution_receipt_bound(root: Path, attempt_id: str) -> bool:
     return True
 
 
+def _refuse_run_of_full_delivery(args: Any) -> None:
+    """status, report and finish of a run whose profile needs the automation (local-pilot-v1), in a delivery without it:
+    refused at once, before any receipt of the automation is read; the refusal is journaled like any other."""
+    from tools.pilot_state import moved_project_allowed, read_run
+
+    run = getattr(args, "run", None)
+    if execution_gate.mode_b_available() or not (isinstance(run, str) and re.fullmatch(r"[0-9a-f]{32}", run)):
+        return
+    try:
+        with moved_project_allowed():
+            profile = read_run(Path(args.project).resolve() / ".pilot-runs" / run)["manifest"].get("policy_profile")
+    except (OSError, ValueError, KeyError, TypeError):
+        return  # an unreadable run is the answer of the command itself
+    if profile == execution_gate.LOCAL_PILOT:
+        raise HostStop("MODE_B_NOT_IN_PACKAGE", f"прогон {run} сделан профилем {profile}, а в этой поставке нет режима автотестов")
+
+
 def cmd_finish(args: Any) -> int:
     """Close the current attempt in one command — the same order and checks as the manual sequence."""
+    _refuse_run_of_full_delivery(args)
     from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
     from tools.pilot_state import derive_state
 
@@ -1901,6 +1919,7 @@ def cmd_finish(args: Any) -> int:
 
 def cmd_report(args: Any) -> int:
     """Write the run report and the analyst questions; only reads the journal."""
+    _refuse_run_of_full_delivery(args)
     from tools.run_report import GUARANTEE, write_report
 
     from tools.pilot_state import moved_project_allowed
@@ -1916,6 +1935,7 @@ def cmd_report(args: Any) -> int:
 
 
 def cmd_status(args: Any) -> int:
+    _refuse_run_of_full_delivery(args)
     from tools.pilot_state import closure_cache, moved_project_allowed
     from tools.project_inventory import inventory_cache
 
@@ -2025,6 +2045,8 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(code, str) and code:
                 payload["reason"] = code
                 payload["message"] = str(error)
+                if isinstance(error, execution_gate.ModeBMissing):
+                    payload["fix"] = fix_for(code)
             _print(payload)
             return 2
         if isinstance(error, (FileNotFoundError, ValueError)):

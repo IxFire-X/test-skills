@@ -245,8 +245,8 @@ FIXES: dict[str, str] = {
     # --- a delivery without the execution files ---
     "PROFILE_NOT_IN_PACKAGE": "в этой поставке нет исполнения тестов — повтори команду без --profile или с --profile cases-only-v1: "
                               "кейсы и отчёт доступны, автотесты запускает тот, у кого есть полная поставка",
-    "MODE_B_NOT_IN_PACKAGE": "эта поставка — для кейсов, режима автотестов в ней нет: не вызывай эту команду; кейсы и отчёт доступны "
-                             "(scan без --profile, status, report, finish)",
+    "MODE_B_NOT_IN_PACKAGE": "эта поставка — для кейсов, режима автотестов в ней нет: не вызывай его команды; прогон local-pilot-v1, сделанный полной "
+                             "поставкой, продолжай её командами, а здесь начни новый — `scan --project <project> --new-run` без --profile",
     # --- the build is run by a human (materialize prints the command, ingest takes the reports) ---
     "EXEC_REPLACED": "exec заменён: `materialize --project <project> --run <run_id>` кладёт тесты в проект и печатает команду, человек её запускает, "
                      "`ingest --project <project> --run <run_id> --reports <каталог с отчётами>` принимает отчёты",
