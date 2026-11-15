@@ -948,6 +948,15 @@ def finalize_durable_execution_attempt(
         return _finalize_durable_execution_attempt(run_root, attempt_id)
 
 
+def partial_delta(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
+    """The generated-delta of an attempt whose tests were written only in part (``materialize`` cleaned the files it wrote), else None."""
+    try:
+        delta = pilot_state.read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    return delta if (delta.get("facts") or {}).get("reason_code") == "MATERIALIZATION_INCOMPLETE" else None
+
+
 def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     try:
         existing = pilot_state.read_terminal_result(run_root, attempt_id)
@@ -1317,7 +1326,7 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: s
                                   facts={}, run_root=run_root)
         return {**closed, "exit_code": pilot_state.exit_code(existing)}
     attempt, branch, facts = _durable_branch_facts(run_root, attempt_id, abandon)
-    closed = finalize_attempt(branch, None, project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
+    closed = finalize_attempt(branch, partial_delta(run_root, attempt_id), project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
     return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
 
 
@@ -1380,9 +1389,13 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
                      "reason_code": cause if partial else None, "blocker_count": blockers, "mixed_manual_traceable": coverage == "MIXED", "prior_stage_cause": cause}
             causes = [cause]
         else:
-            refusal = _automation_refusal(run_root, attempt_id, blockers, abandon)
+            delta = partial_delta(run_root, attempt_id)  # the tests were written in part: the attempt is closed by the plan that cleaned them
+            refusal = "MATERIALIZATION_INCOMPLETE" if delta else _automation_refusal(run_root, attempt_id, blockers, abandon)
             facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": refusal,
                      "blocker_count": blockers, "mixed_manual_traceable": False, "prior_stage_cause": refusal}
+            if delta:
+                facts.update(materialization_applicability="REQUIRED", automation_accepted=True, generated_required_count=len(_files(delta)),
+                             generated_materialized_count=sum(row.get("materialization") == "MATERIALIZED" for row in _files(delta)))
             causes = [refusal]
         branch = {"run_id": attempt["run_id"], "attempt_id": attempt_id, "policy_profile": profile,
                   "canonical_document": dict(effective["document"]), "stage_causes": causes, "evidence": {}}

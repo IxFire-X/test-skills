@@ -20,7 +20,7 @@ _SCHEMA = _ROOT / "schemas" / "tc-to-autotest-output.schema.json"
 _AUTOTEST_REVIEW_SCHEMA = _ROOT / "schemas" / "autotest-reviewer-output.schema.json"
 _JAVA_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 _JAVA_KEYWORDS = frozenset("""
-abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while _
+abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while _ true false null
 """.split())
 
 _MESSAGES = {
@@ -135,12 +135,15 @@ def _diagnostic(code: str, path: str) -> dict[str, str]:
     return {"path": path, "code": code, "message": _MESSAGES[code]}
 
 
+_WINDOWS_RESERVED = re.compile(r"(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", re.IGNORECASE)  # the device names: a file of that name cannot be made on Windows, with or without an extension
+
+
 def _portable(path: str) -> bool:
     if not path or path.startswith("/") or "\\" in path or ":" in path:
         return False
     if any(ord(character) <= 0x1F or ord(character) == 0x7F for character in path):
         return False
-    return all(segment and segment not in {".", ".."} and not segment.endswith((".", " ")) for segment in path.split("/"))
+    return all(segment and segment not in {".", ".."} and not segment.endswith((".", " ")) and not _WINDOWS_RESERVED.fullmatch(segment) for segment in path.split("/"))
 
 
 def _python_name(name: str) -> bool:
@@ -199,6 +202,7 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         path_seen.add(path_key)
         if not _portable(path):
             diagnostics.append(_diagnostic("AUTOMATION_PORTABLE_PATH", _pointer("artifacts", "generated_files", index, "path")))
+            diagnostics[-1]["message"] += "".join(f": сегмент {segment} — имя устройства Windows" for segment in path.split("/") if _WINDOWS_RESERVED.fullmatch(segment))
         content_digest = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
         if row["content_digest"] != content_digest:
             # no command gives this digest, so the refusal names the exact value (as MODEL_INPUTS_MISMATCH does)

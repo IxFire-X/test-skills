@@ -499,7 +499,7 @@ def _python_tests(text: str) -> set[str]:
         return found
     try:
         return walk(ast.parse(text).body, "")
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return set()
 
 
@@ -741,6 +741,26 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
     return 0
 
 
+def _close_incomplete_materialization(root: Path, attempt_id: str) -> int | None:
+    """Tests written only in part (a file could not be written): the files written are already cleaned by the plan; the attempt is closed here, not by a new run.  None when whole."""
+    from tools.finalize_attempt import finalize_durable_branch_attempt, partial_delta
+
+    delta = partial_delta(root, attempt_id)
+    if delta is None:
+        return None
+    failed = next((str(row["path"]) for row in delta["files"] if row.get("materialization") == "NOT_MATERIALIZED"), "?")
+    try:
+        finalize_durable_branch_attempt(root, attempt_id)
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError) as error:  # as the neighbours: an answer with the attempt, never the bare one of the general handler
+        _print({"status": "error", "stage": "materialize", "reason": "FINALIZATION", "message": str(error), "attempt_id": attempt_id,
+                "fix": "попытку закрывает finish (python -m tools.run_pipeline finish --project <project> --run <run_id>): он идёт той же веткой"})
+        return 2
+    _print({"status": "error", "stage": "materialize", "reason": "MATERIALIZATION_INCOMPLETE", "attempt_id": attempt_id, "accepted": False,
+            "message": f"тесты записаны в проект не полностью: файл {failed} не записан (ошибка записи); записанные пакетом файлы убраны, попытка закрыта",
+            "fix": "причину ошибки записи (место на диске, права, длина пути, антивирус) исправляет человек; затем новый прогон тем же scan с флагом --new-run"})
+    return 2
+
+
 @_one_closure
 def cmd_materialize(args: Any) -> int:
     """The accepted tests into the project, then the command a human runs — nothing is started."""
@@ -772,6 +792,9 @@ def cmd_materialize(args: Any) -> int:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), **({"fix": stop.fix} if stop.fix else {}),
                 "attempt_id": attempt_id})
         return 2
+    incomplete = _close_incomplete_materialization(root, attempt_id)
+    if incomplete is not None:
+        return incomplete
     try:
         carriers = _durable_carriers(coordinates)
     except (HostStop, KeyError, ValueError, TypeError, OSError) as error:
@@ -794,7 +817,12 @@ def cmd_materialize(args: Any) -> int:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
         return 2
     taken = time.time_ns()  # before the look at the reports: a file touched after this has a later time than this
-    entries = _report_files(Path(coordinates["module_root"]) / request.report_paths[0], [Path(coordinates["module_root"])])
+    try:
+        entries = _report_files(Path(coordinates["module_root"]) / request.report_paths[0], [Path(coordinates["module_root"])])
+    except HostStop as stop:  # the tests are already in the project: the person removes the link, the repeat goes on
+        _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "attempt_id": attempt_id,
+                "fix": stop.fix or "уберите ссылку на пути к отчётам (причина в message) и повторите materialize: тесты уже записаны, повтор безопасен"})
+        return 2
     facts = {
         "baseline_digest": attempt["baseline_digest"], "generated_delta_digest": delta["digest"], "execution_request_digest": digest,
         "language": language, "module": module_relative, "working_directory": working, "command": command,

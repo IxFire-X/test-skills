@@ -514,6 +514,8 @@ def _param_group_rows(text: str, method: str) -> list[str] | None:
         return None
     if "CsvSource" in names:
         found = re.search(r"@\s*(?:[\w$]+\s*\.\s*)*CsvSource\s*(?=\()", masked_region)
+        if found is None:  # a bare @CsvSource has no rows to read
+            return None
         open_at = found.end()
         depth, close = 0, None
         for index in range(open_at, len(masked_region)):
@@ -659,7 +661,7 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
             text = content.decode("utf-8")
             texts[row["file_id"]] = text
             parsed[row["file_id"]] = ast.parse(text, filename=str(file)) if language == "python" else _java_class(file, text)
-        except (UnicodeDecodeError, SyntaxError):
+        except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError, MemoryError):  # a file the parser cannot take is no test file (ValueError: a null byte)
             parsed[row["file_id"]] = None
             continue
         if language == "java" and _java_display_name(text):
