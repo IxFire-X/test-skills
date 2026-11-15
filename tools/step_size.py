@@ -277,6 +277,19 @@ _RECEIPT_SLOTS = ("batch-plans/{a}.json", "generator-headers/{a}.json", "prior-c
 _BUNDLES = ("cases", "candidate-bundle")  # where publish_test_case_bundle writes the document of the run
 
 
+def _sealed(value: Mapping[str, Any]) -> bool:
+    """Whether ``value['digest']`` is the digest of the rest of ``value``: the seal of the journal on a receipt, or the self-digest the plan and the header carry
+    (``batch_assembly.with_digest``)."""
+    from tools.batch_assembly import with_digest
+    from tools.pilot_state import check_sealed_value
+
+    try:
+        check_sealed_value(value, "receipt")
+        return True
+    except ValueError:
+        return isinstance(value.get("digest"), str) and with_digest({key: item for key, item in value.items() if key != "digest"})["digest"] == value["digest"]
+
+
 class _Journal:
     """What the journal of one attempt binds, by digest — files that are an input as a whole (more than one is
     ``ambiguous``), objects kept inside a carrier ``(carrier, key, bytes)``, inputs that stand for project files (the
@@ -324,10 +337,9 @@ class _Journal:
                     value = json.loads(raw.decode("utf-8"))
                 except ValueError:  # a run artifact that is no JSON names no other digest
                     continue
-                if isinstance(value, dict):
-                    for nested in (value, *(item for item in value.values() if isinstance(item, dict))):
-                        if isinstance(nested.get("digest"), str):
-                            self._file(nested["digest"], path)
+                if isinstance(value, dict) and _sealed(value):  # the ``digest`` field of a file nobody sealed is a claim, not a receipt
+                    for nested in (value, *(item for item in value.values() if isinstance(item, dict) and _sealed(item))):
+                        self._file(nested["digest"], path)
         effective = root / "effective-canonicals" / f"{attempt_id}.json"
         if effective.is_file():
             value = json.loads(effective.read_text(encoding="utf-8"))
@@ -337,10 +349,15 @@ class _Journal:
                 self.bundled[str(value["document_digest"])] = Path(receipt["json_path"])  # the bundle file the receipt names
             self.carried[str(value["effective_bundle_receipt_digest"])] = (effective, "effective_bundle_receipt", len(_compact(value["effective_bundle_receipt"])))
         ledgers = [event for event in events if event.get("batch_id") == "reviewer-ledger-v1" and event["event_type"] == "ARTIFACT_READ_BACK"]
-        if ledgers:
-            ledger = root / "reviewer-session-ledgers" / attempt_id / (str(ledgers[0]["artifact_digest"]).removeprefix("sha256:") + ".json")
-            package = json.loads(ledger.read_text(encoding="utf-8"))["package_binding"]
-            self.carried[str(package["package_digest"])] = (ledger, "package_binding", len(_compact(package)))
+        if ledgers:  # the last revision of the ledger, by the strict reader of the journal: an older revision is a file nobody reads again
+            from tools.pilot_state import read_reviewer_session_ledger
+
+            ledger = root / "reviewer-session-ledgers" / attempt_id / (str(ledgers[-1]["artifact_digest"]).removeprefix("sha256:") + ".json")
+            try:
+                package = read_reviewer_session_ledger(root, attempt_id)["package_binding"]
+                self.carried[str(package["package_digest"])] = (ledger, "package_binding", len(_compact(package)))
+            except (KeyError, OSError, TypeError, ValueError):  # a ledger the journal does not stand behind binds no input
+                pass
 
     def plan(self, state: Any) -> Mapping[str, Any]:
         """The batch plan of the attempt as the journal binds it; ``{}`` before it is published."""

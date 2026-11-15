@@ -153,16 +153,17 @@ def test_an_unknown_digest_is_unresolved_and_a_warning_not_a_stop(tmp_path: Path
     assert report["size_complete"] is False and report["input_warning"] == "STEP_INPUT_UNRESOLVED" and report["role"] == "tc-generator"
 
 
-def test_two_different_files_with_one_digest_are_ambiguous_not_chosen(tmp_path: Path) -> None:
+def test_a_twin_with_the_digest_field_of_a_file_and_other_bytes_is_no_second_file_of_that_digest(tmp_path: Path) -> None:
+    """v0.6: the twin's seal does not hold (its ``digest`` field is the plan's, its bytes are not), so it binds nothing: the plan is its one file, not an ``ambiguous`` input
+    the twin could make of any digest."""
     from tools.step_size import request_files
 
-    root, attempt_id, _baseline, receipts, marker, plan, header, _plan_path, _header_path = _generator_run(tmp_path)
+    root, attempt_id, _baseline, receipts, marker, plan, header, plan_path, _header_path = _generator_run(tmp_path)
     twin = dict(plan, kind="другой план")  # same self "digest" field, other bytes
     pilot_state.publish_run_artifact_bytes(root, attempt_id, "twin-plan.json", json.dumps(twin, ensure_ascii=False).encode("utf-8"))
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     found = request_files(root, "tc-generator:BATCH-fixture")
-    assert found["unresolved"] == [{"digest": plan["digest"], "reason": "ambiguous"}], found
-    assert not any(row["digest"] == plan["digest"] for row in found["files"])
+    assert found["unresolved"] == [] and [Path(row["path"]) for row in found["files"] if row["digest"] == plan["digest"]] == [root / plan_path], found
 
 
 def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

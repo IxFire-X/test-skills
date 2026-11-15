@@ -1061,15 +1061,19 @@ def write_status_files(run_root: Path, document: Mapping[str, Any], output_dir: 
 def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
     """A run closed before the reviewer's verdict (``submit --abort``, an answer that could not be used): the status file UNREVIEWED
     in ``<run>/published``, unless the review ended in an effective document or a REJECTED set.  Called by ``finish``."""
-    from tools.pilot_state import read_effective_canonical_if_present
+    from tools.pilot_state import read_effective_canonical_if_present, terminal_reviewer_evidence
 
     published = published_dir(run_root)
     try:
         candidate = journal_assembly(Path(run_root), attempt_id)[0]
     except (KeyError, OSError, TypeError, ValueError):
         return []  # nothing was assembled: there is no set to mark
-    name = f"{candidate['document_id']}.r{candidate['revision']}.REJECTED.md"
-    if read_effective_canonical_if_present(Path(run_root), attempt_id) or any(published.rglob(name)):
+    try:  # «rejected» is the verdict the journal holds, not a file of the directory the agent writes to
+        ledger = terminal_reviewer_evidence(Path(run_root), attempt_id)
+        rejected = bool(ledger["session_complete"]) and ledger["authoritative_verdict_count"] == 1 and ledger["authoritative_verdict"] == "REJECTED"
+    except (KeyError, OSError, TypeError, ValueError):
+        rejected = False
+    if read_effective_canonical_if_present(Path(run_root), attempt_id) or rejected:
         return []
     return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED")
 

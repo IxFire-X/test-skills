@@ -99,7 +99,8 @@ def _markdown_human_blocks(value: str, *, literal: bool = False) -> list[str]:
             continue
         rendered.append("\n\n".join(escape_inline(line) if literal else line for line in paragraph.splitlines()))
     if trailing_json is not None:
-        rendered.append(f"```json\n{trailing_json}\n```")
+        fence = "`" * max(3, max(map(len, re.findall(r"`+", trailing_json)), default=0) + 1)  # longer than any run of backticks in the body, or the body closes it
+        rendered.append(f"{fence}json\n{trailing_json}\n{fence}")
     return "\n\n".join(rendered).splitlines()
 
 
@@ -530,7 +531,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str, extras: d
                         "**Ожидаемый результат**", "", *_markdown_human_blocks(expected, literal=profile == _PROFILE_V4),
                     ])
         if group:
-            slot = "<" + group["parameter"]["name"].replace("\n", " ") + ">"
+            slot = "<" + "".join("\\" + char if char in "\\<>[]" else char for char in group["parameter"]["name"].replace("\n", " ")) + ">"  # the name is the model's: no tag, no link
             lines[start:] = [line.replace(SLOT, slot) for line in lines[start:]] + _markdown_variants(group, variants)
     return Projection(("\n".join(lines) + "\n").encode("utf-8"), warnings)
 
