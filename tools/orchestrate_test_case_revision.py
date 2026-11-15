@@ -17,7 +17,7 @@ from tools.canonical_document import CanonicalDocumentError, canonical_bytes, do
 from tools.output_guard import run_output_directory
 from tools.publish_test_case_bundle import Receipt, partial_context, planned_receipt, publish_bundle, rejected_cases, status_payloads, verify_bundle
 from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_REVIEW_STAGE, REWORK_STAGE, SelectionError, candidate_rows, check_rework,
-                                      review_outcome, reviewer_verdict_is_bound, rework_final, select_effective_document, validate_review_decision)
+                                      finding_code, review_outcome, reviewer_verdict_is_bound, rework_final, select_effective_document, validate_review_decision)
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import classify_version, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -459,7 +459,7 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
             if final["kind"] == "ALL":  # every case came back: a whole set, no file of the rejected
                 summary.update(outcome="ACCEPTED_WHOLE", removed=0, rejected_by_findings=0, rejected_with_group=0)
                 return summary
-        codes = lambda rows: sorted({code for row in rows for code, _text in row["said"]})  # noqa: E731  (the report carries codes, never the reviewer's texts: they are in the set's files)
+        codes = lambda rows: sorted({finding_code(code) for row in rows for code, _text in row["said"]})  # noqa: E731  (the report carries codes, never the reviewer's texts: they are in the set's files)
         summary.update(coverage_gaps=[{"requirement": gap["requirement"], "labels": gap["labels"], "codes": codes(row for row in partial["rejected"] if gap["requirement"] in row["requirements"])}
                                       for gap in partial["gaps"]],
                        rejected_cases=[{"case_id": row["case_id"], "label": row["label"], "with_group": row["with_group"], "codes": codes([row])} for row in partial["rejected"]],

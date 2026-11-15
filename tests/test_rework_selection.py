@@ -38,6 +38,22 @@ def test_the_view_holds_the_rejected_cases_and_their_blocking_findings_cut_to_th
     assert len(view["findings"]["TC-B1-001"][0]["message"]) == 2000
 
 
+def test_the_code_of_a_finding_in_the_view_is_a_code_or_OTHER() -> None:
+    document = r1_document()
+    phrase = "Требование REQ-7 нарушено: " + "ж" * 5000
+    outcome = _outcome(document, [{**_finding("BLOCKING", ["TC-B1-001"]), "code": phrase}, {**_finding("BLOCKING", ["TC-B1-001"]), "code": "MISSING_ASSERTION"}])
+    codes = [row["code"] for row in rework_request(document, outcome)["findings"]["TC-B1-001"]]
+    assert codes == ["OTHER", "MISSING_ASSERTION"]
+
+
+@pytest.mark.parametrize("code, kept", [("MISSING_ASSERTION", True), ("A", True), ("X" * 64, True), ("X" * 65, False), ("1ABC", False), ("lower_case", False),
+                                        ("TWO WORDS", False), ("Кириллица", False), ("", False), (None, False), (7, False)])
+def test_a_finding_code_is_a_code_only_of_capitals_digits_and_underscores_up_to_64(code, kept: bool) -> None:
+    from tools.revision_selection import finding_code
+
+    assert finding_code(code) == (code if kept else "OTHER")
+
+
 def test_r3_is_r2_with_the_reworked_case_at_its_place() -> None:
     document = r1_document()
     outcome = _first(document, 3)

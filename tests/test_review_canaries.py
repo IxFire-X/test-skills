@@ -483,6 +483,24 @@ def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_atte
     assert acceptance["rejected_cases"][0]["codes"] == ["REVIEW_NOTE"] and "Нет проверки состояния." not in json.dumps(acceptance, ensure_ascii=False)
 
 
+def test_a_free_text_code_of_a_blocking_finding_does_not_reach_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The code of a finding is the model's text (the schema asks only for a non-empty string): the report that leaves the perimeter holds it as a code or as OTHER."""
+    from tools import orchestrate_test_case_revision as orchestrate
+    from tools.run_report import build_report, render_markdown
+
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, _two = _ids(run)
+    phrase = "Требование REQ-7 нарушено: ожидание не проверяет баланс счёта клиента"
+    findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.", code=phrase)]
+    assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == "EFFECTIVE_SELECTED"
+    report = build_report(tmp_path / "project", run["run_root"].name)[0]
+    assert report["acceptance"]["rejected_cases"][0]["codes"] == ["OTHER"]
+    assert "баланс счёта" not in json.dumps(report, ensure_ascii=False) and "баланс счёта" not in render_markdown(report)
+
+
 def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Sequence
@@ -447,6 +448,12 @@ REWORK_STAGE = "tc-generator:" + REWORK_INSTANCE
 REWORK_REVIEW_STAGE = "tc-reviewer:" + REWORK_INSTANCE  # the second round: the review of the reworked cases only
 REWORK_TEXT_MAX, REWORK_FINDINGS_MAX = 2000, 10  # what one blocking finding of the reviewer may carry into the generator's view
 _CASE_IDENTITY = ("case_id", "requirement_ids", "display_order", "param_group")
+_FINDING_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
+def finding_code(value: Any) -> str:
+    """The code of a finding is the model's free text (the schema asks a non-empty string): the report and the view of the rework carry it only when it is a code, else OTHER."""
+    return value if isinstance(value, str) and _FINDING_CODE.fullmatch(value) else "OTHER"
 
 
 def rework_request(candidate: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
@@ -454,7 +461,7 @@ def rework_request(candidate: dict[str, Any], outcome: dict[str, Any]) -> dict[s
     the ids of that case) — a function of r1 and the outcome.  The texts are the reviewer's: a view is data, each finding cut at ``REWORK_TEXT_MAX``."""
     owners = _owners(candidate)
     return {"view": REWORK_VIEW, "cases": [case for case in candidate["test_cases"] if case["case_id"] in outcome["rejected"]],
-            "findings": {case_id: [{"code": finding.get("code"), "message": str(finding.get("message"))[:REWORK_TEXT_MAX],
+            "findings": {case_id: [{"code": finding_code(finding.get("code")), "message": str(finding.get("message"))[:REWORK_TEXT_MAX],
                                     "related_ids": [item for item in finding.get("related_ids") or [] if owners.get(item) == case_id]}
                                    for finding in findings[:REWORK_FINDINGS_MAX]] for case_id, findings in outcome["said"].items()}}
 
