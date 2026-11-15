@@ -2428,12 +2428,20 @@ def read_model_request(
     )
 
 
+def _attempt_of(state: Mapping[str, Any], attempt_id: str) -> Mapping[str, Any]:
+    """The attempt of the journal, or a refusal: an id the journal does not know is no ``StopIteration``."""
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None:
+        raise ValueError("unknown attempt")
+    return attempt
+
+
 def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence[str], value: Mapping[str, Any]) -> None:
     """Every check the write of the merged ``context-marker:baseline`` makes that needs no write — the schema and
     order, the inputs, the merge of the parts and OpenSpec — run by ``merge`` before it writes the request."""
     project, root = _run_root(run_root)
     state = derive_state(root)
-    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    attempt = _attempt_of(state, attempt_id)
     check_model_stage_artifact("context-marker:baseline", value)
     _validate_context_marker_sources(project, root, state, attempt, {"stage_instance_id": "context-marker:baseline",
                                                                      "input_digests": list(input_digests)}, value)
@@ -3736,8 +3744,8 @@ def _validate_factual_receipt(
             set(receipt) != expected_keys
             or not identity_matches
             or not _safe_label(receipt.get("session_id"))
-            or not _DIGEST.fullmatch(receipt.get("canonical_branch_digest", ""))
-            or not _DIGEST.fullmatch(receipt.get("package_digest", ""))
+            or not _DIGEST.fullmatch(str(receipt.get("canonical_branch_digest", "")))
+            or not _DIGEST.fullmatch(str(receipt.get("package_digest", "")))
             or type(receipt.get("context_budget_bytes")) is not int
             or receipt.get("context_budget_bytes") < 1
             or receipt.get("generator_role") != "generator"
@@ -3750,7 +3758,7 @@ def _validate_factual_receipt(
             or not isinstance(isolation.get("distinct_invocations"), bool)
             or isolation.get("distinct_invocations") != (receipt.get("generator_invocation_id") != receipt.get("reviewer_invocation_id"))
             or isolation.get("role_policy") != "canonical-reviewer-v1"
-            or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
+            or not _DIGEST.fullmatch(str(isolation.get("evidence_digest", "")))
             or isolation.get("evidence_digest") != isolation_digest
         ):
             raise ValueError("invalid reviewer session boundary")
@@ -3874,7 +3882,7 @@ def _validate_factual_receipt(
                 and isinstance(ledger["events"][-1], Mapping)
                 and ledger["events"][-1].get("event_type") == "REVIEW_SESSION_COMPLETED"
             )
-        except (ImportError, UnicodeDecodeError, StrictJsonError, ValueError, OutputConfinementError):
+        except (ImportError, UnicodeDecodeError, StrictJsonError, ValueError, OutputConfinementError, KeyError, TypeError, AttributeError):
             ledger_bound = False
         normalized_bundle_keys = ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")
         normalized_bundle = {key: bundle.get(key) for key in normalized_bundle_keys} if isinstance(bundle, Mapping) else {}
@@ -3916,14 +3924,14 @@ def _validate_factual_receipt(
         if (
             set(receipt) != expected_keys
             or not identity_matches
-            or not _DIGEST.fullmatch(receipt.get("automation_digest", ""))
+            or not _DIGEST.fullmatch(str(receipt.get("automation_digest", "")))
             or type(receipt.get("automation_revision")) is not int
             or receipt.get("automation_revision") != int(kind[-1])
             or not all(_safe_label(receipt.get(key)) for key in ("reviewer_session_id", "generator_invocation_id", "reviewer_invocation_id"))
             or receipt.get("generator_invocation_id") == receipt.get("reviewer_invocation_id")
             or receipt.get("role_policy") != "autotest-static-reviewer-v1"
-            or not _DIGEST.fullmatch(receipt.get("effective_canonical_digest", ""))
-            or not _DIGEST.fullmatch(receipt.get("effective_bundle_receipt_digest", ""))
+            or not _DIGEST.fullmatch(str(receipt.get("effective_canonical_digest", "")))
+            or not _DIGEST.fullmatch(str(receipt.get("effective_bundle_receipt_digest", "")))
             or not isinstance(effective, Mapping)
             or receipt.get("effective_canonical_digest") != effective.get("document_digest")
             or receipt.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest")
@@ -3932,7 +3940,7 @@ def _validate_factual_receipt(
             or not isinstance(isolation.get("fresh_context"), bool)
             or not isinstance(isolation.get("distinct_invocations"), bool)
             or not (isolation["fresh_context"] and isolation["distinct_invocations"] or _self_review_accepted_at(project, root, state))
-            or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
+            or not _DIGEST.fullmatch(str(isolation.get("evidence_digest", "")))
             or isolation.get("evidence_digest") != isolation_digest
         ):
             raise ValueError("invalid automation review boundary")
@@ -4484,8 +4492,8 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
     if not wanted:
         return []
     present: set[str] = set()
-    for folder in _RECEIPT_FOLDERS:
-        for path in (Path(root) / folder).glob(f"{attempt_id}*.json"):
+    for pattern in (*(f"{folder}/{attempt_id}*.json" for folder in _RECEIPT_FOLDERS), f"closure/{attempt_id}/*.json", f"terminal-results/{attempt_id}.json"):  # the closure and the result are read back without a batch too
+        for path in Path(root).glob(pattern):
             try:
                 value = _check_sealed(json.loads(path.read_text(encoding="utf-8")), "receipt")  # the digest field must be the digest of the body
             except (OSError, ValueError, TypeError):
@@ -4987,11 +4995,7 @@ def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapp
     if revision == 2:
         # Revision two is a single pre-execution correction.  Durable ownership
         # is the first materialization boundary, before a final delta can exist.
-        try:
-            read_attempt_receipt(run_root, attempt_id, "materialization-ownership", "ARTIFACT_READ_BACK")
-        except ValueError:
-            pass
-        else:
+        if _receipt_target(_run_root(run_root)[1], attempt_id, "materialization-ownership").exists():  # the file decides, not its events: a cut materialize leaves it without them
             raise ValueError("automation revision two is forbidden after materialization")
         if attempt["policy_profile"] != "local-pilot-v1" or run["authorization"].get("execution_requested") is not True:
             raise ValueError("automation review boundary lacks local execution authorization")
@@ -5076,6 +5080,8 @@ def publish_rework_round(run_root: Path, attempt_id: str, candidate_digest: str,
 def rework_round_if_present(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
     """The receipt ``rework-round`` read back, or None where the review did not send cases back for a rework."""
     project, root = _run_root(run_root)
+    if not any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == REWORK_BATCH for event in derive_state(root)["events"]):
+        return None  # a file the journal does not bind is no receipt (the repeat of a cut submit writes it again through publish_bound): not read, nothing written
     target = _receipt_target(root, attempt_id, "rework-round")
     try:
         raw = read_confined_bytes(project, root, target)
@@ -5200,7 +5206,7 @@ def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     from tools.cases_import import run_skeleton
 
     project, root = _run_root(run_root)
-    attempt = next(item for item in derive_state(root)["attempts"] if item["attempt_id"] == attempt_id)
+    attempt = _attempt_of(derive_state(root), attempt_id)
     value = run_skeleton(root, attempt)
     if value is None:
         raise ValueError("IMPORT_NOT_CASES_RUN: the run has no --cases")
@@ -5532,7 +5538,7 @@ def check_reuse(run_root: Path, attempt_id: str, stage: str, run_id: str) -> dic
     session: the label of its request, and for the review the ``fresh_context`` and the label of its boundary (a SELF review takes the label of the new generator)."""
     project, root = _run_root(run_root)
     state = derive_state(root)
-    source, family = _checked_source(project, root, state, next(row for row in state["attempts"] if row["attempt_id"] == attempt_id), stage, run_id)
+    source, family = _checked_source(project, root, state, _attempt_of(state, attempt_id), stage, run_id)
     asked = source["stages"].get(stage)
     told: dict[str, Any] = {"invocation_id": str(asked[0]["invocation_id"]) if asked else None, "fresh_context": None}
     if family == "review":
@@ -5581,7 +5587,7 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
 
 def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, source: dict[str, Any], command: Callable[[str], str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The rows the scan adds for the cases of the source — the plan, the batches in the order of the source, the review, the autotests — or why they are not offered."""
-    attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
+    attempt = _attempt_of(state, attempt_id)
     try:
         changed = _input_differences(source, root, attempt)  # the cases ask the baseline too: the .skillsrc, the profile, the module
         reason = "входы иные: " + ", ".join(row["input"] for row in changed) if changed else _cases_refusal(project, root, state, attempt_id, source, "plan")
@@ -5594,13 +5600,13 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
         return {"stage": stage, **more, "command": command(stage)}
 
     self_review = not source["boundary"]["host_isolation"]["fresh_context"]
+    consent = {"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"}
     rows = [row("plan"), *(row(stage, response_digest=source["stages"][stage][1]) for stage in source["stages"] if reuse_family(stage) == "batch"),
-            row("tc-reviewer:canonical", response_digest=source["stages"]["tc-reviewer:canonical"][1], review="SELF" if self_review else "independent",
-                **({"needs": "согласие человека на SELF: scan --accept-self-review, review.self в .skillsrc или --accept-self-review на этом шаге"} if self_review else {}))]
+            row("tc-reviewer:canonical", response_digest=source["stages"]["tc-reviewer:canonical"][1], review="SELF" if self_review else "independent", **(consent if self_review else {}))]
     stages = source["stages"]
     if _REWORK_REVIEW_STAGE in stages:  # the rework and its second round (a source with the rework unfinished is refused above); the independence is the labels of the source
         same = stages[_REWORK_REVIEW_STAGE][0]["invocation_id"] == stages[_REWORK_STAGE][0]["invocation_id"]
-        rows += [row(_REWORK_STAGE, response_digest=stages[_REWORK_STAGE][1]), row(_REWORK_REVIEW_STAGE, response_digest=stages[_REWORK_REVIEW_STAGE][1], review="SELF" if same else "independent")]
+        rows += [row(_REWORK_STAGE, response_digest=stages[_REWORK_STAGE][1]), row(_REWORK_REVIEW_STAGE, response_digest=stages[_REWORK_REVIEW_STAGE][1], review="SELF" if same else "independent", **(consent if same else {}))]
     if "tc-to-autotest:r1" not in source["stages"]:
         return rows, {}
     try:  # the autotests, after the cases: the same project and execution, accepted by the review of revision 1
@@ -5648,7 +5654,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
 
     project, root = _run_root(run_root)
     state = derive_state(root)
-    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    attempt = _attempt_of(state, attempt_id)
     baseline = frozen_baseline(root, attempt)
     published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
                                    if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
@@ -5875,7 +5881,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     unfinished = context_incomplete(root, attempt_id, state)
     if unfinished is not None:
         raise ValueError(scan_incomplete_message(*unfinished))
-    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    attempt = _attempt_of(state, attempt_id)
     found = plan_inputs(root, attempt_id, state)
     request = read_run(root)["manifest"].get("scan_request") or {}  # the paths as typed: the header names them as the scan does, inside the project (``relative_to_project``)
     docs = list(dict.fromkeys(relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in request.get("docs") or []))
@@ -5905,7 +5911,7 @@ def reuse_plan(run_root: Path, attempt_id: str, run_id: str) -> dict[str, Any]:
     built here by the code of the new run and compared with the source's before anything is written."""
     project, root = _run_root(run_root)
     state = derive_state(root)
-    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    attempt = _attempt_of(state, attempt_id)
     source, _family = _checked_source(project, root, state, attempt, "plan", run_id)
     satt = str(source["attempt"]["attempt_id"])
     header = _strict(run_id, "generator-headers", lambda: _generator_input(project, source["root"], source["state"], satt, "header"))
