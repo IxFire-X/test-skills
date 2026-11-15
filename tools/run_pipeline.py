@@ -1430,7 +1430,7 @@ def _scan(args: Any) -> int:
         attempt = create_attempt(
             run_root,
             {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
-            frozen["baseline"],
+            baseline,  # the fresh one: what lay in the run root was taken only with these very bytes
         )
         plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
         _publish_context(run_root, str(attempt["attempt_id"]), plan)

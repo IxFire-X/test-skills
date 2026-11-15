@@ -1777,10 +1777,10 @@ def freeze_phase_two_inputs(run_root: Path, project_root: Path, module_root: Pat
         exclusion = build_exclusion_receipt(inventory)
         exclusion_target = root / "exclusions" / (exclusion["digest"].removeprefix("sha256:") + ".json")
         baseline_target = root / "baselines" / (str(baseline["digest"]).removeprefix("sha256:") + ".json")
-        from tools.project_inventory import read_exclusion_receipt, read_execution_baseline, read_inventory_receipt
-        frozen_inventory = read_inventory_receipt(inventory_target) if inventory_target.exists() else freeze_inventory_receipt(inventory_target, inventory)
-        frozen_exclusions = read_exclusion_receipt(exclusion_target) if exclusion_target.exists() else freeze_exclusion_receipt(exclusion_target, exclusion)
-        frozen_baseline = read_execution_baseline(baseline_target) if baseline_target.exists() else freeze_execution_baseline(baseline_target, baseline)
+        # A receipt that lies there already is taken only with the bytes of the fresh one (an equal file is no news, any other is refused).
+        frozen_inventory = freeze_inventory_receipt(project, root, inventory_target, inventory)
+        frozen_exclusions = freeze_exclusion_receipt(project, root, exclusion_target, exclusion)
+        frozen_baseline = freeze_execution_baseline(project, root, baseline_target, baseline)
     except InventoryError as error:
         raise ValueError("phase two input receipt is invalid") from error
     append_event(root, "INVENTORY_READY", actor="controller", artifact_digest=frozen_inventory["digest"])
@@ -2934,14 +2934,14 @@ def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[
     try:
         validate_context_receipt_binding(inventory, project, value)
         target = _context_selection_target(root, attempt_id, str(value.get("digest", "")))
-        if target.exists():
-            raw = target.read_bytes()
+        raw = read_confined_bytes(project, root, target)
+        if raw is not None:
             readback = loads_json_strict(raw.decode("utf-8"))
             if readback != value:
                 raise ValueError("context selection readback mismatch")
         else:
-            readback = freeze_context_receipt(target, value)
-    except (ContextSelectionError, OSError, UnicodeDecodeError, StrictJsonError) as error:
+            readback = freeze_context_receipt(project, root, target, value)
+    except (ContextSelectionError, OutputConfinementError, OSError, UnicodeDecodeError, StrictJsonError) as error:
         raise ValueError("invalid context selection receipt") from error
     batch_id = f"review-{readback['batch_index']:04d}"
     append_event(root, "CONTEXT_SELECTED", actor="controller", attempt_id=attempt_id, batch_id=batch_id, artifact_digest=readback["digest"])
@@ -2962,7 +2962,7 @@ def context_progress(run_root: Path, attempt_id: str, state: Mapping[str, Any] |
     total = None
     for digest in digests:
         try:
-            receipt = loads_json_strict(_context_selection_target(root, attempt_id, digest).read_bytes().decode("utf-8"))
+            receipt = loads_json_strict((read_confined_bytes(project, root, _context_selection_target(root, attempt_id, digest)) or b"").decode("utf-8"))
         except (OSError, UnicodeDecodeError, StrictJsonError, ValueError):
             continue  # a receipt file that cannot be read is the business of the read that needs it (read_context_selection)
         if isinstance(receipt, dict) and receipt.get("digest") == digest and _digest({k: v for k, v in receipt.items() if k != "digest"}) == digest:
@@ -3003,11 +3003,13 @@ def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_dig
     project, root = _run_root(run_root)
     target = _context_selection_target(root, attempt_id, receipt_digest)
     try:
-        raw = target.read_bytes()
+        raw = read_confined_bytes(project, root, target)
+        if raw is None:
+            raise FileNotFoundError(str(target.name))
         receipt = loads_json_strict(raw.decode("utf-8"))
         inventory = _frozen_inventory(project, root, str(receipt.get("inventory_digest", "")))
         validate_context_receipt_binding(inventory, project, receipt)
-    except (OSError, UnicodeDecodeError, StrictJsonError, ContextSelectionError) as error:
+    except (OSError, UnicodeDecodeError, StrictJsonError, ContextSelectionError, OutputConfinementError) as error:
         raise ValueError("invalid context selection readback") from error
     state = derive_state(root)
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)

@@ -19,6 +19,7 @@ import stat
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes, remove_confined_bytes_if_equal
 from tools.scan_rules import INCLUDABLE_RULES, SECRET_DIRS, directory_reason, include_mode, is_source, path_reason
 from tools.stack_catalog import MANIFEST_LANGUAGES
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
@@ -1121,58 +1122,35 @@ def validate_execution_baseline_binding(
         raise InventoryError("execution baseline runtime binding is invalid")
 
 
-def _safe_immutable_target(path: Path, error_type: type[ValueError]) -> Path:
-    """Reject link/reparse parent chains before publishing an immutable artifact."""
-    target = Path(path).absolute()
-    current = target.parent
-    while True:
-        if (current.exists() or current.is_symlink()) and _is_reparse(current):
-            raise error_type("immutable receipt parent is a symlink or reparse point")
-        if current == current.parent:
-            break
-        current = current.parent
-    if (target.exists() or target.is_symlink()) and _is_reparse(target):
-        raise error_type("immutable receipt target is a symlink or reparse point")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if _is_reparse(target.parent):
-        raise error_type("immutable receipt parent is a symlink or reparse point")
-    return target
-
-
-def _freeze_json_receipt(path: Path, receipt: Mapping[str, Any], error_type: type[ValueError]) -> dict[str, Any]:
-    """Create once, cleanup a partial artifact, and prove exact JSON readback."""
-    target = _safe_immutable_target(Path(path), error_type)
+def _freeze_json_receipt(project_root: Path, run_root: Path, path: Path, receipt: Mapping[str, Any], error_type: type[ValueError], *, label: str = "immutable receipt") -> dict[str, Any]:
+    """Create once below the pinned ``run_root``; a file that lies there is taken only with the same bytes. The bytes are read back."""
     payload = _canonical_bytes(dict(receipt))
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_BINARY"):
-        flags |= os.O_BINARY
     try:
-        descriptor = os.open(target, flags, 0o600)
-    except FileExistsError as error:
-        raise error_type("immutable receipt already exists") from error
+        created, identity = create_confined_bytes_exclusive(project_root, run_root, Path(path), payload, return_identity=True)
+    except OutputConfinementError as error:
+        raise error_type(f"{label} cannot be created: {error}") from error
+    except OSError as error:
+        raise error_type(f"{label} readback failed") from error
     try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        raw = target.read_bytes()
-        readback = loads_json_strict(raw.decode("utf-8"))
-        if raw != payload or readback != dict(receipt):
-            raise error_type("immutable receipt readback is invalid")
+        raw = read_confined_bytes(project_root, run_root, Path(path))
+        readback = loads_json_strict(raw.decode("utf-8")) if raw == payload else None
+        if readback != dict(receipt):
+            raise error_type(f"{label} readback is invalid")
         return readback
-    except BaseException:
-        try:
-            target.unlink()
-        except OSError:
-            pass
+    except BaseException as error:
+        if created:
+            with contextlib.suppress(Exception):
+                remove_confined_bytes_if_equal(project_root, run_root, Path(path), payload, expected_identity=identity)
+        if isinstance(error, (OutputConfinementError, OSError, StrictJsonError)):
+            raise error_type(f"{label} readback failed") from error
         raise
 
 
-def freeze_inventory_receipt(path: Path, inventory: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_inventory_receipt(project_root: Path, run_root: Path, path: Path, inventory: Mapping[str, Any]) -> dict[str, Any]:
     """Persist the controller-owned metadata inventory as an immutable receipt."""
     _inventory_index(inventory)
     _validate_receipt_schema(inventory, "inventory-receipt.schema.json", InventoryError)
-    readback = _freeze_json_receipt(path, inventory, InventoryError)
+    readback = _freeze_json_receipt(project_root, run_root, path, inventory, InventoryError)
     _validate_receipt_schema(readback, "inventory-receipt.schema.json", InventoryError)
     return readback
 
@@ -1215,10 +1193,10 @@ def _validate_exclusion_receipt(receipt: Mapping[str, Any]) -> None:
         raise InventoryError("exclusion receipt is invalid")
 
 
-def freeze_exclusion_receipt(path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_exclusion_receipt(project_root: Path, run_root: Path, path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:
     _validate_exclusion_receipt(receipt)
     _validate_receipt_schema(receipt, "exclusion-receipt.schema.json", InventoryError)
-    readback = _freeze_json_receipt(path, receipt, InventoryError)
+    readback = _freeze_json_receipt(project_root, run_root, path, receipt, InventoryError)
     _validate_receipt_schema(readback, "exclusion-receipt.schema.json", InventoryError)
     return readback
 
@@ -1241,11 +1219,11 @@ def read_exclusion_receipt(path: Path) -> dict[str, Any]:
     return receipt
 
 
-def freeze_execution_baseline(path: Path, baseline: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_execution_baseline(project_root: Path, run_root: Path, path: Path, baseline: Mapping[str, Any]) -> dict[str, Any]:
     """Create a baseline once, then read back identical canonical bytes."""
     _validate_baseline_shape(baseline)
     _validate_receipt_schema(baseline, "execution-baseline.schema.json", InventoryError)
-    readback = _freeze_json_receipt(path, baseline, InventoryError)
+    readback = _freeze_json_receipt(project_root, run_root, path, baseline, InventoryError)
     _validate_baseline_shape(readback)
     _validate_receipt_schema(readback, "execution-baseline.schema.json", InventoryError)
     return readback
@@ -1569,42 +1547,13 @@ def select_context_batches(
     ]
 
 
-def freeze_context_receipt(path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_context_receipt(project_root: Path, run_root: Path, path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:
     """Persist exactly one immutable safe receipt for an already selected byte set."""
     expected = _digest({key: value for key, value in receipt.items() if key != "digest"})
     if receipt.get("schema_version") != "1.0.0" or receipt.get("digest") != expected:
         raise ContextSelectionError("context receipt is invalid")
     _validate_receipt_schema(receipt, "context-selection-receipt.schema.json", ContextSelectionError)
-    target = _safe_immutable_target(Path(path), ContextSelectionError)
-    payload = _canonical_bytes(dict(receipt))
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_BINARY"):
-        flags |= os.O_BINARY
-    try:
-        descriptor = os.open(target, flags, 0o600)
-    except FileExistsError as error:
-        raise ContextSelectionError("context receipt is immutable") from error
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        raw = target.read_bytes()
-        readback = loads_json_strict(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, StrictJsonError) as error:
-        raise ContextSelectionError("context receipt readback failed") from error
-    except BaseException:
-        try:
-            target.unlink()
-        except OSError:
-            pass
-        raise
-    if raw != payload or readback != dict(receipt) or readback.get("digest") != expected:
-        try:
-            target.unlink()
-        except OSError:
-            pass
-        raise ContextSelectionError("context receipt readback is invalid")
+    readback = _freeze_json_receipt(project_root, run_root, path, receipt, ContextSelectionError, label="context receipt")
     _validate_receipt_schema(readback, "context-selection-receipt.schema.json", ContextSelectionError)
     return readback
 

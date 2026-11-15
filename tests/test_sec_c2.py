@@ -303,6 +303,17 @@ _OS_WRITE = {"link", "replace", "rename", "symlink", "remove", "unlink", "mkdir"
              "chmod", "mkstemp", "mkdtemp"}
 _SHUTIL_WRITE = {"copyfile", "copy", "copy2", "copytree", "move", "rmtree"}
 _PATH_WRITE = {"write_bytes", "write_text", "mkdir", "touch", "unlink", "rmdir", "symlink_to", "hardlink_to"}
+_TEMPFILE_WRITE = {"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile", "TemporaryDirectory", "mkstemp", "mkdtemp"}
+
+
+def _is_read_only_open(node: ast.Call) -> bool:
+    """``os.open`` whose flags are a literal made of ``os.O_*`` names alone (``getattr(os, "O_X", 0)`` too), none of them a creating or writing one."""
+    flags = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "flags"), None)
+    if flags is None:
+        return False
+    names = {leaf.attr for leaf in ast.walk(flags) if isinstance(leaf, ast.Attribute)} | {leaf.id for leaf in ast.walk(flags) if isinstance(leaf, ast.Name)} | {leaf.value for leaf in ast.walk(flags) if isinstance(leaf, ast.Constant) and isinstance(leaf.value, str)}
+    numbers = {leaf.value for leaf in ast.walk(flags) if isinstance(leaf, ast.Constant) and isinstance(leaf.value, int)} - {0}  # a bare number may be O_WRONLY
+    return bool(names) and not numbers and names <= {name for name in names if name.startswith("O_") or name in {"os", "getattr"}} and not names & {"O_CREAT", "O_WRONLY", "O_RDWR"}
 
 
 def _write_sites() -> dict[str, int]:
@@ -317,15 +328,15 @@ def _write_sites() -> dict[str, int]:
             function = node.func
             name = function.attr if isinstance(function, ast.Attribute) else function.id if isinstance(function, ast.Name) else None
             base = function.value.id if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name) else None
-            hit = name in {"NamedTemporaryFile", "TemporaryDirectory"} \
+            hit = (name in _TEMPFILE_WRITE and base in {None, "tempfile"}) \
                 or (base == "os" and name in _OS_WRITE) or (base == "shutil" and name in _SHUTIL_WRITE) \
-                or (isinstance(function, ast.Attribute) and base not in {"os", "shutil"} and name in _PATH_WRITE)
+                or (isinstance(function, ast.Attribute) and base not in {"os", "shutil", "tempfile"} and name in _PATH_WRITE)
             if name == "open" and base != "os":
                 mode = node.args[1].value if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) else None
                 mode = next((k.value.value for k in node.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)), mode)
                 hit = isinstance(mode, str) and any(char in mode for char in "wax+")
             if name == "open" and base == "os":
-                hit = "O_CREAT" in ast.unparse(node) or "O_WRONLY" in ast.unparse(node) or "O_RDWR" in ast.unparse(node)
+                hit = not _is_read_only_open(node)
             if hit:
                 found[path.name] = found.get(path.name, 0) + 1
     return found
@@ -335,11 +346,11 @@ def _write_sites() -> dict[str, int]:
 # outside ``confined_output``; a new call, or a module, fails the test and has to be argued here.
 WRITES_OUTSIDE_CONFINED_OUTPUT = {
     "pilot_state.py": (2, "rmdir of the empty directory of an attempt step the same code made, below the run"),
-    "project_inventory.py": (4, "the inventory's own probes of the project: unlink/mkdir of its guard files inside the scanned module"),
     "publish_test_case_bundle.py": (6, "the bundle of the run: <run>/published only (orchestrate.published_dir asks output_guard.run_output_directory at every entry; a link out is refused), hard link install"),
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),
-    "init_skillsrc.py": (3, "the .skillsrc of the project and its evidence copies, the project given by --project (confined target)"),
+    "init_skillsrc.py": (4, "the .skillsrc in the root of the project given by --project: mkstemp of its temporary file, os.replace of it over .skillsrc and unlink of it after a failure "
+                            "(confined_output takes no project root as its root, so there is no function for a file there); the fourth is the --output report, whose target comes from acquire_confined_output"),
 }
 
 

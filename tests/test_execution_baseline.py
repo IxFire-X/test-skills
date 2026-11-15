@@ -166,8 +166,9 @@ def test_nested_maven_baseline_binds_root_skillsrc_and_detects_drift(tmp_path: P
         build_profile="default",
         adapter_parameters={},
     )
-    frozen = freeze_execution_baseline(tmp_path / "baseline.json", baseline)
-    assert read_execution_baseline(tmp_path / "baseline.json") == frozen
+    (tmp_path / "receipts").mkdir()
+    frozen = freeze_execution_baseline(tmp_path, tmp_path / "receipts", tmp_path / "receipts" / "baseline.json", baseline)
+    assert read_execution_baseline(tmp_path / "receipts" / "baseline.json") == frozen
     assert frozen["skillsrc_file_id"] == _file_id(inventory, ".skillsrc")
     assert frozen["wrapper_identity"] == runtime_identity(module, "mvnw")
     assert "interpreter_path" not in frozen

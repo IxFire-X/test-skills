@@ -50,14 +50,16 @@ def test_inventory_is_metadata_only_complete_and_excludes_secrets(tmp_path: Path
     serialized = repr(inventory)
     assert "ultra-secret-value" not in serialized
     assert hashlib.sha256(b"API_TOKEN=ultra-secret-value\n").hexdigest() not in serialized
-    frozen_inventory = freeze_inventory_receipt(tmp_path / "inventory.json", inventory)
-    assert read_inventory_receipt(tmp_path / "inventory.json") == frozen_inventory
-    (tmp_path / "inventory.json").write_bytes((tmp_path / "inventory.json").read_bytes() + b" ")
+    (tmp_path / "receipts").mkdir()
+    receipts = tmp_path / "receipts"
+    frozen_inventory = freeze_inventory_receipt(tmp_path, receipts, receipts / "inventory.json", inventory)
+    assert read_inventory_receipt(receipts / "inventory.json") == frozen_inventory
+    (receipts / "inventory.json").write_bytes((receipts / "inventory.json").read_bytes() + b" ")
     with pytest.raises(InventoryError, match="canonical"):
-        read_inventory_receipt(tmp_path / "inventory.json")
+        read_inventory_receipt(receipts / "inventory.json")
     exclusion_receipt = build_exclusion_receipt(inventory)
-    frozen_exclusions = freeze_exclusion_receipt(tmp_path / "exclusions.json", exclusion_receipt)
-    assert read_exclusion_receipt(tmp_path / "exclusions.json") == frozen_exclusions
+    frozen_exclusions = freeze_exclusion_receipt(tmp_path, receipts, receipts / "exclusions.json", exclusion_receipt)
+    assert read_exclusion_receipt(receipts / "exclusions.json") == frozen_exclusions
 
 
 def test_inventory_excludes_skill_pack_and_reparse_escape(tmp_path: Path) -> None:
