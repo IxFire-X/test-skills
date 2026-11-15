@@ -225,7 +225,7 @@ def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_docume
     run = _to_plan(tmp_path, monkeypatch)
     write_report(run["project"], run["root"].name)
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
-    assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002", "text": "combine отказывает на None."}]
+    assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002"}]  # v0.6 fix6: the text of the requirement is not in the report
     assert report["import"]["outside"] == [3]
     assert "требований без кейса в CSV: 1 (SREQ-0002); кейсов вне документов: 1 (строки 3)" in (run["root"] / "report.md").read_text(encoding="utf-8")
     questions = (run["root"] / "questions-for-analyst.md").read_text(encoding="utf-8")

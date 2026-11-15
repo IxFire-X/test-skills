@@ -304,7 +304,7 @@ def step_sizes(root: Path) -> list[dict[str, Any]]:
         except ValueError:
             continue
         if isinstance(value, Mapping) and isinstance(value.get("step"), str):
-            rows.append({key: value.get(key) for key in _STEP_KEYS})
+            rows.append({key: _STEP_FILTERS.get(key, _count)(value.get(key)) for key in _STEP_KEYS})  # the file is the agent's: no text of its own is copied
     return rows
 
 
@@ -404,8 +404,15 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
 
 def _identifier(value: Any) -> str | None:
     """A command, code, stage or batch name; anything else (a path, a message) is dropped — the report never copies text."""
-    return value if isinstance(value, str) and _IDENTIFIER.match(value) else None
+    return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else None
 
+
+def _count(value: Any) -> int | None:
+    return value if type(value) is int else None
+
+
+_STEP_FILTERS = {"step": _identifier, "role": _identifier, "warning": _identifier, "fits": lambda value: value if type(value) is bool else None,
+                 "at": lambda value: value if isinstance(value, str) and _time(value) else None}
 
 REFUSALS_BASIS = "по журналу (событие COMMAND_REFUSED); подробности строки — из refusals.jsonl, сверенной с журналом по digest"  # the journal counts, the file only gives the detail
 
@@ -646,7 +653,7 @@ def expectation_summary(document: Mapping[str, Any]) -> dict[str, Any]:
     """Hints on vague expectations of the cases by ID only, on any document."""
     from tools.test_design_hints import capped, expectation_hints
 
-    hints = expectation_hints(document)
+    hints = [{key: hint[key] for key in ("code", "case_id", "step_id")} for hint in expectation_hints(document)]  # the detail names the model's assertions
     counts: dict[str, int] = {}
     for hint in hints:
         counts[hint["code"]] = counts.get(hint["code"], 0) + 1
@@ -655,7 +662,7 @@ def expectation_summary(document: Mapping[str, Any]) -> dict[str, Any]:
 
 def render_expectations(summary: Mapping[str, Any]) -> str:
     lines = ["## Ожидания кейсов", "", "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет")]
-    lines += [f"  - {gap['code']} {gap.get('case_id', '')} {gap.get('step_id', '')} {gap['detail']}".rstrip() for gap in summary["gaps"]]
+    lines += [f"  - {gap['code']} {gap.get('case_id', '')} {gap.get('step_id', '')} {gap.get('detail', '')}".rstrip() for gap in summary["gaps"]]
     return "\n".join(lines)
 
 
@@ -701,7 +708,11 @@ def _zephyr_import(root: Path) -> Any:
         template = output_guard.project_file(Path(root).parent.parent, str(shown["template_path"]))  # its text and place first, then the bytes
         if "sha256:" + hashlib.sha256(template.read_bytes()).hexdigest() != shown["template_digest"]:
             return None
-        return {**shown, "basis": ZEPHYR_BASIS}
+        from tools.zephyr_template_export import read_template
+
+        header, added = read_template(Path(root).parent.parent, shown["template_path"]).header, shown["columns_added"]
+        return {**shown, "columns_added": [column for column in added if column in header] if isinstance(added, list) else [],  # only names the checked template has
+                "rows": _count(shown["rows"]), "basis": ZEPHYR_BASIS}
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -722,7 +733,7 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     from tools.cases_import import outside_rows
 
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}
+            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": outside_rows(imported)} if "gaps" in imported else {})}
 
 
 def _left(root: Path) -> str | None:
@@ -812,7 +823,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     events = list(state["events"])
     attempt = state["attempts"][-1] if state["attempts"] else None
     attempt_id = attempt["attempt_id"] if attempt else None
-    status = _durable_status_facts(project, root, stage="report")
+    try:
+        status = _durable_status_facts(project, root, stage="report")
+    except (KeyError, OSError, TypeError, ValueError):  # a terminal result that cannot be read: the report is still written, the cause named by its code
+        status = {"evidence_errors": [{"code": "EVIDENCE_UNVERIFIED"}]}
 
     from tools.step_size import output_sizes
 
@@ -946,7 +960,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
             "requirements": requirements,
-            "source_requirements": requirements if requirements is not None else source_count,
+            "source_requirements": source_count if source_count is not None else requirements,  # the document's: the marker's number counts the excluded too
             "canonical_requirements": canonical_count, "canon_basis": canon_basis,
             "batches": len({event.get("stage_instance_id") for event in responses if str(event.get("stage_instance_id")).startswith("tc-generator:BATCH-")}),
             "cases": cases, "review_verdict": evidence.get("authoritative_verdict"),
@@ -1060,7 +1074,7 @@ def _step_size_lines(report: Mapping[str, Any]) -> list[str]:
             "предупреждение STEP_OVER_BUDGET строится по вызовам модели из журнала.", "",
             *(["замеров нет", ""] if not report["step_sizes"] else [
                 "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
-                *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
+                *(f"| {_dash(s['step'])} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
                   f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), ""])]
 
 
@@ -1270,16 +1284,29 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     project = Path(project).resolve()
     root = project / ".pilot-runs" / run_id
     report, warnings = build_report(project, run_id)
+    summary = report.get("import")
+    imported = {**summary, "gaps": _gap_texts(root)} if summary and "gaps" in summary else summary  # the text of a requirement goes to the analyst only
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
-        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root), imported=report.get("import")).encode("utf-8"),
+        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root), imported=imported).encode("utf-8"),
     }
     written = []
     for name, data in outputs.items():
         atomic_write_confined_bytes_at_root(project, root, root / name, data)
         written.append(str(root / name))
     return written
+
+
+def _gap_texts(root: Path) -> list[Any]:
+    """The import gaps of the newest attempt with the requirement text — for ``questions-for-analyst.md`` only, never for the report."""
+    from tools import pilot_state
+
+    try:
+        attempt_id = pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]
+        return list(pilot_state.read_attempt_receipt(root, str(attempt_id), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]["gaps"])
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
+        return []
 
 
 def _attempt_notes(run_root: Path) -> tuple[list[Any], list[Any]]:
