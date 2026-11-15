@@ -297,8 +297,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
             segment = []
         if len(members) == 1:
             batches.append(list(members))
-            notes.append(f"BATCH_GROUP_OVER_BUDGET: требование {members[0]} — оценка ответа {size} Б больше порога пачки {cap} Б; "
-                         "оно не делится и идёт отдельной пачкой")
+            notes.append(_alone_note(members[0], size, cap))
             continue
         # a group over the batch budget is cut in display order, one requirement per unit — else a document of
         # FR-1…FR-40 is one prefix group and the split gives nothing
@@ -313,6 +312,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
                 units = []
             if member:
                 parts.append([member])
+                notes.append(_alone_note(member, expected[member], cap))
         batches.extend(parts)
         notes.append(f"BATCH_GROUP_OVER_BUDGET: группа {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
                      f"разрезана подряд по требованиям на {len(parts)} пачек: " + " | ".join(", ".join(part) for part in parts))
@@ -329,6 +329,11 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
     if imported is None:
         notes.extend(_end_to_end_notes(batches, keys))
     return batches, notes
+
+
+def _alone_note(member: str, size: int, cap: int) -> str:
+    return (f"BATCH_GROUP_OVER_BUDGET: требование {member} — оценка ответа {size} Б больше порога пачки {cap} Б; "
+            "оно не делится и идёт отдельной пачкой")
 
 
 def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> list[str]:
@@ -693,7 +698,7 @@ def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[s
 
 
 def _missing(item: Mapping[str, Any], key: str) -> bool:
-    return item.get(key) in (None, "") if key in ("step_id", "input_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
+    return item.get(key) in (None, "") if key in ("step_id", "input_id", "output_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
 
 
 def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -1070,8 +1075,7 @@ def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str
         "source_requirements": [dict(deepcopy(row), display_order=index) for index, row in
                                 enumerate((row for row in plan["source_requirements"] if row["source_requirement_id"] in owned), start=1)],
         "source_to_canonical_mappings": deepcopy(fragment["source_to_canonical_mappings"]),
-        "operation_capabilities": list(_unique_by_id([item for part in [*earlier, fragment] for item in part["operation_capabilities"]],
-                                                     "capability_id", "BATCH_ID_CONFLICT", permit_equal=True).values()),
+        "operation_capabilities": _capabilities_of([*earlier, fragment]),
         "requirements": deepcopy(fragment["requirements"]),
         "test_cases": deepcopy(fragment["test_cases"]),
     })
@@ -1133,12 +1137,18 @@ def _unique_by_id(items: list[dict[str, Any]], key: str, code: str, *, permit_eq
     return result
 
 
+_OWN_IDS = frozenset({"case_id", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "blocker_id"})
+
+
 def _case_fingerprint(case: dict[str, Any]) -> str:
+    """The case without the names of its own nodes; a reference (operation.capability_id, a step_output source) stays —
+    a source of a value has a ``kind``, a step or an output of its own has none."""
     def without_identity(value: Any) -> Any:
         if isinstance(value, list):
             return [without_identity(item) for item in value]
         if isinstance(value, dict):
-            return {key: without_identity(item) for key, item in value.items() if key != "display_order" and key != "requirement_ids" and not key.endswith("_id")}
+            return {key: without_identity(item) for key, item in value.items()
+                    if key != "display_order" and key != "requirement_ids" and not (key in _OWN_IDS and "kind" not in value)}
         return value
     return _digest(without_identity(case))
 
@@ -1209,7 +1219,7 @@ def _document(header: dict[str, Any], plan: dict[str, Any], ordered: list[dict[s
     document.update({
         "source_requirements": deepcopy(plan["source_requirements"]),
         "source_to_canonical_mappings": mappings,
-        "operation_capabilities": list(capabilities.values()),
+        "operation_capabilities": [capabilities[key] for key in sorted(capabilities)],
         "requirements": list(requirements.values()),
         "test_cases": list(cases.values()),
     })
