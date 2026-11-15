@@ -97,7 +97,7 @@ def _rework_step(root: Path, attempt_id: str, answered: bool) -> dict[str, Any] 
 def _manual_share(root: Path, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """The manual steps of a candidate of a project with code (the frozen inventory has a source or a test file) when they are over the share."""
     state = pilot_state.derive_state(root)
-    inventory = read_inventory_receipt(root / "inventories" / (str(pilot_state.frozen_baseline(root, state["attempts"][-1])["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(pilot_state.frozen_baseline(root, state["attempts"][-1])["inventory_digest"]).removeprefix("sha256:") + ".json"))
     steps = [step for case in document["test_cases"] for step in case["steps"]]
     manual = sum(1 for step in steps if step["manual_only"])
     if not steps or manual / len(steps) <= MANUAL_SHARE_WARN or not any(row["kind"] in ("source", "test") for row in inventory["files"]):

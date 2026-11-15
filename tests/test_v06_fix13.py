@@ -113,6 +113,7 @@ def test_init_does_not_write_over_a_skillsrc_that_is_a_link(tmp_path: Path) -> N
     approval.write_text(json.dumps({"approval_id": "a1", "original_digest": proposal["original_digest"], "proposed_digest": proposal["proposed_digest"]}), encoding="utf-8")
     code, report = _init_cli(project, "--write", "--replacement-approval", str(approval), "--immutable-evidence-dir", str(project / "evidence"))
     assert (code, report["status"], report["errors"]) == (1, "error", ["write_error"]) and outside.read_bytes() == before and (project / ".skillsrc").is_symlink(), report
+    assert "не пишет поверх ссылок" in report["message"] and "target is not a regular file" in report["message"] and "обычным файлом" in report["fix"], report  # told why, in words and by the refusal of the core
 
 
 def test_a_document_that_is_no_skillsrc_is_refused_before_anything_is_written(tmp_path: Path) -> None:

@@ -64,8 +64,8 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     else:
         run_root, attempt_id = _new_run(project)
     attempt = next(row for row in derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
-    inventory = read_inventory_receipt(run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root.parent.parent, run_root, run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     selected = select_context_batches(inventory, project, [next(item["opaque_id"] for item in inventory["files"] if item["project_path"] == "src/evidence.py")], byte_budget=4096)[0]["receipt"]
     context = publish_context_selection(run_root, attempt_id, selected)
     header = _header() if header is None else header

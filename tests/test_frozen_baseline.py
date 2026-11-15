@@ -43,7 +43,7 @@ def test_the_baseline_of_a_real_attempt_is_read(tmp_path: Path) -> None:
     attempt = _attempt(run)
     baseline = pilot_state.frozen_baseline(run["run_root"], attempt)
     assert baseline["digest"] == attempt["baseline_digest"]
-    assert baseline == read_execution_baseline(run["run_root"] / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    assert baseline == read_execution_baseline(run["run_root"].parent.parent, run["run_root"], run["run_root"] / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
 
 
 def test_a_baseline_with_another_digest_under_the_right_name_is_unbound(tmp_path: Path) -> None:

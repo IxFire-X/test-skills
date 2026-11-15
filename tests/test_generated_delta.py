@@ -58,10 +58,10 @@ def _reviewer_protocol_inputs(
 
     attempt = next(row for row in derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
     baseline = read_execution_baseline(
-        run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json")
+        run_root.parent.parent, run_root, run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json")
     )
     inventory = read_inventory_receipt(
-        run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json")
+        run_root.parent.parent, run_root, run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json")
     )
     scanned = [row["artifact_digest"] for row in derive_state(run_root)["events"]
                if row["event_type"] == "CONTEXT_SELECTED" and row.get("attempt_id") == attempt_id]

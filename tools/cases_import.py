@@ -264,7 +264,7 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     if path is None:
         return None
     baseline = pilot_state.frozen_baseline(root, attempt)
-    inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     row = next((item for item in inventory["files"] if item["project_path"] == path), None)  # bytes bound by the inventory
     secret = next((item for item in inventory.get("exclusions") or [] if item.get("project_path") == path and item.get("reason_code") == "SECRET_SUSPECTED"), None)
     if row is None and secret is not None:  # left out by a secret rule — not a changed file

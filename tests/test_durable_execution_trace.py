@@ -166,7 +166,7 @@ def test_sparse_unknown_closure(tmp_path: Path) -> None:
     attempt = next(row for row in pilot_state.derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
     from tools.project_inventory import read_execution_baseline
 
-    baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
     child_identity = {
         "project": attempt["project"], "module": attempt["module"], "policy_profile": attempt["policy_profile"],
         "parent_attempt_id": attempt_id, "retry_reason": "explicit-execution-retry",

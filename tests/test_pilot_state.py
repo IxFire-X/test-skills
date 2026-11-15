@@ -295,7 +295,7 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
             input_digests=[DIGEST_A],
         )
     assert _snapshot(root) == before
-    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     context = pilot_state.publish_context_selection(
         root, attempt_id,
         select_context_batches(inventory, tmp_path, [], byte_budget=64 * 1024)[0]["receipt"],

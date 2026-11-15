@@ -105,9 +105,9 @@ def resume_phase_one_spine(run_root: Path) -> Mapping[str, Any]:
         raise ValueError("invalid F4 event order")
     try:
         baseline_name = str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"
-        baseline = read_execution_baseline(root / "baselines" / baseline_name)
+        baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / baseline_name)
         inventory_name = str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"
-        frozen_inventory = read_inventory_receipt(root / "inventories" / inventory_name)
+        frozen_inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / inventory_name)
         if frozen_inventory["digest"] != baseline["inventory_digest"]:
             raise InventoryError("baseline inventory binding is invalid")
         project = Path(attempt["project"]).resolve()

@@ -90,7 +90,7 @@ def test_a_model_answer_under_the_label_of_the_import_is_still_reconciled(tmp_pa
 
     root, attempt_id = _openspec_run(tmp_path, monkeypatch)
     attempt = pilot_state.derive_state(root)["attempts"][-1]
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     pilot_state.publish_model_request(root, attempt_id, "context-marker:requirements", model_id="controller:cases-import", invocation_id="forged",
                                       input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])
     with pytest.raises(ValueError) as refused:

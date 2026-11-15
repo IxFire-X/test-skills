@@ -831,7 +831,7 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     if remaining <= 0:
         raise ValueError("REVIEW_CONTEXT_LIMIT: no context budget is left for evidence; abort the session with REVIEW_CONTEXT_LIMIT")
     attempt = next(row for row in derive_state(Path(run_root))["attempts"] if row["attempt_id"] == attempt_id)
-    inventory = read_inventory_receipt(Path(run_root) / "inventories" / (package["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(Path(run_root).parent.parent, Path(run_root), Path(run_root) / "inventories" / (package["inventory_digest"].removeprefix("sha256:") + ".json"))
     by_path = {item["project_path"]: item["opaque_id"] for item in inventory["files"]}
     paths = sorted(set(project_paths))
     unknown = [path for path in paths if path not in by_path]
@@ -1613,7 +1613,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
         for key in ("candidate", "assembly_receipt", "generator_fragments"):
             missing[key] = str(error).removeprefix("MODEL_INPUTS_MISMATCH: ").removeprefix("REVIEW_INPUTS_UNAVAILABLE: candidate: ")
     baseline = frozen_baseline(resolved, attempt)
-    journal["inventory_receipt"] = read_inventory_receipt(resolved / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    journal["inventory_receipt"] = read_inventory_receipt(project, resolved, resolved / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     try:
         digests = list(read_reviewer_session_ledger(root, attempt_id, unconfirmed_ok=True)["package_binding"]["context_receipt_digests"])
     except (KeyError, TypeError, ValueError):

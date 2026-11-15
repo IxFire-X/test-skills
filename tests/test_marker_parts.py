@@ -37,7 +37,7 @@ def _run(tmp_path: Path, files: int = 3) -> tuple[Path, str, dict, list[dict]]:
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     baseline = _baseline(root)
     attempt = pilot_state.create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, baseline)
-    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     ids = [item["opaque_id"] for item in inventory["files"]]
     batches = select_context_batches(inventory, tmp_path, ids, byte_budget=100 * 1024)
     receipts = [pilot_state.publish_context_selection(root, attempt["attempt_id"], batch["receipt"]) for batch in batches]

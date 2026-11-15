@@ -160,7 +160,7 @@ def _reject_prestart_execution(
         module_name = str(attempt["module"])
         module_root = (project / module_name).resolve(strict=True)
         module_root.relative_to(project)
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         delta = read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
         effective = read_effective_canonical(root, attempt_id)
         document = effective["document"]
@@ -273,7 +273,7 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
     if inputs is None:
         raise HostStop("EXECUTION_NOT_PREPARED", "no static review of the automation in this attempt", _not_prepared_fix(root, attempt_id))
     try:
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(Path(str(coordinates["manifest"]["project"])), root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         document = read_effective_canonical(root, attempt_id)["document"]
         materialize_delta(
             Path(str(coordinates["manifest"]["project"])), Path(coordinates["module_root"]), baseline, inputs["automation"], inputs["review"],
@@ -411,7 +411,7 @@ def _durable_request(coordinates: Mapping[str, Any], carriers: Mapping[str, Any]
     root, attempt = Path(coordinates["run_root"]), coordinates["attempt"]
     module_root = Path(coordinates["module_root"]).resolve()
     try:
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(Path(str(coordinates["manifest"]["project"])), root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         automation, document = carriers["automation"], carriers["document"]
         artifacts = automation["artifacts"]
         files = {row["file_id"]: row for row in artifacts["generated_files"]}

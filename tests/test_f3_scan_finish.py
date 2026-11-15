@@ -202,7 +202,7 @@ def test_the_receipts_are_the_old_ones_with_batch_count_added(tmp_path: Path, ca
     receipts = sorted((json.loads(path.read_text(encoding="utf-8")) for path in (root / "context-selections" / attempt_id).glob("*.json")),
                       key=lambda row: row["batch_index"])
     assert len(receipts) == done["context_batch_count"] > 1
-    inventory = read_inventory_receipt(root / "inventories" / (done["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (done["inventory_digest"].removeprefix("sha256:") + ".json"))
     for receipt in receipts:
         old = _context_receipt(inventory, receipt["batch_index"], receipt["files"], receipt["byte_count"], b"", receipt.get("skipped"))
         old.pop("byte_set_digest"), old.pop("digest")
@@ -221,8 +221,8 @@ def test_a_receipt_without_batch_count_is_a_whole_set(tmp_path: Path) -> None:
     (project / "src" / "evidence.py").write_text("value = 1\n", encoding="utf-8")
     run_root, attempt_id = _new_run(project)
     attempt = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
-    inventory = read_inventory_receipt(run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root.parent.parent, run_root, run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     item = next(row for row in inventory["files"] if row["project_path"] == "src/evidence.py")
     legacy = _context_receipt(inventory, 1, [item], int(item["size"]), b"")  # the receipt of a run before F3: no batch_count
     assert "batch_count" not in legacy

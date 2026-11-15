@@ -177,9 +177,9 @@ def _frozen_attempt(
         if attempt.get("module") != _module_name(project, module) or attempt.get("baseline_digest") != baseline.get("digest"):
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "attempt identity or baseline binding is invalid")
         baseline_name = str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"
-        frozen = read_execution_baseline(Path(run_root) / "baselines" / baseline_name)
+        frozen = read_execution_baseline(project, Path(run_root), Path(run_root) / "baselines" / baseline_name)
         inventory_name = str(frozen["inventory_digest"]).removeprefix("sha256:") + ".json"
-        inventory = read_inventory_receipt(Path(run_root) / "inventories" / inventory_name)
+        inventory = read_inventory_receipt(project, Path(run_root), Path(run_root) / "inventories" / inventory_name)
         validate_execution_baseline_binding(frozen, inventory, module)
     except GeneratedDeltaError:
         raise
@@ -382,7 +382,7 @@ def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
     project = Path(str(read_run(root)["manifest"]["project"])).resolve()
     attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
     module = project if attempt["module"] == "." else project.joinpath(*str(attempt["module"]).split("/"))
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     try:
         materialization_precheck(project, module, baseline, inputs["automation"], inputs["review"],
                                  canonical_document=read_effective_canonical(root, attempt_id)["document"], run_root=root,

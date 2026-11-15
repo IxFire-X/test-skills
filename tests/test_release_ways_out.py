@@ -126,7 +126,7 @@ def test_o12b_a_left_run_takes_no_model_step_and_says_so(tmp_path: Path, capsys:
     assert " scan " in status["scan_command"] and "--new-run" not in status["scan_command"], status  # the plain scan of the request starts anew
     root, attempt_id = Path(first["run_root"]), first["attempt_id"]
     state = pilot_state.derive_state(root)
-    baseline = read_execution_baseline(root / "baselines" / (state["attempts"][-1]["baseline_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (state["attempts"][-1]["baseline_digest"].removeprefix("sha256:") + ".json"))
     contexts = list(dict.fromkeys(e["artifact_digest"] for e in state["events"] if e["event_type"] == "CONTEXT_SELECTED"))
     journal = (root / "events.jsonl").read_bytes()
     with pytest.raises(ValueError) as refused:

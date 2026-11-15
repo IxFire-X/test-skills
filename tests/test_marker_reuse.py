@@ -34,8 +34,8 @@ def _fresh(project: Path, *, changed: bool = False) -> tuple[Path, str, list[str
 
     run_root, attempt_id = _run(project, "cases-only-v1", flag=False)
     attempt = next(row for row in derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
-    inventory = read_inventory_receipt(run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root.parent.parent, run_root, run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     context = publish_context_selection(run_root, attempt_id, select_context_batches(inventory, project, [], byte_budget=64 * 1024)[0]["receipt"])
     return run_root, attempt_id, [baseline["requirements"]["digest"], baseline["inventory_digest"], context["digest"]]
 

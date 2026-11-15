@@ -381,7 +381,7 @@ def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
     for attempt_path in sorted((root / "attempts").glob("*.json")) if (root / "attempts").is_dir() else []:
         try:
             attempt = _read_artifact(project, root, attempt_path, "attempt")
-            baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+            baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
             if baseline["digest"] != attempt["baseline_digest"]:
                 raise ValueError("baseline digest mismatch")
             paths.append(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
@@ -390,7 +390,7 @@ def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
     same = same and bool(paths)
     for path in paths:
         try:
-            files = [str(row["project_path"]) for row in read_inventory_receipt(path)["files"]]
+            files = [str(row["project_path"]) for row in read_inventory_receipt(project, root, path)["files"]]
         except (InventoryError, OSError, KeyError, TypeError, ValueError):
             same = False
             continue
@@ -1694,9 +1694,9 @@ def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mappin
 
     try:
         baseline_name = baseline_digest.removeprefix("sha256:") + ".json"
-        frozen_baseline = read_execution_baseline(root / "baselines" / baseline_name)
+        frozen_baseline = read_execution_baseline(project, root, root / "baselines" / baseline_name)
         inventory_name = str(frozen_baseline["inventory_digest"]).removeprefix("sha256:") + ".json"
-        frozen_inventory = read_inventory_receipt(root / "inventories" / inventory_name)
+        frozen_inventory = read_inventory_receipt(project, root, root / "inventories" / inventory_name)
         module_root = project if module == "." else project.joinpath(*module.split("/"))
         validate_execution_baseline_binding(frozen_baseline, frozen_inventory, module_root, policy_profile=manifest["policy_profile"])
     except InventoryError as error:
@@ -1794,7 +1794,7 @@ def _frozen_inventory(project: Path, root: Path, inventory_digest: str) -> dict[
 
     if not _DIGEST.fullmatch(inventory_digest):
         raise ValueError("invalid frozen inventory digest")
-    receipt = read_inventory_receipt(root / "inventories" / (inventory_digest.removeprefix("sha256:") + ".json"))
+    receipt = read_inventory_receipt(project, root, root / "inventories" / (inventory_digest.removeprefix("sha256:") + ".json"))
     events = _events(project, root)
     if receipt.get("digest") != inventory_digest or not any(event["event_type"] == "INVENTORY_READY" and event.get("artifact_digest") == inventory_digest for event in events):
         raise ValueError("unbound frozen inventory")
@@ -1819,7 +1819,7 @@ def frozen_baseline(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
     if not _DIGEST.fullmatch(digest):
         raise BaselineUnbound(f"BASELINE_UNBOUND: у попытки нет digest baseline; {fix}")
     try:
-        baseline = read_execution_baseline(root / "baselines" / (digest.removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(project, root, root / "baselines" / (digest.removeprefix("sha256:") + ".json"))
     except (OSError, KeyError, TypeError, ValueError) as error:
         raise BaselineUnbound(f"BASELINE_UNBOUND: baseline {digest} не читается ({type(error).__name__}); {fix}") from error
     frozen = any(event["event_type"] == "EXECUTION_BASELINE_FROZEN" and event.get("artifact_digest") == digest for event in derive_state(root)["events"])
@@ -1940,7 +1940,7 @@ def _context_marker_snapshots(
     from tools.build_context import _OPENSPEC_PATH
     from tools.project_inventory import read_execution_baseline
 
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     minimum = 2 if stage_instance_id == "context-marker:requirements" else 3
     head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
     if stage_instance_id.startswith("context-marker:batch-") and len(inputs) == 3:
@@ -2080,7 +2080,7 @@ def _validate_model_request_predecessors(
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
         _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
         context = read_context_selection(root, attempt_id, inputs[1])
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         selected = [event for event in events if event["event_type"] == "CONTEXT_SELECTED" and event.get("artifact_digest") == inputs[1] and event["seq"] < cutoff]
         if baseline["digest"] != attempt["baseline_digest"] or context["inventory_digest"] != baseline["inventory_digest"] or not selected:
             raise ValueError("tc-generator context must bind its prior attempt inventory selection")
@@ -3580,7 +3580,7 @@ def _validate_closed_execution_request(
     module = project if attempt["module"] == "." else project.joinpath(*str(attempt["module"]).split("/"))
     try:
         module = module.resolve()
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         runtime_relative = baseline["interpreter_path"] if request.adapter_id == PYTEST else baseline["executable_path"] if request.adapter_id == SYSTEM_MAVEN else baseline["wrapper_path"]
         expected_executable = system_maven_path(runtime_relative) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, runtime_relative)
         executable = system_maven_path(request.executable) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, Path(request.executable).relative_to(module).as_posix())
@@ -7311,10 +7311,10 @@ def _validate_scenario_observation(
         manifest = read_run(root)["manifest"]
         initial = manifest.get("project_state")
         baseline = read_execution_baseline(
-            root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")
+            project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")
         )
         inventory = read_inventory_receipt(
-            root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json")
+            project, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json")
         )
         selected_valid = (
             [row.get("event_type") for row in selected_events]
@@ -7524,10 +7524,10 @@ def publish_project_state_observation(
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
 
     baseline = read_execution_baseline(
-        root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")
+        project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")
     )
     inventory = read_inventory_receipt(
-        root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json")
+        project, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json")
     )
     selected = [
         next(row for row in state["events"] if row.get("event_type") == "RUN_CREATED"),

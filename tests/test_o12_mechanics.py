@@ -340,8 +340,8 @@ def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     root, attempt_id, project = Path(run["run_root"]), run["attempt_id"], run["project"]
     attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
-    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     other = select_context_batches(inventory, project, [next(item["opaque_id"] for item in inventory["files"] if item["project_path"] == "src/extra.py")],
                                    byte_budget=4096)[0]["receipt"]
     other_digest = publish_context_selection(root, attempt_id, other)["digest"]

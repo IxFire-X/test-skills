@@ -61,8 +61,8 @@ def test_scan_publishes_full_nested_inventory_and_safe_receipts(tmp_path: Path, 
     run_root, attempt_id = _durable(scan)
     run = read_run(run_root)
     state = derive_state(run_root)
-    inventory = read_inventory_receipt(run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
-    exclusions = read_exclusion_receipt(run_root / "exclusions" / (scan["exclusion_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    exclusions = read_exclusion_receipt(run_root.parent.parent, run_root, run_root / "exclusions" / (scan["exclusion_digest"].removeprefix("sha256:") + ".json"))
     context_receipts = sorted((run_root / "context-selections" / attempt_id).glob("*.json"))
     assert [event["event_type"] for event in state["events"]][:6] == [
         "RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND",
@@ -102,7 +102,7 @@ def test_scan_target_narrows_only_context_and_never_executes(tmp_path: Path, mon
 
     scan = payloads[-1]
     run_root, attempt_id = _durable(scan)
-    inventory = read_inventory_receipt(run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
     assert {item["project_path"] for item in inventory["files"]} >= {
         "services/api/src/selected.py", "services/api/src/other.py",
     }
@@ -193,8 +193,8 @@ def test_cases_only_scan_needs_no_runtime_and_cannot_supply_local_execution_proo
 
     scan = payloads[-1]
     root, _attempt = _durable(scan)
-    baseline = read_execution_baseline(root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
-    inventory = read_inventory_receipt(root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
     assert baseline["policy_profile"] == "cases-only-v1"
     assert not {"test_root", "adapter_id", "build_profile", "adapter_parameters", "interpreter_path", "wrapper_path", "executable_path"} & baseline.keys()
     assert "EXECUTION_BASELINE_FROZEN" in [event["event_type"] for event in derive_state(root)["events"]]

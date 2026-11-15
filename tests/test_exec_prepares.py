@@ -127,7 +127,7 @@ def test_a_prestart_rejection_keeps_the_request_only_when_it_is_local_and_has_a_
     monkeypatch.setattr(execution_core, "runner_report", report)
     monkeypatch.setattr(execution_core, "request_is_attempt_local", lambda *_: local)
     monkeypatch.setattr(execution_core, "request_report_path", lambda _request: Path("r.xml") if has_report else None)
-    monkeypatch.setattr(project_inventory, "read_execution_baseline", lambda _path: {"adapter_id": PYTEST})
+    monkeypatch.setattr(project_inventory, "read_execution_baseline", lambda *_: {"adapter_id": PYTEST})
     monkeypatch.setattr(pilot_state, "read_attempt_receipt", lambda *_: {"record": {"delta": delta}})
     monkeypatch.setattr(pilot_state, "read_effective_canonical", lambda *_: {
         "document": {"document_id": "D", "revision": 1}, "document_digest": "sha256:d", "effective_bundle_receipt_digest": "sha256:e"})

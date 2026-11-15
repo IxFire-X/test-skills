@@ -70,7 +70,7 @@ def test_scan_cases_makes_the_csv_the_requirement_document_of_the_run(tmp_path: 
     assert manifest["scan_request"]["cases"] == "cases/zephyr.csv" and manifest["scan_request"]["docs"] == []
     from tools.project_inventory import read_inventory_receipt
 
-    [inventory] = [read_inventory_receipt(path) for path in (run_root / "inventories").glob("*.json")]
+    [inventory] = [read_inventory_receipt(run_root.parent.parent, run_root, path) for path in (run_root / "inventories").glob("*.json")]
     assert any(row["project_path"] == "cases/zephyr.csv" for row in inventory["files"])  # the CSV bytes are bound by the inventory
 
 

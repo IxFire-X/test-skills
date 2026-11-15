@@ -232,8 +232,8 @@ def test_a_scan_of_a_tests_module_with_a_neighbour_reaches_the_context_and_names
     assert run_pipeline.cmd_scan(args) == 0, payloads[-1:]
     scan = payloads[-1]
     run_root = Path(scan["run_root"])
-    inventory = read_inventory_receipt(run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
-    baseline = read_execution_baseline(run_root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(run_root.parent.parent, run_root, run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root.parent.parent, run_root, run_root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
     assert scan["policy_profile"] == profile and "context-marker" in json.dumps(scan, ensure_ascii=False), scan
     assert [row["project_path"] for row in inventory["files"] if row.get("origin") == "context"] == ["services/app/src/owners.py"]
     assert "services/app/src/owners.py" in {row["project_path"] for row in baseline["inputs"]}

@@ -1155,19 +1155,29 @@ def freeze_inventory_receipt(project_root: Path, run_root: Path, path: Path, inv
     return readback
 
 
-def read_inventory_receipt(path: Path) -> dict[str, Any]:
-    target = Path(path)
-    if _is_reparse(target) or _is_reparse(target.parent):
-        raise InventoryError("inventory receipt target is a symlink or reparse point")
+def _read_json_receipt(project_root: Path, run_root: Path, path: Path, label: str) -> dict[str, Any]:
+    """The canonical JSON object of a receipt below the pinned ``run_root``: every directory up to it is held, a link or reparse point refuses."""
     try:
-        raw = target.read_bytes()
-        receipt = loads_json_strict(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, StrictJsonError) as error:
-        raise InventoryError("inventory receipt is unreadable") from error
-    if not isinstance(receipt, dict):
-        raise InventoryError("inventory receipt is invalid")
-    if raw != _canonical_bytes(receipt):
-        raise InventoryError("inventory receipt bytes are not canonical")
+        raw = read_confined_bytes(project_root, run_root, Path(path))
+    except OutputConfinementError as error:
+        raise InventoryError(f"{label} target is a symlink or reparse point") from error
+    except OSError as error:
+        raise InventoryError(f"{label} is unreadable") from error
+    if raw is None:
+        raise InventoryError(f"{label} is unreadable")
+    try:
+        value = loads_json_strict(raw.decode("utf-8"))
+    except (UnicodeDecodeError, StrictJsonError) as error:
+        raise InventoryError(f"{label} is unreadable") from error
+    if not isinstance(value, dict):
+        raise InventoryError(f"{label} is invalid")
+    if raw != _canonical_bytes(value):
+        raise InventoryError(f"{label} bytes are not canonical")
+    return value
+
+
+def read_inventory_receipt(project_root: Path, run_root: Path, path: Path) -> dict[str, Any]:
+    receipt = _read_json_receipt(project_root, run_root, path, "inventory receipt")
     _inventory_index(receipt)
     _validate_receipt_schema(receipt, "inventory-receipt.schema.json", InventoryError)
     return receipt
@@ -1201,19 +1211,8 @@ def freeze_exclusion_receipt(project_root: Path, run_root: Path, path: Path, rec
     return readback
 
 
-def read_exclusion_receipt(path: Path) -> dict[str, Any]:
-    target = Path(path)
-    if _is_reparse(target) or _is_reparse(target.parent):
-        raise InventoryError("exclusion receipt target is a symlink or reparse point")
-    try:
-        raw = target.read_bytes()
-        receipt = loads_json_strict(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, StrictJsonError) as error:
-        raise InventoryError("exclusion receipt is unreadable") from error
-    if not isinstance(receipt, dict):
-        raise InventoryError("exclusion receipt is invalid")
-    if raw != _canonical_bytes(receipt):
-        raise InventoryError("exclusion receipt bytes are not canonical")
+def read_exclusion_receipt(project_root: Path, run_root: Path, path: Path) -> dict[str, Any]:
+    receipt = _read_json_receipt(project_root, run_root, path, "exclusion receipt")
     _validate_exclusion_receipt(receipt)
     _validate_receipt_schema(receipt, "exclusion-receipt.schema.json", InventoryError)
     return receipt
@@ -1229,19 +1228,8 @@ def freeze_execution_baseline(project_root: Path, run_root: Path, path: Path, ba
     return readback
 
 
-def read_execution_baseline(path: Path) -> dict[str, Any]:
-    target = Path(path)
-    if _is_reparse(target) or _is_reparse(target.parent):
-        raise InventoryError("execution baseline target is a symlink or reparse point")
-    try:
-        raw = target.read_bytes()
-        value = loads_json_strict(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, StrictJsonError) as error:
-        raise InventoryError("execution baseline is unreadable") from error
-    if not isinstance(value, dict):
-        raise InventoryError("execution baseline is invalid")
-    if raw != _canonical_bytes(value):
-        raise InventoryError("execution baseline bytes are not canonical")
+def read_execution_baseline(project_root: Path, run_root: Path, path: Path) -> dict[str, Any]:
+    value = _read_json_receipt(project_root, run_root, path, "execution baseline")
     _validate_baseline_shape(value)
     _validate_receipt_schema(value, "execution-baseline.schema.json", InventoryError)
     return value

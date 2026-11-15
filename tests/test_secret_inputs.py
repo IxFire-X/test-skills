@@ -177,7 +177,7 @@ def test_materialize_stops_on_a_changed_secret_file_without_printing_it(tmp_path
     _module_python(project)
     _document, _artifact, _review, _evidence, run_root, attempt_id, _authorization, _delta = _reviewed_inputs(project)
     attempt = next(row for row in derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root.parent.parent, run_root, run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
     assert baseline["secret_inputs"][0]["project_path"] == "config/app.yml"
 
     if change == "edit":

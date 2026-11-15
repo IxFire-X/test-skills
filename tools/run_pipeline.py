@@ -148,7 +148,7 @@ def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, 
     root = Path(run_root)
     try:
         baseline = frozen_baseline(root, attempt)
-        inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+        inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     except (KeyError, OSError, ValueError):
         return None
     return exclusion_summary(inventory["exclusions"], str(attempt.get("module") or "."))
@@ -284,7 +284,7 @@ def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, st
 
     try:
         attempt = next(row for row in pilot.derive_state(run_root)["attempts"] if row.get("attempt_id") == attempt_id)
-        baseline = read_execution_baseline(Path(run_root) / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = read_execution_baseline(Path(project), Path(run_root), Path(run_root) / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         project_root = Path(project).resolve()
         module_root = project_root if attempt["module"] == "." else project_root.joinpath(*str(attempt["module"]).split("/"))
         adapter_id = str(baseline["adapter_id"])
@@ -405,7 +405,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
 
     baseline_path = f"baselines/{attempt['baseline_digest'][7:]}.json"
     try:
-        baseline = read_execution_baseline(root / baseline_path)
+        baseline = read_execution_baseline(Path(project), root, root / baseline_path)
         if baseline["digest"] != attempt["baseline_digest"]:
             raise ValueError("baseline digest mismatch")
         record(baseline["digest"], "baseline", "authorized context", baseline_path)

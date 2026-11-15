@@ -138,7 +138,7 @@ def test_the_run_binds_the_outside_document_and_status_sees_no_drift(tmp_path: P
     scan = _scan(project, monkeypatch, module="api")
     run_root = Path(scan["run_root"])
     [baseline_path] = (run_root / "baselines").glob("*.json")
-    assert DOC in {row["project_path"] for row in read_execution_baseline(baseline_path)["inputs"]}
+    assert DOC in {row["project_path"] for row in read_execution_baseline(run_root.parent.parent, run_root, baseline_path)["inputs"]}
 
     printed: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", printed.append)

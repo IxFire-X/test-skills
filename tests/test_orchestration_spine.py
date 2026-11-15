@@ -59,8 +59,8 @@ def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_wr
     run = _run(tmp_path)
     root = Path(run["run"]["run_root"])
     attempt = run["state"]["attempts"][0]
-    baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"][7:] + ".json"))
-    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"][7:] + ".json"))
+    baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (attempt["baseline_digest"][7:] + ".json"))
+    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (baseline["inventory_digest"][7:] + ".json"))
     context = pilot_state.publish_context_selection(root, attempt["attempt_id"], select_context_batches(inventory, tmp_path, [], byte_budget=65536)[0]["receipt"])
     gap = "spec.md:3 — missing: refusal outcome; blocks: negative case; question: which result?"
     marker = {"schema_version": "5.0.0", "stage": "context-marker", "artifacts": {

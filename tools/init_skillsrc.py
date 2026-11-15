@@ -529,6 +529,13 @@ def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any
     return receipt
 
 
+def _why_not_written(error: BaseException, receipt: dict[str, Any]) -> dict[str, Any]:
+    """The core refused to write ``.skillsrc``: the person is told why, beside the code — the refusal itself, and what lies in the place most often."""
+    if isinstance(error, OutputConfinementError):
+        receipt.update(_message=f".skillsrc не записан: ядро записи отказало ({error}); чаще всего на месте .skillsrc лежит ссылка или каталог — пакет не пишет поверх ссылок", _fix="замените .skillsrc обычным файлом и повторите init")
+    return receipt
+
+
 def _sanitize(value: Any) -> Any:
     if isinstance(value, str):
         from tools.project_inventory import URL_USERINFO_TEXT
@@ -901,7 +908,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
                 before_replace=lambda: _preserve_immutable_evidence(root, immutable_evidence_dir, original),
             )
         except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
-            return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
+            return _why_not_written(error, _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal))
         return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back) | shown
     try:
         discovery_ids = {question["id"] for question in working_discovery.get("questions", [])}
@@ -920,7 +927,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     try:
         read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
     except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
-        return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
+        return _why_not_written(error, _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1))
     return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
 
 
