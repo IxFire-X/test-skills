@@ -124,7 +124,7 @@ def test_an_incoming_directory_that_is_a_junction_gives_no_answer(tmp_path: Path
     _junction(root / "incoming", outside)
     before = _events(root)
     code, out = _call(capsys, "submit", root, BASELINE)
-    assert code == 2 and out["code"] == "INPUT_OUTSIDE_PROJECT" and _events(root) == before
+    assert code == 2 and out["code"] == "STAGE_INBOX_UNSAFE" and _events(root) == before  # the refusal of prepare, not the advice of --run-root that cannot help
 
 
 def test_prepare_does_not_take_a_junction_for_its_incoming_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

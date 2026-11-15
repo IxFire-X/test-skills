@@ -1861,10 +1861,10 @@ def cmd_finish(args: Any) -> int:
             _print(_closed_before_review(project, run["manifest"], str(error)))
             return 2
         code = str(error).split(":", 1)[0] if str(error).startswith(("FINISH_", "ABANDON_")) else "FINALIZATION"
-        fix = getattr(error, "fix", None) or (_INTERRUPTED_FIX if executed and not (root / "execution-receipts" / f"{attempt_id}.json").exists() else None)
+        fix = getattr(error, "fix", None) or (_INTERRUPTED_FIX if executed and not _execution_receipt_bound(root, attempt_id) else None)
         raise HostStop(code, str(error), _exact_fix(fix, project, root, attempt_id) if fix else None) from error
     except (KeyError, TypeError, ValueError, OSError) as error:
-        if not executed or (root / "execution-receipts" / f"{attempt_id}.json").exists():
+        if not executed or _execution_receipt_bound(root, attempt_id):  # a file of the run that no event binds is no receipt
             raise
         raise HostStop("FINISH_FACT_UNDETERMINED", f"the started execution has no receipt yet ({error})", _INTERRUPTED_FIX) from error
     result = closed["result"]

@@ -356,8 +356,8 @@ def _budget(root: Path, step: Mapping[str, Any], found: Mapping[str, Any] | None
     if "bytes" in step:
         return {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
     found = found or step_size.stage_inputs(root, step["stage"], write_views=False)
-    report = step_size.measure(root.parents[1], [Path(row["path"]) for row in found["files"]], step["stage"].split(":", 1)[0],
-                               extra_bytes=sum(row["bytes"] for row in found["bindings"]))
+    report = step_size.measure(root.parents[1], [], step["stage"].split(":", 1)[0],  # the bytes are the rows' own: a view of the step that is not on the disk (status writes none) is no refusal
+                               extra_bytes=sum(row["bytes"] for row in (*found["files"], *found["bindings"])))
     return {key: report[key] for key in ("bytes", "budget_bytes", "fits", "hint")}
 
 
@@ -389,7 +389,10 @@ LOST_WORD_MARK = "codeword-lost-"  # + the stage as its slot is named (``:`` →
 def _mark_lost_word(project: Path, root: Path, stage: str) -> None:
     """The word of the batch was shown once and is asked for again: a mark of the run for the report, no refusal (the repeat is a call that succeeded).
     The mark is a file of its own, made exclusively; a repeat finds it and writes nothing."""
-    confined_output.create_confined_bytes_exclusive(project, root, root / (LOST_WORD_MARK + stage.replace(":", "-")), stage.encode("utf-8"))
+    try:
+        confined_output.create_confined_bytes_exclusive(project, root, root / (LOST_WORD_MARK + stage.replace(":", "-")), stage.encode("utf-8"))
+    except confined_output.OutputConfinementError:  # other bytes in the place of the mark (an agent, a cleaning): the report loses its line, the call goes on
+        pass
 
 
 def _cached(stage: str, reuse: bool = False) -> contextlib.AbstractContextManager:
@@ -522,6 +525,7 @@ def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry
         if step["done"] and not (step.get("recheck") and slot(root, stage).is_file()):
             return {"stage": stage, **step["direct"][0](root, step)}
         _refuse_terminal(state, attempt_id)
+        _refuse_linked_inbox(root)
         return {"stage": stage, **step["direct"][1](root, load(str(slot(root, stage)), project).value, dry_run)}
     if _events(state, attempt_id, stage, "MODEL_RESPONSE_RECEIVED"):  # the recorded answer stands: the slot is not read again
         return {"stage": stage, "answered": True, **({} if dry_run else _accepted(root, stage))}
@@ -535,6 +539,7 @@ def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry
         from tools.orchestrate_test_case_revision import refuse_closed_review
 
         refuse_closed_review(root, attempt_id)
+    _refuse_linked_inbox(root)  # as prepare: a link in the place of incoming leads out of the run, and the way out the refusal names is a new run
     answer = load(str(slot(root, stage)), project)
     check, told = STEPS[stage.split(":", 1)[0]][2], {}
     key = step.get("extra")  # a key of the slot that is not part of the answer (the evidence of the review): taken out before the answer is checked

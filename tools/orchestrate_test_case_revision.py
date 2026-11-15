@@ -733,6 +733,7 @@ def abort_rework_review(run_root: Path, attempt_id: str, reason: str, dry_run: b
     """``submit --abort`` of the second round: no verdict is coming; the set closes as for a rework nobody finished («Доработка не завершена.»); ``finish`` follows."""
     if reason not in ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE"):
         raise ValueError(f"REVIEWER_ABORT_REASON_INVALID: {reason}; fix: --abort REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE")
+    _require_open_attempt(run_root, attempt_id)
     data = rework_round_data(run_root, attempt_id, need_answer=True)
     if data["report2"] is not None:
         raise ValueError("REVIEW_CLOSED: the review of the rework has its answer; fix: submit без --abort довершает итог")
