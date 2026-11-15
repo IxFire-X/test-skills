@@ -8,22 +8,21 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
 if __package__:
-    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
+    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
     from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from .schema_validation import StrictJsonError, load_json_strict
     from .stack_catalog import is_ignored_path
-    from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+    from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
 else:
-    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
+    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
     from discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from schema_validation import StrictJsonError, load_json_strict
     from stack_catalog import is_ignored_path
-    from skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+    from skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
 
 
 __all__ = ["OutputConfinementError"]
@@ -490,28 +489,20 @@ def _preserve_immutable_evidence(project_root: Path, directory: Path | None, ori
 
 
 def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None, *, before_replace: Any = None) -> bytes:
-    handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc.", suffix=".tmp", dir=project_dir)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(_payload(document))
-            stream.flush()
-            os.fsync(stream.fileno())
-        load_skillsrc(temporary)
-        fresh = discover_project(project_dir)
-        if fresh.get("fingerprint") != expected_fingerprint:
-            raise InitError("project_changed", "project manifests changed during initialization")
-        current = destination.read_bytes() if destination.exists() else None
-        if current != expected_destination:
-            raise InitError("destination_changed", ".skillsrc changed during initialization")
-        if before_replace is not None:
-            before_replace()
-        os.replace(temporary, destination)
-        read_back = destination.read_bytes()
-        load_skillsrc(destination)
-        return read_back
-    finally:
-        if temporary.exists(): temporary.unlink()
+    payload = _payload(document)
+    parse_skillsrc_bytes(payload)  # the check the temporary file had: valid before anything is written
+    fresh = discover_project(project_dir)
+    if fresh.get("fingerprint") != expected_fingerprint:
+        raise InitError("project_changed", "project manifests changed during initialization")
+    current = destination.read_bytes() if destination.exists() else None
+    if current != expected_destination:
+        raise InitError("destination_changed", ".skillsrc changed during initialization")
+    if before_replace is not None:
+        before_replace()
+    atomic_write_confined_bytes_in_project(project_dir, destination.name, payload)
+    read_back = destination.read_bytes()
+    load_skillsrc(destination)
+    return read_back
 
 
 def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str, exit_code: int | None = None, *, proposal: Mapping[str, Any] | None = None, read_back: bytes | None = None) -> dict[str, Any]:

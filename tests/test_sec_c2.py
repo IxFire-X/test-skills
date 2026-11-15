@@ -349,8 +349,7 @@ WRITES_OUTSIDE_CONFINED_OUTPUT = {
     "publish_test_case_bundle.py": (6, "the bundle of the run: <run>/published only (orchestrate.published_dir asks output_guard.run_output_directory at every entry; a link out is refused), hard link install"),
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),
-    "init_skillsrc.py": (4, "the .skillsrc in the root of the project given by --project: mkstemp of its temporary file, os.replace of it over .skillsrc and unlink of it after a failure "
-                            "(confined_output takes no project root as its root, so there is no function for a file there); the fourth is the --output report, whose target comes from acquire_confined_output"),
+    "init_skillsrc.py": (1, "the --output report of init: its target comes from acquire_confined_output (below docs/to_do); the .skillsrc of the project is written by confined_output"),
 }
 
 

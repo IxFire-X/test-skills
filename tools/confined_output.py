@@ -15,6 +15,7 @@ __all__ = [
     "OutputConfinementError",
     "acquire_confined_output",
     "atomic_write_confined_bytes_at_root",
+    "atomic_write_confined_bytes_in_project",
     "create_confined_directory_exclusive",
     "create_confined_bytes_exclusive",
     "ensure_project_child_directory",
@@ -329,6 +330,33 @@ def _write_bytes(target: ConfinedOutputTarget, data: bytes) -> None:
 def atomic_write_confined_bytes_at_root(project_root: Path, confined_root: Path, target: Path, data: bytes) -> None:
     """Atomically replace one mutable journal below an explicitly pinned confined root."""
     with _acquire_confined_native_output(project_root, confined_root, target, create_parents=True) as record:
+        _write_bytes(record, data)
+
+
+_PROJECT_ROOT_FILES: Final = frozenset({".skillsrc"})  # the only file the core writes in the root of a project: a new name is a change of the core, with its reason
+
+
+def atomic_write_confined_bytes_in_project(project_root: Path, name: str, data: bytes) -> None:
+    """Atomically replace ``name`` directly in the root of the project, pinned by its directory guard; only the names of ``_PROJECT_ROOT_FILES``."""
+    if name not in _PROJECT_ROOT_FILES:
+        raise OutputConfinementError("name is not an allowed file of the project root")
+    if "/" in name or "\\" in name:  # one component, whatever the list says
+        raise OutputConfinementError("name must be one path component")
+    _safe_components((name,))
+    try:
+        root = project_root.resolve(strict=True)
+        guard = _open_directory_guard(root)
+    except OSError as error:
+        raise OutputConfinementError("project root is unavailable or unsafe") from error
+    try:
+        record = ConfinedOutputTarget(root, (), root, _identity(root), name, (guard,))
+    except BaseException:
+        _close_guard(guard)
+        raise
+    with record:
+        leaf = _leaf_details(record)
+        if _destination_is_unsafe(record) or (leaf is not None and not _regular_details(leaf)):
+            raise OutputConfinementError("target is not a regular file")
         _write_bytes(record, data)
 
 
