@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import functools
 import hashlib
+import io
 import json
 import os
 import re
@@ -141,6 +144,21 @@ def emit_error(message: str, prog: str | None = None) -> None:
                "--attempt у prepare и submit нет") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"
         payload.update(code="INVALID_ARGUMENT", message=message, fix=fix)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def one_closure(command):
+    """One ``closure_cache()`` for a command: the journal is checked once, not on every read; what the command prints is let out after the final full check."""
+    @functools.wraps(command)
+    def wrapper(args):
+        from tools.pilot_state import closure_cache  # imported when the command runs: pilot_state is heavy
+
+        held = io.StringIO()
+        with contextlib.redirect_stdout(held), closure_cache():
+            code = command(args)
+        sys.stdout.write(held.getvalue())
+        return code
+    wrapper.__closure_cached__ = True
+    return wrapper
 
 
 class JsonArgumentParser(argparse.ArgumentParser):

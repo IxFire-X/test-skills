@@ -22,6 +22,8 @@ ENTRY_POINTS = [
     ("tools.finalize_attempt", "finalize_attempt"),
     ("tools.exec_commands", "cmd_materialize"),
     ("tools.exec_commands", "cmd_ingest"),
+    ("tools.run_pipeline", "cmd_scan"),
+    ("tools.run_pipeline", "cmd_finish"),
 ]
 
 

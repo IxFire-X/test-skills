@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
 from tools.fixes import fix_for
-from tools.json_cli import JsonArgumentParser
+from tools.json_cli import JsonArgumentParser, one_closure
 from tools.run_lock import JournalRefusal
 from tools.project_inventory import (
     ContextSelectionError,
@@ -1327,6 +1327,7 @@ def _inventory_invalid_detail(error: BaseException) -> str:
     return "scan input or receipt is invalid"
 
 
+@one_closure
 def cmd_scan(args: Any) -> int:
     """Scan, then ``run_id: <id>`` as the last line of the output."""
     _PRINTED.clear()
@@ -1824,6 +1825,7 @@ def _refuse_run_of_full_delivery(args: Any) -> None:
         raise HostStop("MODE_B_NOT_IN_PACKAGE", f"прогон {run} сделан профилем {profile}, а в этой поставке нет режима автотестов")
 
 
+@one_closure
 def cmd_finish(args: Any) -> int:
     """Close the current attempt in one command — the same order and checks as the manual sequence."""
     _refuse_run_of_full_delivery(args)

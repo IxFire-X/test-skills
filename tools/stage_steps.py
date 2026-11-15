@@ -404,15 +404,14 @@ def _mark_lost_word(project: Path, root: Path, stage: str) -> None:
 
 
 def _cached(stage: str, reuse: bool = False) -> contextlib.AbstractContextManager:
-    """The automation stages and a reuse (it reads the source run whole, twice) read the journal and its receipts many times in one call: one closure cache for the call
-    (the way ``open_review`` runs)."""
+    """Every stage reads the journal and its receipts many times in one call: one closure cache for the call (the way ``open_review`` runs), the inventory too for
+    the automation stages and a reuse (it reads the source run whole, twice)."""
     from tools.project_inventory import inventory_cache
 
-    if not reuse and not stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
-        return contextlib.nullcontext()
     stack = contextlib.ExitStack()
     stack.enter_context(pilot_state.closure_cache())
-    stack.enter_context(inventory_cache())
+    if reuse or stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
+        stack.enter_context(inventory_cache())
     return stack
 
 

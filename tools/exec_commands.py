@@ -5,11 +5,8 @@ it, ``ingest`` takes the reports; ``exec`` only answers that it was replaced.  T
 from __future__ import annotations
 
 import ast
-import contextlib
 import dataclasses
-import functools
 import hashlib
-import io
 import os
 import stat
 import sys
@@ -19,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from tools.json_cli import one_closure as _one_closure
 from tools.run_pipeline import HostStop, command_token
 from tools.execution_core import (
     automation_split_fields as _automation_split,
@@ -37,21 +35,6 @@ from tools.execution_core import (
     process_evidence_row as _core_process_row,
 )
 from tools.run_tests import ProcessOutcome
-
-
-def _one_closure(command: Any) -> Any:
-    """One ``closure_cache()`` for a command: the journal is checked once, not on every read; what the command prints is let out after the final full check."""
-    @functools.wraps(command)
-    def wrapper(args: Any) -> int:
-        from tools.pilot_state import closure_cache
-
-        held = io.StringIO()
-        with contextlib.redirect_stdout(held), closure_cache():
-            code = command(args)
-        sys.stdout.write(held.getvalue())
-        return code
-    wrapper.__closure_cached__ = True
-    return wrapper
 
 
 def _resolve_host_context(
