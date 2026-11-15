@@ -479,6 +479,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or new scan"),
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
+        if kind == "rework-round" and not pilot.rework_round_bound(state, attempt_id):
+            continue  # a file the journal does not bind is no receipt and no damage (a cut submit leaves one: its repeat writes it again)
         if not path.exists():
             if kind == "effective-canonical":  # gone where the journal recorded an accepting verdict is a named loss, not «nothing yet»
                 try:

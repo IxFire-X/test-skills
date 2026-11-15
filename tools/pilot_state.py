@@ -5077,10 +5077,15 @@ def publish_rework_round(run_root: Path, attempt_id: str, candidate_digest: str,
     return publish_bound(run_root, attempt_id, "rework-round", {"rounds": 1, "candidate_digest": candidate_digest, "report_digest": report_digest}, batch_id=REWORK_BATCH)
 
 
+def rework_round_bound(state: Mapping[str, Any], attempt_id: str) -> bool:
+    """Whether the journal binds a receipt ``rework-round`` of the attempt: a file of the run that it does not bind is no receipt and no damage."""
+    return any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == REWORK_BATCH for event in state["events"])
+
+
 def rework_round_if_present(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
     """The receipt ``rework-round`` read back, or None where the review did not send cases back for a rework."""
     project, root = _run_root(run_root)
-    if not any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == REWORK_BATCH for event in derive_state(root)["events"]):
+    if not rework_round_bound(derive_state(root), attempt_id):
         return None  # a file the journal does not bind is no receipt (the repeat of a cut submit writes it again through publish_bound): not read, nothing written
     target = _receipt_target(root, attempt_id, "rework-round")
     try:

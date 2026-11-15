@@ -452,6 +452,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     elif fresh_context is not None or invocation_id is not None:  # the statement of the session is the source's: the host does not make it again
         raise ValueError("INVALID_ARGUMENT: --fresh-context и --invocation-id не идут с --reuse-from — сессия и независимость ревью берутся из источника; fix: prepare --stage "
                          f"{stage} --reuse-from <run_id>" + (" --accept-self-review (только если источник проверен в той же сессии и человек согласен)" if "open" in step else ""))
+    pilot_state.context_receipts(root, attempt_id, state)  # a changed file of the context is CONTEXT_DRIFTED with its way out, before any request or consent is written (the readers below fail after them)
     if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
         return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
