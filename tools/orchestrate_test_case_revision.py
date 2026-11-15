@@ -1073,9 +1073,22 @@ def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
         rejected = bool(ledger["session_complete"]) and ledger["authoritative_verdict_count"] == 1 and ledger["authoritative_verdict"] == "REJECTED"
     except (KeyError, OSError, TypeError, ValueError):
         rejected = False
-    if read_effective_canonical_if_present(Path(run_root), attempt_id) or rejected:
+    if read_effective_canonical_if_present(Path(run_root), attempt_id):
+        return []
+    if rejected:  # a select cut before its REJECTED file: the verdict is the journal's, the file is written again (the same bytes, created once)
+        from tools.review_canaries import recorded_answer
+
+        answer = recorded_answer(Path(run_root), attempt_id)
+        if answer is not None:
+            write_status_files(run_root, candidate, published, _PROFILE, "REJECTED", _blocking_notes(answer["artifacts"]["validation_report"]))
         return []
     return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED")
+
+
+def _blocking_notes(report: Mapping[str, Any]) -> list[str]:
+    """The blocking findings of a rejection, as the line beside the rejected set."""
+    return [f"{row.get('code', '—')} ({', '.join(map(str, row.get('related_ids') or [])) or '—'}): {row.get('message', '')}"
+            for row in report.get("findings") or [] if row.get("severity") == "BLOCKING"]
 
 
 def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
@@ -1236,9 +1249,7 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
             write_status_files(run_root, shown, output_dir, csv_profile, "REJECTED-CASES", extras=extras, intro=intro)
     if effective is None:
         if not dry_run:  # the rejected set with the blocking findings beside it — what the person has after a rejection
-            blocking = [f"{row.get('code', '—')} ({', '.join(map(str, row.get('related_ids') or [])) or '—'}): {row.get('message', '')}"
-                        for row in report.get("findings") or [] if row.get("severity") == "BLOCKING"]
-            write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", blocking)
+            write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", _blocking_notes(report))
         rework_facts = {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": "REWORK", "accepted": False, "reviewer_session_digest": facts["reviewer_session_digest"]}
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK", _freeze(rework_facts), ())
     if dry_run and second:  # the successor is not published: its bundle is checked when it is

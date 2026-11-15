@@ -1282,10 +1282,44 @@ def automation_next(run_root: Path, attempt_id: str) -> tuple[str, str | None]:
     return automation_outcome(run_root, attempt_id, blockers)
 
 
-def finish_closes(run_root: Path, attempt_id: str) -> bool:
-    """Would ``finish`` close this attempt now — the same reading as finish, without writing."""
+NEW_RUN_FIX = "новый прогон: scan с теми же --module, --docs, --profile и флагом --new-run"
+_REWORK_FIX = ("доработка кейсов ждёт своих шагов, а автоматизация ещё не начиналась — finish сейчас не закроет прогон и ничего не публикует: следующий шаг назовёт run_pipeline status "
+               "(prepare tc-generator:rework-1 или ревью доработки); отменить доработку — python -m tools.api submit --run-root <run> --stage tc-generator:rework-1 --abort REWORK_UNUSABLE "
+               "(у ревью доработки — --stage tc-reviewer:rework-1 --abort REVIEW_UNUSABLE); после отмены следующий шаг назовёт status")
+
+
+def _rework_waits(run_root: Path, attempt_id: str) -> bool:
+    return pilot_state.rework_round_if_present(run_root, attempt_id) is not None and pilot_state.read_effective_canonical_if_present(run_root, attempt_id) is None
+
+
+def finish_refusal(run_root: Path, attempt_id: str, abandon: str | None = None) -> None:
+    """Raises where ``finish`` cannot close this open attempt, decided by the journal and before anything is written (only reads).
+
+    A receipt the journal read back that no file carries is not a basis for a closing result (``EVIDENCE_UNVERIFIED``).  A rework that waits for its
+    steps is published and closed by finish, so what the attempt closes with is judged first: a cases-only run closes (``--abandon`` is not needed), a run
+    with an automation still to come does not."""
+    state = pilot_state.derive_state(run_root)
+    if pilot_state.lost_attempt_receipts(run_root, state, attempt_id):
+        raise FinalizationError("EVIDENCE_UNVERIFIED: журнал связывает квитанцию попытки, а файла нет — решение по файлам прогона не принимается", fix=NEW_RUN_FIX)
+    if not _rework_waits(run_root, attempt_id):
+        return
+    if next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)["policy_profile"] == "cases-only-v1":
+        if abandon is not None:
+            raise FinalizationError("ABANDON_NOT_NEEDED: попытку закрывает finish без --abandon (доработка будет закрыта как незавершённая)",
+                                    fix="python -m tools.run_pipeline finish --project <project> --run <run_id>")
+        return
     try:
-        _durable_branch_facts(run_root, attempt_id)
+        _automation_refusal(run_root, attempt_id, 0, abandon)
+    except FinalizationError as error:
+        raise FinalizationError("FINISH_FACT_UNDETERMINED: доработка кейсов не закончена, автоматизация не начиналась", fix=_REWORK_FIX) from error
+
+
+def finish_closes(run_root: Path, attempt_id: str) -> bool:
+    """Would ``finish`` close this attempt now — the same reading as finish (``finish_refusal``), without writing."""
+    try:
+        finish_refusal(run_root, attempt_id)
+        if not _rework_waits(run_root, attempt_id):
+            _durable_branch_facts(run_root, attempt_id)
     except (FinalizationError, KeyError, StopIteration, TypeError, ValueError, OSError):
         return False
     return True

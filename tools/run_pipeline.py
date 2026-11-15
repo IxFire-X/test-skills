@@ -1872,7 +1872,16 @@ def cmd_finish(args: Any) -> int:
 
     published_dir(root)  # a published directory that leads out of the run: refused before the attempt is closed
     if not executed:
-        close_pending_rework(root, attempt_id)  # the first review sent cases back and the rework is not over: r2 and the rejected cases are published now, once
+        from tools.finalize_attempt import NEW_RUN_FIX, finish_refusal
+
+        try:
+            if attempt.get("state") != "TERMINAL":
+                finish_refusal(root, attempt_id, abandon)  # judged by the journal, before the write below
+            close_pending_rework(root, attempt_id)  # the first review sent cases back and the rework is not over: r2 and the rejected cases are published now, once
+        except FinalizationError as error:
+            raise HostStop(str(error).split(":", 1)[0], str(error), _exact_fix(error.fix, project, root, attempt_id)) from error
+        except (KeyError, TypeError, ValueError) as error:  # a rework that does not read (its receipt is not the answer's): status would lead back here
+            raise HostStop("FINISH_FACT_UNDETERMINED", f"закрыть доработку не удалось ({str(error).split(':', 1)[0][:80]})", _exact_fix(NEW_RUN_FIX, project, root, attempt_id)) from error
     try:
         closed = (finalize_durable_execution_attempt(root, attempt_id) if executed
                   else finalize_durable_branch_attempt(root, attempt_id, abandon))
