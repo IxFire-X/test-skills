@@ -306,6 +306,10 @@ FIXES: dict[str, str] = {
     "STEP_INPUT_UNRESOLVED": "не стоп: вход шага нашёлся не по журналу (или два файла с одним digest) — одна строка человеку, шаг продолжай",
 }
 
+# not a row of the table: ``MATERIALIZATION_CONFLICT`` has many causes, and the table is read for any refusal of that code — this text belongs to the held path of ``submit`` only
+HELD_PATH_FIX = ("путь файла уже занят в проекте (он есть в описи прогона, `materialize` его не запишет): в ответе назови другой путь и другое имя класса; "
+                 "или человек убирает прежние тесты из проекта и делает `scan --new-run` (опись замораживает scan)")
+
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"
 
 

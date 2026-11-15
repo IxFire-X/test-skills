@@ -230,16 +230,22 @@ def _automation_check(root: Path, stage: str, value: Mapping[str, Any]) -> None:
     document = pilot_state.read_effective_canonical(root, str(attempt["attempt_id"]))["document"]
     rows = execution_gate.load_mode_b("automation_validation").validate_automation_artifact(dict(value), dict(document))
     adapters = execution_gate.load_mode_b("execution_adapters")
-    adapter = pilot_state.frozen_baseline(root, attempt)["adapter_id"]
+    frozen = pilot_state.frozen_baseline(root, attempt)
+    adapter = frozen["adapter_id"]
     language = "python" if adapter == adapters.PYTEST else "java" if adapter in {adapters.MAVEN, adapters.SYSTEM_MAVEN, adapters.GRADLE} else None
     if not rows and language is not None:
         compatibility = execution_gate.load_mode_b("run_tests").validate_artifact_runner_compatibility(
             root.parents[1] / str(attempt["module"]), language, document, value, materialized=False)
         rows = list(compatibility.diagnostics)
+    if not rows:  # a path of the project (the inventory of the run) is a refusal of ``materialize`` after two stages of the model: refused here, while the answer can be given again
+        held = execution_gate.load_mode_b("generated_delta").held_indexes(frozen, value["artifacts"]["generated_files"])
+        from tools.fixes import HELD_PATH_FIX
+
+        rows = [{"path": f"/artifacts/generated_files/{index}/path", "code": "MATERIALIZATION_CONFLICT", "fix": HELD_PATH_FIX} for index in held]
     if rows:
         from tools.fixes import fix_for
 
-        own = "; ".join(dict.fromkeys(text for row in rows[:3] if (text := fix_for(row["code"]))))  # what the code of each refusal asks, before the general way out
+        own = "; ".join(dict.fromkeys(text for row in rows[:3] if (text := row.get("fix") or fix_for(row["code"]))))  # what the code of each refusal asks, before the general way out
         raise pilot_state.ModelStageArtifactInvalid(
             f"invalid model stage artifact: {stage}: " + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in rows[:3]) + (f" and {len(rows) - 3} more" if len(rows) > 3 else "")
             + "; fix: " + (own + "; " if own else "") + "исправь ответ в слоте по этим строкам и повтори submit (--dry-run проверяет, ничего не записывая); ничего не записано, "

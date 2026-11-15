@@ -145,6 +145,12 @@ def _baseline_test_paths(baseline: Mapping[str, Any]) -> set[str]:
     return paths
 
 
+def held_indexes(baseline: Mapping[str, Any], generated: Sequence[Any]) -> list[int]:
+    """The rows of the generated files whose path the frozen baseline already holds — the files ``materialize`` refuses (``baseline-absence``)."""
+    held = _baseline_test_paths(baseline)
+    return [index for index, row in enumerate(generated) if isinstance(row, Mapping) and isinstance(row.get("path"), str) and row["path"].replace("\\", "/") in held]
+
+
 def _frozen_attempt(
     project: Path,
     module: Path,
