@@ -121,3 +121,20 @@ def test_finish_after_a_select_cut_before_its_rejected_file_leaves_a_file_of_the
     code, out = _finish(run["run_root"], capsys)
     assert code == 1 and out["reason_code"] == "REWORK", out
     assert [name for name in _published(run) if "REJECTED" in name or "UNREVIEWED" in name], _published(run)
+
+
+def test_finish_of_a_rejected_run_leaves_a_lying_rejected_file_as_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_review_canaries import _answer, _finding, _generated_run, _ids, _open, _select
+    from tools import orchestrate_test_case_revision as orchestrate
+
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, two = _ids(run)
+    _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [one["case_id"], two["case_id"]], "Нет проверки состояния.")]))
+    lying = run["run_root"] / "published" / next(name for name in _published(run) if name.endswith("REJECTED.md"))
+    lying.write_bytes(b"the form of an earlier version")  # a set rejected by another version of the package: other bytes of the same file
+    code, out = _finish(run["run_root"], capsys)
+    assert code == 1 and out["reason_code"] == "REWORK", out
+    assert lying.read_bytes() == b"the form of an earlier version"

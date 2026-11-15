@@ -1043,18 +1043,20 @@ def publish_unreviewed_candidate(
 
 
 def write_status_files(run_root: Path, document: Mapping[str, Any], output_dir: str | os.PathLike[str], csv_profile: str, status: str,
-                       notes: Sequence[str] = (), **shown: Any) -> list[str]:
+                       notes: Sequence[str] = (), keep_existing: bool = False, **shown: Any) -> list[str]:
     """``<doc>.rN.REJECTED|UNREVIEWED.html/.md`` — a set that is not accepted, with its header, never a CSV; created once below the run,
-    the same bytes again are accepted, nothing is replaced or removed."""
-    from tools.confined_output import create_confined_bytes_exclusive
+    the same bytes again are accepted, nothing is replaced or removed; ``keep_existing``: a file that lies is left as it is, whatever its bytes."""
+    from tools.confined_output import create_confined_bytes_exclusive, read_confined_bytes
 
     root = Path(run_root).resolve(strict=True)  # <project>/.pilot-runs/<run>; the confinement refuses a target outside it
     project = root.parent.parent
     base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}.{status}"
     paths = []
     for suffix, data in status_payloads(dict(document), csv_profile, status, notes, **shown):
-        create_confined_bytes_exclusive(project, root, base.with_name(f"{base.name}.{suffix}"), data)
-        paths.append(str(base.with_name(f"{base.name}.{suffix}")))
+        target = base.with_name(f"{base.name}.{suffix}")
+        if not (keep_existing and read_confined_bytes(project, root, target) is not None):
+            create_confined_bytes_exclusive(project, root, target, data)
+        paths.append(str(target))
     return paths
 
 
@@ -1075,12 +1077,12 @@ def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
         rejected = False
     if read_effective_canonical_if_present(Path(run_root), attempt_id):
         return []
-    if rejected:  # a select cut before its REJECTED file: the verdict is the journal's, the file is written again (the same bytes, created once)
+    if rejected:  # a select cut before its REJECTED file: the verdict is the journal's, a file that is not there is written, one that lies stays
         from tools.review_canaries import recorded_answer
 
         answer = recorded_answer(Path(run_root), attempt_id)
         if answer is not None:
-            write_status_files(run_root, candidate, published, _PROFILE, "REJECTED", _blocking_notes(answer["artifacts"]["validation_report"]))
+            write_status_files(run_root, candidate, published, _PROFILE, "REJECTED", _blocking_notes(answer["artifacts"]["validation_report"]), keep_existing=True)
         return []
     return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED")
 
