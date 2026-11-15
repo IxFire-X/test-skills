@@ -1117,10 +1117,14 @@ def _tests_clause(report: Mapping[str, Any]) -> str:
     counts, stats = report.get("counts") or {}, report.get("execution_stats") or {}
     if not counts.get("automation"):
         return ""
+    from tools.publish_test_case_bundle import plural
+
     failed, quarantine = stats.get("failed", 0) + stats.get("errors", 0), len(report.get("quarantine") or [])
+    unit = f"{stats.get('total')} {plural(stats.get('total') or 0, 'метода', 'методов', 'методов')}"  # Maven and Gradle show the runs: the unit is named
     tests = ("тесты не запустились (сборка или окружение)" if counts.get("execution") == "NOT_RUNNABLE" else
-             f"прошли {stats['passed']} из {stats['total']}" if counts.get("execution") == "PASS" and stats else
-             f"упали {failed} из {stats['total']}" + (f", в карантине {quarantine}" if quarantine else "") if stats else "запуск не выполнен")
+             "результаты запуска не получены" if counts.get("execution") == "UNKNOWN" else  # closed without reports (the numbers of such a close are zeros) or no verdict
+             f"прошли {stats['passed']} из {unit}" if counts.get("execution") == "PASS" and stats else
+             f"упали {failed} из {unit}" + (f", в карантине {quarantine}" if quarantine else "") if stats else "запуск не выполнен")
     return f"Автотесты: {tests}. Прогон {'принят' if counts.get('accepted') else 'не принят'}."
 
 
@@ -1189,7 +1193,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "## Числа", "",
         f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "
         f"исходных SREQ {_dash(counts['source_requirements'])}, канонических CREQ {_dash(counts['canonical_requirements'])}.", "",
-        *(f"- {key}: {_dash(value)}" for key, value in counts.items()),
+        *(f"- {key}: {_dash(value)}" for key, value in counts.items() if not (key == "accepted" and report["policy_profile"] == execution_gate.CASES_ONLY)),  # no run by the profile: `False` there reads as a contradiction of the first line
         *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа | Токены ответа (оценка) |", "|---|---|---|---|---|---|---|---|---|---|",

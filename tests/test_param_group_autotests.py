@@ -250,6 +250,24 @@ def test_a_repeated_row_index_is_an_error() -> None:
     assert errors, errors
 
 
+def test_a_gradle_testcase_named_by_the_display_name_of_a_method_says_so() -> None:
+    xml = ('<testsuite name="p.GroupTest" tests="1"><testcase name="TC-B1-014 Вход с верными данными" classname="p.GroupTest" time="0.1"/></testsuite>').encode("utf-8")
+    _rows, errors = _match(xml)
+    assert "unmatched JUnit testcase" in errors and any("@DisplayName on a method" in error for error in errors), errors
+
+
+def test_a_testcase_of_another_class_is_not_called_a_display_name() -> None:
+    xml = '<testsuite name="o.Other" tests="1"><testcase name="whatever" classname="o.Other" time="0.1"/></testsuite>'.encode("utf-8")
+    assert not any("@DisplayName" in error for error in _match(xml)[1])
+
+
+def test_a_report_named_by_text_gets_no_advice_to_run_the_same_command_again() -> None:
+    from tools.exec_commands import _mismatch_way_out
+
+    assert _mismatch_way_out(["unmatched JUnit testcase", "testcase of a reviewed class is named by text, not by a method: @DisplayName on a method"], "запустите ещё раз")         .startswith("тесты после materialize не правят")
+    assert _mismatch_way_out(["unmatched JUnit testcase"], "запустите ещё раз") == "запустите ещё раз"
+
+
 def test_a_gradle_row_naming_another_case_id_is_an_error() -> None:
     xml = (FIXTURES / "gradle-sample.xml").read_text(encoding="utf-8").replace("[3] TC-B1-003", "[3] TC-B1-002")
     _rows_out, errors = _match(xml.encode("utf-8"))

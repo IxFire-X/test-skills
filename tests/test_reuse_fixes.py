@@ -276,6 +276,32 @@ def test_the_scan_names_the_files_of_the_project_that_changed_since_the_source(t
     assert offered["reason"] == "входы иные: в проекте изменились файлы — появились 1: src/added_one.py"
 
 
+def test_the_scan_names_the_build_directories_that_appeared_since_the_source(tmp_path: Path) -> None:
+    src = _source(tmp_path)
+    (src["project"] / "build").mkdir()
+    (src["project"] / "build" / "out.txt").write_text("x\n", encoding="utf-8")
+    run_root, attempt_id = _new(src["project"])
+    offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert offered["run_id"] is None and offered["files"] == {"excluded_added": {"count": 1, "paths": ["build (BUILD_OUTPUT)"]}}, offered
+    assert offered["reason"] == "входы иные: в проекте появились каталоги сборки: build"
+
+
+def test_a_difference_of_the_inventories_that_is_in_no_file_and_no_exclusion_leaves_no_dash_and_no_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    inventory = {"files": [{"project_path": "a.py", "content_digest": "d"}], "exclusions": [{"project_path": ".tools", "reason_code": "EXCLUDED_DIRECTORY"}]}
+    monkeypatch.setattr(pilot_state, "_frozen_inventory", lambda *_args: inventory)
+    monkeypatch.setattr(pilot_state, "frozen_baseline", lambda *_args: {"inventory_digest": "x"})
+    assert pilot_state._changed_files(Path("."), Path("r"), {}, {"root": Path("s"), "attempt": {}}) == ("", None)
+
+
+def test_an_excluded_path_of_another_reason_is_named_with_its_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    mine = {"files": [], "exclusions": [{"project_path": "gen", "reason_code": "BINARY_OR_GENERATED"}]}
+    inventories = iter([mine, {"files": [], "exclusions": []}])
+    monkeypatch.setattr(pilot_state, "_frozen_inventory", lambda *_args: next(inventories))
+    monkeypatch.setattr(pilot_state, "frozen_baseline", lambda *_args: {"inventory_digest": "x"})
+    said, found = pilot_state._changed_files(Path("."), Path("r"), {}, {"root": Path("s"), "attempt": {}})
+    assert said == ": в проекте появились исключённые пути: gen (BINARY_OR_GENERATED)" and found["excluded_added"]["paths"] == ["gen (BINARY_OR_GENERATED)"]
+
+
 # ---- reuse4f: the order of the refusals, the files named once, the finding addressed to the step -----------------------------------------------
 
 def test_the_marker_of_a_source_with_a_finished_rework_and_a_damaged_batch_is_taken(reworked: dict, monkeypatch: pytest.MonkeyPatch) -> None:

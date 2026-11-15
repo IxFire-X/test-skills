@@ -82,28 +82,37 @@ def test_inline_java_review_rejects_class_display_name(tmp_path: Path, annotatio
     assert result.status == "NOT_RUNNABLE"
     rows = [row for row in result.diagnostics if row["code"] == "RUNNER_CLASS_DISPLAY_NAME"]
     assert len(rows) == 1 and rows[0]["path"] == "/artifacts/generated_files/0"
-    assert "убери" in rows[0]["message"] and "у методов можно" in rows[0]["message"]
+    assert "убери" in rows[0]["message"] and "именем метода" in rows[0]["message"]
     assert "Owner, pet" not in rows[0]["message"]
 
 
-def test_inline_java_review_keeps_method_display_name_and_commented_class_annotation(tmp_path: Path) -> None:
+def _java_review(tmp_path: Path, body: str):
     from tools.run_tests import validate_artifact_runner_compatibility
 
     document = automated_document()
     artifact = automation(document)
-    content = (
-        "package sample;\nimport org.junit.jupiter.api.*;\n"
-        "// @DisplayName(\"commented out\")\n/** {@code @DisplayName} is not used here */\n"
-        "@Tag(\"@DisplayName(\\\"in a string\\\")\")\nclass ProductsTest {\n"
-        "  @Test\n  @DisplayName(\"TC-1 method\")\n  void products() {}\n"
-        "  @Nested\n  @DisplayName(\"nested\")\n  class Inner { @Test void hidden() {} }\n}\n"
-    )
+    content = "package sample;" + chr(10) + "import org.junit.jupiter.api.*;" + chr(10) + body
     artifact["artifacts"]["generated_files"][0].update(
         path="src/test/java/sample/ProductsTest.java", language="java", framework="junit5",
         content=content, content_digest="sha256:" + hashlib.sha256(content.encode()).hexdigest(),
     )
     artifact["artifacts"]["generated_symbols"][0]["locator"] = {"kind": "java_class_method", "class_fqn": "sample.ProductsTest", "method_name": "products"}
-    assert validate_artifact_runner_compatibility(tmp_path, "java", document, artifact, materialized=False).status == "READY"
+    return validate_artifact_runner_compatibility(tmp_path, "java", document, artifact, materialized=False)
+
+
+def test_inline_java_review_ignores_a_display_name_that_is_a_comment_or_a_string(tmp_path: Path) -> None:
+    body = ('// @DisplayName("commented out")' + chr(10) + '/** {@code @DisplayName} is not used here */' + chr(10)
+            + '@Tag("@DisplayName(\\"in a string\\")")' + chr(10) + "class ProductsTest {" + chr(10) + "  @Test void products() {}" + chr(10) + "}" + chr(10))
+    assert _java_review(tmp_path, body).status == "READY"
+
+
+@pytest.mark.parametrize("where", ["method", "nested"])
+def test_inline_java_review_rejects_a_display_name_on_a_method_or_a_nested_class(tmp_path: Path, where: str) -> None:
+    """Gradle writes the display name of a method as the testcase name: the report cannot be matched to the method."""
+    method = '@Test @DisplayName("TC-1 method") void products() {}' if where == "method" else "@Test void products() {}"
+    nested = '@Nested @DisplayName("nested") class Inner { @Test void hidden() {} }' if where == "nested" else ""
+    result = _java_review(tmp_path, "class ProductsTest {" + chr(10) + method + chr(10) + nested + chr(10) + "}" + chr(10))
+    assert [row["code"] for row in result.diagnostics] == ["RUNNER_CLASS_DISPLAY_NAME"]
 
 
 def _sealed_authorization(*, profile: str, execution_requested: bool) -> dict:

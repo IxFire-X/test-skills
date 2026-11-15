@@ -250,3 +250,13 @@ def test_a_planted_receipt_with_the_right_digest_field_but_another_body_does_not
     target.write_text(json.dumps({"digest": digest, "plan": "подложено"}, ensure_ascii=False), encoding="utf-8")
     code, status = _pipeline(capsys, ["status", "--project", str(run["project"]), "--run", root.name])
     assert status.get("evidence_errors"), {key: status.get(key) for key in ("status", "warnings", "evidence_errors", "stop_reason")}
+
+
+def test_the_report_of_a_run_without_a_run_by_its_profile_does_not_print_accepted_in_the_numbers(tmp_path: Path) -> None:
+    """G6: the cases-only profile runs no tests, so `accepted: False` there only reads as a contradiction of the first line; a run with tests keeps it."""
+    from tools.run_report import render_markdown
+
+    report = _report(_opened(tmp_path))
+    assert "- accepted:" in render_markdown({**report, "policy_profile": "local-pilot-v1"})
+    only_cases = render_markdown({**report, "policy_profile": "cases-only-v1"})
+    assert "- accepted:" not in only_cases and "- execution:" in only_cases and "- completion:" in only_cases

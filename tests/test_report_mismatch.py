@@ -47,10 +47,10 @@ def test_class_display_name_in_report_gives_reason_and_fix_without_report_text(t
     assert notes == {
         "report_mismatch": f"отчёт JUnit не сопоставлен с тестами: методы класса {CLASS} записаны в отчёт под другим classname — "
                            "так делает @DisplayName на классе теста",
-        "report_fix": "убери @DisplayName с класса теста (у методов можно) и начни новый прогон тем же scan",
+        "report_fix": "убери @DisplayName с класса и методов теста и начни новый прогон тем же scan",
     }
     assert CLASS in notes["report_mismatch"] and "@DisplayName" in notes["report_mismatch"]
-    assert "у методов можно" in notes["report_fix"]
+    assert "и методов" in notes["report_fix"]
     assert "Owner, pet" not in str(notes) and "secret-ish" not in str(notes)
 
 

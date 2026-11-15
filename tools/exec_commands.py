@@ -925,6 +925,11 @@ def _finish_ingest(coordinates: Mapping[str, Any], report: Mapping[str, Any]) ->
     return int(closed["exit_code"])
 
 
+def _mismatch_way_out(problems: Sequence[str], again: str) -> str:
+    """The way out of a report that is not the reviewed tests: run again — but a testcase named by text (@DisplayName on a method) is named so again: the tests are not edited after materialize."""
+    return "тесты после materialize не правят, та же команда даст те же имена: уберите @DisplayName из автотестов и начните новый прогон тем же scan --new-run" if any("@DisplayName" in problem for problem in problems) else again
+
+
 def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: Mapping[str, Any], request: Any, printed: Mapping[str, Any],
                       reason: str, language: str) -> int:
     """``ingest --no-reports --reason …``: the human says the run left no reports.  Only a negative result can come of it: the tests were not
@@ -1088,7 +1093,7 @@ def cmd_ingest(args: Any) -> int:
     source = carriers["automation"]["artifacts"]["source"]
     problems = report_set_problems(snapshots, compatibility, source, language)
     if problems:
-        return _ingest_refusal(attempt_id, "INGEST_REPORT_MISMATCH", "; ".join(problems[:3]), f"отчёты не те тесты, что рецензированы: {again}. Команда: {command_text}",
+        return _ingest_refusal(attempt_id, "INGEST_REPORT_MISMATCH", "; ".join(problems[:3]), f"отчёты не те тесты, что рецензированы: {_mismatch_way_out(problems, again)}. Команда: {command_text}",
                                reports=[path.relative_to(project).as_posix() for path, _info in fresh][:10])
     ran_at, duration = _ran_at_and_duration(snapshots, fresh)
     run_id = "RUN-" + hashlib.sha256((digest + "\n" + "\n".join(sorted(row["digest"] for row in _report_digest_evidence(snapshots, module_root)))).encode("utf-8")).hexdigest()[:32]

@@ -221,23 +221,18 @@ def _brace_pairs(text: str) -> dict[int, int]:
     return pairs
 
 
-# Surefire writes a class display name that differs from the simple class name as the report classname,
-# so the report can no longer match the class FQN; a method display name leaves the testcase name alone.
+# Surefire writes a class display name as the report classname, so the report can no longer match the class FQN; Gradle writes
+# the display name of a method as the testcase name, so the report cannot match the method.  The test is named by its method alone.
 _CLASS_DISPLAY_ANNOTATION = re.compile(r"@\s*(?:[\w$]+\s*\.\s*)*(?:DisplayName|DisplayNameGeneration|IndicativeSentencesGeneration)\b")
 _CLASS_DISPLAY_NAME_FIX = (
-    "аннотация класса @DisplayName (@DisplayNameGeneration, @IndicativeSentencesGeneration) меняет classname в отчёте "
-    "Surefire — отчёт не сопоставится с классом теста: убери @DisplayName с класса; у методов можно"
+    "аннотация @DisplayName (@DisplayNameGeneration, @IndicativeSentencesGeneration) меняет имя класса или метода в отчёте "
+    "сборки — отчёт не сопоставится с тестом: убери её и с класса, и с методов; тест называется только именем метода"
 )
 
 
-def _java_class_display_name(class_name: str, text: str) -> bool:
-    """Whether the top-level test class carries an annotation that renames it in the Surefire report."""
-    masked = _mask_java_noncode(text)
-    declaration = re.search(r"\bclass\s+" + re.escape(class_name) + r"\b", masked)
-    if declaration is None:
-        return False
-    head = masked[:declaration.start()]
-    return _CLASS_DISPLAY_ANNOTATION.search(head[head.rfind(";") + 1:]) is not None
+def _java_display_name(text: str) -> bool:
+    """Whether the file carries, outside comments and strings, an annotation that renames a class or a method in the report."""
+    return _CLASS_DISPLAY_ANNOTATION.search(_mask_java_noncode(text)) is not None
 
 
 def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | None:
@@ -667,7 +662,7 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
         except (UnicodeDecodeError, SyntaxError):
             parsed[row["file_id"]] = None
             continue
-        if language == "java" and _java_class_display_name(file.stem, text):
+        if language == "java" and _java_display_name(text):
             diagnostics.append(_diag(pointer, "RUNNER_CLASS_DISPLAY_NAME", _CLASS_DISPLAY_NAME_FIX))
         if language == "java" and api_level is not None:
             diagnostics.extend(_java_api_level_diagnostics(pointer, text, api_level))
@@ -1058,6 +1053,8 @@ def match_junit_cases(
         group_rows[pair] = [{"index": index, "case_id": rows[index - 1], "status": status} for index, _name_id, status in sorted(seen)]
     if strict and unmatched:
         errors.append("unmatched JUnit testcase")
+        if java and any(case.classname == binding["locator"].get("class_fqn") for case in unmatched for binding in compatibility.bindings.values()):
+            errors.append("testcase of a reviewed class is named by text, not by a method: @DisplayName on a method")
     if strict:
         missing = [pair for pair, values in observed.items() if not values]
         if missing:

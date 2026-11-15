@@ -75,15 +75,34 @@ def _first_line(execution: str | None, accepted: bool | None, stats: dict | None
 
 def test_a_failed_run_of_the_tests_is_not_called_accepted_in_the_first_line() -> None:
     line = _first_line("FAIL", False, {"total": 75, "passed": 57, "failed": 18, "errors": 0}, quarantine=18)
-    assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75, в карантине 18. Прогон не принят.**"
+    assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75 методов, в карантине 18. Прогон не принят.**"
 
 
 def test_a_green_run_of_the_tests_is_accepted_in_the_first_line() -> None:
-    assert _first_line("PASS", True, {"total": 75, "passed": 75, "failed": 0, "errors": 0}) == "**Кейсы: принято 76 из 76. Автотесты: прошли 75 из 75. Прогон принят.**"
+    assert _first_line("PASS", True, {"total": 75, "passed": 75, "failed": 0, "errors": 0}) == "**Кейсы: принято 76 из 76. Автотесты: прошли 75 из 75 методов. Прогон принят.**"
+
+
+@pytest.mark.parametrize("total, words", [(1, "из 1 метода"), (2, "из 2 методов"), (5, "из 5 методов"), (11, "из 11 методов"), (21, "из 21 метода"), (57, "из 57 методов")])
+def test_the_unit_of_the_tests_in_the_first_line_is_declined_after_from(total: int, words: str) -> None:
+    assert f"упали 1 {words}," in _first_line("FAIL", False, {"total": total, "passed": total - 1, "failed": 1, "errors": 0}, quarantine=1)
+
+
+def test_a_set_accepted_in_part_names_the_unit_of_the_tests_too() -> None:
+    from tools.run_report import _acceptance_lines
+
+    report = {"acceptance": _acceptance(), "review_canaries": None, "reviewer_isolation_state": "verified", "quarantine": [],
+              "counts": {"automation": True, "execution": "PASS", "accepted": False}, "execution_stats": {"total": 57, "passed": 57, "failed": 0, "errors": 0}}
+    assert "Автотесты: прошли 57 из 57 методов. Прогон не принят." in "\n".join(_acceptance_lines(report))
 
 
 def test_a_run_closed_before_the_tests_says_the_tests_did_not_run() -> None:
     assert _first_line(None, False, None) == "**Кейсы: принято 76 из 76. Автотесты: запуск не выполнен. Прогон не принят.**"
+
+
+def test_a_run_closed_without_reports_does_not_read_as_no_test_failed() -> None:
+    """The close of `ingest --no-reports` gives the run UNKNOWN with the numbers all zeros: «упали 0 из 0» would read as «none failed»."""
+    line = _first_line("UNKNOWN", False, {"total": 0, "passed": 0, "failed": 0, "errors": 0, "skipped": 0})
+    assert line == "**Кейсы: принято 76 из 76. Автотесты: результаты запуска не получены. Прогон не принят.**"
 
 
 def test_tests_that_did_not_start_are_said_so_in_the_first_line() -> None:

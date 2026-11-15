@@ -330,7 +330,7 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
     return {
         "report_mismatch": (f"отчёт JUnit не сопоставлен с тестами: методы класса {', '.join(sorted(classes))} записаны в отчёт "
                             "под другим classname — так делает @DisplayName на классе теста"),
-        "report_fix": "убери @DisplayName с класса теста (у методов можно) и начни новый прогон тем же scan",
+        "report_fix": "убери @DisplayName с класса и методов теста и начни новый прогон тем же scan",
     }
 
 

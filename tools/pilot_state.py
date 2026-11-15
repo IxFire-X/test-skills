@@ -5614,15 +5614,24 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
 
 def _changed_files(project: Path, root: Path, attempt: Mapping[str, Any], source: Mapping[str, Any]) -> tuple[str, dict[str, Any] | None]:
     """The files of the project that differ between the inventory of this run and the source's — paths and counts (at most 10 paths of each kind), and the words of it."""
-    files = lambda base, owner: {row["project_path"]: row["content_digest"] for row in _frozen_inventory(project, base, str(frozen_baseline(base, owner)["inventory_digest"]))["files"]}  # noqa: E731
+    inventory = lambda base, owner: _frozen_inventory(project, base, str(frozen_baseline(base, owner)["inventory_digest"]))  # noqa: E731
     try:
-        mine, theirs = files(root, attempt), files(source["root"], source["attempt"])
+        inventories = inventory(root, attempt), inventory(source["root"], source["attempt"])
+        mine, theirs = ({row["project_path"]: row["content_digest"] for row in item["files"]} for item in inventories)
+        left, right = ({(row["project_path"], row["reason_code"]) for row in item["exclusions"]} for item in inventories)
     except (ValueError, OSError, KeyError, TypeError):
         return "", None
     rows = (("added", "появились", sorted(mine.keys() - theirs.keys())), ("removed", "пропали", sorted(theirs.keys() - mine.keys())),
             ("changed", "изменились", sorted(path for path in mine.keys() & theirs.keys() if mine[path] != theirs[path])))
     found = {kind: {"count": len(paths), "paths": paths[:10]} for kind, _word, paths in rows if paths}
-    return ": в проекте изменились файлы — " + "; ".join(f"{word} {len(paths)}: {', '.join(paths[:10])}{' …' if len(paths) > 10 else ''}" for _kind, word, paths in rows if paths), found
+    said = [f"{word} {len(paths)}: {', '.join(paths[:10])}{' …' if len(paths) > 10 else ''}" for _kind, word, paths in rows if paths]
+    for kind, word, pairs in (("excluded_added", "появились", sorted(left - right)), ("excluded_removed", "пропали", sorted(right - left))):  # the directories the tests of a run leave (build, .gradle) are excluded paths, not files
+        built = [path for path, reason in pairs if reason == "BUILD_OUTPUT"]
+        said += [f"{word} каталоги сборки: {', '.join(built[:10])}"] if built else []
+        other = [f"{path} ({reason})" for path, reason in pairs if reason != "BUILD_OUTPUT"]
+        said += [f"{word} исключённые пути: {', '.join(other[:10])}"] if other else []
+        found.update({kind: {"count": len(pairs), "paths": [f"{path} ({reason})" for path, reason in pairs[:10]]}} if pairs else {})
+    return (": в проекте " + ("изменились файлы — " if found.keys() & {"added", "removed", "changed"} else "") + "; ".join(said)) if said else "", found or None
 
 
 def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
