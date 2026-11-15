@@ -200,6 +200,37 @@ def _keep_declared_test_keys(module: Any, declared: Mapping[str, Any], *, new_fi
         test["executable"] = declared_test["executable"]
 
 
+_DISCOVERED = {"": {"schema_version", "version", "project", "discovery", "modules"}, "/project": {"name"},
+               "module": {"id", "root", "stack", "detected_from", "paths", "test"}, "paths": {"source", "tests", "resources", "context"}}
+
+
+def _keep_human_keys(proposed: dict[str, Any], existing: Mapping[str, Any], declared_modules: list[Any]) -> list[str]:
+    """What detection does not derive is the person's (limits, review, paths.exclude, the name …): it goes into the proposal as the file has it; returns the paths."""
+    kept: list[str] = []
+
+    def carry(target: dict[str, Any], source: Mapping[str, Any], derived: set[str], path: str) -> None:
+        for key, value in source.items():
+            if key not in derived and key not in target:
+                target[key] = copy.deepcopy(value)
+                kept.append(f"{path}/{key}")
+
+    project = existing["project"] if isinstance(existing.get("project"), Mapping) else {}
+    v3 = existing.get("version") == "3.0"  # a v2 file has other keys: only its service_url_env goes over, as it did
+    if v3 and project.get("name") and project["name"] != proposed["project"]["name"]:
+        proposed["project"]["name"] = project["name"]
+        kept.append("/project/name")
+    if v3:
+        carry(proposed, existing, _DISCOVERED[""], "")
+        carry(proposed["project"], project, _DISCOVERED["/project"], "/project")
+    for index, module in enumerate(proposed["modules"]):
+        declared = next((row for row in declared_modules if isinstance(row, Mapping) and row.get("id") == module.get("id")), {})
+        carry(module, declared, _DISCOVERED["module"] if v3 else set(declared) - {"service_url_env"}, f"/modules/{index}")
+        paths = module.get("paths") if isinstance(module.get("paths"), dict) else {}
+        carry(paths, declared.get("paths") if v3 and isinstance(declared.get("paths"), Mapping) else {}, _DISCOVERED["paths"], f"/modules/{index}/paths")
+        if paths: module["paths"] = paths
+    return kept
+
+
 def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
     """Public reconciliation question: deliberately contains no manifest values."""
     return {
@@ -852,23 +883,23 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
                 module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
             if (declared.get("paths") or {}).get("source") and not (module.get("paths") or {}).get("source"):
                 module.setdefault("paths", {})["source"] = list(declared["paths"]["source"])
-            if declared.get("service_url_env") and "service_url_env" not in module:
-                module["service_url_env"] = declared["service_url_env"]
             _keep_declared_test_keys(module, declared, new_file=existing is None)
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:
         return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
     if existing is not None:
+        kept = _keep_human_keys(proposed, existing, existing_modules)
         proposal = _proposal(existing, original, proposed)
+        shown = {"warnings": [f"сохранены ключи человека (только пути): {', '.join(kept)}"], "_preserved": kept} if kept else {}
         if not proposal["structural_diff"]:
             return _receipt("unchanged", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
         if not _replacement_is_bound(replacement_approval, proposal):
             if replacement_approval is not None:
                 return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], ["replacement_unbound"], fingerprint, proposal=proposal, exit_code=2)
-            return _receipt("needs_input", root, False, normalize_skillsrc(existing)["modules"], [_authority_question()], [], fingerprint, proposal=proposal)
+            return _receipt("needs_input", root, False, normalize_skillsrc(existing)["modules"], [_authority_question()], [], fingerprint, proposal=proposal) | shown
         if not write:
-            return _receipt("preview", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
+            return _receipt("preview", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal) | shown
         try:
             read_back = atomic_write_skillsrc(
                 root,
@@ -880,7 +911,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
             )
         except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
             return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
-        return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back)
+        return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back) | shown
     try:
         discovery_ids = {question["id"] for question in working_discovery.get("questions", [])}
         reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in effective_answers.items() if key not in discovery_ids})

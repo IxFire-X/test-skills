@@ -214,7 +214,7 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
         changed = {str(row.get("path")) for row in diff or [] if isinstance(row, Mapping)}
         before, after = _test_change(project)
         switch = any(path.endswith("/test/adapter_id") for path in changed) and (after or {}).get("adapter_id") == "maven:selected-symbols-v1"
-        diff = {"paths": diff, "test_before": before, "test_after": after}
+        diff = {"paths": diff, "preserved": receipt.get("_preserved") or [], "test_before": before, "test_after": after}
         check_id, block = ("execution:skillsrc-switch", EXECUTION) if switch else ("skillsrc", CASES)
         message = ("в .skillsrc записан wrapper, которого нет в проекте; предлагается системный mvn" if switch
                    else ".skillsrc расходится с проектом; предлагается замена")
