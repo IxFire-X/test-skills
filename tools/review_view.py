@@ -395,6 +395,8 @@ def _short(value: Mapping[str, Any]) -> str:
 
 def _step_operation(step: Mapping[str, Any], short: bool) -> str:
     operation = step["operation"]
+    if operation is None:  # a manual step: the word of the neighbour views, not JSON ``null``
+        return "—"
     return operation["capability_id"] if short and isinstance(operation, Mapping) and list(operation) == ["capability_id", "kind"] and operation["kind"] == "project_action" else _json(operation)
 
 
@@ -427,7 +429,7 @@ def _autotest_step(step: Mapping[str, Any], short: bool = False, moved: Collecti
     return lines
 
 
-REVIEW_LEGEND = ("- Вид для ревьюера, короткая запись: `Операция: CAP-…` — операция project_action этой capability; `@x` — project_result{\"name\":\"x\"}; `STEP-….x` — step_output этого шага и выхода x;"
+REVIEW_LEGEND = ("- Вид для ревьюера, короткая запись: `Операция: CAP-…` — операция project_action этой capability, `Операция: —` — ручной шаг; `@x` — project_result{\"name\":\"x\"}; `STEP-….x` — step_output этого шага и выхода x;"
                  " у `Выход x тип` источник — project_result того же имени. Операция шага и ASSERT (оператор, значение), у которых есть связь с кодом, — в `tables.txt`"
                  " у символа: у такого шага в виде нет строк `Операция:` и `ASSERT-…`. Остальное — как в JSON.")
 
@@ -461,7 +463,7 @@ def _autotest(document: Mapping[str, Any], digest: str, short: bool = False, mov
     lines.append("## Кейсы")
     for case in document["test_cases"]:
         lines += ["", f"### {case['case_id']} {case['title']}", "", f"- требования {', '.join(case['requirement_ids'])}",
-                  f"- Цель: {case['objective']}"]
+                  *([f"- param_group: {case['param_group']}"] if case.get("param_group") else []), f"- Цель: {case['objective']}"]
         lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
         for step in sorted(case["steps"], key=lambda row: row["display_order"]):
             lines += _autotest_step(step, short, hidden.get((case["case_id"], step["step_id"]), ()))
@@ -584,8 +586,9 @@ def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[s
         line, middles = template_texts(list(texts))
         into = expected if line.lstrip().startswith(("Ожидание", "Проверки")) else values
         for own, middle in zip(into, middles):
-            if middle.strip() and middle.strip() not in own:
-                own.append(middle.strip())
+            shown_middle = middle.strip() or _json(middle)  # an empty or blank value is told apart by its quotes, as in JSON
+            if shown_middle not in own:
+                own.append(shown_middle)
         shown.append(line.replace(SLOT, f"<{parameter['name']}>"))
     title, _ = template_texts([case["title"] for case in cases])
     titled = len({case["title"] for case in cases}) > 1

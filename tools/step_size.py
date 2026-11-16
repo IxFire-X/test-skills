@@ -584,7 +584,7 @@ def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
     rows are those of the marker, byte for byte).  The plan the journal keeps is not changed."""
     rows = [{key: value for key, value in row.items() if key != "text"} for row in plan.get("source_requirements") or []]
     return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
-                     "view": PLAN_VIEW, "texts": "тексты требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[].text по source_requirement_id; в source_requirements фрагмента копируй их без изменений"})
+                     "view": PLAN_VIEW, "texts": "тексты требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[].text по source_requirement_id"})
 
 
 def _write_view(project: Path, root: Path, target: Path, data: bytes, write: bool) -> None:

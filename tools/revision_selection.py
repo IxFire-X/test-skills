@@ -486,6 +486,12 @@ def _regroup(candidate: dict[str, Any], outcome: dict[str, Any], passed: Sequenc
     return back, dropped
 
 
+def _rework_place(r3: dict[str, Any], path: str) -> str:
+    """The pointer of an error in r3 and, when it is inside a case, that case's ID: the agent reads its answer, not r3."""
+    match = re.match(r"/test_cases/(\d+)(?:/|$)", path)
+    return path + (f" ({r3['test_cases'][int(match[1])]['case_id']})" if match and int(match[1]) < len(r3["test_cases"]) else "")
+
+
 def check_rework(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any) -> dict[str, Any]:
     """r3 = r2 plus the answer's cases at r1's places, or ``SelectionError``: the answer is exactly the rejected cases (no other, none missing, none twice), each
     keeps its ``case_id``, ``requirement_ids``, ``display_order`` and ``param_group``, every other case is r2's byte for byte, and r3 passes the validator."""
@@ -515,7 +521,7 @@ def check_rework(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any
         raise _refuse("REWORK_FOREIGN_CASE_CHANGED", "a case outside the answer is not r2's byte for byte")
     rows = validate_canonical_document(r3)
     if rows:
-        raise SelectionError([_diagnostic(row["path"], "REWORK_INVALID", f"{row['code']}: {row['message']}") for row in rows[:5]])
+        raise SelectionError([_diagnostic(row["path"], "REWORK_INVALID", f"{_rework_place(r3, row['path'])}: {row['code']}: {row['message']}") for row in rows[:5]])
     return r3
 
 

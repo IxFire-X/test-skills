@@ -672,4 +672,4 @@ def test_a_form_other_than_the_two_the_short_form_knows_stays_as_it_is() -> None
                  "expected": {"kind": "step_output", "step_id": "STEP-X-0", "extra": 1}}]}]}
     assert _autotest_step(step, True) == _autotest_step(step)
     step["operation"] = None  # a manual step has no operation
-    assert _autotest_step(step, True) == _autotest_step(step) and "Операция: null" in "\n".join(_autotest_step(step, True))
+    assert _autotest_step(step, True) == _autotest_step(step) and "Операция: —" in "\n".join(_autotest_step(step, True))

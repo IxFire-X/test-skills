@@ -32,9 +32,9 @@ def failure_note(message: str) -> tuple[str, str]:
 
     first = masked_failure_text((message or "").strip().splitlines()[0].strip()) if (message or "").strip() else ""
     match = _ASSERT_REF.search(first)
-    if match and match.start() == 0:
+    if match and match.start() == int(first.startswith("[")):  # AssertJ writes the label of ``as(…)`` in brackets
         # The mark already shows the ref, so the note does not repeat it.
-        first = first[match.end():].lstrip(" :-")
+        first = first[match.end():].lstrip(" :-]")
     return (match.group(0) if match else "FAIL"), _SAFE.sub("_", first)[:NOTE_LIMIT].rstrip()
 
 

@@ -283,7 +283,7 @@ FIXES: dict[str, str] = {
                                "новое ревью — новый прогон (`scan --new-run`)",
     "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (ключ `evidence` с путями в проекте в слоте ответа, затем `submit`) или закрой сессию "
                                       "`submit --stage tc-reviewer:canonical --abort REVIEW_CONTEXT_LIMIT`",
-    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (уже выданные называет `status`)",
+    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (уже выданные называет `status`); пустой `evidence` — убери ключ",
     "REVIEWER_EVIDENCE_DUPLICATE": "эти файлы уже выданы ревьюеру: не проси их снова, а новые пути — отдельным запросом",
     "REVIEWER_ABORT_REASON_INVALID": "`submit --abort` — REVIEW_CONTEXT_LIMIT (не хватило бюджета на evidence) или REVIEW_UNUSABLE "
                                      "(ответ дважды не прошёл проверку)",
