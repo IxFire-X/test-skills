@@ -5463,16 +5463,43 @@ def _input_differences(source: Mapping[str, Any], root: Path, attempt: Mapping[s
     """What the new run froze at its scan that the source froze otherwise: the project (its inventory), the requirements, the .skillsrc, the profile, the module."""
     mine = frozen_baseline(root, attempt)
     theirs = _strict(source["run_id"], "baselines", lambda: frozen_baseline(source["root"], source["attempt"]))
-    return [{"input": name, "given": get(mine), "source": get(theirs)} for name, get in _BASELINE_INPUTS.items() if get(mine) != get(theirs)]
+    rows = [{"input": name, "given": get(mine), "source": get(theirs)} for name, get in _BASELINE_INPUTS.items() if get(mine) != get(theirs)]
+    same = lambda base, baseline: _comparable(root.parents[1], _frozen_inventory(root.parents[1], base, str(baseline["inventory_digest"])))  # noqa: E731  (the project: the run root is project/.pilot-runs/<id>)
+    try:
+        by_composition = any(row["input"] == "inventory" for row in rows) and same(root, mine) == same(source["root"], theirs)
+    except (ValueError, OSError, KeyError, TypeError):
+        by_composition = False
+    return [{**row, "input": _SAME_COMPOSITION if by_composition and row["input"] == "inventory" else row["input"]} for row in rows]
+
+
+_SAME_COMPOSITION = ("inventory (состав проекта тот же: в нём тесты прошлого прогона или каталоги сборки, а план и пачки привязаны к квитанциям контекста с описью целиком — "
+                     "они делаются заново; разметка берётся)")
+
+
+def _test_roots(project: Path, inventory: Mapping[str, Any]) -> tuple[str, ...]:
+    """The test roots the human's ``.skillsrc`` names for the module of the inventory, as project paths with a trailing «/» — none when it does not read."""
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+
+    if not any(row["project_path"] == ".skillsrc" for row in inventory["files"]):  # the one of the project root, as the scan reads it: a nested one may be a file of an agent
+        return ()
+    try:
+        modules = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]
+    except (OSError, SkillsrcError, KeyError, TypeError, ValueError):
+        return ()
+    prefix = "" if inventory["module"] == "." else str(inventory["module"]).rstrip("/") + "/"
+    return tuple(prefix + root.rstrip("/") + "/" for item in modules if isinstance(item, Mapping) and item.get("root") == inventory["module"]
+                 for root in (item.get("paths") or {}).get("tests") or [] if isinstance(root, str))
 
 
 def _comparable(project: Path, inventory: Mapping[str, Any]) -> dict[str, Any]:
     """The inventory as «the same project» reads it — the whole body but its digest, without the files the package wrote in earlier runs (``own_files``)
-    and the build directories (BUILD_OUTPUT: not walked, the model never sees them).  What else the inventory says (path, bytes, kind, language, origin, the other exclusions) stays."""
+    and the build directories (BUILD_OUTPUT: not walked, the model never sees them).  What else the inventory says (path, bytes, kind, language, origin, the other exclusions) stays.
+    An own file is left out only when it is a test (kind) under a test root of the module by the ``.skillsrc`` — the root of the receipt is not trusted here."""
     from tools.existing_tests import own_files
 
-    own = own_files(project, inventory)[0]
-    return {**{key: value for key, value in inventory.items() if key != "digest"}, "files": [row for row in inventory["files"] if row["project_path"] not in own],
+    own, roots = own_files(project, inventory)[0], _test_roots(project, inventory)
+    return {**{key: value for key, value in inventory.items() if key != "digest"},
+            "files": [row for row in inventory["files"] if not (row["project_path"] in own and row.get("kind") == "test" and row["project_path"].startswith(roots))],
             "exclusions": [row for row in inventory["exclusions"] if row["reason_code"] != "BUILD_OUTPUT"]}
 
 
@@ -5581,7 +5608,11 @@ def _checked_source(project: Path, root: Path, state: Mapping[str, Any], attempt
     source = _run_source(project, run_id, whole=False)  # the journal, the markers and the verdict: what the refusals that need no answer read
     pack = skill_pack_digest()
     refusal = _source_refusal(source, str(attempt.get("module")), family)
-    differences = _input_differences(source, root, attempt) if refusal is None and family not in ("marker", "automation") else []  # the marker: its own inputs only, as before
+    differences: list[dict[str, Any]] = []
+    if refusal is None and family == "marker":  # its own inputs only, before its answer is read strictly: a changed file of the context is «входы иные», not a source that does not read
+        differences = _marker_differences(project, root, state, attempt, source, _marker_inputs(root, state, attempt), _marker_base(source))
+    elif refusal is None and family != "automation":
+        differences = _input_differences(source, root, attempt)
     if refusal is None and differences:
         refusal = "входы иные: " + ", ".join(row["input"] for row in differences)
     refusal = refusal or _other_pack(source, stage, pack)  # any change of the package cancels the reuse: coarse, but one fingerprint and no second mechanism
@@ -5634,6 +5665,13 @@ def _reuse_source(
     if str(request.get("model_id") or "").startswith("controller:"):
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage_instance_id} источника сделан кодом (merge) — сделай его тем же merge")
     return {"run_id": run_id, "attempt_id": str(source["attempt"]["attempt_id"]), "request_digest": str(request["digest"]), "response_digest": response}
+
+
+def _marker_inputs(root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any]) -> list[str]:
+    """requirements, inventory and the context receipts of the new run — the inputs a marker of it binds, in order."""
+    baseline = frozen_baseline(root, attempt)
+    published = dict.fromkeys(str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "CONTEXT_SELECTED")
+    return [baseline["requirements"]["digest"], baseline["inventory_digest"], *published]
 
 
 def _marker_stage_order(stage: str) -> tuple[int, int]:
@@ -5724,10 +5762,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     project, root = _run_root(run_root)
     state = derive_state(root)
     attempt = _attempt_of(state, attempt_id)
-    baseline = frozen_baseline(root, attempt)
-    published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
-                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
-    current = [baseline["requirements"]["digest"], baseline["inventory_digest"], *published]
+    current = _marker_inputs(root, state, attempt)
     pack = skill_pack_digest()
     first_refusal: dict[str, Any] | None = None
     runs = [path for path in (project / ".pilot-runs").iterdir() if path.name != root.name and (path / "events.jsonl").is_file()]

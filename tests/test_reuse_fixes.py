@@ -97,6 +97,7 @@ def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, part_pack: str
             "verdict": "ПРИНЯТО", "drift": False}
     monkeypatch.setattr(pilot_state, "_run_source", lambda project, run_id, whole=True: fake)
     monkeypatch.setattr(pilot_state, "_input_differences", lambda source, root, attempt: [])
+    monkeypatch.setattr(pilot_state, "_marker_differences", lambda *args: [])  # the source is no run on disk: its project is not compared here (as in ``test_marker_reuse``)
     return source_id, "context-marker:batch-001"
 
 

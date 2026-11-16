@@ -142,7 +142,11 @@ def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
     A run that does not read whole (moved project, damaged journal or receipt, a lock of another process) hides nothing and is counted:
     a file we cannot tell stays in the model input.  A run planted whole — journal and receipt, consistent — is not told apart: its
     ``test_root`` is taken from its own receipt, so it can hide from the model any file of the inventory whose digest it names, except the task
-    documents, ``.skillsrc`` and the closed manifests.  It gives no right to write (the baseline is the full inventory)."""
+    documents, ``.skillsrc`` and the closed manifests.  It gives no right to write (the baseline is the full inventory).
+
+    The same planted run also hides the change of such a file from «the same project» (``pilot_state._comparable``: a reuse of the marker, and of the plan, the
+    batches and the review once the project is otherwise the same).  That comparison leaves out an own file only if it is a test by its kind under a test root
+    of the module by the human's ``.skillsrc``, not by the root of the receipt: a planted receipt hides no file of the source and no test elsewhere."""
     from tools import pilot_state
 
     digests = {str(row.get("project_path")): row.get("content_digest") for row in inventory.get("files") or []}
