@@ -308,3 +308,12 @@ def test_ready_takes_a_folder_in_docs(tmp_path: Path) -> None:
     project = _project(tmp_path)
     report = ready.check(project, ["openspec/specs"], "cases-only-v1", None)
     assert not [row for row in report["checks"] if row["id"].startswith("docs") and row["level"] == "STOP"], report
+
+
+def test_docs_with_commas_are_refused_with_the_way_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import build_context
+
+    project = _project(tmp_path)
+    monkeypatch.setattr("sys.argv", ["build_context", "--project", str(project), "--docs", f"{BASE},{ADD}"])
+    assert build_context.main() == 2
+    assert "один файл на каждый --docs" in capsys.readouterr().out

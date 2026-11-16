@@ -81,6 +81,14 @@ def test_an_answer_that_is_not_exactly_the_rejected_cases_is_refused(answer, cod
     assert _code(lambda: check_rework(document, _first(document, 3), answer(document))) == code
 
 
+def test_the_identity_refusal_names_the_field_that_differs() -> None:
+    document = r1_document()
+    with pytest.raises(SelectionError) as raised:
+        check_rework(document, _first(document, 3), _answer(document, 3, display_order=70))
+    message = raised.value.diagnostics[0]["message"]
+    assert "display_order" in message and "requirement_ids" not in message, message
+
+
 def test_a_reworked_case_cannot_leave_a_requirement_without_a_case() -> None:
     from tools.revision_selection import coverage_gaps
 

@@ -206,3 +206,23 @@ def test_the_folder_of_an_archived_change_names_all_its_deltas(tmp_path: Path, m
 def test_an_archived_change_of_an_area_whose_spec_is_not_named_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     refusal = _scan_refused(tmp_path, monkeypatch, {ARCHIVE: MODIFY, BASE: SPEC}, [ARCHIVE], capsys, no_run=False)  # refused after the run is made, before any model call
     assert refusal["reason"] == "OPENSPEC_SOURCE_CONFLICT" and f'--docs "{BASE}"' in refusal["fix"], refusal
+
+
+def _ready_stop(tmp_path: Path, files: dict[str, str], docs: list[str]) -> tuple[str, dict]:
+    from tools import ready
+
+    project = _project(tmp_path)
+    for path, text in files.items():
+        _write(project, path, text)
+    report = ready.check(project, docs, "cases-only-v1", cases="cases/zephyr.csv")
+    return report["status"], next(row for row in report["checks"] if row["id"] == "context:openspec")
+
+
+def test_ready_with_cases_stops_where_scan_stops_on_an_archived_area_not_named(tmp_path: Path) -> None:
+    status, row = _ready_stop(tmp_path, {ARCHIVE: MODIFY, BASE: SPEC}, [ARCHIVE])  # was READY
+    assert status == "BLOCKED" and row["level"] == "STOP" and BASE in row["fix"], row
+
+
+def test_ready_with_cases_stops_where_scan_stops_on_one_of_two_deltas_of_an_archive(tmp_path: Path) -> None:
+    status, row = _ready_stop(tmp_path, {ARCHIVE: MODIFY, SECOND: MODIFY, BASE: SPEC}, [BASE, ARCHIVE])
+    assert status == "BLOCKED" and "openspec/changes/archive/2026-11-01-update" in row["fix"], row

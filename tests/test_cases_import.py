@@ -88,6 +88,28 @@ def test_scan_cases_refusals_write_no_run(tmp_path: Path, monkeypatch: pytest.Mo
     assert not (project / ".pilot-runs").exists() or not any((project / ".pilot-runs").iterdir())
 
 
+def test_scan_says_how_many_cases_it_read_from_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _code, scan = _scan(_project(tmp_path), monkeypatch)
+    assert any("cases/zephyr.csv" in line and "кейсов 2" in line for line in scan["warnings"]), scan.get("warnings")
+
+
+def test_ready_takes_the_csv_of_cases_and_says_how_many_cases_it_holds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import ready
+
+    ready.main(["--project", str(_project(tmp_path)), "--cases", "cases/zephyr.csv", "--profile", "cases-only-v1"])
+    row = next(item for item in json.loads(capsys.readouterr().out)["checks"] if item["id"] == "cases")
+    assert row["level"] == "OK" and "кейсов 2" in row["message"], row
+
+
+def test_ready_refuses_a_csv_of_cases_as_scan_does(tmp_path: Path) -> None:
+    from tools import ready
+
+    project = _project(tmp_path, HEADER + "\r\nКейс,Цель,,High,Шаг,\"Операция: не определена\",Итог\r\n")
+    report = ready.check(project, [], "cases-only-v1", cases="cases/zephyr.csv")
+    row = next(item for item in report["checks"] if item["id"] == "cases")
+    assert report["status"] == "BLOCKED" and row["level"] == "STOP" and "IMPORT_CSV_V4" in row["message"] and row["fix"], row
+
+
 def test_cases_import_answers_the_requirements_part_by_code_one_source_requirement_per_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import api, context_marker_parts
     from tools.pilot_state import derive_state, read_model_request, read_model_stage_artifact

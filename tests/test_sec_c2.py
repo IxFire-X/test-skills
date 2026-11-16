@@ -43,7 +43,7 @@ PATH_FLAGS = {
     "exec_commands.py": {"--run": "run"},
     "init_skillsrc.py": {"--project": "parser", "--answers": "guard", "--replacement-approval": "guard",
                          "--immutable-evidence-dir": "guard", "--output": "confined"},
-    "ready.py": {"--project": "parser", "--docs": "guard"},
+    "ready.py": {"--project": "parser", "--docs": "guard", "--cases": "guard"},  # texts2: the value goes through check_cases → _input_files, as in scan
     "release_manifest.py": {"--root": "maintainer"},
     "render_contract_docs.py": {"--root": "maintainer"},
     "review_edits.py": {"--candidate": "guard", "--edits": "guard"},

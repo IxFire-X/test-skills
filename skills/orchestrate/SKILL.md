@@ -51,7 +51,7 @@ permissions:
 на пачку; замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `python -m tools.api submit --run-root <run> --stage <id>` принимает его (`--dry-run` — только проверки; `--transport-attempts 2` —
 единственный повтор) и печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело. `<id>` с номером ревизии (`…:r1`) называет `status`. Роль стадии — `skills/<роль>/SKILL.md` (контракт и схема ответа — там): `context-marker`, `tc-generator`, `tc-reviewer`.
 
-1. **Разметка.** `context-marker:baseline`, либо частями `:requirements`, затем `:batch-NNN`. Digest источника — `digest` строки списка `list_path`, не свой `sha256sum`. Импорт — [import.md](references/import.md).
+1. **Разметка.** `context-marker:baseline`, либо частями `:requirements`, затем `:batch-NNN`. Digest — sha256 файла-источника, как печатает `build_context`, не строка `list_path`. Импорт — [import.md](references/import.md).
 2. **Пауза.** Пробелы без канала наблюдения, ожидаемого результата или доступа — `state: scope_pause` (`scope_gaps`). `prepare --stage scope` печатает пробелы и формы ответа.
    Остановись: покажи человеку список, спроси «исключить или продолжать»; его слова — в `answer_slot`, затем `submit --stage scope`. Без ответа `submit --stage plan`
    отказывает `SCOPE_PENDING`. Решение за человеком (исключить можно и без пробелов, до плана), другое — новый прогон; `scan --no-pause` просит человек, ты его не добавляешь.

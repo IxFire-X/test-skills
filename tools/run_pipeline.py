@@ -897,9 +897,9 @@ def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: 
 
 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
-                    target: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
+                    target: str | None = None, cases: bool = False) -> tuple[list[str], list[dict[str, Any]], int]:
     """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
-    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root)
+    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root, cases=cases)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
     sectioned = _sectioned_ids(inventory, project, docs)
@@ -1300,28 +1300,36 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
     return {"drift": _drift_report(project, manifest, result.get("changed") or [])}
 
 
+def check_cases(project: Path, cases: str) -> tuple[str, int]:
+    """``(path in the project, number of cases)`` of the Zephyr CSV of ``--cases`` — only reads; a refusal is ``HostStop`` or ``CasesImportError`` (scan and ready)."""
+    from tools.cases_import import CasesImportError, read_cases
+
+    [(rel, data)] = _input_files(project, [cases], "--cases",
+                                 outside_fix="CSV кейсов должен лежать внутри проекта: укажите --cases путём от корня проекта")
+    from tools.cases_import import password_cells, secret_cell
+    from tools.project_inventory import _secret_rule
+
+    cases_read = read_cases(data)
+    passwords = password_cells(cases_read)  # a plain password in a cell, by row and column, never the value
+    if passwords:
+        raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + "; ".join(passwords[:5]))
+    secret = _secret_rule(project / rel, data, rel)  # the rule the inventory would leave the CSV out by
+    if secret is not None:
+        cell = secret_cell(cases_read, secret[0])  # and the cell it is in, as for a password
+        raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + (f"{cell}: " if cell else "")
+                               + f"правило секретов {secret[0]} ({secret[1]}) — файл не войдёт в опись")
+    return rel, len(cases_read)
+
+
 def _scan_cases(project: Path, args: Any) -> int | None:
     """``--cases`` — the Zephyr CSV is checked before anything is written and becomes the document of the run."""
-    from tools.cases_import import CasesImportError, read_cases
+    from tools.cases_import import CasesImportError
 
     cases = getattr(args, "cases", None)
     if not cases:
         return None
     try:
-        [(rel, data)] = _input_files(project, [cases], "--cases",
-                                     outside_fix="CSV кейсов должен лежать внутри проекта: укажите --cases путём от корня проекта")
-        from tools.cases_import import password_cells, secret_cell
-        from tools.project_inventory import _secret_rule
-
-        cases_read = read_cases(data)
-        passwords = password_cells(cases_read)  # a plain password in a cell, by row and column, never the value
-        if passwords:
-            raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + "; ".join(passwords[:5]))
-        secret = _secret_rule(project / rel, data, rel)  # the rule the inventory would leave the CSV out by
-        if secret is not None:
-            cell = secret_cell(cases_read, secret[0])  # and the cell it is in, as for a password
-            raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + (f"{cell}: " if cell else "")
-                                   + f"правило секретов {secret[0]} ({secret[1]}) — файл не войдёт в опись")
+        rel, args.cases_read = check_cases(project, cases)
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
         return 2
@@ -1573,6 +1581,8 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
     """The answer of a scan that made (or finished) the run."""
     context_skipped = plan["context_skipped"]
     unread = plan["own_runs_unread"]
+    if getattr(args, "cases_read", None):
+        context_warnings = [*context_warnings, f"CSV {args.cases}: кейсов {args.cases_read}"]
     if unread:  # the human must see why the input is larger than it was meant to be (a moved project, a damaged run), and which runs
         context_warnings = [*context_warnings, f"OWN_TESTS_UNREAD: прошлых прогонов не прочитано: {len(unread)} ({', '.join(unread[:5])}{f' и ещё {len(unread) - 5}' if len(unread) > 5 else ''}; папка проекта перенесена или скопирована, "
                             "прогон повреждён или занят другой командой); это не ошибка, работу можно продолжать — тесты, записанные ими в проект, остаются во входе модели, вход больше"]

@@ -355,7 +355,7 @@ def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = (
 
 
 def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any],
-                  target: str | None = None) -> dict[str, Any]:
+                  target: str | None = None, cases: bool = False) -> dict[str, Any]:
     """What will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
     from tools.project_inventory import ContextStop, skipped_summary
     from tools.run_pipeline import HostStop, context_preview
@@ -363,7 +363,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()
     try:
-        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None, target)
+        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None, target, cases)
     except ContextStop as stop:
         row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
         return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
@@ -520,19 +520,31 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
                  f"автотесты — только API Java {level['level']}, новее отклонит submit генератора (RUNNER_API_LEVEL)")]
 
 
-def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:
+def _cases_row(project: Path, cases: str) -> dict[str, Any]:
+    """``--cases`` of the request: the check scan makes of the CSV (only reads, the same code)."""
+    from tools.cases_import import CasesImportError
+    from tools.run_pipeline import HostStop, check_cases
+
+    try:
+        rel, count = check_cases(project, cases)
+    except (HostStop, CasesImportError) as refusal:
+        return _row("cases", CASES, "STOP", f"{refusal.code}: {refusal}", refusal.fix)
+    return _row("cases", CASES, "OK", f"{rel}: кейсов {count} — scan --cases возьмёт их")
+
+
+def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None, cases: str | None = None) -> str:
     """The full scan command of this very request plus the flag — an agent runs a fix verbatim (package python); every value
     through ``printed``."""
     from tools.run_pipeline import printed
 
     parts = [f"{printed(sys.executable)} -m tools.run_pipeline scan --project {printed(project)}", *(f"--docs {printed(doc)}" for doc in docs),
              f"--profile {profile}", *([f"--module {printed(module)}"] if module else []), *([f"--target {printed(target)}"] if target else []),
-             "--accept-self-review"]
+             *([f"--cases {printed(cases)}"] if cases else []), "--accept-self-review"]
     return " ".join(parts)
 
 
 def check(project: Path, docs: Sequence[str], profile: str | None = None, module: str | None = None,
-          target: str | None = None) -> dict[str, Any]:
+          target: str | None = None, cases: str | None = None) -> dict[str, Any]:
     from tools import execution_gate
 
     project = Path(project).resolve()
@@ -550,10 +562,12 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     rows.append(_git_row(project, profile))
     rows.extend(check_run_root(project))
     rows.extend(check_docs(project, docs))
+    if cases:
+        rows.append(_cases_row(project, cases))
     from tools.run_pipeline import HostStop, expand_docs
 
     try:
-        _self_review_scan(project, docs, profile, module, target)  # the values every printed command of the run carries (the folders as typed)
+        _self_review_scan(project, docs, profile, module, target, cases)  # the values every printed command of the run carries (the folders as typed)
         typed, docs = docs, expand_docs(project, list(docs))  # the files of a folder, as scan takes them
     except HostStop as stop:  # scan refuses the same request: said here, before anything else
         rows.append(_row("command", CASES, "STOP", f"{stop.code}: {stop}", stop.fix))
@@ -580,7 +594,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                 scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
-                rows.append(check_context(project, selected, docs, inventory, target))
+                rows.append(check_context(project, selected, docs, inventory, target, bool(cases)))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1" and ((selected.get("stack") or {}) if isinstance(selected.get("stack"), Mapping) else {}).get("language") == "documents":
@@ -617,7 +631,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         # PT: the row is OK — there is nothing to fix; the scan with the SELF flag is data for the one case the human says yes to
         rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); если CLI этого не умеет — "
                          "спросите человека о прогоне с пометкой SELF; команду scan с флагом SELF (details.self_review_scan) — только после его «да»",
-                         None, {"self_review_scan": _self_review_scan(project, typed, profile, module, target)}))
+                         None, {"self_review_scan": _self_review_scan(project, typed, profile, module, target, cases)}))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": requested_profile, "checks": rows}
 
@@ -646,8 +660,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="P8a-1: default is what this package can do — local-pilot-v1 with its execution files, else cases-only-v1")
     parser.add_argument("--module")
     parser.add_argument("--target", help="the narrowed context of scan --target, to preview before the scan")
+    parser.add_argument("--cases", help="the Zephyr CSV of scan --cases: checked as scan checks it")
     args = parser.parse_args(argv)
-    report = check(Path(args.project), args.docs, args.profile, args.module, args.target)
+    report = check(Path(args.project), args.docs, args.profile, args.module, args.target, args.cases)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     print(_table(report), file=sys.stderr)
     return 0 if report["status"] == "READY" else 2

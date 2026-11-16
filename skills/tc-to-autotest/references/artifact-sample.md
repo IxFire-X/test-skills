@@ -13,4 +13,4 @@
 "manual_dispositions":[],"diagnostics":[]}}
 ```
 
-Код ставит сам (не пиши): `source.source_digest`, `source.effective_bundle_receipt_digest`, `content_digest` каждого файла. В r1 оба ключа `predecessor_automation_sha256` и `correction_review_sha256` пиши как в образце — `null`. Ответ r2 — то же с `automation_revision: 2` и полным новым набором; в r2 оба ключа пустыми (код ставит digest ответа и ревью r1). Каждая операция и каждая проверка кейса — своя строка связи.
+Код ставит сам (не пиши): `source.source_digest`, `source.effective_bundle_receipt_digest`, `content_digest` каждого файла. В r1 и r2 оба ключа `predecessor_automation_sha256` и `correction_review_sha256` — `null`, как в образце (digest ответа и ревью r1 код ставит сам; своё значение — отказ). Ответ r2 — то же с `automation_revision: 2` и полным новым набором. Каждая операция и каждая проверка кейса — своя строка связи.

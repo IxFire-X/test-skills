@@ -272,3 +272,9 @@ def test_the_same_design_reference_with_its_keys_in_another_order_is_no_variant(
     other = {"design_refs": [{"value": "Anna", "class": "C-1", "parameter": "P-first"}]}
     assert _design_variants([one, other])[0] == []
     assert _design_variants([one, {"design_refs": [{"parameter": "P-first", "class": "C-2", "value": "Anna"}]}])[0] == ["P-first"]
+
+
+def test_the_fix_of_the_parameter_refusal_says_where_the_design_goes() -> None:
+    from tools.fixes import fix_for
+
+    assert "каждого CREQ" in str(fix_for("SEMANTIC_PARAM_GROUP_PARAMETER"))

@@ -361,7 +361,7 @@ def build_context(
         for doc in docs or []:
             confined = _confined(project, doc if doc.is_absolute() else project / doc)
             if confined is None or not confined.is_file():
-                raise ValueError(f"docs path must stay inside the project: {doc}")
+                raise ValueError(f"docs path must stay inside the project: {doc}" + ("; fix: один файл на каждый --docs, флаг повторяется (не через запятую)" if "," in str(doc) else ""))
             with confined.open("rb") as stream:
                 data = stream.read(_DOCS_MAX_FILE + 1)
             if len(data) > _DOCS_MAX_FILE:

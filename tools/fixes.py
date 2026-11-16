@@ -206,7 +206,7 @@ FIXES: dict[str, str] = {
                                      "операции, capability, виды и места входов и утверждений, ссылки `step_output` (по номеру шага), `expectations`, `automation_blockers` и число шагов "
                                      "должны совпасть. Путь в диагностике — первое расхождение в этом кейсе: выровняй кейс по первому кейсу группы. Тот же код при занятом имени: "
                                      "PG-… уже есть в прошлой пачке — дай группе новое имя, группа живёт в одной пачке",
-    "SEMANTIC_PARAM_GROUP_PARAMETER": "в группе param_group варьируется ровно один параметр дизайна, у каждого кейса свой вариант: проверь design_refs",
+    "SEMANTIC_PARAM_GROUP_PARAMETER": "в группе param_group варьируется ровно один параметр дизайна, у каждого кейса свой вариант: проверь design_refs; параметр нужен в design у каждого CREQ, к которому привязаны кейсы группы",
     "SEMANTIC_PARAM_GROUP_SINGLE": "param_group из одного кейса не бывает: убери группу или добавь вариант",
     "SEMANTIC_REQUIRED_CAPABILITY_ARGUMENT": "каждому обязательному аргументу capability нужен ровно один вход шага (location=arg)",
     "SEMANTIC_UNDECLARED_CAPABILITY_ARGUMENT": "вход arg ссылается на аргумент, которого нет в capability: объяви его или убери вход",

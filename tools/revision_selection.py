@@ -510,8 +510,9 @@ def check_rework(candidate: dict[str, Any], outcome: dict[str, Any], answer: Any
         raise _refuse("REWORK_CASE_SET", f"the answer must hold exactly the rejected cases {rejected}, it holds {given}")
     before = {case["case_id"]: case for case in candidate["test_cases"]}
     for case in answer["test_cases"]:
-        if any(case.get(key) != before[case["case_id"]].get(key) or (key in case) != (key in before[case["case_id"]]) for key in _CASE_IDENTITY):
-            raise _refuse("REWORK_CASE_IDENTITY", f"{case['case_id']}: case_id, requirement_ids, display_order and param_group stay as the reviewer saw them")
+        differs = [key for key in _CASE_IDENTITY if case.get(key) != before[case["case_id"]].get(key) or (key in case) != (key in before[case["case_id"]])]
+        if differs:
+            raise _refuse("REWORK_CASE_IDENTITY", f"{case['case_id']}: {', '.join(differs)} differ from what the reviewer saw: the identity of a reworked case does not change")
     by_id = {case["case_id"]: case for case in answer["test_cases"]}
     back = _regroup(candidate, outcome, rejected)[0]  # the variants taken out with their group come back beside the reworked ones, as when every case passes
     r3 = copy.deepcopy(r2)
