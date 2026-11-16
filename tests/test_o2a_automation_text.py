@@ -159,7 +159,9 @@ def test_prepare_of_the_reviewer_lists_the_code_and_the_tables_instead_of_the_js
     assert code == 0 and read["by_basis"].get("код") == 1 and read["by_basis"].get("таблицы") == 1 and "model-stage-artifacts" not in json.dumps(read), read
     views = run["root"] / "review-views"
     digest = pilot_state.read_attempt_receipt(run["root"], run["attempt"], "automation-review-boundary-r1", "ARTIFACT_READ_BACK")["record"]["automation_digest"].removeprefix("sha256:")
-    assert sorted(path.name.removeprefix(digest + ".") for path in views.glob(digest + ".*")) == ["FILE-products.py.txt", "tables.txt"]
+    assert sorted(path.name.removeprefix(digest + ".") for path in views.glob(digest + ".*")) == ["FILE-products.py.txt", "autotest-review.md", "tables.txt"]
+    assert read["by_basis"].get("вид кейсов") == 1 and "вид документа" not in read["by_basis"]  # the short form of the view instead of the generator's view
+    assert (views / (digest + ".autotest-review.md")).read_text(encoding="utf-8").count("Вид для ревьюера, короткая запись") == 1
 
 
 def test_the_derived_files_are_written_before_the_request_and_change_no_event_or_input_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,6 +206,7 @@ def test_an_answer_whose_bytes_are_not_its_digest_is_not_turned_into_files(tmp_p
     source.write_bytes(source.read_bytes() + b" ")
     found = request_files(run["root"], REVIEWER)
     assert [row["path"] for row in found["files"] if row["digest"] == boundary["automation_digest"]] == [str(source)]
+    assert [row["basis"] for row in found["files"] if row["digest"] != boundary["automation_digest"] and row.get("basis", "").startswith("вид")] == ["вид документа"]  # the generator's view, as before
 
 
 def test_the_rows_of_a_big_answer_are_smaller_than_its_json_and_the_hint_check_still_reads_the_json(tmp_path: Path) -> None:

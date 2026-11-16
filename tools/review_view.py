@@ -40,7 +40,7 @@ from tools.test_case_projections import SLOT, template_texts
 
 VIEW_VERSION = "review-view-v2"
 AUTOTEST_VIEW_VERSION = "autotest-view-v1"
-PROFILES = ("review", "autotest")
+PROFILES = ("review", "autotest", "autotest-review")
 DATA_MISMATCH = "CV_DATA_MISMATCH"
 NO_END_TO_END = "CV_NO_END_TO_END"
 MIN_LITERAL = 3
@@ -385,32 +385,46 @@ def _autotest_capability(capability: Mapping[str, Any]) -> list[str]:
              f" результаты {results}"] + [f"  граница: {line}" for line in capability["provenance"]])
 
 
-def _autotest_step(step: Mapping[str, Any]) -> list[str]:
+def _short(value: Mapping[str, Any]) -> str:
+    """:func:`_exact` in the short form of the reviewer's view: ``@x`` is ``project_result{"name":"x"}``, ``STEP-….x`` the ``step_output`` of that step and output; any other form is as it is."""
+    kind, rest = value.get("kind"), [key for key in value if key != "kind"]
+    if kind == "project_result" and rest == ["name"]:
+        return f"@{value['name']}"
+    return f"{value['step_id']}.{value['output_id']}" if kind == "step_output" and rest == ["output_id", "step_id"] else _exact(value)
+
+
+def _autotest_step(step: Mapping[str, Any], short: bool = False) -> list[str]:
+    exact, operation = (_short if short else _exact), step["operation"]
     manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
-    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Операция: {_json(step['operation'])}"]
+    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}",
+             "   Операция: " + (operation["capability_id"] if short and isinstance(operation, Mapping) and list(operation) == ["capability_id", "kind"] and operation["kind"] == "project_action" else _json(operation))]
     for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
         # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
         secret = " (секрет)" if item["target"].get("sensitive") else ""
-        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {_exact(item['source'])}")
-    lines += [f"   Выход {row['output_id']} {_typed(row)} ← {_exact(row['source'])}"
+        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {exact(item['source'])}")
+    lines += [f"   Выход {row['output_id']} {_typed(row)}" + ("" if short and row["source"] == {"kind": "project_result", "name": row["output_id"]} else f" ← {_exact(row['source'])}")
               for row in sorted(step["outputs"], key=lambda row: row["display_order"])]
     lines += [f"   Блокер автоматизации {blocker['blocker_id']} [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
               for blocker in step["automation_blockers"]]
     for expectation in sorted(step["expectations"], key=lambda row: row["display_order"]):
         lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
-        lines += [f"     {row['assertion_id']}: {_exact(row['actual'])} {row['operator']}"
-                  + (f" {_exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
+        lines += [f"     {row['assertion_id']}: {exact(row['actual'])} {row['operator']}"
+                  + (f" {exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
                   for row in sorted(expectation["assertions"], key=lambda row: row["display_order"])]
     return lines
 
 
-def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
+REVIEW_LEGEND = ("- Вид для ревьюера, короткая запись: `Операция: CAP-…` — операция project_action этой capability; `@x` — project_result{\"name\":\"x\"}; `STEP-….x` — step_output этого шага и выхода x;"
+                 " у `Выход x тип` источник — project_result того же имени. Остальное — как в JSON.")
+
+
+def _autotest(document: Mapping[str, Any], digest: str, short: bool = False) -> list[str]:
     lines = [
         f"# Вид для генератора автотестов {document['document_id']} r{document['revision']}", "",
         f"- Вид: {AUTOTEST_VIEW_VERSION}, построен кодом из effective-документа; одинаковый документ — одинаковые байты.",
         f"- document_sha256: {digest}",
         "- Машинная часть целиком: ID, цели, типы и литералы точно как в JSON (литерал — его JSON). Значения запроса бери только"
-        " отсюда; текст действия и ожидания — пояснение. Полный JSON — только для диагностики валидатора.", "",
+        " отсюда; текст действия и ожидания — пояснение. Полный JSON — только для диагностики валидатора.", *([REVIEW_LEGEND] if short else []), "",
         # the testing-work constraints (boundary, framework, dependencies, edits, interface, authorization) live in the
         # canonical requirements the cases link (automation-output-contract)
         "## Требования", "", *(f"- {row['requirement_id']}: {row['text']}" for row in document["requirements"]), "",
@@ -433,7 +447,7 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
                   f"- Цель: {case['objective']}"]
         lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
         for step in sorted(case["steps"], key=lambda row: row["display_order"]):
-            lines += _autotest_step(step)
+            lines += _autotest_step(step, short)
     return lines
 
 
@@ -466,8 +480,8 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         raise ValueError(f"unknown view profile: {profile}")
     real = document if basis is None else basis
     require_valid_canonical_document(dict(real))
-    if profile == "autotest":
-        return ("\n".join(_autotest(document, document_sha256(dict(document)))) + "\n").encode("utf-8")
+    if profile in ("autotest", "autotest-review"):  # the second is the reviewer's: the same facts in the short form (the generator's view is not changed)
+        return ("\n".join(_autotest(document, document_sha256(dict(document)), profile == "autotest-review")) + "\n").encode("utf-8")
     sources: dict[str, list[str]] = {}
     for mapping in document["source_to_canonical_mappings"]:
         for requirement_id in mapping["canonical_requirement_ids"]:

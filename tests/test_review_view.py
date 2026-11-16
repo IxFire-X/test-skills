@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -623,3 +625,51 @@ def test_blank_values_and_route_templates_are_not_false_mismatches(text: str, va
     item["target"]["sensitive"] = False
     step.update(action=text, test_data="—", inputs=[item])
     assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+
+
+# o2b: the short form of the view for the reviewer of the automation (the generator view stays as it was)
+GENERATOR_VIEW_SHA256 = "176433d32ae612f19499aec46de1cf5e55befc9bf8e2ec0b54cdeb6557896f56"  # of the example, as before o2b
+
+
+def _long(line: str) -> str:
+    """The inverse of the short form — here, in the test: the production code only writes it."""
+    if match := re.fullmatch(r"(\s+)Операция: (CAP-\S+)", line):
+        return f'{match[1]}Операция: {{"capability_id":"{match[2]}","kind":"project_action"}}'
+    if match := re.fullmatch(r"(\s+Выход (\S+) )(?!.* ← )(.*)", line):
+        return f'{match[1]}{match[3]} ← project_result{{"name":"{match[2]}"}}'
+    if not re.match(r"\s+(ASSERT-\S+: |Вход )", line):  # a text of the document may hold ``@x`` or ``STEP-1.x`` itself
+        return line
+    line = re.sub(r"(?<=: )@(\S+)(?= )", lambda m: f'project_result{{"name":"{m[1]}"}}', line)
+    return re.sub(r"(?<= )(STEP-[\w-]+)\.(\w+)$", lambda m: f'step_output{{"output_id":"{m[2]}","step_id":"{m[1]}"}}', line)
+
+
+def test_the_view_of_the_generator_is_the_same_bytes_as_before() -> None:
+    from tools.review_view import render
+
+    assert hashlib.sha256(render(_example(), profile="autotest")).hexdigest() == GENERATOR_VIEW_SHA256
+
+
+def test_the_short_form_turns_back_into_the_view_of_the_generator_byte_for_byte() -> None:
+    from tools.review_view import render
+
+    document = _example()
+    short = render(document, profile="autotest-review").decode("utf-8").split("\n")
+    legend = [line for line in short if line.startswith("- Вид для ревьюера")]
+    assert len(legend) == 1 and len(short) > 1000
+    back = "\n".join(_long(line) for line in short if line != legend[0])
+    assert back == render(document, profile="autotest").decode("utf-8")
+    assert len("\n".join(short)) < 0.9 * len(render(document, profile="autotest").decode("utf-8"))
+
+
+def test_a_form_other_than_the_two_the_short_form_knows_stays_as_it_is() -> None:
+    from tools.review_view import _autotest_step
+
+    step = {"step_id": "STEP-X-1", "display_order": 1, "action": "a", "manual_only": False, "automation_blockers": [],
+            "operation": {"kind": "project_action", "capability_id": "CAP-1", "extra": 1},
+            "inputs": [], "outputs": [{"output_id": "n", "display_order": 1, "source": {"kind": "project_result", "name": "other"}, "semantic_type": {"kind": "json", "type": "integer"}}],
+            "expectations": [{"expectation_id": "EXP-X-1", "display_order": 1, "text": "t", "assertions": [
+                {"assertion_id": "ASSERT-X-1", "display_order": 1, "actual": {"kind": "project_result", "name": "n", "extra": 1}, "operator": "equals",
+                 "expected": {"kind": "step_output", "step_id": "STEP-X-0", "extra": 1}}]}]}
+    assert _autotest_step(step, True) == _autotest_step(step)
+    step["operation"] = None  # a manual step has no operation
+    assert _autotest_step(step, True) == _autotest_step(step) and "Операция: null" in "\n".join(_autotest_step(step, True))

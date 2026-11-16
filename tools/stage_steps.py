@@ -285,7 +285,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
         raise ReviewRefused("REVIEW_INVOCATION_REQUIRED", "метка ревьюера та же, что у r1, а приём ревью такую цепочку отклонит; fix: ревью r2 — новой сессией: другая --invocation-id")
     from tools import review_view
 
-    review_view.ensure_autotest_view(root.parents[1], root, pilot_state.derive_state(root))  # the view the reviewer reads: made again if it was changed after the generator
+    effective = review_view.ensure_autotest_view(root.parents[1], root, pilot_state.derive_state(root))["document"]  # the generator's view: made again if it was changed (the reviewer reads the short form of it)
     boundary = boundary_of_revision(root, attempt_id, revision)
     if not boundary:
         facts = pilot_state.automation_boundary_facts(root, attempt_id, revision, fresh_context=fresh, reviewer_invocation_id=label)
@@ -294,7 +294,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
         raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью автотестов уже открыто с ревьюером {boundary['reviewer_invocation_id']} (fresh_context={boundary['host_isolation']['fresh_context']}); "
                             "fix: повтори prepare с теми же --invocation-id и --fresh-context или иди дальше: submit")
     digest = str(boundary["automation_digest"])
-    step_size.automation_text_rows(root.parents[1], root, [root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json")], digest, True)  # the reviewer's files, before its request
+    step_size.automation_text_rows(root.parents[1], root, [root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json")], digest, True, effective)  # the reviewer's files, before its request
     pilot_state.request_review(root, attempt_id, stage, str(boundary["automation_digest"]))
     asked = _events(pilot_state.derive_state(root), attempt_id, stage, "MODEL_REQUESTED")
     if not asked:

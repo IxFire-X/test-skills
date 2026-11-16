@@ -9,6 +9,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools import review_view
+
 _ID = re.compile(r"[^\s|=#]+\Z")  # an id a table line can hold
 _LOCATORS = {"java_class_method": ("class_fqn", "method_name"), "python_module_function": ("function_name",), "python_class_method": ("qualified_class_name", "method_name")}
 _ROW = {"operation": {"kind", "case_id", "step_id", "file_id", "symbol_id"}, "assertion": {"kind", "case_id", "step_id", "file_id", "symbol_id", "expectation_id", "assertion_id"}}
@@ -46,8 +48,9 @@ def _relations(rows: list[Any]) -> str | None:
     return "\n".join(lines)
 
 
-def render(artifact: Mapping[str, Any], digest: str) -> list[tuple[str, str, bytes]] | None:
-    """``(file name, basis, bytes)`` of the files the reviewer reads instead of the JSON of the answer ``digest``; None leaves it whole."""
+def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any] | None = None) -> list[tuple[str, str, bytes]] | None:
+    """``(file name, basis, bytes)`` of the files the reviewer reads instead of the JSON of the answer ``digest``; None leaves it whole.
+    With the effective *document* the files hold its view of the cases in the short form too (the generator's view is not changed)."""
     stem, body, files = digest.removeprefix("sha256:"), artifact["artifacts"], artifact["artifacts"]["generated_files"]
     names = [f"{stem}.{re.sub(r'[^A-Za-z0-9._-]', '_', row['file_id'])}{re.sub(r'[^A-Za-z0-9.]', '', Path(row['path']).suffix)[:12]}.txt" for row in files]  # .txt: inert text, no file of a language is written before the review
     if len({name.casefold() for name in names}) != len(names):  # a case-blind file system keeps FILE-A and FILE-a as one file
@@ -58,4 +61,5 @@ def render(artifact: Mapping[str, Any], digest: str) -> list[tuple[str, str, byt
     tables = "\n".join([f"# Автоматизация r{body['automation_revision']}, id полные; код — файлы {stem}.FILE-… байт в байт; символы: SYMBOL FILE вид класс#метод; "
                         "связи: SYMBOL FILE TC STEP | operation | EXP = ASSERT …\n", f"## прочие поля (JSON)\n{_json(rest)}\n",
                         *(f"## {title}\n{text}\n" if text is not None else f"## {title} (JSON)\n{_json(rows)}\n" for title, text, rows in parts)])
-    return [*((name, "код", row["content"].encode("utf-8")) for name, row in zip(names, files)), (f"{stem}.tables.txt", "таблицы", tables.encode("utf-8"))]
+    view = [] if document is None else [(f"{stem}.autotest-review.md", "вид кейсов", review_view.render(document, "autotest-review"))]
+    return [*((name, "код", row["content"].encode("utf-8")) for name, row in zip(names, files)), (f"{stem}.tables.txt", "таблицы", tables.encode("utf-8")), *view]

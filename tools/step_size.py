@@ -454,6 +454,11 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     bindings: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
     contexts: list[str] = []
+    effective = None
+    if stage.startswith("autotest-reviewer:"):  # the document the answer of the generator is checked against; its view of the cases goes among the files of the answer
+        from tools.pilot_state import read_effective_canonical_if_present
+
+        effective = read_effective_canonical_if_present(root, attempt_id)
     for position, digest in enumerate(digests):
         if stage in (REWORK_STAGE, REWORK_REVIEW_STAGE) and position < 2:  # two carriers, one view built by the code from the journal: the rejected cases (for the rework),
             if position == 0:  # the reworked ones (for its review)
@@ -469,7 +474,7 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             continue
         if position in views:
             files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
-        elif position == 0 and stage.startswith("autotest-reviewer:") and (text := automation_text_rows(project, root, journal.files.get(digest, []), digest, write_views)) is not None:
+        elif position == 0 and stage.startswith("autotest-reviewer:") and (text := automation_text_rows(project, root, journal.files.get(digest, []), digest, write_views, effective and effective["document"])) is not None:
             files.extend(text)  # the answer of the automation as files of code and tables, not its JSON
         elif digest == journal.inventory_digest:  # the model reads the projection of the inventory, not the receipt
             data = inventory_view_bytes(project, root, digest)
@@ -513,12 +518,11 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             else:
                 unresolved.append({"digest": answer, "source": source, "reason": "not-in-journal"})  # e.g. an r2 requested before r1
     if stage.startswith("autotest-reviewer:"):  # the document the answer of the generator is checked against: the view of the effective one (the whole file is over the budget on a real project)
-        from tools.pilot_state import read_attempt_receipt, read_effective_canonical_if_present
+        from tools.pilot_state import read_attempt_receipt
 
-        effective = read_effective_canonical_if_present(root, attempt_id)
         if effective is None:
             unresolved.append({"digest": None, "source": "effective-canonical", "reason": "not-in-journal"})
-        else:
+        elif not any(row.get("basis") == "вид кейсов" for row in files):  # no files of the answer: the generator's view, or the document
             view = autotest_view(root, effective["document_digest"])  # the generator's prepare makes it; without it the whole file is read
             target = view if view.is_file() else root / read_attempt_receipt(root, attempt_id, "effective-canonical", "ARTIFACT_READ_BACK")["path"]
             files.append({"digest": effective["document_digest"], "path": str(target), "bytes": target.stat().st_size, "basis": "вид документа" if view.is_file() else "эффективный документ"})
@@ -598,8 +602,9 @@ def _write_view(project: Path, root: Path, target: Path, data: bytes, write: boo
         atomic_write_confined_bytes_at_root(project, root, target, data)
 
 
-def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], digest: str, write: bool) -> list[dict[str, Any]] | None:
-    """The rows of ``tools.automation_text`` for the answer ``digest``, written like the other views; None: its JSON stays (not one file, bytes not its digest, no render)."""
+def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], digest: str, write: bool, document: Any = None) -> list[dict[str, Any]] | None:
+    """The rows of ``tools.automation_text`` for the answer ``digest`` (and the effective *document*, whose view of the cases they hold), written like the other views;
+    None: its JSON stays (not one file, bytes not its digest, no render)."""
     paths = [path for path in paths if path.is_file()]
     try:
         from tools.execution_gate import from_mode_b
@@ -607,7 +612,7 @@ def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], diges
         from tools.confined_output import read_confined_bytes
 
         raw = (read_confined_bytes(project, root, paths[0]) or b"") if len(paths) == 1 else b""  # a file of the run is read through the core
-        parts = render(json.loads(raw), digest) if "sha256:" + hashlib.sha256(raw).hexdigest() == digest else None
+        parts = render(json.loads(raw), digest, document) if "sha256:" + hashlib.sha256(raw).hexdigest() == digest else None
     except (RuntimeError, OSError, ValueError):  # RuntimeError: a delivery without mode B; OSError: unreadable; ValueError: not JSON, or the core refused the path
         return None
     for name, _basis, data in parts or []:

@@ -296,7 +296,7 @@ def test_the_reviewer_reads_the_effective_document(tmp_path: Path) -> None:
     run_generator(run)
     prepare_stage(run["root"], REVIEWER, *INDEPENDENT)
     listed = json.loads(next((run["root"] / "tmp").glob("step-inputs-autotest-reviewer-r1.json")).read_text(encoding="utf-8"))["files"]
-    assert any(row.get("basis") == "вид документа" for row in listed)
+    assert any(row.get("basis") == "вид кейсов" for row in listed)  # the short form of the view of the effective document
 
 
 def test_a_repeated_prepare_of_the_reviewer_writes_nothing(tmp_path: Path) -> None:
