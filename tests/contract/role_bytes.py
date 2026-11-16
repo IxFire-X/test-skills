@@ -7,11 +7,11 @@ from __future__ import annotations
 
 # role: (bytes at V0, limit = bytes + min(5 %, 3 KB))
 BUDGET = {
-    "autotest-reviewer": (12474, 13097),
+    "autotest-reviewer": (13918, 14613),  # texts1: +877 (13 041 → 13 918; a step: framework imports against the build file; a wrong import is a compile error); was (12474, 13097)
     "context-marker": (13660, 14343),
     "orchestrate": (48339, 50755),  # V8-W2b: SKILL 15 884 + references 32 455 (commands of both CLIs, role files, review outcome); V8-W2 was (46408, 48728)
     "tc-generator": (35783, 37572),
     "tc-reviewer": (19349, 20316),
-    "tc-to-autotest": (17470, 18343),
+    "tc-to-autotest": (18600, 19530),  # texts1: +288 (18 312 → 18 600; framework imports come from the build file and the tests' imports); was (17470, 18343)
 }
 LIMIT = {role: limit for role, (_measured, limit) in BUDGET.items()}

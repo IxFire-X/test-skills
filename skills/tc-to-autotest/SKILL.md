@@ -54,7 +54,7 @@ setup and teardown through existing fixtures, order-independent tests, and bound
 for observed conditions instead of arbitrary sleeps. Missing fixtures/setup are rework.
 Keep generated paths and process assumptions valid on Linux and Windows; use the selected
 project runtime and native framework APIs, never a hardcoded host Python path.
-Подготовка данных (setup) не проверяет то, что проверяет отдельный тест: проверка поведения — в самом тесте. В сквозном тесте первая упавшая проверка не скрывает остальные (`assertAll` или эквивалент из зависимостей проекта). Импорты и API сверяй с версиями фреймворка проекта (JUnit, AssertJ, Spring Boot — по его зависимостям), не с памятью.
+Подготовка данных (setup) не проверяет то, что проверяет отдельный тест: проверка поведения — в самом тесте. В сквозном тесте первая упавшая проверка не скрывает остальные (`assertAll` или эквивалент из зависимостей проекта). Импорты, аннотации и API тестового фреймворка (JUnit, AssertJ, Spring Boot) пиши по версиям из файла сборки модуля (`pom.xml` / `build.gradle`; он главнее) и по импортам тестов проекта, не по памяти. Для этого только читай файлы проекта: без команд сборки, ничего вне проекта (`~/.m2`, кэш Gradle).
 Missing URL, access, fixture or oracle is a concrete gap: identify its source, affected
 checks and required clarification. Do not invent it or replace the case with a unit test.
 
