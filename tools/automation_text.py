@@ -60,11 +60,13 @@ PART_BYTES, PART_LINES = 60_000, 1_800  # a part of the view of the cases: an ag
 
 
 def _view_parts(stem: str, text: str) -> list[tuple[str, str, bytes]]:
-    """The view of the cases in files of at most PART_BYTES and PART_LINES: the head (requirements, capabilities, boundaries) comes first — alone, if it fills a part —
-    and a case is never cut.  A part starts with a line that says where it is, where the assertions are and where the legend is; the bodies, joined by a line break, are the view."""
+    """The view of the cases in files of at most PART_BYTES and PART_LINES: the head (requirements, capabilities, boundaries) comes first — in as many parts as it needs,
+    cut between its items — and a case is never cut.  A part starts with a line that says where it is, where the assertions are and where the legend is; the bodies, joined by a line break, are the view."""
     groups: list[list[str]] = [[]]
     size = lines = 0
-    for block in re.split(r"\n(?=### TC-)", text):  # the first block is the head
+    head, *cases = re.split(r"\n(?=### TC-)", text)
+    items = [piece for item in re.split(r"\n(?=## |- )", head) for piece in ([item] if len(item.encode("utf-8")) < PART_BYTES - 400 else item.split("\n"))]
+    for block in [*items, *cases]:  # the head by its sections and items (an item longer than a part by lines; a line is never cut), a case whole
         weight, height = len(block.encode("utf-8")) + 1, block.count("\n") + 1
         if groups[-1] and (size + weight > PART_BYTES - 400 or lines + height > PART_LINES - 1):  # 400: room of the first line
             groups.append([])

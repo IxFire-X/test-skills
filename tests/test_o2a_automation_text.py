@@ -298,8 +298,8 @@ def test_the_view_comes_in_parts_that_fit_one_read_and_their_bodies_are_the_view
     files = _view_files(parts)
     names = sorted(name for name, basis, _data in parts if basis == "вид кейсов")
     assert len(files) > 1 and names == [f"{DIGEST.removeprefix('sha256:')}.autotest-review.{number}.md" for number in range(1, len(files) + 1)]
-    assert all(len(text.encode("utf-8")) <= automation_text.PART_BYTES and text.count("\n") <= automation_text.PART_LINES for text in files[1:])
-    assert len(files[0].encode("utf-8")) > automation_text.PART_BYTES and "\n### TC-" not in files[0]  # the head of the example alone is over a part (110 KB; 33–46 KB on a real run): a part of its own
+    assert all(len(text.encode("utf-8")) <= automation_text.PART_BYTES and text.count("\n") <= automation_text.PART_LINES for text in files)
+    assert "\n### TC-" not in files[0] and "## Требования" in files[0] and "легенда записи" in files[0] and "- Вид для ревьюера" in files[0]  # the head of the example is 110 KB (33–46 KB on a real run): it is cut too, the legend stays in part 1
     assert all(text.startswith(f"часть {number} из {len(files)}, ") and "tables.txt" in text.split("\n", 1)[0] and "легенда" in text.split("\n", 1)[0] for number, text in enumerate(files, 1))
     assert "## Требования" in files[0] and not any("## Требования" in text for text in files[1:])
     monkeypatch.setattr(automation_text, "PART_BYTES", 10**9)
@@ -309,15 +309,17 @@ def test_the_view_comes_in_parts_that_fit_one_read_and_their_bodies_are_the_view
     assert sum(text.count("\n### TC-") for text in files) == len(document["test_cases"])  # each case in one part
 
 
-def test_a_head_that_fills_a_part_is_alone_in_it_and_a_case_is_never_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_head_longer_than_a_part_is_cut_by_its_items_and_a_case_is_never_cut(monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import automation_text
 
     document = _example()
     monkeypatch.setattr(automation_text, "PART_BYTES", 5_000)  # the head and any case are longer
     files = _view_files(automation_text.render(_answer(document), DIGEST, document))
-    assert files[0].split("\n", 1)[0].startswith("часть 1 из ") and "голова вида без кейсов" in files[0].split("\n", 1)[0] and "\n### TC-" not in files[0]
-    assert sum(text.count("\n### TC-") for text in files) == len(document["test_cases"]) and all(text.count("\n### TC-") >= 1 for text in files[1:])
-    assert all(len(text.encode("utf-8")) <= 5_000 for text in files[1:] if text.count("\n### TC-") > 1)  # a case longer than a part is a part of its own, never cut
+    heads = [text for text in files if "голова вида без кейсов" in text.split("\n", 1)[0]]
+    assert len(heads) > 1 and files[0] in heads and all("\n### TC-" not in text for text in heads)  # the head fills several parts, none of them holds a case
+    assert all(len(text.encode("utf-8")) <= 5_000 for text in heads)
+    assert sum(text.count("\n### TC-") for text in files) == len(document["test_cases"])
+    assert all(len(text.encode("utf-8")) <= 5_000 for text in files if text.count("\n### TC-") > 1)  # a case longer than a part is a part of its own, never cut
 
 
 def test_a_head_that_fits_shares_its_part_with_the_first_cases(monkeypatch: pytest.MonkeyPatch) -> None:

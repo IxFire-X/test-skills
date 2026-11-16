@@ -135,8 +135,8 @@ def _python_names(text: str) -> set[str]:
     return {name for name in names if name}
 
 
-def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], int]:
-    """``({project path: run id}, runs not read)``: the files of ``inventory`` the package wrote in an earlier run of the project and nobody
+def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """``({project path: run id}, ids of the runs not read)``: the files of ``inventory`` the package wrote in an earlier run of the project and nobody
     changed since — their digest is a digest the run recorded (written, or quarantined).  Reads the receipts of the runs, not the files.
 
     A run that does not read whole (moved project, damaged journal or receipt, a lock of another process) hides nothing and is counted:
@@ -147,12 +147,12 @@ def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
 
     digests = {str(row.get("project_path")): row.get("content_digest") for row in inventory.get("files") or []}
     own: dict[str, str] = {}
-    unread = 0
+    unread: list[str] = []
     for run_root in sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "materialization-ownership").is_dir()):
         try:
             written = pilot_state.written_files(run_root)
         except (OSError, KeyError, TypeError, AttributeError, ValueError):
-            unread += 1
+            unread.append(run_root.name[:8])
             continue
         own.update({path: run_root.name[:8] for path, found in written.items() if digests.get(path) and digests[path] in found})
     return own, unread
@@ -161,13 +161,14 @@ def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
 def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str]) -> dict[str, dict[str, dict[str, list[str]]]]:
     """``{key: {test class: {method: [outcome, …]}}}`` from the test files of ``inventory`` whose bytes still match."""
     project = Path(project)
-    sources = {Path(path).stem for path in context_paths if Path(path).suffix in {".java", ".py"} and not Path(path).stem.startswith("test_")
+    in_context = {str(path) for path in context_paths}
+    sources = {Path(path).stem for path in in_context if Path(path).suffix in {".java", ".py"} and not Path(path).stem.startswith("test_")
                and not Path(path).stem.endswith(("Test", "Tests", "IT"))}
-    owned = own_files(project, inventory)[0]
+    hidden = {path for path in own_files(project, inventory)[0] if path not in in_context}  # an own test the model reads (the human put it in paths.include) is in the map
     result: dict[str, dict[str, dict[str, list[str]]]] = {}
     for row in sorted(inventory.get("files") or [], key=lambda item: str(item.get("project_path"))):
         relative = str(row.get("project_path"))
-        if row.get("kind") != "test" or Path(relative).suffix not in {".java", ".py"} or relative in owned:
+        if row.get("kind") != "test" or Path(relative).suffix not in {".java", ".py"} or relative in hidden:
             continue
         try:
             raw = (project / relative).read_bytes()

@@ -122,7 +122,7 @@ def test_an_ownership_receipt_nobody_bound_hides_no_test_and_the_run_is_counted_
     planted = project / ".pilot-runs" / ("a" * 32) / "materialization-ownership" / ("b" * 32 + ".json")
     planted.parent.mkdir(parents=True)
     planted.write_text(json.dumps({"payload": {"files": [{"path": "src/part0.py"}]}}), encoding="utf-8")
-    assert own_files(project, {"files": [{"project_path": "src/part0.py", "content_digest": "sha256:x"}]}) == ({}, 1)
+    assert own_files(project, {"files": [{"project_path": "src/part0.py", "content_digest": "sha256:x"}]}) == ({}, ["a" * 8])
 
 
 def test_an_inventory_of_a_neighbour_run_under_the_expected_name_is_not_the_one_the_map_is_built_from(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

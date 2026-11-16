@@ -1468,8 +1468,11 @@ def context_filter(
         Path(str(index[opaque]["project_path"])).name.casefold() == ".skillsrc"
         or Path(str(index[opaque]["project_path"])).name.casefold() in _CLOSED_MANIFESTS)]
     if skipped and not code:
+        reasons = {row["reason"] for row in skipped}
+        own_only = "CONTEXT_OWN_TEST" in reasons and "CONTEXT_EXCLUDED_BY_USER" not in reasons  # a user exclude may be the cause: its advice stays
         raise ContextStop("CONTEXT_ALL_SKIPPED", f"пропущено {len(skipped)} файлов, кода в контексте не осталось",
-                          "весь контекст пропущен: проверьте .skillsrc paths.exclude и --target")
+                          "весь контекст пропущен: в нём тесты, записанные пакетом в прошлых прогонах (CONTEXT_OWN_TEST); нужный из них верните в .skillsrc paths.include "
+                          "или укажите --target на каталог с кодом" if own_only else "весь контекст пропущен: проверьте .skillsrc paths.exclude и --target")
     return kept, sorted(skipped, key=lambda row: row["project_path"])
 
 

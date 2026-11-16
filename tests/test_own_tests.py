@@ -127,6 +127,16 @@ def test_a_run_that_does_not_read_whole_hides_nothing_and_is_said(tmp_path: Path
     code, scan = _scan(tmp_path, monkeypatch)
     assert code == 0 and path in _selected_paths(_receipts(scan)) and "own_files" not in scan, scan
     assert scan["own_runs_unread"] == 1 and any("прошлых прогонов" in line for line in scan["warnings"]), scan
+    assert any(run_root.name[:8] in line for line in scan["warnings"]), scan  # the warning names the run it could not read
+
+
+def test_a_target_where_a_past_run_wrote_its_tests_stops_and_names_paths_include(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _run_root, _attempt_id, path = _prior(tmp_path)
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+    code = run_pipeline.main(["scan", "--project", str(tmp_path), "--new-run", "--target", str(Path(path).parent)])
+    assert code == 2 and payloads[-1]["reason"] == "CONTEXT_ALL_SKIPPED", payloads[-1]
+    assert "CONTEXT_OWN_TEST" in payloads[-1]["fix"] and "paths.include" in payloads[-1]["fix"] and "paths.exclude" not in payloads[-1]["fix"], payloads[-1]
 
 
 # --- the map of existing tests ----------------------------------------------------------------
@@ -142,3 +152,18 @@ def test_the_map_skips_the_own_file_and_takes_it_back_once_a_person_changed_it(t
     assert build_map(tmp_path, inventory(), ["sample.py"]) == {}
     (tmp_path / path).write_text((tmp_path / path).read_text(encoding="utf-8") + "# edited by a person\n", encoding="utf-8")
     assert "sample" in build_map(tmp_path, inventory(), ["sample.py"])
+
+
+def test_the_map_keeps_an_own_file_the_human_named_in_paths_include(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.existing_tests import for_context
+    from tools.init_skillsrc import _payload
+    from tools.skillsrc_manifest import load_skillsrc
+
+    _run_root, _attempt_id, path = _prior(tmp_path)
+    document = load_skillsrc(tmp_path / ".skillsrc")
+    document["modules"][0]["paths"]["include"] = [path]
+    (tmp_path / ".skillsrc").write_bytes(_payload(document))
+    code, scan = _scan(tmp_path, monkeypatch)
+    receipts = _receipts(scan)
+    assert code == 0 and path in _selected_paths(receipts), scan  # the model reads it, so the map names its tests as well
+    assert "sample" in for_context(tmp_path, receipts, Path(scan["run_root"]))

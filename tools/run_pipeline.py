@@ -1515,8 +1515,9 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
                   abandoned: Sequence[str], **extra: Any) -> dict[str, Any]:
     """The answer of a scan that made (or finished) the run."""
     context_skipped = plan["context_skipped"]
-    if plan["own_runs_unread"]:  # the human must see why the input is larger than it was meant to be (a moved project, a damaged run)
-        context_warnings = [*context_warnings, f"OWN_TESTS_UNREAD: прошлых прогонов не прочитано: {plan['own_runs_unread']} (папка проекта перенесена или скопирована, "
+    unread = plan["own_runs_unread"]
+    if unread:  # the human must see why the input is larger than it was meant to be (a moved project, a damaged run), and which runs
+        context_warnings = [*context_warnings, f"OWN_TESTS_UNREAD: прошлых прогонов не прочитано: {len(unread)} ({', '.join(unread[:5])}{f' и ещё {len(unread) - 5}' if len(unread) > 5 else ''}; папка проекта перенесена или скопирована, "
                             "прогон повреждён или занят другой командой); это не ошибка, работу можно продолжать — тесты, записанные ими в проект, остаются во входе модели, вход больше"]
     return _durable_status(
         project,
@@ -1535,7 +1536,7 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
         context_summary=context_summary,
         **({"context_skipped": context_skipped} if context_skipped["files"] else {}),
         **({"own_files": plan["own_files"]} if plan["own_files"] else {}),
-        **({"own_runs_unread": plan["own_runs_unread"]} if plan["own_runs_unread"] else {}),
+        **({"own_runs_unread": len(unread)} if unread else {}),
         **({"warnings": list(context_warnings)} if context_warnings else {}),
         **_skillsrc_defaults(project, module),
         **({"abandoned_runs": list(abandoned)} if abandoned else {}),
