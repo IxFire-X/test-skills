@@ -32,8 +32,8 @@ def _requirements() -> list[dict]:
             for n, text in enumerate(["combine склеивает строки через двоеточие.", "combine отказывает на None.", "Результат — строка."], start=1)]
 
 
-LINKS = [{"row": 2, "source_requirement_ids": ["SREQ-0001", "SREQ-0003"]},
-         {"row": 3, "source_requirement_ids": [], "reason": "пустая правая часть в документах не описана"}]
+LINKS = [{"row": 2, "source_requirement_ids": ["SREQ-0001", "SREQ-0003"], "verdict": "fits"},  # a plain document: every row is judged
+         {"row": 3, "source_requirement_ids": [], "reason": "пустая правая часть в документах не описана", "verdict": "fits"}]
 
 
 def _answer(links=LINKS) -> dict:
@@ -94,7 +94,7 @@ def test_wrong_case_links_are_refused_before_the_write(tmp_path: Path, monkeypat
     assert _responses(root) == []
 
 
-def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exclude: tuple[str, ...] = ()) -> dict:
+def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exclude: tuple[str, ...] = (), links=LINKS) -> dict:
     from tests.test_batch_assembly import _header
     from tools import context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
@@ -105,7 +105,7 @@ def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exclude: tuple[str
 
         import_requirements(root, attempt_id)
     _request_requirements(root, attempt_id)
-    answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", _answer())
+    answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", _answer(links))
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the first act of `submit --stage plan`
     [part] = [row for row in context_marker_parts.plan(root)["parts"] if row["stage"] == "context-marker:batch-001"]
     pilot_state.publish_model_request(root, attempt_id, "context-marker:batch-001", model_id="model-context", invocation_id="part-1",
@@ -244,7 +244,7 @@ def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_docume
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
     assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002"}]  # v0.6 fix6: the text of the requirement is not in the report
     assert report["import"]["outside"] == [3] and report["import"]["new"] == ["SREQ-0002"]
-    assert ("кейсов из CSV без изменений: 2, из них вне документов: 1 (строки 3); "
+    assert ("кейсов из CSV: 2, судилось: 2; без изменений: 1; проверить вручную: 0; переписаны: 0; устарели: 0; вне документов: 1 (строки 3); "  # every row is judged in a plain document
             "требований без кейса в CSV (новые кейсы под них пишет генератор): 1 (SREQ-0002)") in (run["root"] / "report.md").read_text(encoding="utf-8")
     questions = (run["root"] / "questions-for-analyst.md").read_text(encoding="utf-8")
     assert "## Требования без кейса в CSV" in questions and "SREQ-0002: combine отказывает на None. — в CSV нет кейса; генератор пишет под него новый кейс" in questions
@@ -278,7 +278,8 @@ def _openspec_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     entry = {"path": "openspec/specs/catalog/spec.md", "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
     rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
     assert len(rows) == 2
-    links = [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]]}, {"row": 3, "source_requirement_ids": [], "reason": "нет в спеке"}]
+    links = [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]], "verdict": "fits"},
+             {"row": 3, "source_requirement_ids": [], "reason": "нет в спеке", "verdict": "fits"}]
     _request_requirements(root, attempt_id)
     answer = {"schema_version": "5.0.0", "stage": "context-marker", "warnings": [],
               "artifacts": {"analytics_documentation": {"requirements": rows, "case_links": links}, "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}}
@@ -290,7 +291,7 @@ def test_a_requirement_the_model_lost_from_openspec_is_still_refused_before_the_
 
     root, attempt_id, rows, answer = _openspec_run(tmp_path, monkeypatch)
     lost = {**answer, "artifacts": {**answer["artifacts"], "analytics_documentation": {
-        "requirements": rows[:1], "case_links": [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]]}, answer["artifacts"]["analytics_documentation"]["case_links"][1]]}}}
+        "requirements": rows[:1], "case_links": [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]], "verdict": "fits"}, answer["artifacts"]["analytics_documentation"]["case_links"][1]]}}}
     with pytest.raises(ValueError, match="OPENSPEC_MISSING"):
         pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", lost)
     assert _responses(root) == []

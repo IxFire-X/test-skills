@@ -1967,11 +1967,17 @@ def _context_marker_snapshots(
                 raise ValueError("context-marker OpenSpec source is not UTF-8") from error
             snapshots[path] = {"path": path, "sha256": item["content_digest"], "content": content}
     from tools.build_context import openspec_unnamed_baseline
+
+    named = _named_docs(project, root)
+    return [row for row in snapshots.values() if not (named and openspec_unnamed_baseline(row["path"], named))]  # the areas --docs does not name are context, no requirements
+
+
+def _named_docs(project: Path, root: Path) -> list[str]:
+    """The files ``--docs`` named, as the project's own paths (from the root, forward slashes) however they were typed."""
     from tools.doc_sections import resolve_spec
     from tools.run_pipeline import relative_to_project
 
-    named = [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
-    return [row for row in snapshots.values() if not (named and openspec_unnamed_baseline(row["path"], named))]  # the areas --docs does not name are context, no requirements
+    return [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
 
 
 def _validate_context_marker_sources(
@@ -2748,7 +2754,11 @@ def _publish_model_stage_artifact(
         _reconcile_requirements_openspec(project, root, state, attempt, request, value)
         from tools.cases_import import check_requirements_answer
 
-        check_requirements_answer(root, attempt, value)  # the links of an import with documents (by the run, not a label)
+        from tools.cases_scope import scope
+
+        check_requirements_answer(root, attempt, value, lambda: scope(  # the links of an import with documents (by the run, not a label), judged by the delta
+            _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"],
+                                      _published_context_receipts(state, attempt_id, stage_instance_id)), _named_docs(project, root)))
     if stage_instance_id == "tc-reviewer:canonical":
         _validate_review_decision(root, state, attempt_id, value)
     if stage_instance_id == _REWORK_REVIEW_STAGE:

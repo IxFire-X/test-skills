@@ -75,6 +75,8 @@ def scope(snapshots: Sequence[Mapping[str, str]], docs: Sequence[str]) -> Scope:
     live = [entry for path, entry in by_path.items() if _DELTA.fullmatch(path) and not path.startswith(_ARCHIVE)]
     archived = [by_path[path] for path in named]
     empty = [path for path in named if not any(delta_names([by_path[path]]))]  # nobody else sifts an archived file out
+    if live and not any(delta_names(live)):  # a live change that names no operation is no «nothing changed» either
+        empty += [_path(entry) for entry in live]
     if empty:
         raise ScopeSourceError(f"в файле нет операций ADDED / MODIFIED / REMOVED / RENAMED: {', '.join(empty)}")
     if not live and not archived:
@@ -87,6 +89,11 @@ def identities(requirement: Mapping[str, Any]) -> set[Name]:
     """The OpenSpec requirements a normalized requirement stands for, from the identity marks of its provenance."""
     marks = (_IDENTITY.search(str(mark)) for mark in requirement.get("provenance") or [])
     return {(found["capability"], found["name"].strip()) for found in marks if found}
+
+
+def unmatched(requirements: Sequence[Mapping[str, Any]], found: Scope) -> list[Name]:
+    """The names the delta touches that no requirement stands for (an archived change the specification has moved past, or a spec.md not named)."""
+    return sorted(found.affected - set().union(*(identities(item) for item in requirements)))
 
 
 def judged_rows(links: Sequence[Mapping[str, Any]], requirements: Sequence[Mapping[str, Any]], found: Scope) -> list[int]:

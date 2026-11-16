@@ -13,7 +13,7 @@ SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
 GENERATOR = ROOT / "skills" / "tc-generator" / "SKILL.md"
 SKILL_BYTES_LIMIT = 15_906  # SKILL.md of orchestrate after V8-W2 (15 149 B + 5 %; 24 548 before, 52 492 after PT2): the agent at work reads it whole; the limit only goes down
-GENERATOR_ROLE_BYTES_LIMIT = 36_400  # tc-generator SKILL + references: 35 826 before F4a; texts1-b 36 219 (rework identity, shared requirements, the design of a split requirement); upd-a 36 380 (new cases for the requirements of `write` in an import)
+GENERATOR_ROLE_BYTES_LIMIT = 36_720  # tc-generator SKILL + references: 35 826 before F4a; texts1-b 36 219 (rework identity, shared requirements, the design of a split requirement); upd-a 36 380 (new cases for the requirements of `write` in an import); upd-b2p2 36 697 (the verdict `rewrite`: the one imported case whose text is rewritten)
 
 
 def _flat(path: Path) -> str:

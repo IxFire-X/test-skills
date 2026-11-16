@@ -675,6 +675,18 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
     return entries
 
 
+def _cases_scope_files(entries: list[dict[str, str]], cases: str | None) -> None:
+    """An update of cases (``--cases`` with ``--docs``) reads the scope of the documents' OpenSpec change: a named archive file that is no delta, or a change without an operation, stops the scan."""
+    from tools.cases_scope import ScopeSourceError, scope
+
+    try:
+        if cases:
+            scope(entries, [row["path"] for row in entries])
+    except ScopeSourceError as error:
+        raise HostStop("SNAPSHOT_DOCS", str(error), fix="архивное изменение называют файлом его дельты openspec/changes/archive/<имя>/specs/<область>/spec.md "
+                       "или папкой openspec/changes/archive/<имя>; живое — папкой openspec/changes/<имя>") from None
+
+
 def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
     """The entry of ``path#Section``: ``content`` is the section at its source line numbers (the rest of the lines
     empty), ``view`` the same with the note the model reads.  The digest is that of ``content`` and the requirement digest also
@@ -887,7 +899,7 @@ def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
                     target: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
     """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
-    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root)
+    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
     sectioned = _sectioned_ids(inventory, project, docs)
@@ -1389,7 +1401,8 @@ def cmd_scan(args: Any) -> int:
 
     try:
         _skillsrc_preflight(Path(args.project).resolve())
-        _docs_entries(Path(args.project).resolve(), getattr(args, "docs", None))
+        entries = _docs_entries(Path(args.project).resolve(), getattr(args, "docs", None))
+        _cases_scope_files(entries, getattr(args, "cases", None))
         _reference_cases(Path(args.project).resolve(), getattr(args, "reference", None))
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
@@ -1471,7 +1484,7 @@ def _scan(args: Any) -> int:
         frozen_inventory = frozen["inventory"]
         exclusion_receipt = frozen["exclusions"]
         task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
-            frozen_inventory, project, getattr(args, "docs", None), module_root)
+            frozen_inventory, project, getattr(args, "docs", None), module_root=module_root, cases=bool(getattr(args, "cases", None)))
         context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         attempt = create_attempt(
             run_root,
@@ -1637,7 +1650,8 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
         prefix = "" if module_path == "." else module_path + "/"
         scope["parent_files"] = [item["project_path"] for item in frozen_inventory["files"]
                                  if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
-        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(frozen_inventory, project, getattr(args, "docs", None), module_root)
+        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
+            frozen_inventory, project, getattr(args, "docs", None), module_root=module_root, cases=bool(getattr(args, "cases", None)))
         context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
         have = {str(event["artifact_digest"]) for event in state["events"]
@@ -1699,8 +1713,8 @@ def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None
     return files
 
 
-def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None,
-                         module_root: Path | None = None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
+def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None, module_root: Path | None = None,
+                         cases: bool = False) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
     """``(ids of the task documents, ids of other tasks' files in to_do, summary, warnings)``.
 
     A document of --docs must be a file of the module's inventory (its bytes are bound by the inventory digest);
@@ -1709,7 +1723,8 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
-    from tools.build_context import openspec_context_only, openspec_live_changes, openspec_unnamed_areas, openspec_unselected
+    from tools.build_context import (openspec_context_only, openspec_live_changes, openspec_partial_archives, openspec_unnamed_archive_areas, openspec_unnamed_areas,
+                                     openspec_unselected)
     from tools.scan_rules import include_mode
 
     if not docs:
@@ -1734,6 +1749,12 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     task_count = len(others)
     if unnamed := openspec_unnamed_areas(task_paths, list(by_path)):  # a change of an area whose spec.md is no requirements of the run
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "изменение OpenSpec меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
+                       fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
+    if cases and (partial := openspec_partial_archives(task_paths, list(by_path))):  # an update of cases judges the whole archived change: no delta is left out silently
+        raise HostStop("OPENSPEC_SOURCE_CONFLICT", "названы не все дельты архивного изменения: " + ", ".join(partial),
+                       fix="назовите архивное изменение папкой: " + " ".join(f"--docs {printed('openspec/changes/archive/' + name)}" for name in partial))
+    if cases and (unnamed := openspec_unnamed_archive_areas(task_paths, list(by_path))):  # the cases of an area whose spec.md is not named would stay unjudged
+        raise HostStop("OPENSPEC_SOURCE_CONFLICT", "архивное изменение меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
                        fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
     skipped = openspec_unselected(list(by_path), task_paths)  # the other live changes and the archive: not selected by --docs, no context
     others |= {str(by_path[path]["opaque_id"]) for path in skipped}

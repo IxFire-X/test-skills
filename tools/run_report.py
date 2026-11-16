@@ -56,9 +56,19 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
         elif text:
             loose.append(text)
-    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside:
+    checks = list((imported or {}).get("verdict_texts") or [])  # the cases an update of cases rewrote, made obsolete or doubts
+    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
+    if checks:  # no question: what the update did to the old cases, for the analyst to check
+        lines += ["## Проверьте: кейсы после обновления", ""]
+        for row in checks:
+            label = {"rewritten": "переписан", "obsolete": "устарел", "manual": "сомнение"}[row["group"]]
+            lines += [f"- строка {row['row']}" + (f", Key {row['key']}" if row["key"] else "") + f" — {label}: «{row['was']}»"
+                      + (f" → «{row['now']}»" if row["now"] else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not row["key"] else ""))
+                      + (f"; удалено требование {row['removed']['capability']}/{row['removed']['name']}" if row["removed"] else "")
+                      + (f"; причина: {row['reason']}" if row["reason"] else "")]
+        lines.append("")
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
                   *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; "
@@ -733,11 +743,14 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
         imported = pilot_state.read_attempt_receipt(root, str(attempts[-1]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     except (KeyError, OSError, ValueError):
         return {"csv": path, "cases": None, "normalized": None}
-    from tools.cases_import import outside_rows, planned_gaps
+    from tools.cases_import import planned_gaps, verdict_groups
 
+    keys = {case["row"]: case["key"] for case in imported["cases"]}  # rows and Keys only: the text of a case or of a verdict never goes into the report
+    judged = [case for case in imported["cases"] if case.get("verdict")]
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": outside_rows(imported),
-                "new": planned_gaps(root, str(attempts[-1]), imported)} if "gaps" in imported else {})}  # new cases are written for the gaps the plan owns
+            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": verdict_groups(imported)["outside"],
+                "new": planned_gaps(root, str(attempts[-1]), imported)} if "gaps" in imported else {}),  # new cases are written for the gaps the plan owns
+            **({"judged": len(judged), "verdicts": {name: [{"row": row, "key": keys[row]} for row in rows] for name, rows in verdict_groups(imported).items()}} if judged else {})}
 
 
 def _left(root: Path) -> str | None:
@@ -1251,11 +1264,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "
                   f"{_dash(summary['normalized'])} ячеек кодом (пустая Test Data → «—», пустой Objective → Name)",
+                  *([_verdict_line(summary)] if summary.get("verdicts") else []),
                   *([f"- кейсов из CSV без изменений: {summary['cases']}, из них вне документов: {len(summary['outside'])}"
                      + (" (строки " + ", ".join(map(str, summary["outside"])) + ")" if summary["outside"] else "")
                      + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
                      + (" (" + ", ".join(summary["new"]) + ")" if summary["new"] else "")]
-                    if "gaps" in summary else []), ""]
+                    if "gaps" in summary and not summary.get("verdicts") else []), ""]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]
     if report.get("expectations"):
@@ -1274,6 +1288,18 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_VERDICT_GROUPS = (("unchanged", "без изменений"), ("manual", "проверить вручную"), ("rewritten", "переписаны"), ("obsolete", "устарели"), ("outside", "вне документов"))
+
+
+def _verdict_line(summary: Mapping[str, Any]) -> str:
+    """The six groups of an update of cases in the report — counts and rows, never a text of a case or of a verdict."""
+    groups = [f"{label}: {len(rows)}" + (" (строки " + ", ".join(str(row["row"]) for row in rows) + ")" if rows and name != "unchanged" else "")
+              for name, label in _VERDICT_GROUPS for rows in [summary["verdicts"][name]]]
+    return (f"- кейсов из CSV: {summary['cases']}, судилось: {summary['judged']}; " + "; ".join(groups)
+            + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
+            + (" (" + ", ".join(summary["new"]) + ")" if summary["new"] else "") + "; тексты — в questions-for-analyst.md")
+
+
 def write_report(project: Path, run_id: str) -> list[str]:
     """Build and write the report inside one closure_cache: each journal and receipt is checked once, not per read."""
     from tools.pilot_state import closure_cache
@@ -1290,6 +1316,8 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     report, warnings = build_report(project, run_id)
     summary = report.get("import")
     imported = {**summary, "gaps": _gap_texts(root)} if summary and "gaps" in summary else summary  # the text of a requirement goes to the analyst only
+    if imported and imported.get("verdicts"):
+        imported = {**imported, "verdict_texts": _verdict_texts(root)}  # so do the texts of the cases and of the verdicts
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
@@ -1311,6 +1339,24 @@ def _gap_texts(root: Path) -> list[Any]:
         return list(pilot_state.read_attempt_receipt(root, str(attempt_id), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]["gaps"])
     except (IndexError, KeyError, OSError, TypeError, ValueError):
         return []
+
+
+def _verdict_texts(root: Path) -> list[dict[str, Any]]:
+    """The rewritten, obsolete and doubtful cases of the newest attempt with their text — for ``questions-for-analyst.md`` only, never for the
+    report; «now» is the title the accepted set has for the Key (nothing without a Key or an accepted set)."""
+    from tools import pilot_state
+    from tools.cases_import import verdict_groups
+
+    try:
+        attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
+        imported = pilot_state.read_attempt_receipt(root, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
+        return []
+    now = {((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"): case["title"]
+           for case in (_effective_document(root, attempt_id)[0] or {}).get("test_cases") or []}
+    group = {row: name for name, rows in verdict_groups(imported).items() if name in ("rewritten", "obsolete", "manual") for row in rows}
+    return [{"group": group[case["row"]], "row": case["row"], "key": case["key"], "was": case["title"], "now": now.get(case["key"]) if case["key"] and group[case["row"]] == "rewritten" else None,
+             "reason": case.get("verdict_reason"), "removed": case.get("removed")} for case in imported["cases"] if case["row"] in group]
 
 
 def _attempt_notes(run_root: Path) -> tuple[list[Any], list[Any]]:

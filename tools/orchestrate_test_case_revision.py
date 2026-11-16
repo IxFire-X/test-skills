@@ -1161,7 +1161,7 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
     batch_assembly.require_imported_human_fields keeps): case title/objective/preconditions/priority, step action,
     test data and expectation texts — the machine part only.  A new case (the generator wrote it for a requirement no case
     of the CSV links — ``is_new_case``, the rule of the batch check) is free."""
-    from tools.cases_import import is_new_case
+    from tools.cases_import import is_new_case, is_rewritten
 
     gaps = {row["source_requirement_id"] for row in imported.get("gaps") or []} if isinstance(imported, Mapping) else set()  # True: every case is imported
     mappings = candidate.get("source_to_canonical_mappings") or []
@@ -1174,7 +1174,10 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
             continue
         if is_new_case(source, mappings, gaps):
             continue
-        changed += [f"/test_cases/{index}/{field}" for field in _IMPORTED_CASE_FIELDS if case.get(field) != source.get(field)]
+        rewritten = isinstance(imported, Mapping) and is_rewritten(source, mappings, imported)  # the text is the generator's, the priority the human's
+        changed += [f"/test_cases/{index}/{field}" for field in (("priority",) if rewritten else _IMPORTED_CASE_FIELDS) if case.get(field) != source.get(field)]
+        if rewritten:
+            continue
         steps, original = case.get("steps") or [], source.get("steps") or []
         if len(steps) != len(original):
             changed.append(f"/test_cases/{index}/steps")

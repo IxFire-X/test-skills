@@ -651,11 +651,14 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
     if len(cases) != len(expected):
         differences.append(f"/test_cases: кейсов {len(cases)}, в импорте у пачки {len(expected)}")
     for (index, case), source in zip(cases, expected):
-        for field in ("title", "objective", "preconditions", "priority"):
+        rewrite = source.get("verdict") == "rewrite"  # the text is rewritten to the current requirement; Key, priority and the rest of the management stay
+        for field in ("priority",) if rewrite else ("title", "objective", "preconditions", "priority"):
             if case.get(field) != source[field]:
                 differences.append(f"/test_cases/{index}/{field}")
         if case.get("management") != canonical_management(source):  # Key, folder, labels, custom fields
             differences.append(f"/test_cases/{index}/management")
+        if rewrite:
+            continue
         steps = case.get("steps") or []
         if len(steps) != len(source["steps"]):
             differences.append(f"/test_cases/{index}/steps: шагов {len(steps)}, в импорте {len(source['steps'])}")

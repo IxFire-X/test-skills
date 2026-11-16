@@ -113,7 +113,7 @@ def test_the_review_view_names_no_new_cases_for_a_requirement_left_out_on_the_pa
     assert _import_gaps(run["root"], derive_state(run["root"]))[0] == []
 
 
-def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int) -> tuple[int, dict]:
+def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int, links=LINKS) -> tuple[int, dict]:
     """The review sends case ``number`` (1-based) back; the generator answers the rework with a new title: ``submit`` of ``tc-generator:rework-1``."""
     import copy
 
@@ -124,7 +124,7 @@ def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capt
 
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
-    run = _to_plan(tmp_path, monkeypatch)
+    run = _to_plan(tmp_path, monkeypatch, links=links)
     run["run_root"] = run["root"]
     assert _submit(run, _fragment(run))[0] == 0
     _open(run, monkeypatch)
@@ -168,7 +168,7 @@ def test_the_size_estimate_counts_a_requirement_without_a_case_by_its_text() -> 
 @pytest.fixture
 def every_requirement_has_a_case():
     saved = list(LINKS)
-    LINKS[:] = [saved[0], {"row": 3, "source_requirement_ids": ["SREQ-0002"]}]  # the default links of the helpers of test_cases_import_docs
+    LINKS[:] = [saved[0], {"row": 3, "source_requirement_ids": ["SREQ-0002"], "verdict": "fits"}]  # the default links of the helpers of test_cases_import_docs
     yield
     LINKS[:] = saved
 
@@ -179,9 +179,9 @@ def test_a_run_without_a_requirement_lacking_a_case_keeps_its_bytes(tmp_path: Pa
     assert "write" not in _receipt(run) and run["imported"]["gaps"] == []
 
 
-# the digests of the merged marker and of the skeleton of this run on the base 9c7a0f78 (before upd-a)
-BASE_MARKER = "sha256:17a9c0fbea13f035b99b7b8b71fc46c1c8de35710e2b5407c749c07e73848b78"
-BASE_IMPORTED = "sha256:2aefa82e7ca59654409bb43caaa889e5d3472e0f650606b8363232ab7fcdeddb"
+# the digests of the merged marker and of the skeleton of this run (before upd-a: 17a9c0fb…, 2aefa82e…; upd-b2: every row of a plain document carries its verdict)
+BASE_MARKER = "sha256:d02d57a1c43c786005c64ee4fbd043ef988ececba9759395a4f65c212ea9eb99"
+BASE_IMPORTED = "sha256:e8c13a359655b28d931c4a459bcf3c67769981072c68528b7472999f8c60ff00"
 
 
 REVIEW = "tc-reviewer:canonical"

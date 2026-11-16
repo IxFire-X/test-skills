@@ -177,8 +177,34 @@ def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
             "custom_fields": management["custom_fields"]}
 
 
-def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[str, Any]], links: Any) -> None:
-    """One link per case row of the CSV, to source requirements of the answer; no requirements only with a reason."""
+def _verdict_errors(links: list[Mapping[str, Any]], requirements: list[Mapping[str, Any]], found: Any) -> list[str]:
+    """The verdict rules of an answer: a row the scope judges has one, ``rewrite`` and ``obsolete`` only inside the scope, ``obsolete`` only for a requirement the delta removes."""
+    from tools.cases_scope import judged_rows, unmatched
+
+    missing = unmatched(requirements, found)
+    if found.affected and len(missing) == len(found.affected):
+        return ["имена дельты не найдены среди требований: " + ", ".join(f"{cap}/{name}" for cap, name in missing[:5]) + " — назовите в --docs spec.md их области"]
+    judged, errors = set(judged_rows(links, requirements, found)), []
+    for link in links:
+        row, verdict, ids = link["row"], link.get("verdict"), link["source_requirement_ids"]
+        removed = link.get("removed") or {}
+        if verdict is None:
+            errors += [f"строка {row}: нет verdict"] * (row in judged)
+        elif verdict != "fits" and row not in judged:
+            errors.append(f"строка {row}: verdict {verdict} вне области")
+        elif verdict == "rewrite":
+            errors += [f"строка {row}: rewrite без требований"] * (not ids) + [f"строка {row}: rewrite без reason"] * (not str(link.get("reason") or "").strip())
+        elif verdict == "obsolete":
+            errors += ([f"строка {row}: obsolete со связями"] * bool(ids) + [f"строка {row}: obsolete без reason"] * (not str(link.get("reason") or "").strip())
+                       + [f"строка {row}: removed не среди удалённых дельтой"] * ((removed.get("capability"), removed.get("name")) not in found.gone))
+        if removed and verdict != "obsolete":
+            errors.append(f"строка {row}: removed без obsolete")
+    return errors
+
+
+def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[str, Any]], links: Any, found: Any = None) -> None:
+    """One link per case row of the CSV, to source requirements of the answer; no requirements only with a reason.  With the
+    scope of the run (``found``, ``tools.cases_scope``) the verdicts too."""
     known = {str(item["source_requirement_id"]) for item in requirements}
     rows = [case["row"] for case in cases]
     if not isinstance(links, list) or not all(isinstance(link, Mapping) for link in links):
@@ -195,6 +221,8 @@ def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[s
         errors += [f"строка {link.get('row')}: {item} не SREQ ответа" for item in ids if item not in known]
         if not ids and not str(link.get("reason") or "").strip():
             errors.append(f"строка {link.get('row')}: пусто без reason")
+    if found is not None and not errors:
+        errors = _verdict_errors(links, requirements, found)
     if errors:
         raise CasesImportError("IMPORT_CASE_LINKS", "; ".join(errors[:12]))
 
@@ -225,6 +253,35 @@ def outside_rows(imported: Mapping[str, Any]) -> list[int]:
     return [int(case["row"]) for case in imported["cases"] if any(source.startswith(OUTSIDE) for source in case_sources(case))]
 
 
+def _verdict_keys(link: Mapping[str, Any]) -> dict[str, Any]:
+    """What the skeleton keeps of a verdict — only when the answer gave one, so a run without verdicts has the bytes it always had."""
+    if not link.get("verdict"):
+        return {}
+    return {"verdict": link["verdict"], **{key: link[source] for key, source in (("verdict_reason", "reason"), ("removed", "removed")) if link.get(source)}}
+
+
+def verdict_groups(imported: Mapping[str, Any]) -> dict[str, list[int]]:
+    """The rows of the CSV by what the update makes of their case: ``rewritten``, ``obsolete``, ``manual`` (a linked case that fits, with a
+    doubt in its reason), ``outside`` (linked to no document requirement), ``unchanged``."""
+    groups: dict[str, list[int]] = {name: [] for name in ("rewritten", "obsolete", "manual", "outside", "unchanged")}
+    outside = set(outside_rows(imported))
+    for case in imported["cases"]:
+        verdict = case.get("verdict")
+        name = ("rewritten" if verdict == "rewrite" else "obsolete" if verdict == "obsolete" else "outside" if case["row"] in outside
+                else "manual" if case.get("verdict_reason") else "unchanged")
+        groups[name].append(int(case["row"]))
+    return groups
+
+
+def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imported: Mapping[str, Any]) -> bool:
+    """A case of a candidate is the rewrite of an old one when it traces to exactly the source requirements of the one imported case
+    that has the verdict ``rewrite`` — its text is the generator's, its ``priority`` and ``management`` stay the human's."""
+    ids = set(case.get("requirement_ids") or [])
+    found = {mapping.get("source_requirement_id") for mapping in mappings if ids & set(mapping.get("canonical_requirement_ids") or [])}
+    same = [item for item in imported["cases"] if set(case_sources(item)) == found]
+    return len(same) == 1 and same[0].get("verdict") == "rewrite"
+
+
 def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None = None,
                    requirements: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """The skeleton of the import: the human fields of every case as the CSV has them, one source requirement per case.
@@ -246,8 +303,9 @@ def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None
         normalized += [{"row": step["row"], "field": "test_data"} for step in case["steps"] if not step["test_data"].strip()]
         sources = ({"source_requirement_ids": list(by_row[case["row"]]["source_requirement_ids"]) or [f"{OUTSIDE}{case['row']}"]}
                    if links is not None else {"source_requirement_id": requirement["source_requirement_id"]})
+        link = by_row.get(case["row"]) or {}
         rows.append({
-            **sources, "row": case["row"], "key": case["key"],
+            **sources, **_verdict_keys(link), "row": case["row"], "key": case["key"],
             "title": case["title"], "objective": case["objective"] if case["objective"].strip() else case["title"],
             "preconditions": [case["preconditions"]] if case["preconditions"].strip() else [],
             "priority": case["priority"] or "MEDIUM", "management": case["management"],
@@ -390,13 +448,20 @@ def run_marker_requirements(root: Path, attempt: Mapping[str, Any], answer: Mapp
     return marker_requirements(*found, requirements, links)
 
 
-def check_requirements_answer(root: Path, attempt: Mapping[str, Any], value: Mapping[str, Any]) -> None:
-    """The links of a model answer of the requirements step of an import with documents, before the write."""
+def check_requirements_answer(root: Path, attempt: Mapping[str, Any], value: Mapping[str, Any], scope: Any = None) -> None:
+    """The links of a model answer of the requirements step of an import with documents, before the write; ``scope`` gives
+    the ``tools.cases_scope.Scope`` of the run (called only for such a run) the verdicts are checked against."""
+    from tools.cases_scope import ScopeSourceError
+
     if not docs_run(root):
         return
     path, data = run_csv(root, attempt)
     requirements = value["artifacts"]["analytics_documentation"]["requirements"]
-    require_case_links(read_cases(data), requirements, value["artifacts"]["analytics_documentation"].get("case_links"))
+    try:
+        found = scope() if scope else None
+    except ScopeSourceError as error:  # the file went out of the snapshots after the scan: the scan refuses it first
+        raise CasesImportError("IMPORT_CASE_LINKS", str(error)) from None
+    require_case_links(read_cases(data), requirements, value["artifacts"]["analytics_documentation"].get("case_links"), found)
 
 
 def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:

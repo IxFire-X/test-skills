@@ -30,6 +30,12 @@ A module whose context does not fit one call is marked in parts (`status` names 
   `source_requirement_ids` of the documents that case checks, or `[]` with a `reason` when it checks none. The cases are
   never requirements: no SREQ from the CSV. The controller refuses a missing, repeated or unknown link before the write
   (`IMPORT_CASE_LINKS`).
+  Judge the old cases: a row gets `verdict` — `fits` (the case still checks the current text), `rewrite` (it contradicts the
+  text of a linked requirement; `reason` names the contradiction) or `obsolete` (its requirement was removed:
+  `source_requirement_ids` `[]`, `removed` {capability, name}, `reason`). A plain document: judge every row. An OpenSpec
+  change (selected, or archived and named in `--docs`): judge only the rows linked to a requirement its delta ADDS, MODIFIES or
+  RENAMES, and every unlinked row when it REMOVES one; no `verdict` elsewhere. An archived delta gives names, never
+  requirements. In doubt: `fits` with the doubt in `reason`.
 - `context-marker:batch-NNN` — the requirements answer and the files of one context batch. Copy the requirements
   unchanged (a changed requirement rejects the part: `CONTEXT_MARKER_REQUIREMENTS_CHANGED`) and add only the code
   observations of this batch in `sources` and `warnings`. A requirement whose code is not in this batch is the warning

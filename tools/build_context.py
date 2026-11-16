@@ -204,6 +204,21 @@ def openspec_unnamed_areas(docs: list[str], paths: list[str]) -> list[str]:
     return sorted(path for path in areas if path in paths and path not in docs)
 
 
+_ARCHIVE_DELTA = re.compile(r"^openspec/changes/archive/([^/]+)/specs/(.+)/spec\.md$")
+
+
+def openspec_partial_archives(docs: list[str], paths: list[str]) -> list[str]:
+    """The archived changes (of ``paths``, the inventory) that ``docs`` names by some of their deltas but not all of them."""
+    named = {match.group(1) for doc in docs if (match := _ARCHIVE_DELTA.fullmatch(doc))}
+    return sorted({match.group(1) for path in paths if (match := _ARCHIVE_DELTA.fullmatch(path)) and match.group(1) in named and path not in docs})
+
+
+def openspec_unnamed_archive_areas(docs: list[str], paths: list[str]) -> list[str]:
+    """The baseline ``spec.md`` (of ``paths``) of the areas an archived delta of ``docs`` changes, that ``docs`` does not name."""
+    areas = {f"openspec/specs/{match.group(2)}/spec.md" for doc in docs if (match := _ARCHIVE_DELTA.fullmatch(doc))}
+    return sorted(path for path in areas if path in paths and path not in docs)
+
+
 def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[str]]:
     """Compose only standard spec documents explicitly present in authorized inputs."""
     baseline: dict[tuple[str, str], dict[str, Any]] = {}

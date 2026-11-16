@@ -8,7 +8,7 @@ from __future__ import annotations
 # role: (bytes at V0, limit = bytes + min(5 %, 3 KB))
 BUDGET = {
     "autotest-reviewer": (13918, 14613),  # texts1: +877 (13 041 → 13 918; a step: framework imports against the build file; a wrong import is a compile error); was (12474, 13097)
-    "context-marker": (14246, 14958),  # texts1-b: +606 (13 640 → 14 246; a free sentence of disagreement, a sample of a requirement)
+    "context-marker": (14961, 15709),  # upd-b2p2: limit +751 (14 958 → 15 709, the table rule 5 %; the verdicts fits / rewrite / obsolete of an import with documents, +663 B on 14 298). texts1-b: +606 (13 640 → 14 246; a free sentence of disagreement, a sample of a requirement)
     "orchestrate": (51225, 53786),  # texts1-b: +504 (50 721 → 51 225; the evidence key only in the case review, no generator output for the reviewer, the base of a relative --reports). Before: V8-W2b: SKILL 15 884 + references 32 455 (commands of both CLIs, role files, review outcome); V8-W2 was (46408, 48728)
     "tc-generator": (36219, 38029),  # texts1-b: +430 (35 789 → 36 219; rework identity, shared requirements, the design of a split requirement)
     "tc-reviewer": (20359, 21376),  # texts1-b: +67 (20 292 → 20 359; no generator output)
