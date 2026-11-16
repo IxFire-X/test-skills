@@ -26,12 +26,14 @@ inputs are both specified, retain both explicitly. Several jointly required resu
 of one action, such as a field error AND unchanged storage, may remain one condition;
 do not fragment every response field or manufacture a Cartesian test matrix.
 
-Preserve the original source text byte-for-byte in `source_requirements`; the union
-of its mapped canonical conditions must preserve its meaning and every explicit
+The source text stays as the plan gives it: the answer does not copy it. The union
+of the canonical conditions mapped to a source requirement must preserve its meaning and every explicit
 variant. Canonical conditions need not repeat the full source paragraph. Give each
 condition an ID in the batch's namespace and provenance to its source(s). Keep shared
 data, prerequisites and testing-work constraints as linked canonical requirements
-without turning them into behavioral test quotas or meta-cases. Reconcile the whole
+without turning them into behavioral test quotas or meta-cases; each requirement of the batch
+still stands in `requirement_ids` of some case (`BATCH_UNCOVERED_REQUIREMENT`): link a shared one
+to a case that uses it, make no case of its own for it. Reconcile the whole
 source against this inventory before proceeding, including unlabelled requirements.
 
 Link each case only to the conditions and shared requirements it actually addresses.

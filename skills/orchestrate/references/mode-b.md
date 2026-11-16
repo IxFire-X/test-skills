@@ -43,7 +43,7 @@ python -m tools.run_pipeline materialize --project "$project" --module "$moduleI
 python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId" --reports "$reports"
 ```
 
-`ingest --reports <каталог в модуле или <run>/incoming/>` сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. Прерванный `ingest` повторяют теми же отчётами.
+`ingest --reports <каталог в модуле или <run>/incoming/>` (относительный путь — от текущего каталога команды) сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. Прерванный `ingest` повторяют теми же отчётами.
 Нет отчёта — `UNKNOWN`; timeout точного теста по отчёту фреймворка — `FAIL`. После `EXECUTION_STARTED` прерывание автоматически не перезапускай; продолжение — новый scan.
 
 ## 6. Закрытие

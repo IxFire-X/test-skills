@@ -24,3 +24,30 @@ def test_the_reviewer_makes_an_import_that_differs_from_the_build_file_a_blockin
 
 def test_the_guide_says_a_failed_row_of_a_parameterized_test_takes_the_whole_method_into_quarantine() -> None:
     assert "весь метод" in _text("HOW-TO-USE-MODE-B.md").split("@ParameterizedTest")[-1]
+
+
+def test_the_sample_of_an_automation_answer_passes_the_schema_in_the_part_the_model_writes() -> None:
+    import json
+    import re
+
+    from tools.schema_validation import schema_diagnostics
+
+    block = re.search(r"```json\n(.*?)\n```", _text("skills/tc-to-autotest/references/artifact-sample.md"), re.S).group(1)
+    answer = json.loads(re.sub(r"<[^>]*>", "x", block))
+    artifacts = answer["artifacts"]
+    artifacts["source"].update(source_digest="sha256:" + "0" * 64, effective_bundle_receipt_digest="sha256:" + "0" * 64)
+    artifacts.update(predecessor_automation_sha256=None, correction_review_sha256=None)
+    artifacts["source"]["document_id"] = "TCDOC-x"
+    for row in artifacts["generated_files"]:
+        row["content_digest"] = "sha256:" + "0" * 64
+    assert schema_diagnostics(answer, ROOT / "schemas" / "tc-to-autotest-output.schema.json", ROOT) == []
+
+
+def test_a_free_sentence_of_disagreement_reaches_the_analyst_as_other_and_makes_no_pause() -> None:
+    from tools.run_report import analyst_questions
+    from tools.scope_pause import gap_rows
+
+    sentence = "SREQ-0003: код отвечает 200 — требование ждёт 201"
+    marker = {"warnings": [sentence], "artifacts": {"analytics_documentation": {"requirements": [{"source_requirement_id": "SREQ-0003", "text": "x"}]}}}
+    assert gap_rows(marker) == []
+    assert "## Прочее\n\n- " + sentence in analyst_questions(marker["warnings"])

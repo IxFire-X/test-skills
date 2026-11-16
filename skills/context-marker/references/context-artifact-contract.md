@@ -70,7 +70,10 @@ Keep gaps in existing `warnings`, with four fields: source requirement/scenario 
 what is missing; which checks it blocks; the concrete question requiring resolution.
 Write them in this order joined by ` — `, the requirement ID first
 (`REQ-x сценарий (path#anchor) — чего нет — что блокирует — вопрос?`): `questions-for-analyst.md`
-groups them by that ID.
+groups them by that ID. Four fields are a gap: they become a question to the analyst and the pause of the scope.
+A disagreement of the code and a requirement is no gap: one free sentence with a single ` — `
+(`SREQ-0003: код отвечает 200 — требование ждёт 201`); it goes to «Прочее» of `questions-for-analyst.md`, no pause.
+A requirement of the answer: `{"source_requirement_id": "SREQ-0001", "display_order": 1, "text": "<текст>", "provenance": ["docs/req.md:12"], "digest": "sha256:<64 hex источника>"}`.
 Requirement-without-scenario warnings preserve the requirement. Unsupported schema,
 unmatched names or missing baseline require clarification; they never authorize invented
 requirements. Substantive unresolved gaps block full-coverage claims, while independently

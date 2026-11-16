@@ -57,7 +57,7 @@ Cases-only mode on a project with code (the batch context holds project code or 
 Record the design in the same answer. A requirement with input parameters gets `design`:
 its parameters (`P-…` with a required `name`, 1–80 characters), valid and invalid classes (`C-…`; `label` only when the ID does not
 speak for itself, at most 40 characters) and numeric `bounds` (`min`/`max`, `step`, `unit`).
-A requirement without inputs gets no `design`. Every case gets `technique` (`EP`, `BVA`, `DT`,
+`design_refs` of a case name only parameters declared in the `design` of a requirement from the case's `requirement_ids`: when a requirement is split into several CREQ, put the `design` on the CREQ its cases are linked to. A requirement without inputs gets no `design`. Every case gets `technique` (`EP`, `BVA`, `DT`,
 `PAIRWISE`, `OTHER`) and `design_refs`: which class or bound (`min`, `max`, `below_min`,
 `above_max`) it checks; a DT/PAIRWISE case names one class per parameter. Code compares the
 references with the design and gives the reviewer hints; do not add cases only to silence them.

@@ -8,10 +8,10 @@ from __future__ import annotations
 # role: (bytes at V0, limit = bytes + min(5 %, 3 KB))
 BUDGET = {
     "autotest-reviewer": (13918, 14613),  # texts1: +877 (13 041 → 13 918; a step: framework imports against the build file; a wrong import is a compile error); was (12474, 13097)
-    "context-marker": (13660, 14343),
-    "orchestrate": (48339, 50755),  # V8-W2b: SKILL 15 884 + references 32 455 (commands of both CLIs, role files, review outcome); V8-W2 was (46408, 48728)
-    "tc-generator": (35783, 37572),
-    "tc-reviewer": (19349, 20316),
-    "tc-to-autotest": (18600, 19530),  # texts1: +288 (18 312 → 18 600; framework imports come from the build file and the tests' imports); was (17470, 18343)
+    "context-marker": (14246, 14958),  # texts1-b: +606 (13 640 → 14 246; a free sentence of disagreement, a sample of a requirement)
+    "orchestrate": (51225, 53786),  # texts1-b: +504 (50 721 → 51 225; the evidence key only in the case review, no generator output for the reviewer, the base of a relative --reports). Before: V8-W2b: SKILL 15 884 + references 32 455 (commands of both CLIs, role files, review outcome); V8-W2 was (46408, 48728)
+    "tc-generator": (36219, 38029),  # texts1-b: +430 (35 789 → 36 219; rework identity, shared requirements, the design of a split requirement)
+    "tc-reviewer": (20359, 21376),  # texts1-b: +67 (20 292 → 20 359; no generator output)
+    "tc-to-autotest": (20327, 21343),  # texts1: +288 (18 312 → 18 600; framework imports); texts1-b: +1 727 (18 600 → 20 327; a sample of the answer, 1 632 B, a pointer to it and a digest note); was (17470, 18343)
 }
 LIMIT = {role: limit for role, (_measured, limit) in BUDGET.items()}
