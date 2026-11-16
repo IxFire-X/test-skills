@@ -511,7 +511,7 @@ def check_rework_answer(run_root: Path, attempt_id: str, value: Mapping[str, Any
     if imported:  # a rejected imported case keeps its human fields byte for byte in the rework too; a new case is free
         reworked = {case["case_id"] for case in value["test_cases"]}
         changed = _imported_human_changes({**basis["candidate"], "test_cases": [case for case in basis["candidate"]["test_cases"] if case["case_id"] in reworked]},
-                                          _plain(value), imported)
+                                          _plain(value), imported, basis["candidate"]["test_cases"])
         if changed:
             message = "человеческие поля импорта изменены: " + ", ".join(changed[:12]) + " — верни их байт в байт, доработай только машинную часть"
             raise BatchAssemblyError("IMPORT_HUMAN_FIELD_CHANGED", message, [{"path": path, "code": "IMPORT_HUMAN_FIELD_CHANGED", "message": message, "fix": REWORK_FIX} for path in changed[:12]], REWORK_FIX)
@@ -1156,7 +1156,7 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
 _IMPORTED_CASE_FIELDS = ("title", "objective", "preconditions", "priority")
 
 
-def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any], imported: Mapping[str, Any] | bool = True) -> list[str]:
+def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any], imported: Mapping[str, Any] | bool = True, every: Sequence[Mapping[str, Any]] = ()) -> list[str]:
     """In an import the reviewer's fix (or the rework) may not touch the human fields the import fixed (the fields
     batch_assembly.require_imported_human_fields keeps): case title/objective/preconditions/priority, step action,
     test data and expectation texts — the machine part only.  A new case (the generator wrote it for a requirement no case
@@ -1174,7 +1174,7 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
             continue
         if is_new_case(source, mappings, gaps):
             continue
-        rewritten = isinstance(imported, Mapping) and is_rewritten(source, mappings, imported)  # the text is the generator's, the priority the human's
+        rewritten = isinstance(imported, Mapping) and is_rewritten(source, mappings, imported, every or candidate.get("test_cases", []))  # the text is the generator's, the priority the human's; every: all cases of the candidate when ``candidate`` holds some
         fields = ("priority",) if rewritten else _IMPORTED_CASE_FIELDS  # the management (Key, folder, labels) is the human's in both
         changed += [f"/test_cases/{index}/{field}" for field in (*fields, "management") if case.get(field) != source.get(field)]
         if rewritten:

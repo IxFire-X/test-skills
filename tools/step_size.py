@@ -609,7 +609,7 @@ def _write_view(project: Path, root: Path, target: Path, data: bytes, write: boo
 def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], digest: str, write: bool, document: Any = None) -> list[dict[str, Any]] | None:
     """The rows of ``tools.automation_text`` for the answer ``digest`` (and the effective *document*, whose view of the cases they hold), written like the other views;
     None: its JSON stays (not one file, bytes not its digest, no render)."""
-    paths = [path for path in paths if path.is_file()]
+    paths = list(paths)
     try:
         from tools.execution_gate import from_mode_b
         render, = from_mode_b("automation_text", "render")

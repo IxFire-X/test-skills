@@ -357,8 +357,9 @@ def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = (
 def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any],
                   target: str | None = None, cases: bool = False) -> dict[str, Any]:
     """What will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
+    from tools.cases_scope import ScopeSourceError
     from tools.project_inventory import ContextStop, skipped_summary
-    from tools.run_pipeline import HostStop, context_preview
+    from tools.run_pipeline import HostStop, context_preview, scope_fix
 
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()
@@ -367,6 +368,8 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     except ContextStop as stop:
         row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
         return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
+    except ScopeSourceError as error:  # scan stops on the same delta file
+        return _row("context:scope", CASES, "STOP", f"SNAPSHOT_DOCS: {error}", scope_fix(error))
     except HostStop as stop:
         if stop.code == "SOURCE_TARGET_INVALID":  # the scan would stop on the same --target
             return _row("context:target", CASES, "STOP", f"{stop.code}: --target {target}: {stop}",

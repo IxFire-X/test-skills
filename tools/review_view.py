@@ -388,7 +388,7 @@ def _autotest_capability(capability: Mapping[str, Any]) -> list[str]:
 def _short(value: Mapping[str, Any]) -> str:
     """:func:`_exact` in the short form of the reviewer's view: ``@x`` is ``project_result{"name":"x"}``, ``STEP-….x`` the ``step_output`` of that step and output; any other form is as it is."""
     kind, rest = value.get("kind"), [key for key in value if key != "kind"]
-    if kind == "project_result" and rest == ["name"]:
+    if kind == "project_result" and rest == ["name"] and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", str(value["name"])):  # a name of any other form (a line break) is the exact JSON
         return f"@{value['name']}"
     return f"{value['step_id']}.{value['output_id']}" if kind == "step_output" and rest == ["output_id", "step_id"] else _exact(value)
 

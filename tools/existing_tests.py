@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -152,7 +153,7 @@ def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
     digests = {str(row.get("project_path")): row.get("content_digest") for row in inventory.get("files") or []}
     own: dict[str, str] = {}
     unread: list[str] = []
-    for run_root in sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "materialization-ownership").is_dir()):
+    for run_root in sorted(path for path in (project / ".pilot-runs").glob("*") if re.fullmatch(r"[0-9a-f]{32}", path.name) and (path / "materialization-ownership").is_dir()):  # a name of no run is not looked at, not printed
         try:
             written = pilot_state.written_files(run_root)
         except (OSError, KeyError, TypeError, AttributeError, ValueError):
@@ -160,6 +161,16 @@ def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
             continue
         own.update({path: run_root.name[:8] for path, found in written.items() if digests.get(path) and digests[path] in found})
     return own, unread
+
+
+def own_tests(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """``own_files`` narrowed to what may be hidden from the model and from «the same project»: a test (by its kind) under a test root of the module by the
+    ``.skillsrc`` of the project root — not by the root of a receipt, which an agent may write.  One rule for the context filter and ``pilot_state._comparable``."""
+    from tools import pilot_state
+
+    own, unread = own_files(project, inventory)
+    kinds, roots = {str(row.get("project_path")): row.get("kind") for row in inventory.get("files") or []}, pilot_state.module_test_roots(project, inventory)
+    return {path: run for path, run in own.items() if kinds.get(path) == "test" and path.startswith(roots)}, unread
 
 
 def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str]) -> dict[str, dict[str, dict[str, list[str]]]]:
@@ -237,9 +248,14 @@ _IMPORT_LINE = re.compile(r"(?:import |from \S+ import )\S")
 
 
 def held_bytes(project: Path, row: Mapping[str, Any]) -> bytes | None:
-    """The bytes of the file of an inventory *row*; None when unreadable or not the scanned file any more."""
+    """The bytes of the file of an inventory *row*; None when unreadable, not the scanned file any more, or a link or a reparse point lies on its way."""
+    path = Path(project)
     try:
-        raw = (Path(project) / str(row.get("project_path"))).read_bytes()
+        for part in Path(str(row.get("project_path"))).parts:  # each part of the path from the project: as _input_files, no link is followed
+            path /= part
+            if path.is_symlink() or getattr(os.stat(path, follow_symlinks=False), "st_file_attributes", 0) & 0x400:
+                return None
+        raw = path.read_bytes()
     except OSError:
         return None
     return raw if "sha256:" + hashlib.sha256(raw).hexdigest() == row.get("content_digest") else None

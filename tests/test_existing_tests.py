@@ -98,7 +98,7 @@ def test_a_test_file_changed_after_the_scan_and_a_generated_one_are_not_in_the_m
 
     project, inventory, context = _project(tmp_path)
     (project / "tests" / "test_items.py").write_text(PY_TESTS + "\n# changed\n", encoding="utf-8")
-    run = project / ".pilot-runs" / "r" / "materialization-ownership"
+    run = project / ".pilot-runs" / ("a" * 32) / "materialization-ownership"  # tails10: a folder is a run only by the name of a run id
     run.mkdir(parents=True)
     (run / "a.json").write_text(json.dumps({"payload": {"files": [{"path": "src/test/java/org/example/owner/OwnerControllerTests.java"}]}}),
                                 encoding="utf-8")

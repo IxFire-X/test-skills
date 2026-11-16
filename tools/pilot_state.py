@@ -4495,10 +4495,11 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
     if not wanted:
         return []
     present: set[str] = set()
+    project, run = _run_root(root)
     for pattern in (*(f"{folder}/{attempt_id}*.json" for folder in _RECEIPT_FOLDERS), f"closure/{attempt_id}/*.json", f"terminal-results/{attempt_id}.json"):  # the closure and the result are read back without a batch too
-        for path in Path(root).glob(pattern):
+        for path in run.glob(pattern):  # the paths of the run as the core pins it (root may be written relative or in another case)
             try:
-                value = _check_sealed(json.loads(path.read_text(encoding="utf-8")), "receipt")  # the digest field must be the digest of the body
+                value = _check_sealed(json.loads(read_confined_bytes(project, run, path)), "receipt")  # through the core: a link in the place of a file is no receipt; the digest field must be the digest of the body
             except (OSError, ValueError, TypeError):
                 continue
             present.add(value["digest"])
@@ -5486,15 +5487,16 @@ _SAME_COMPOSITION = ("inventory (состав проекта тот же: в н�
                      "они делаются заново; разметка берётся)")
 
 
-def _test_roots(project: Path, inventory: Mapping[str, Any]) -> tuple[str, ...]:
+def module_test_roots(project: Path, inventory: Mapping[str, Any]) -> tuple[str, ...]:
     """The test roots the human's ``.skillsrc`` names for the module of the inventory, as project paths with a trailing «/» — none when it does not read."""
-    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+    from tools.skillsrc_manifest import SkillsrcError, normalize_skillsrc, parse_skillsrc_bytes
 
     held = next((row.get("content_digest") for row in inventory["files"] if row["project_path"] == ".skillsrc"), None)  # the one of the project root, as the scan reads it: a nested one may be a file of an agent
     try:
-        if held is None or held != "sha256:" + hashlib.sha256((project / ".skillsrc").read_bytes()).hexdigest():  # a file changed since the scan names no root
+        raw = (project / ".skillsrc").read_bytes()
+        if held is None or held != "sha256:" + hashlib.sha256(raw).hexdigest():  # a file changed since the scan names no root
             return ()
-        modules = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]
+        modules = normalize_skillsrc(parse_skillsrc_bytes(raw, project=project))["modules"]  # the bytes whose digest was checked, not a second read
     except (OSError, SkillsrcError, KeyError, TypeError, ValueError):
         return ()
     prefix = "" if inventory["module"] == "." else str(inventory["module"]).rstrip("/") + "/"
@@ -5506,11 +5508,11 @@ def _comparable(project: Path, inventory: Mapping[str, Any]) -> dict[str, Any]:
     """The inventory as «the same project» reads it — the whole body but its digest, without the files the package wrote in earlier runs (``own_files``)
     and the build directories (BUILD_OUTPUT: not walked, the model never sees them).  What else the inventory says (path, bytes, kind, language, origin, the other exclusions) stays.
     An own file is left out only when it is a test (kind) under a test root of the module by the ``.skillsrc`` — the root of the receipt is not trusted here."""
-    from tools.existing_tests import own_files
+    from tools.existing_tests import own_tests
 
-    own, roots = own_files(project, inventory)[0], _test_roots(project, inventory)
+    own = own_tests(project, inventory)[0]
     return {**{key: value for key, value in inventory.items() if key != "digest"},
-            "files": [row for row in inventory["files"] if not (row["project_path"] in own and row.get("kind") == "test" and row["project_path"].startswith(roots))],
+            "files": [row for row in inventory["files"] if row["project_path"] not in own],
             "exclusions": [row for row in inventory["exclusions"] if row["reason_code"] != "BUILD_OUTPUT"]}
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import contextlib
 import hashlib
 import json
 import os
@@ -14,7 +13,7 @@ import uuid
 from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
-from tools.existing_tests import own_files
+from tools.existing_tests import own_tests
 from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser, one_closure
 from tools.run_lock import JournalRefusal
@@ -605,37 +604,38 @@ def expand_docs(project: Path, docs: list[str] | None) -> list[str]:
     entered or listed), inside the project; the bytes are read later by ``_input_files`` and every file must be of the inventory."""
     from tools.build_context import docs_over_limit, openspec_dir_files
 
-    root, expanded, sized, named = project.resolve(), [], {}, {}
+    root, expanded, sized, named = project.resolve(), [], {}, []
     for raw in docs or []:
         _local_input(raw, "--docs")  # a share or a device is never looked at
         candidate = Path(raw)
         path = candidate if candidate.is_absolute() else project / candidate
+        try:
+            confined = _confined(project, path)  # first: a path outside the project is not looked at (no type, no size), _input_files refuses it
+        except ValueError:
+            expanded.append(raw)
+            continue
         if not path.is_dir():  # a file (maybe path#Section): _docs_entries reads it
             expanded.append(raw)
-            if "#" not in raw and path.is_file() and not _is_reparse(path):  # a section is counted later, by what it holds; a link or a path outside is refused by _input_files
-                with contextlib.suppress(ValueError):
-                    named[str(_confined(project, path))] = path.stat().st_size  # in the total only: a large named file has its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE)
+            if "#" not in raw and path.is_file() and not _is_reparse(path):  # a section is counted later, by what it holds; a link is refused by _input_files
+                named.append(confined)
             continue
         found: list[str] = []
         files = None
-        try:
-            confined = _confined(project, path)
-            folder = confined.relative_to(root).as_posix()
-            if openspec_dir_files(folder, []) is not None and not _is_reparse(path):  # the rule of the folder and the link first: no walk of what is no folder of OpenSpec
-                for current, dirs, names in os.walk(confined, followlinks=False):
-                    dirs[:] = sorted(name for name in dirs if not _is_reparse(Path(current) / name))
-                    found += [(Path(current) / name).relative_to(root).as_posix() for name in sorted(names) if not _is_reparse(Path(current) / name)]
-                files = openspec_dir_files(folder, found)
-        except ValueError:
-            raise HostStop("SNAPSHOT_DOCS", f"docs path is outside the project: {raw}", fix="укажите --docs путём внутри проекта") from None
+        folder = confined.relative_to(root).as_posix()
+        if openspec_dir_files(folder, []) is not None and not _is_reparse(path):  # the rule of the folder and the link first: no walk of what is no folder of OpenSpec
+            for current, dirs, names in os.walk(confined, followlinks=False):
+                dirs[:] = sorted(name for name in dirs if not _is_reparse(Path(current) / name))
+                found += [(Path(current) / name).relative_to(root).as_posix() for name in sorted(names) if not _is_reparse(Path(current) / name)]
+            files = openspec_dir_files(folder, found)
         if not files:
             raise HostStop("SNAPSHOT_DOCS", f"в папке {raw} нет файлов OpenSpec для прогона (или это не папка, которую код раскрывает)",
                            fix="папкой в --docs можно назвать openspec/specs, openspec/specs/<область>, openspec/changes/<имя> или openspec/changes/archive/<имя>; остальное — файлами")
         sized.update((str(root / name), (root / name).stat().st_size) for name in files)
         expanded += files
-    rest = [size for name, size in named.items() if name not in sized]
-    if docs_over_limit(list(sized.values()), rest):
-        raise HostStop("NEED_DOCS_LIMIT", f"документы --docs: {len(sized) + len(rest)} файл(ов), {sum(sized.values()) + sum(rest)} байт — предел 256 КиБ на файл папки и 1 МиБ на все")
+    if sized:  # the total is for the files a folder brings, with the files named beside it: a large document without a folder has its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE)
+        rest = [item.stat().st_size for item in dict.fromkeys(named) if str(item) not in sized]
+        if docs_over_limit(list(sized.values()), rest):
+            raise HostStop("NEED_DOCS_LIMIT", f"документы --docs: {len(sized) + len(rest)} файл(ов), {sum(sized.values()) + sum(rest)} байт — предел 256 КиБ на файл папки и 1 МиБ на все")
     return list(dict.fromkeys(expanded))
 
 
@@ -687,9 +687,14 @@ def _cases_scope_files(entries: list[dict[str, str]], cases: str | None) -> None
                 raise HostStop("SNAPSHOT_DOCS", "дельта архивного изменения названа разделом (путь#Раздел)", fix="назовите файл дельты целиком, без #Раздел")
             scope(entries, [row["path"] for row in entries])
     except ScopeSourceError as error:
-        raise HostStop("SNAPSHOT_DOCS", str(error), fix="в дельте нет ## ADDED/MODIFIED/REMOVED/RENAMED Requirements: допишите операции или не называйте файл" if "нет операций" in str(error)
-                       else "архивное изменение называют файлом его дельты openspec/changes/archive/<имя>/specs/<область>/spec.md "
-                       "или папкой openspec/changes/archive/<имя>; живое — папкой openspec/changes/<имя>") from None
+        raise HostStop("SNAPSHOT_DOCS", str(error), fix=scope_fix(error)) from None
+
+
+def scope_fix(error: Exception) -> str:
+    """The way out of a delta file the scope cannot read (``ScopeSourceError``): the fix of the scan and of ``ready``."""
+    return ("в дельте нет ## ADDED/MODIFIED/REMOVED/RENAMED Requirements: допишите операции или не называйте файл" if "нет операций" in str(error)
+            else "архивное изменение называют файлом его дельты openspec/changes/archive/<имя>/specs/<область>/spec.md "
+            "или папкой openspec/changes/archive/<имя>; живое — папкой openspec/changes/<имя>")
 
 
 def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
@@ -911,7 +916,7 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     selected = [opaque for opaque in selected if opaque not in sectioned]
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
-    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_files(project, inventory)[0])
+    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_tests(project, inventory)[0])
     return kept, skipped, budget
 
 
@@ -1547,7 +1552,7 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
         selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
-    own, unread = own_files(project, frozen_inventory)
+    own, unread = own_tests(project, frozen_inventory)
     selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget, own)
     context_skipped = skipped_summary(skipped)
     batches = select_context_batches(

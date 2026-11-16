@@ -115,8 +115,8 @@ def test_the_test_roots_are_those_of_the_skillsrc_the_inventory_holds(tmp_path: 
     raw = json.dumps(document).encode("utf-8")
     (tmp_path / ".skillsrc").write_bytes(raw)
     row = {"project_path": ".skillsrc", "content_digest": "sha256:" + hashlib.sha256(raw).hexdigest()}
-    assert pilot_state._test_roots(tmp_path, {"module": ".", "files": [row]}) == ("src/",)
-    assert pilot_state._test_roots(tmp_path, {"module": ".", "files": [{**row, "content_digest": "sha256:" + "0" * 64}]}) == ()
+    assert pilot_state.module_test_roots(tmp_path, {"module": ".", "files": [row]}) == ("src/",)
+    assert pilot_state.module_test_roots(tmp_path, {"module": ".", "files": [{**row, "content_digest": "sha256:" + "0" * 64}]}) == ()
 
 
 def test_a_nested_skillsrc_does_not_widen_the_test_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

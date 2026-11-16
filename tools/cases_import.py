@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 from tools.fixes import FIXES
@@ -183,7 +183,7 @@ def _verdict_errors(links: list[Mapping[str, Any]], requirements: list[Mapping[s
 
     missing = unmatched(requirements, found)
     if found.affected and len(missing) == len(found.affected):
-        return ["имена дельты не найдены среди требований: " + ", ".join(f"{cap}/{name}" for cap, name in missing[:5]) + " — назовите в --docs spec.md их области"]
+        return ["имена дельты не найдены среди требований: " + ", ".join(f"{cap}/{name}" for cap, name in missing[:5]) + " — повторите scan: он назовёт причину"]  # the scan stops on it before the model; no advice the model cannot do
     judged, errors = set(judged_rows(links, requirements, found)), []
     for link in links:
         row, verdict, ids = link["row"], link.get("verdict"), link["source_requirement_ids"]
@@ -258,11 +258,16 @@ def outside_rows(imported: Mapping[str, Any]) -> list[int]:
     return [int(case["row"]) for case in imported["cases"] if any(source.startswith(OUTSIDE) for source in case_sources(case))]
 
 
+def _cut(value: Any) -> Any:
+    """A text of the model in the skeleton, which the generator reads, is not longer than 2000 signs (shorter ones stay as they are)."""
+    return value[:2000] if isinstance(value, str) else {key: _cut(item) for key, item in value.items()} if isinstance(value, Mapping) else value
+
+
 def _verdict_keys(link: Mapping[str, Any]) -> dict[str, Any]:
     """What the skeleton keeps of a verdict — only when the answer gave one, so a run without verdicts has the bytes it always had."""
     if not link.get("verdict"):
         return {}
-    return {"verdict": link["verdict"], **{key: link[source] for key, source in (("verdict_reason", "reason"), ("removed", "removed")) if link.get(source)}}
+    return {"verdict": link["verdict"], **{key: _cut(link[source]) for key, source in (("verdict_reason", "reason"), ("removed", "removed")) if link.get(source)}}
 
 
 def verdict_groups(imported: Mapping[str, Any]) -> dict[str, list[int]]:
@@ -278,14 +283,22 @@ def verdict_groups(imported: Mapping[str, Any]) -> dict[str, list[int]]:
     return groups
 
 
-def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imported: Mapping[str, Any]) -> bool:
+def _found(case: Mapping[str, Any], mappings: list[Mapping[str, Any]]) -> set[Any]:
+    ids = set(case.get("requirement_ids") or [])
+    return {mapping.get("source_requirement_id") for mapping in mappings if ids & set(mapping.get("canonical_requirement_ids") or [])}
+
+
+def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imported: Mapping[str, Any], peers: Sequence[Mapping[str, Any]] = ()) -> bool:
     """A case of a candidate is the rewrite of an old one when it has the Key of the one imported case with the verdict ``rewrite`` (the Key
     a rewrite keeps), else traces to exactly the source requirements of that case — its text is the generator's, its ``priority`` and
-    ``management`` stay the human's."""
-    ids = set(case.get("requirement_ids") or [])
-    found = {mapping.get("source_requirement_id") for mapping in mappings if ids & set(mapping.get("canonical_requirement_ids") or [])}
+    ``management`` stay the human's.  Without a Key and with several imported cases of the same sources (a positive and a negative case of one
+    requirement) the k-th such case of the candidate by ``display_order`` is the k-th by row (``peers``: the cases of the candidate)."""
+    found = _found(case, mappings)
     key = ((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale")
     same = [item for item in imported["cases"] if key and item["key"] == key] or [item for item in imported["cases"] if set(case_sources(item)) == found]
+    if len(same) > 1 and not key:
+        mates = sorted((peer for peer in peers if _found(peer, mappings) == found), key=lambda peer: peer.get("display_order", 0))
+        same = [sorted(same, key=lambda item: item["row"])[mates.index(case)]] if len(mates) == len(same) and case in mates else same
     return len(same) == 1 and same[0].get("verdict") == "rewrite"
 
 

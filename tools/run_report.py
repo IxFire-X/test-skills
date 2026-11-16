@@ -36,6 +36,11 @@ _ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "au
 
 # --- questions for the analyst ----------------------------------------------------------------
 
+def _one_line(text: Any) -> str:
+    """A text of a file or of a model on one line: a line break in it makes no heading and no item of the list."""
+    return " ".join(str(text or "").split())
+
+
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
                       autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None) -> str:
     """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
@@ -64,16 +69,16 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
         lines += ["## Проверьте: кейсы после обновления", ""]
         for row in checks:
             label = {"rewritten": "переписан", "obsolete": "устарел", "manual": "сомнение"}[row["group"]]
-            was, now, reason = (" ".join(str(row[name] or "").split()) for name in ("was", "now", "reason"))  # one line each, as the notes of the review
-            lines += [f"- строка {row['row']}" + (f", Key {row['key']}" if row["key"] else "") + f" — {label}: «{was}»"
-                      + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not row["key"] else ""))
-                      + (f"; удалено требование {row['removed']['capability']}/{row['removed']['name']}" if row["removed"] else "")
+            key, was, now, reason = (_one_line(row[name]) for name in ("key", "was", "now", "reason"))  # one line each, as the notes of the review
+            lines += [f"- строка {row['row']}" + (f", Key {key}" if key else "") + f" — {label}: «{was}»"
+                      + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not key else ""))
+                      + (f"; удалено требование {_one_line(row['removed']['capability'])}/{_one_line(row['removed']['name'])}" if row["removed"] else "")
                       + (f"; причина: {reason}" if reason else "")]
         lines.append("")
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
                   *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; "
-                    + ("генератор пишет под него новый кейс — проверьте его" if row["source_requirement_id"] in written else "исключено из охвата — кейс не пишется")
+                    + ("генератор пишет под него новый кейс — проверьте его" if _identifier(row["source_requirement_id"]) in written else "исключено из охвата — кейс не пишется")
                     for row in gap_rows), ""]
     if outside:
         lines += ["## Кейсы CSV вне документов", "",
@@ -749,8 +754,8 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     keys = {case["row"]: _identifier(case["key"]) for case in imported["cases"]}  # rows and Keys only (a Key of a form no identifier has is null): the text of a case or of a verdict never goes into the report
     judged = [case for case in imported["cases"] if case.get("verdict")]
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": verdict_groups(imported)["outside"],
-                "new": planned_gaps(root, str(attempts[-1]), imported)} if "gaps" in imported else {}),  # new cases are written for the gaps the plan owns
+            **({"gaps": [{"source_requirement_id": _identifier(row["source_requirement_id"])} for row in imported["gaps"]], "outside": verdict_groups(imported)["outside"],
+                "new": [_identifier(item) for item in planned_gaps(root, str(attempts[-1]), imported)]} if "gaps" in imported else {}),  # new cases are written for the gaps the plan owns; an id that is no identifier is counted, not printed
             **({"judged": len(judged), "verdicts": {name: [{"row": row, "key": keys[row]} for row in rows] for name, rows in verdict_groups(imported).items()}} if judged else {})}
 
 
@@ -1269,7 +1274,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                   *([f"- кейсов из CSV без изменений: {summary['cases']}, из них вне документов: {len(summary['outside'])}"
                      + (" (строки " + ", ".join(map(str, summary["outside"])) + ")" if summary["outside"] else "")
                      + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
-                     + (" (" + ", ".join(summary["new"]) + ")" if summary["new"] else "")]
+                     + (" (" + ", ".join(filter(None, summary["new"])) + ")" if summary["new"] else "")]
                     if "gaps" in summary and not summary.get("verdicts") else []), ""]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]
@@ -1298,7 +1303,7 @@ def _verdict_line(summary: Mapping[str, Any]) -> str:
               for name, label in _VERDICT_GROUPS for rows in [summary["verdicts"][name]]]
     return (f"- кейсов из CSV: {summary['cases']}, судилось: {summary['judged']}; " + "; ".join(groups)
             + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
-            + (" (" + ", ".join(summary["new"]) + ")" if summary["new"] else "") + "; тексты — в questions-for-analyst.md")
+            + (" (" + ", ".join(filter(None, summary["new"])) + ")" if summary["new"] else "") + "; тексты — в questions-for-analyst.md")
 
 
 def write_report(project: Path, run_id: str) -> list[str]:
