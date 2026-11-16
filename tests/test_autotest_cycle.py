@@ -504,7 +504,7 @@ def test_the_second_revision_reads_the_first_and_its_review(tmp_path: Path) -> N
     run_generator(run)
     run_reviewer(run, "AUTO_FIX_APPLIED")
     code, out = prepare_stage(run["root"], "tc-to-autotest:r2", "--model-id", "model-automation")
-    assert code == 0 and {"r1", "ревью r1"} <= set(out["result"]["read"]["by_basis"])
+    assert code == 0 and {"код", "таблицы", "вид кейсов", "ревью r1"} <= set(out["result"]["read"]["by_basis"])
 
 
 def test_the_second_revision_is_not_a_stage_after_the_materialization_began(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

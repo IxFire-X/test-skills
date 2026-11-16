@@ -106,7 +106,7 @@ def test_the_second_revision_over_the_budget_of_the_step_is_a_measurement_not_a_
     monkeypatch.setattr(step_size, "step_budget", lambda project: 1000)
     code, out = prepare_stage(run["root"], "tc-to-autotest:r2")
     budget = out["result"]["budget"]
-    assert code == 0 and budget["fits"] is False and budget["bytes"] > 1000 and {"r1", "ревью r1"} <= set(out["result"]["read"]["by_basis"])
+    assert code == 0 and budget["fits"] is False and budget["bytes"] > 1000 and {"код", "таблицы", "вид кейсов", "ревью r1"} <= set(out["result"]["read"]["by_basis"])
 
 
 def test_materialize_after_a_rework_verdict_names_the_second_revision_not_a_dead_end(tmp_path: Path) -> None:

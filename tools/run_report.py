@@ -256,7 +256,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     basis = None
     if str(call["stage"]).startswith(("tc-reviewer:", "tc-to-autotest:")) and inputs:
         # the view of the document when it is built, else the canonical JSON
-        basis = "вид" if found and any(row.get("basis") == "вид" for row in found["files"]) else "канон"
+        basis = "вид" if found and any(row.get("basis") in ("вид", "вид кейсов") for row in found["files"]) else "канон"
     call["input_basis"] = basis
     call["composition"] = _composition(found, project, root) if found else None
     # the answer bytes are the journal-bound response artifact behind its digest

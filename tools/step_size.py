@@ -430,8 +430,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     A context receipt or a requirements digest opens into the project files it stands for; an object kept inside a carrier
     is a ``binding`` with its own bytes, or 0 when the step reads the carrier anyway.  The view of the document replaces it
     (``basis: вид``: the reviewer's candidate, the autotest view of ``tc-to-autotest``); a generator batch also reads the map
-    of existing project tests (``basis: карта``).  ``tc-to-autotest:r2`` also reads the answers of r1 and of its
-    review (``basis: r1``/``ревью r1``) — they bind the correction, not the request.  An input the journal does not bind is
+    of existing project tests (``basis: карта``).  ``tc-to-autotest:r2`` also reads the answer of r1 as the reviewer of r1 did
+    (``код``, ``таблицы``, ``вид кейсов``; the whole view and the JSON — ``вид``, ``r1`` — only when those files cannot be built)
+    and its review (``ревью r1``) — they bind the correction, not the request.  An input the journal does not bind is
     ``unresolved`` (``not-in-journal``), never guessed.  ``write_views=False`` (the report) measures the map without
     writing it; the report also passes its ``state`` and one ``journals`` cache for all its calls."""
     from tools.pilot_state import derive_state
@@ -455,7 +456,7 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     unresolved: list[dict[str, str]] = []
     contexts: list[str] = []
     effective = None
-    if stage.startswith("autotest-reviewer:"):  # the document the answer of the generator is checked against; its view of the cases goes among the files of the answer
+    if stage.startswith("autotest-reviewer:") or stage == "tc-to-autotest:r2":  # the document the answer of the generator is checked against; its view of the cases goes among the files of the answer (r2 reads r1 so)
         from tools.pilot_state import read_effective_canonical_if_present
 
         effective = read_effective_canonical_if_present(root, attempt_id)
@@ -509,11 +510,14 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
         text = PACK / "skills" / ("tc-generator" if stage == REWORK_STAGE else "tc-reviewer") / "rework.md"
         files.append({"digest": "", "path": str(text), "bytes": text.stat().st_size, "basis": "роль доработки"})
     if stage == "tc-to-autotest:r2":
+        document = effective and effective["document"]  # with it r2 reads r1 as the reviewer did (files of code, tables, the view in parts); without it, or when they cannot be built, as before
         for basis, source, event_type in (("r1", "tc-to-autotest:r1", "CANDIDATE_PUBLISHED"), ("ревью r1", "autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")):
             answer = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id
                            and event.get("stage_instance_id") == source and event["event_type"] == event_type), None)
             paths = [path for path in journal.files.get(answer or "", []) if path.is_file()]
-            if len(paths) == 1:
+            if basis == "r1" and document and (text := automation_text_rows(project, root, paths, answer or "", write_views, document)) is not None:
+                files[:] = [row for row in files if row.get("basis") != "вид"] + text  # the files instead of the JSON of r1 and the whole view
+            elif len(paths) == 1:
                 files.append({"digest": answer, "path": str(paths[0]), "bytes": paths[0].stat().st_size, "basis": basis})
             else:
                 unresolved.append({"digest": answer, "source": source, "reason": "not-in-journal"})  # e.g. an r2 requested before r1

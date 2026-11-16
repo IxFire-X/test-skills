@@ -122,9 +122,11 @@ def test_the_correction_also_reads_the_first_automation_and_its_review(tmp_path:
                                       input_digests=list(request["input_digests"]))
     monkeypatch.undo()
     r2 = stage_inputs(run_root, "tc-to-autotest:r2")
-    extra = [(row["digest"], row["basis"]) for row in r2["files"] if row.get("basis") in {"r1", "ревью r1"}]
-    assert extra == [(answers["tc-to-autotest:r1"], "r1"), (answers["autotest-reviewer:r1"], "ревью r1")], r2
-    assert r2["files"][:len(r1["files"])] == r1["files"] and r2["bindings"] == r1["bindings"] and r2["unresolved"] == []
+    extra = [(row["digest"], row["basis"]) for row in r2["files"] if row["digest"] in answers.values()]
+    assert {basis for _digest, basis in extra} == {"код", "таблицы", "вид кейсов", "ревью r1"} and extra[-1] == (answers["autotest-reviewer:r1"], "ревью r1"), r2
+    assert {digest for digest, basis in extra if basis != "ревью r1"} == {answers["tc-to-autotest:r1"]}  # r1 as the files the reviewer read
+    assert [row for row in r2["files"] if row["digest"] not in answers.values()] == [row for row in r1["files"] if row.get("basis") != "вид"]  # the whole view gives way to them
+    assert r2["bindings"] == r1["bindings"] and r2["unresolved"] == []
     assert list(request["input_digests"]) == list(pilot_state.read_model_request(
         run_root, attempt_id, "tc-to-autotest:r2", r2["request_digest"])["input_digests"])  # the protocol is unchanged
 
