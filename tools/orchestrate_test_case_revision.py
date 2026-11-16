@@ -1175,7 +1175,8 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
         if is_new_case(source, mappings, gaps):
             continue
         rewritten = isinstance(imported, Mapping) and is_rewritten(source, mappings, imported)  # the text is the generator's, the priority the human's
-        changed += [f"/test_cases/{index}/{field}" for field in (("priority",) if rewritten else _IMPORTED_CASE_FIELDS) if case.get(field) != source.get(field)]
+        fields = ("priority",) if rewritten else _IMPORTED_CASE_FIELDS  # the management (Key, folder, labels) is the human's in both
+        changed += [f"/test_cases/{index}/{field}" for field in (*fields, "management") if case.get(field) != source.get(field)]
         if rewritten:
             continue
         steps, original = case.get("steps") or [], source.get("steps") or []

@@ -64,10 +64,11 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
         lines += ["## Проверьте: кейсы после обновления", ""]
         for row in checks:
             label = {"rewritten": "переписан", "obsolete": "устарел", "manual": "сомнение"}[row["group"]]
-            lines += [f"- строка {row['row']}" + (f", Key {row['key']}" if row["key"] else "") + f" — {label}: «{row['was']}»"
-                      + (f" → «{row['now']}»" if row["now"] else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not row["key"] else ""))
+            was, now, reason = (" ".join(str(row[name] or "").split()) for name in ("was", "now", "reason"))  # one line each, as the notes of the review
+            lines += [f"- строка {row['row']}" + (f", Key {row['key']}" if row["key"] else "") + f" — {label}: «{was}»"
+                      + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not row["key"] else ""))
                       + (f"; удалено требование {row['removed']['capability']}/{row['removed']['name']}" if row["removed"] else "")
-                      + (f"; причина: {row['reason']}" if row["reason"] else "")]
+                      + (f"; причина: {reason}" if reason else "")]
         lines.append("")
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
@@ -745,7 +746,7 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
         return {"csv": path, "cases": None, "normalized": None}
     from tools.cases_import import planned_gaps, verdict_groups
 
-    keys = {case["row"]: case["key"] for case in imported["cases"]}  # rows and Keys only: the text of a case or of a verdict never goes into the report
+    keys = {case["row"]: _identifier(case["key"]) for case in imported["cases"]}  # rows and Keys only (a Key of a form no identifier has is null): the text of a case or of a verdict never goes into the report
     judged = [case for case in imported["cases"] if case.get("verdict")]
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
             **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": verdict_groups(imported)["outside"],

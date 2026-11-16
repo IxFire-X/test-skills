@@ -153,12 +153,38 @@ def test_a_named_archive_file_gives_the_archive_scope_however_it_is_spelled(tmp_
     assert _publish(root, attempt_id, rows, links)["content_digest"]  # row 3 is not judged: the scope is «archive», not «all»
 
 
-def test_a_delta_none_of_whose_names_is_a_requirement_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    other = MODIFY.replace("Join", "Elsewhere")
-    _project_dir, root, attempt_id, rows = _run(tmp_path, monkeypatch, other, ["openspec/specs/catalog/spec.md", ARCHIVE], path=ARCHIVE)
-    names = _by_name(rows)
-    _refused(root, attempt_id, rows, [{"row": 2, "source_requirement_ids": [names["Join"]]}, {"row": 3, "source_requirement_ids": [names["Refuse"]]}],
-             "имена дельты не найдены среди требований")
+def test_a_delta_none_of_whose_names_is_a_requirement_stops_the_scan_before_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    refusal = _scan_refused(tmp_path, monkeypatch, {ARCHIVE: MODIFY.replace("Join", "Elsewhere"), BASE: SPEC}, [BASE, ARCHIVE], capsys, no_run=False)
+    assert refusal["reason"] == "OPENSPEC_SOURCE_CONFLICT" and "catalog/Elsewhere" in refusal["detail"], refusal
+
+
+def test_a_delta_some_of_whose_names_are_gone_names_them_in_the_warnings_of_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    for path, text in {ARCHIVE: MODIFY + MODIFY.replace("## MODIFIED Requirements\n", "").replace("Join", "Elsewhere"), BASE: SPEC}.items():
+        _write(project, path, text)
+    code, scan = _scan(project, monkeypatch, docs=[BASE, ARCHIVE])
+    assert code == 0 and any("catalog/Elsewhere" in warning and "Join" not in warning for warning in scan["warnings"]), scan
+
+
+def _twenty_rows_without_a_verdict(without_link: int | None = None) -> str:
+    from tools.cases_import import CasesImportError, require_case_links
+    from tools.cases_scope import Scope
+
+    rows = range(2, 22)
+    links = [{"row": row, "source_requirement_ids": ["SREQ-0001"]} for row in rows if row != without_link]
+    with pytest.raises(CasesImportError, match="IMPORT_CASE_LINKS") as refused:
+        require_case_links([{"row": row} for row in rows], [{"source_requirement_id": "SREQ-0001", "provenance": []}], links, Scope("all", frozenset(), frozenset()))
+    return str(refused.value)
+
+
+def test_twenty_rows_without_a_verdict_are_one_entry_that_names_them_all() -> None:
+    message = _twenty_rows_without_a_verdict()
+    assert "строки " + ", ".join(str(row) for row in range(2, 22)) + ": нет verdict" in message and message.count("нет verdict") == 1, message
+
+
+def test_the_verdicts_are_refused_together_with_a_missing_link() -> None:
+    message = _twenty_rows_without_a_verdict(without_link=3)
+    assert "строка 3: нет связи" in message and "нет verdict" in message, message
 
 
 def _scan_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, files: dict[str, str], docs: list[str], capsys: pytest.CaptureFixture[str], no_run: bool = True) -> dict:
@@ -184,7 +210,18 @@ def test_a_named_archive_proposal_stops_the_scan_and_names_the_delta_file(tmp_pa
 
 def test_a_live_change_without_an_operation_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     refusal = _scan_refused(tmp_path, monkeypatch, {LIVE: "# nothing here\n", BASE: SPEC}, [BASE, LIVE], capsys)
-    assert refusal["reason"] == "SNAPSHOT_DOCS" and "операц" in refusal["detail"], refusal
+    assert refusal["reason"] == "SNAPSHOT_DOCS" and "операц" in refusal["detail"] and "допишите операции" in refusal["fix"], refusal
+
+
+def test_an_archived_delta_named_with_a_section_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    refusal = _scan_refused(tmp_path, monkeypatch, {ARCHIVE: MODIFY, BASE: SPEC}, [BASE, ARCHIVE + "#MODIFIED Requirements"], capsys)
+    assert refusal["reason"] == "SNAPSHOT_DOCS" and "целиком" in refusal["fix"], refusal
+
+
+def test_a_large_file_outside_the_project_is_refused_as_outside_not_as_too_large(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / "huge.md").write_bytes(b"x" * (2 * 1024 * 1024))  # beside the project folder
+    refusal = _scan_refused(tmp_path, monkeypatch, {BASE: SPEC}, [BASE, "../huge.md"], capsys)
+    assert refusal["reason"] == "SNAPSHOT_DOCS" and "outside the project" in refusal["detail"], refusal
 
 
 SECOND = "openspec/changes/archive/2026-11-01-update/specs/other/spec.md"

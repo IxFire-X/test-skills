@@ -113,8 +113,8 @@ def test_the_review_view_names_no_new_cases_for_a_requirement_left_out_on_the_pa
     assert _import_gaps(run["root"], derive_state(run["root"]))[0] == []
 
 
-def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int, links=LINKS) -> tuple[int, dict]:
-    """The review sends case ``number`` (1-based) back; the generator answers the rework with a new title: ``submit`` of ``tc-generator:rework-1``."""
+def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int, links=LINKS, edit=None) -> tuple[int, dict]:
+    """The review sends case ``number`` (1-based) back; the generator answers the rework with a new title (or ``edit(case)``): ``submit`` of ``tc-generator:rework-1``."""
     import copy
 
     from tests.test_review_canaries import _answer, _boundary_and_removed, _candidate, _finding, _open, _select
@@ -132,8 +132,9 @@ def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capt
     findings = [*_boundary_and_removed(run), _finding("BLOCKING", [target["case_id"]], "Нет проверки состояния.")]
     assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == "REWORK_PENDING"
     assert _call(capsys, "prepare", run["root"], STAGE)[0] == 0
-    _put(run["root"], STAGE, {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1",
-                              "test_cases": [{**copy.deepcopy(target), "title": "Доработанный кейс"}]})
+    answer = copy.deepcopy(target)
+    (edit or (lambda case: case.update(title="Доработанный кейс")))(answer)
+    _put(run["root"], STAGE, {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1", "test_cases": [answer]})
     return _call(capsys, "submit", run["root"], STAGE)
 
 

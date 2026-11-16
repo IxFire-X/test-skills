@@ -304,6 +304,18 @@ def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
     return rows, warnings
 
 
+def openspec_gone_names(entries: list[dict[str, str]]) -> tuple[list[str], int]:
+    """The ``capability/name`` the delta of an update of cases touches that no requirement of the composed documents has, and how many it touches."""
+    from tools.cases_scope import scope
+
+    touched = scope(entries, [row["path"] for row in entries]).affected
+    try:
+        have = {(row["capability"], row["name"]) for row in _openspec_rows(entries)[0]}
+    except RequirementConflict:  # the composition says what is wrong, at its own step
+        return [], 0
+    return [f"{capability}/{name}" for capability, name in sorted(touched - have)], len(touched)
+
+
 def _openspec_marks(row: dict[str, Any]) -> list[str]:
     prefix = f"capability={row['capability']}; ### Requirement: {row['name']}"
     marks = [f"{row['path']}:{row['line']} — {prefix}"]

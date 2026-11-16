@@ -96,6 +96,47 @@ def test_a_rework_may_rewrite_the_text_of_a_rewritten_case(tmp_path: Path, monke
     assert code == 0, answered
 
 
+@pytest.mark.parametrize("number", [1, 2])  # a rewritten case and one that fits
+def test_a_rework_keeps_the_key_of_an_imported_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int) -> None:
+    code, refused = _rework(tmp_path, monkeypatch, capsys, number, links=REWRITE, edit=lambda case: case["management"].update(external_keys={"zephyr_scale": "TC-999"}))
+    assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/management" in refused["message"], refused
+
+
+def _keyed(monkeypatch: pytest.MonkeyPatch, keys: tuple[str, str]) -> None:
+    """The CSV of the helpers with a Key column: the Keys of its two cases."""
+    from tests import test_cases_import_docs
+
+    lines = test_cases_import_docs.CSV.split("\r\n")
+    prefixed = ["Key," + lines[0], keys[0] + "," + lines[1], keys[1] + "," + lines[2], "," + lines[3]]
+    monkeypatch.setattr(test_cases_import_docs, "CSV", "\r\n".join(prefixed))
+
+
+TWO_ON_ONE = [{"row": 2, "source_requirement_ids": ["SREQ-0001"], "verdict": "rewrite", "reason": "документ требует двоеточие"},
+              {"row": 3, "source_requirement_ids": ["SREQ-0001"], "verdict": "fits"}]  # a positive and a negative case of one requirement
+
+
+def test_the_review_and_the_rework_know_a_rewritten_case_when_two_cases_stand_for_one_requirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _keyed(monkeypatch, ("ABC-T1", "ABC-T2"))
+    code, answered = _autofix(_plan(tmp_path / "a", monkeypatch, TWO_ON_ONE), 1)
+    assert code == 0, answered
+    code, refused = _autofix(_plan(tmp_path / "b", monkeypatch, TWO_ON_ONE), 2)
+    assert code == 2 and "IMPORT_HUMAN_FIELD_CHANGED" in refused["message"], refused  # the case that fits stays byte for byte
+    code, answered = _rework(tmp_path / "c", monkeypatch, capsys, 1, links=TWO_ON_ONE)
+    assert code == 0, answered
+
+
+def test_the_report_names_a_key_of_the_form_of_zephyr_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _keyed(monkeypatch, ("Проверка входа админом", "ABC-T2"))
+    report, _markdown, _questions = _report(tmp_path, monkeypatch, TWO_ON_ONE)
+    assert [row["key"] for row in report["import"]["verdicts"]["rewritten"] + report["import"]["verdicts"]["unchanged"]] == [None, "ABC-T2"]
+
+
+def test_a_line_break_in_a_reason_does_not_make_a_heading_of_the_questions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    links = [{**REWRITE[0], "reason": "документ требует двоеточие\n## Подделка"}, REWRITE[1]]
+    _report_json, _markdown, questions = _report(tmp_path, monkeypatch, links)
+    assert "\n## Подделка" not in questions and "документ требует двоеточие ## Подделка" in questions
+
+
 def _report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, links) -> tuple[dict, str, str]:
     from tools.run_report import write_report
 

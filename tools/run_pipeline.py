@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import contextlib
 import hashlib
 import json
 import os
@@ -611,8 +612,9 @@ def expand_docs(project: Path, docs: list[str] | None) -> list[str]:
         path = candidate if candidate.is_absolute() else project / candidate
         if not path.is_dir():  # a file (maybe path#Section): _docs_entries reads it
             expanded.append(raw)
-            if "#" not in raw and path.is_file():  # a section is counted later, by what it holds
-                named[str(path.resolve())] = path.stat().st_size  # in the total only: a large named file has its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE)
+            if "#" not in raw and path.is_file() and not _is_reparse(path):  # a section is counted later, by what it holds; a link or a path outside is refused by _input_files
+                with contextlib.suppress(ValueError):
+                    named[str(_confined(project, path))] = path.stat().st_size  # in the total only: a large named file has its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE)
             continue
         found: list[str] = []
         files = None
@@ -681,9 +683,12 @@ def _cases_scope_files(entries: list[dict[str, str]], cases: str | None) -> None
 
     try:
         if cases:
+            if any(row.get("section") and row["path"].startswith("openspec/changes/archive/") for row in entries):  # a section is no context file: its names are never judged
+                raise HostStop("SNAPSHOT_DOCS", "дельта архивного изменения названа разделом (путь#Раздел)", fix="назовите файл дельты целиком, без #Раздел")
             scope(entries, [row["path"] for row in entries])
     except ScopeSourceError as error:
-        raise HostStop("SNAPSHOT_DOCS", str(error), fix="архивное изменение называют файлом его дельты openspec/changes/archive/<имя>/specs/<область>/spec.md "
+        raise HostStop("SNAPSHOT_DOCS", str(error), fix="в дельте нет ## ADDED/MODIFIED/REMOVED/RENAMED Requirements: допишите операции или не называйте файл" if "нет операций" in str(error)
+                       else "архивное изменение называют файлом его дельты openspec/changes/archive/<имя>/specs/<область>/spec.md "
                        "или папкой openspec/changes/archive/<имя>; живое — папкой openspec/changes/<имя>") from None
 
 
@@ -1733,8 +1738,8 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
-    from tools.build_context import (openspec_context_only, openspec_live_changes, openspec_partial_archives, openspec_unnamed_archive_areas, openspec_unnamed_areas,
-                                     openspec_unselected)
+    from tools.build_context import (openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives, openspec_unnamed_archive_areas,
+                                     openspec_unnamed_areas, openspec_unselected)
     from tools.scan_rules import include_mode
 
     if not docs:
@@ -1747,7 +1752,8 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
             size = sum(int(item.get("size") or 0) for item in to_do)
             warnings.append(f"модели уйдут все документы из to_do — {len(to_do)} файл(ов), {size} байт; укажите --docs документа задачи")
         return [], set(), {"task_documents": [], "other_tasks_skipped": 0}, warnings
-    task_paths = [row["path"] for row in _docs_entries(project, docs)]
+    entries = _docs_entries(project, docs)
+    task_paths = [row["path"] for row in entries]
     task_ids: list[str] = []
     for path in task_paths:
         item = by_path.get(path)
@@ -1766,9 +1772,14 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     if cases and (unnamed := openspec_unnamed_archive_areas(task_paths, list(by_path))):  # the cases of an area whose spec.md is not named would stay unjudged
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "архивное изменение меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
                        fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
+    gone, touched = openspec_gone_names(entries) if cases else ([], 0)
+    if gone and len(gone) == touched:  # no name of the delta is a requirement now: no row would be judged, and no answer of the model can change that
+        raise HostStop("OPENSPEC_SOURCE_CONFLICT", "имена дельты не найдены среди нынешних требований: " + ", ".join(gone[:5]),
+                       fix="назовите в --docs spec.md области, где эти требования есть сейчас, или дельту, которая их меняет")
     skipped = openspec_unselected(list(by_path), task_paths)  # the other live changes and the archive: not selected by --docs, no context
     others |= {str(by_path[path]["opaque_id"]) for path in skipped}
     warnings = [f"{path} — OpenSpec контекст (proposal/design/tasks), не требования: строк требований из него нет" for path in task_paths if openspec_context_only(path)]
+    warnings += [f"имена дельты не найдены среди нынешних требований, их кейсы не судятся: {', '.join(gone[:5])}"] * bool(gone)
     if skipped:
         names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
         archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)

@@ -221,10 +221,15 @@ def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[s
         errors += [f"строка {link.get('row')}: {item} не SREQ ответа" for item in ids if item not in known]
         if not ids and not str(link.get("reason") or "").strip():
             errors.append(f"строка {link.get('row')}: пусто без reason")
-    if found is not None and not errors:
-        errors = _verdict_errors(links, requirements, found)
+    if found is not None and all(isinstance(link.get("source_requirement_ids"), list) and "row" in link for link in links):
+        errors += _verdict_errors(links, requirements, found)  # with the links: the one retry of the stage has to name everything
     if errors:
-        raise CasesImportError("IMPORT_CASE_LINKS", "; ".join(errors[:12]))
+        by_cause: dict[str, list[str]] = {}  # the rows of one cause in one entry, none cut off: «строки 2, 3: нет verdict»
+        for error in errors:
+            head, _, cause = error.partition(": ")
+            by_cause.setdefault(cause if head.startswith("строка ") else error, []).append(head.removeprefix("строка ") if head.startswith("строка ") else "")
+        raise CasesImportError("IMPORT_CASE_LINKS", "; ".join((f"строк{'и' if len(rows) > 1 else 'а'} {', '.join(rows)}: {cause}" if rows[0] else cause)
+                                                              for cause, rows in list(by_cause.items())[:12]))
 
 
 def marker_requirements(path: str, data: bytes, requirements: list[Mapping[str, Any]], links: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -274,11 +279,13 @@ def verdict_groups(imported: Mapping[str, Any]) -> dict[str, list[int]]:
 
 
 def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imported: Mapping[str, Any]) -> bool:
-    """A case of a candidate is the rewrite of an old one when it traces to exactly the source requirements of the one imported case
-    that has the verdict ``rewrite`` — its text is the generator's, its ``priority`` and ``management`` stay the human's."""
+    """A case of a candidate is the rewrite of an old one when it has the Key of the one imported case with the verdict ``rewrite`` (the Key
+    a rewrite keeps), else traces to exactly the source requirements of that case — its text is the generator's, its ``priority`` and
+    ``management`` stay the human's."""
     ids = set(case.get("requirement_ids") or [])
     found = {mapping.get("source_requirement_id") for mapping in mappings if ids & set(mapping.get("canonical_requirement_ids") or [])}
-    same = [item for item in imported["cases"] if set(case_sources(item)) == found]
+    key = ((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale")
+    same = [item for item in imported["cases"] if key and item["key"] == key] or [item for item in imported["cases"] if set(case_sources(item)) == found]
     return len(same) == 1 and same[0].get("verdict") == "rewrite"
 
 
