@@ -229,6 +229,31 @@ def map_path(run_root: Path, context_digest: str) -> Path:
     return Path(run_root) / "review-views" / (str(context_digest).removeprefix("sha256:") + SUFFIX)
 
 
+_IMPORT_LINE = re.compile(r"(?:import |from \S+ import )\S")
+
+
+def held_bytes(project: Path, row: Mapping[str, Any]) -> bytes | None:
+    """The bytes of the file of an inventory *row*; None when unreadable or not the scanned file any more."""
+    try:
+        raw = (Path(project) / str(row.get("project_path"))).read_bytes()
+    except OSError:
+        return None
+    return raw if "sha256:" + hashlib.sha256(raw).hexdigest() == row.get("content_digest") else None
+
+
+def env_view(project: Path, inventory: Mapping[str, Any], head: list[str], limit: int = 8192) -> bytes:
+    """*head*, then ``<files> <import>`` for each import line of the top level of the project's tests (not those the package wrote: a model's guess), most common first, cut at *limit*; b"" with none."""
+    own, counts = own_files(Path(project), inventory)[0], {}
+    for row in inventory.get("files") or []:
+        if row.get("kind") == "test" and Path(str(row.get("project_path"))).suffix in {".java", ".py"} and str(row.get("project_path")) not in own:
+            for line in {text.rstrip() for text in (held_bytes(project, row) or b"").decode("utf-8", errors="replace").splitlines() if _IMPORT_LINE.match(text)}:
+                counts[line] = counts.get(line, 0) + 1
+    lines, shown = [f"{count} {line}" for line, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))], 0
+    while shown < len(lines) and sum(len(text.encode("utf-8")) + 1 for text in (*head, *lines[:shown + 1])) <= limit - 40:  # 40: the line about the rest
+        shown += 1
+    return ("\n".join([*head, *lines[:shown], *([f"… ещё {len(lines) - shown} строк"] if shown < len(lines) else [])]) + "\n").encode("utf-8") if lines else b""
+
+
 def _segments(path: str) -> list[str]:
     return [part for part in _normal_path(path).split("/") if part]
 

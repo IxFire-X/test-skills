@@ -93,7 +93,7 @@ def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) 
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
         found = request_files(run_root, stage)
         assert found["unresolved"] == [], (stage, found)
-        places[stage] = [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"]]
+        places[stage] = [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"] if row.get("basis") != "окружение тестов"]
     # the document file itself answers before the carrier that holds the same document inside
     assert places["tc-to-autotest:r1"] == ["candidate-bundle"], places
     assert places["autotest-reviewer:r1"] == ["review-views", "review-views", "review-views", "automation-review-boundaries"], places  # V5: the reviewer reads the document its answer is checked against; o2a: the answer as the code file and the tables; o2b: the document as its view of the cases
@@ -110,14 +110,15 @@ def test_the_receipt_inside_the_effective_carrier_is_a_binding_not_a_second_docu
     effective = read_effective_canonical(run_root, attempt_id)
     found = step_size.request_files(run_root, "tc-to-autotest:r1")
     receipt = json.dumps(effective["effective_bundle_receipt"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    assert [row["digest"] for row in found["files"]] == [effective["document_digest"]], found
+    assert [row["digest"] for row in found["files"] if row.get("basis") != "окружение тестов"] == [effective["document_digest"]], found
     assert [{key: row[key] for key in ("digest", "key", "bytes")} for row in found["bindings"]] == [
         {"digest": effective["effective_bundle_receipt_digest"], "key": "effective_bundle_receipt", "bytes": len(receipt)}], found
     assert Path(found["bindings"][0]["carrier"]).relative_to(run_root).parts[0] == "effective-canonicals"
     code = step_size.main(["--project", str(project), "--run", run_root.name, "--stage", "tc-to-autotest:r1"])
     report = json.loads(capsys.readouterr().out)
     document = Path(found["files"][0]["path"]).stat().st_size
-    assert code == 0 and report["input_bytes"] == document + len(receipt) and report["size_complete"] is True, report
+    env = sum(row["bytes"] for row in found["files"] if row.get("basis") == "окружение тестов")
+    assert code == 0 and report["input_bytes"] == document + env + len(receipt) and report["size_complete"] is True, report
 
 
 def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -130,7 +131,7 @@ def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: 
     effective = read_effective_canonical(run_root, attempt_id)
     built = review_view.ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator does before the step is measured
     found = step_size.request_files(run_root, "tc-to-autotest:r1")
-    assert found["files"] == [{"digest": effective["document_digest"], "path": str(built["path"]), "bytes": len(built["data"]), "basis": "вид"}], found
+    assert [row for row in found["files"] if row.get("basis") != "окружение тестов"] == [{"digest": effective["document_digest"], "path": str(built["path"]), "bytes": len(built["data"]), "basis": "вид"}], found
 
 
 def test_no_request_yet_is_an_error(tmp_path: Path) -> None:
@@ -208,5 +209,5 @@ def test_a_document_kept_only_in_its_carrier_is_read_once_from_it(tmp_path: Path
     for path in (run_root / "candidate-bundle").rglob("*.json"):
         path.unlink()
     found = request_files(run_root, "tc-to-autotest:r1")
-    assert [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"]] == ["effective-canonicals"], found
+    assert [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"] if row.get("basis") != "окружение тестов"] == ["effective-canonicals"], found
     assert [(row["digest"], row["bytes"]) for row in found["bindings"]] == [(effective["effective_bundle_receipt_digest"], 0)], found

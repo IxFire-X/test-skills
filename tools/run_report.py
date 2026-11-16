@@ -234,7 +234,7 @@ def _answer_bytes(root: Path, call: Mapping[str, Any]) -> int | None:
 def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[str, int] | None = None, *,
           state: Any = None, journals: dict[str, Any] | None = None, limits: Mapping[str, Any] | None = None) -> None:
     from tools import pilot_state as pilot
-    from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget
+    from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget, with_test_env
 
     inputs: list[str] = []
     by_code = False
@@ -249,7 +249,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
         pass
     # the same files and bytes as the list of reading of prepare — from the journal, the map of existing tests measured, not written
     try:
-        found = stage_inputs(root, str(call["stage"]), attempt_id=str(call["attempt_id"]), write_views=False, state=state, journals=journals)
+        found = with_test_env(root, stage_inputs(root, str(call["stage"]), attempt_id=str(call["attempt_id"]), write_views=False, state=state, journals=journals), write=False, state=state)
         resolved, unresolved = input_size(found), len(found["unresolved"])
     except (KeyError, OSError, TypeError, ValueError):
         found, resolved, unresolved = None, 0, len(inputs)

@@ -471,9 +471,10 @@ def test_the_automation_input_is_the_autotest_view_and_the_receipt_not_the_carri
 
     before, _report = automation_call()
     document = next(path for path in (run_root / "candidate-bundle").rglob("*.json")).stat().st_size
-    assert before["size_complete"] is True and before["input_basis"] == "канон" and before["input_bytes"] == document + receipt, before
+    env = sum(path.stat().st_size for path in (run_root / "review-views").glob("*.test-env.md"))  # the imports of the project tests: a file of the step too
+    assert before["size_complete"] is True and before["input_basis"] == "канон" and before["input_bytes"] == document + env + receipt, before
     review_view.ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator does
     view = run_root / "review-views" / (effective["document_digest"].removeprefix("sha256:") + ".autotest.md")
     after, report = automation_call()
-    assert after["input_basis"] == "вид" and after["input_bytes"] == view.stat().st_size + receipt, after
+    assert after["input_basis"] == "вид" and after["input_bytes"] == view.stat().st_size + env + receipt, after
     assert "(вид)" in render_markdown(report)

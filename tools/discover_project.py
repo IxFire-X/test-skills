@@ -238,6 +238,10 @@ def _reactor_chain(root: Path, project_root: Path | None = None) -> tuple[list[P
             break
         pom = candidate
     return chain, external
+def build_files(module_root: Path, project_root: Path) -> list[Path]:
+    """The build files of a module: its pom and the reactor parents' (the chain of ``java_api_level``) and its Gradle files; as found, not read."""
+    root = Path(module_root).resolve()
+    return [*_reactor_chain(root, project_root)[0], *(root / name for name in ("build.gradle", "build.gradle.kts") if (root / name).is_file())]
 _JUNIT_PARAMS_ARTIFACTS = frozenset({"junit-jupiter", "junit-jupiter-params", "spring-boot-starter-test"})
 _BOOT_TEST_STARTER = re.compile(r"spring-boot-starter-[\w.-]+-test")  # Spring Boot 4 module test starters pull spring-boot-starter-test
 def junit_params_available(module_root: Path, project_root: Path | None = None) -> bool:

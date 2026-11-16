@@ -685,7 +685,40 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
                 if params else "junit-jupiter-params нет в зависимостях тестов: по методу @Test на каждый кейс группы, зависимость не добавлять")}
         if stage.startswith("tc-to-autotest:") and (held := from_mode_b("generated_delta", "occupied_paths")[0](frozen_baseline(root, attempt))):  # the paths ``submit`` refuses (the same frozen baseline)
             result["occupied_paths"] = occupied_field(held)
-    return result
+    return with_test_env(root, result)
+
+
+def build_file_rows(project: Path, inventory: Mapping[str, Any], module_root: Path) -> list[dict[str, Any]]:
+    """The build files of the module and its reactor parents as step inputs — only those of the frozen *inventory* whose bytes still match it."""
+    from tools.discover_project import build_files
+    from tools.existing_tests import held_bytes
+
+    rows = {str(row["project_path"]): row for row in inventory["files"]}
+    found = [(rows.get(path.relative_to(Path(project).resolve()).as_posix()), path) for path in build_files(module_root, project) if path.is_relative_to(Path(project).resolve())]  # a module root behind a link is no file of the project
+    return [{"digest": row["content_digest"], "path": str(path), "bytes": len(raw), "basis": "файл сборки"}
+            for row, path in found if row and (raw := held_bytes(project, row)) is not None]
+
+
+def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, state: Any = None) -> dict[str, Any]:
+    """*found* of an automation stage plus the ``adapter`` the run froze, the build files of the module and the imports of the project's tests
+    (``basis: файл сборки`` / ``окружение тестов``); the frozen baseline and inventory are read strictly — a bad receipt is a refusal."""
+    from tools.existing_tests import env_view
+    from tools.pilot_state import derive_state, frozen_baseline, frozen_inventory
+
+    if not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
+        return found
+    project = (root := Path(root).resolve()).parent.parent
+    attempt = next(item for item in (state or derive_state(root))["attempts"] if item["attempt_id"] == found["attempt_id"])
+    baseline = frozen_baseline(root, attempt)
+    inventory = frozen_inventory(project, root, baseline["inventory_digest"])
+    module = str(attempt.get("module") or ".")
+    files = build_file_rows(project, inventory, project.joinpath(*module.split("/")))
+    data = env_view(project, inventory, ["# Окружение тестов проекта", f"- модуль: {module}; test_root: {baseline.get('test_root')}; адаптер: {baseline['adapter_id']}"])
+    if data:  # written like the map of existing tests: by the code, again when its bytes differ
+        target = root / "review-views" / (hashlib.sha256(data).hexdigest() + ".test-env.md")
+        _write_view(project, root, target, data, write)
+        files.append({"digest": "sha256:" + hashlib.sha256(data).hexdigest(), "path": str(target), "bytes": len(data), "basis": "окружение тестов"})
+    return {**found, "adapter": {"id": baseline["adapter_id"], "rule": "`capability.adapter` — этот id"}, "files": [*found["files"], *files]}
 
 
 def occupied_field(paths: list[str], limit: int = 4096) -> dict[str, Any]:  # printed within ``limit`` bytes: the rest is counted, the guard is the refusal of ``submit``

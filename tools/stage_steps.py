@@ -516,7 +516,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
         _mark_lost_word(project, root, stage)
     told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "generator_checks") if key in opened}
     summary = step_size.compact_inputs(root, stage, found)
-    read = {**summary["files_summary"], **{key: summary[key] for key in ("java_level", "junit_params", "occupied_paths") if key in summary},  # what the automation stages keep to
+    read = {**summary["files_summary"], **{key: summary[key] for key in ("adapter", "java_level", "junit_params", "occupied_paths") if key in summary},  # what the automation stages keep to
             "role_files": [str(path) for path in step_size.role_files(stage.split(":", 1)[0])]}  # the files of the role the stage is done by
     return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": read,
             "budget": _budget(root, step, found), **word, **told, **({"prior_capabilities": prior} if prior and stage.startswith("tc-generator:BATCH-") else {})}  # only the batch's: the automation's ``before`` returns the whole view of the document
