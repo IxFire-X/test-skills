@@ -71,24 +71,27 @@
 ### Требования в OpenSpec
 
 Требования лежат в `openspec/specs/<область>/spec.md`, живые изменения — в `openspec/changes/<имя>/`, архив — в
-`openspec/changes/archive/`. Что взять в прогон, выбирает `--docs`; перечислите файлы по одному (каталог не принимается).
-Нужны `spec.md` **всех** областей из `openspec/specs/`.
+`openspec/changes/archive/`. Что взять в прогон, выбирает `--docs`: файл `spec.md` или папка — `openspec/specs` (все области),
+`openspec/specs/<область>`, `openspec/changes/<имя>` (его дельты и `proposal`/`design`/`tasks`), `openspec/changes/archive/<имя>` (все
+его дельты). Папки вне `openspec/` не раскрываются — назовите файлы. Требования прогона — только названные `spec.md`; остальные области
+модель видит как контекст, и **полнота неназванных областей не проверяется** — назовите всё, что должно попасть в кейсы.
 
 Вся спецификация без изменений:
 
 ```text
-<python пакета> -m tools.ready --project <проект> --docs openspec/specs/owners/spec.md --docs openspec/specs/visits/spec.md --profile cases-only-v1
+<python пакета> -m tools.ready --project <проект> --docs openspec/specs --profile cases-only-v1
 ```
 
-Одно изменение — те же файлы и файлы изменения (дельта `specs/…/spec.md`; `proposal.md`, `design.md`, `tasks.md` модель
-читает как контекст, требований из них нет, но файл любого из них в `--docs` тоже выбирает изменение):
+Одно изменение — папка изменения и области, которые оно меняет (`spec.md` области изменения называть обязательно, иначе остановка
+до модели; `proposal.md`, `design.md`, `tasks.md` модель читает как контекст, требований из них нет):
 
 ```text
-<python пакета> -m tools.ready --project <проект> --docs openspec/specs/owners/spec.md --docs openspec/specs/visits/spec.md --docs openspec/changes/add-search/specs/owners/spec.md --profile cases-only-v1
+<python пакета> -m tools.ready --project <проект> --docs openspec/specs/owners --docs openspec/changes/add-search --profile cases-only-v1
 ```
 
 Другие живые изменения и неназванный архив в модель не идут: scan называет их одной строкой в `warnings`. Файлы двух изменений в
-одном запросе — остановка `OPENSPEC_SOURCE_CONFLICT`: выберите одно.
+одном запросе, а также два живых изменения в проекте без `--docs` — остановка `OPENSPEC_SOURCE_CONFLICT`: повторите `scan` с `--docs`
+одного изменения (`--new-run` не нужен).
 
 ## 4. Дать модели запрос
 
@@ -215,7 +218,8 @@ CSV проверяется до создания прогона. Частые о
 | `RUN_LEFT` | прогон оставлен до ревью кейсов, шаги модели в нём не идут | выполнить обычный scan того же запроса — он начнёт новый прогон |
 | `DOCS_ENCODING` | документ требований не в UTF-8 | сохранить документ в UTF-8 и повторить scan |
 | `DOCS_ZEPHYR_CSV` | в `--docs` подана выгрузка кейсов | подать её через `--reference` или `--cases` |
-| `OPENSPEC_SOURCE_CONFLICT` | в `--docs` файлы двух изменений OpenSpec (или состав спецификации не сходится) | оставить в `--docs` `spec.md` всех областей и файлы одного изменения, повторить scan |
+| `OPENSPEC_SOURCE_CONFLICT` | в `--docs` файлы двух изменений OpenSpec, или `--docs` нет при двух живых изменениях, или `spec.md` области изменения не назван (или состав спецификации не сходится) | назвать в `--docs` папку одного изменения и `spec.md` его областей, повторить scan; если отказ пришёл после шага модели — `scan --new-run` |
+| `NEED_DOCS_LIMIT` | файлы папки из `--docs` больше 256 КиБ каждый или 1 МиБ всего | назвать меньше областей, повторить scan |
 | `STEP_OVER_BUDGET` | вход шага модели больше бюджета | не стоп: шаг идёт; в следующий раз сузьте контекст (`--target` или пути модуля) |
 | `STEP_INPUT_UNRESOLVED` | вход шага не найден в журнале | не стоп: модель сообщит одной строкой |
 | `STEP_OUTPUT_LARGE` | ответ модели крупный | только замер, ничего делать не нужно |

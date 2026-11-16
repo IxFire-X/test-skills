@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +14,7 @@ import pytest
 from tests.test_task_docs_context import _context_paths, _write
 from tools import api, run_pipeline
 from tools.build_context import build_context
+from tools.pilot_state import read_run
 
 BASE = "openspec/specs/owners/spec.md"
 ADD = "openspec/changes/add-search/specs/owners/spec.md"
@@ -31,10 +34,10 @@ def _project(tmp_path: Path) -> Path:
     return project
 
 
-def _scan(project: Path, monkeypatch: pytest.MonkeyPatch, docs: list[str], expect: int = 0) -> dict:
+def _scan(project: Path, monkeypatch: pytest.MonkeyPatch, docs: list[str], expect: int = 0, new_run: bool = True) -> dict:
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
-    args = SimpleNamespace(project=str(project), module=None, target=None, docs=docs, profile="cases-only-v1", new_run=True)
+    args = SimpleNamespace(project=str(project), module=None, target=None, docs=docs, profile="cases-only-v1", new_run=new_run)
     assert run_pipeline.cmd_scan(args) == expect, payloads[-1]
     return payloads[-1]
 
@@ -114,10 +117,11 @@ def test_a_proposal_in_docs_gives_no_requirement_rows(tmp_path: Path) -> None:
     assert any(PROPOSAL in item and "контекст" in item for item in envelope["warnings"])
 
 
-def test_without_docs_two_live_changes_are_still_refused_with_a_way_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_without_docs_two_live_changes_stop_the_scan_and_the_next_scan_goes_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project(tmp_path)
-    code, out = _answer(project, _scan(project, monkeypatch, []), [BASE], capsys)
-    assert code == 2 and out["code"] == "OPENSPEC_SOURCE_CONFLICT" and "--docs" in out["fix"], out
+    stop = _scan(project, monkeypatch, [], expect=2)
+    assert stop["reason"] == "OPENSPEC_SOURCE_CONFLICT" and "--docs" in stop["fix"]
+    _scan(project, monkeypatch, [BASE, ADD], new_run=False)  # the dead run does not block the corrected scan
 
 
 def test_a_row_of_an_unselected_change_is_still_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -132,3 +136,114 @@ def test_a_lost_requirement_of_the_baseline_is_still_refused(tmp_path: Path, mon
     scan = _scan(project, monkeypatch, [BASE, ADD])
     code, out = _answer(project, scan, [ADD], capsys)  # the answer composes the delta without the baseline: Create and Fax are lost
     assert code == 2 and "OPENSPEC_MISSING" in out["message"], out
+
+
+VISITS = "openspec/specs/visits/spec.md"
+ARCHIVE_VISITS = "openspec/changes/archive/2026-10-01-init/specs/visits/spec.md"
+
+
+def _docs_of(scan: dict) -> list[str]:
+    return list(read_run(Path(scan["run_root"]))["manifest"]["scan_request"]["docs"])
+
+
+def test_a_folder_in_docs_is_the_spec_files_under_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, SPEC)
+    assert _docs_of(_scan(project, monkeypatch, ["openspec/specs"])) == [BASE, VISITS]
+    assert _docs_of(_scan(project, monkeypatch, ["openspec/specs/visits"])) == [VISITS]
+
+
+def test_a_change_folder_is_its_deltas_and_its_proposal_and_selects_the_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scan = _scan(_project(tmp_path), monkeypatch, [BASE, "openspec/changes/add-search"])
+    assert _docs_of(scan) == [BASE, PROPOSAL, ADD]
+    assert DROP not in _context_paths(scan)
+
+
+def test_the_folder_of_an_archived_change_is_all_its_deltas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, ARCHIVE_VISITS, ADDED)
+    _write(project, "openspec/changes/archive/2026-10-01-init/proposal.md", "# Proposal\n")
+    scan = _scan(project, monkeypatch, [BASE, "openspec/changes/archive/2026-10-01-init"])
+    assert _docs_of(scan) == [BASE, ARCHIVE, ARCHIVE_VISITS]
+
+
+@pytest.mark.parametrize("folder", ["openspec", "openspec/changes", "openspec/changes/archive", "docs", "openspec/changes/empty"])
+def test_a_folder_the_code_does_not_open_stops_the_scan_with_a_fix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, folder: str) -> None:
+    project = _project(tmp_path)
+    _write(project, "docs/a.md", "text\n")
+    (project / "openspec" / "changes" / "empty").mkdir()
+    stop = _scan(project, monkeypatch, [folder], expect=2)
+    assert stop["reason"] == "SNAPSHOT_DOCS" and stop["fix"] and not (project / ".pilot-runs").exists()
+
+
+@pytest.mark.parametrize("kind", ["junction", "symlink"])
+def test_a_link_inside_a_folder_is_not_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    project = _project(tmp_path)
+    _write(tmp_path, "outside/spec.md", SPEC)
+    link = project / "openspec" / "specs" / "linked"
+    if kind == "junction" and os.name == "nt":  # no rights needed
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(tmp_path / "outside")], capture_output=True, check=True)
+    else:
+        try:
+            link.symlink_to(tmp_path / "outside", target_is_directory=True)
+        except OSError:
+            pytest.skip("no symbolic links here")
+    assert _docs_of(_scan(project, monkeypatch, ["openspec/specs"])) == [BASE]
+
+
+def test_a_folder_over_the_documents_limit_stops_the_scan_before_a_run_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    for area in "abcde":
+        _write(project, f"openspec/specs/{area}/spec.md", SPEC + "x" * 230_000)
+    stop = _scan(project, monkeypatch, ["openspec/specs"], expect=2)
+    assert stop["reason"] == "NEED_DOCS_LIMIT" and stop["fix"] and not (project / ".pilot-runs").exists()
+
+
+def test_the_areas_not_named_are_context_and_leave_the_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, SPEC)
+    code, out = _answer(project, _scan(project, monkeypatch, [BASE]), [BASE], capsys)
+    assert code == 0, out
+
+
+def test_a_row_of_an_area_not_named_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, SPEC)
+    code, out = _answer(project, _scan(project, monkeypatch, [BASE]), [BASE, VISITS], capsys)
+    assert code == 2 and "OPENSPEC_EXTRA" in out["message"], out
+
+
+def test_a_change_of_an_area_whose_spec_is_not_named_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stop = _scan(_project(tmp_path), monkeypatch, ["openspec/changes/add-search"], expect=2)
+    assert stop["reason"] == "OPENSPEC_SOURCE_CONFLICT" and BASE in stop["fix"]
+
+
+def test_a_change_of_a_new_area_needs_no_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, "openspec/changes/add-pets/specs/pets/spec.md", ADDED)
+    _scan(project, monkeypatch, ["openspec/changes/add-pets"])
+
+
+def test_openspec_files_are_no_files_of_other_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _scan(_project(tmp_path), monkeypatch, [BASE, ADD])["context_summary"]["other_tasks_skipped"] == 0
+
+
+def test_scan_says_that_a_named_proposal_is_context_not_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scan = _scan(_project(tmp_path), monkeypatch, [BASE, PROPOSAL])
+    assert any(PROPOSAL in item and "не требования" in item for item in scan["warnings"])
+
+
+def test_a_file_under_openspec_that_is_no_proposal_is_an_ordinary_document(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    notes = "openspec/specs/owners/notes.md"
+    _write(project, notes, "REQ-7 Owners SHALL be listed.\n")
+    envelope = build_context(project, docs_snapshot=_entries(project, [notes]))
+    assert envelope["artifacts"]["analytics_documentation"]["requirements"]
+
+
+def test_ready_takes_a_folder_in_docs(tmp_path: Path) -> None:
+    from tools import ready
+
+    project = _project(tmp_path)
+    report = ready.check(project, ["openspec/specs"], "cases-only-v1", None)
+    assert not [row for row in report["checks"] if row["id"].startswith("docs") and row["level"] == "STOP"], report

@@ -1966,7 +1966,12 @@ def _context_marker_snapshots(
             except UnicodeDecodeError as error:
                 raise ValueError("context-marker OpenSpec source is not UTF-8") from error
             snapshots[path] = {"path": path, "sha256": item["content_digest"], "content": content}
-    return list(snapshots.values())
+    from tools.build_context import openspec_unnamed_baseline
+    from tools.doc_sections import resolve_spec
+    from tools.run_pipeline import relative_to_project
+
+    named = [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
+    return [row for row in snapshots.values() if not (named and openspec_unnamed_baseline(row["path"], named))]  # the areas --docs does not name are context, no requirements
 
 
 def _validate_context_marker_sources(

@@ -41,7 +41,7 @@ Downstream generation decomposes this evidence into canonical coverage condition
 and review independently reconciles those conditions with the original request.
 
 For standard OpenSpec, the authorized `openspec/specs/<capability>/spec.md` documents
-are baseline; `openspec/changes/<selected-change>/specs/<capability>/spec.md` documents
+(named in `--docs`; other capabilities are context) are baseline; `openspec/changes/<selected-change>/specs/<capability>/spec.md` documents
 are one explicitly selected live delta. Compose the final state: RENAMED changes identity
 and keeps baseline behavior, REMOVED deletes it, MODIFIED replaces the complete block,
 ADDED introduces a block. A rename followed by MODIFIED uses the TO name. Reject an

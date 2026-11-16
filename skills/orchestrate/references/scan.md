@@ -2,7 +2,7 @@
 
 Scan сам делает read-only inventory, исключает `.git`, зависимости, build outputs, binaries и файлы с возможными secrets, замораживает baseline (requirements,
 `.skillsrc`, source/config/fixture inputs, parent dependencies, module) и создаёт одну попытку. Тебе — выбрать exact module и передать `--docs`, `--module`, `--profile`.
-Контекст модели — все документы папки, не только `--docs` (кроме чужих живых изменений OpenSpec и неназванного архива).
+Контекст модели — все документы папки, не только `--docs` (при заданном `--docs` — кроме чужих живых изменений OpenSpec и неназванного архива).
 
 - **Модуль.** Один exact module: автоматически — единственный или доказанно содержащий путь пользователя; иначе спроси человека и жди (scan без точного `--module` попытку не создаёт).
   `--module` — ID из inventory или `.skillsrc`, не путь: корню соответствует `root`, остальные — путь папки (`api`, `services/core`); имена с точкой или не из латиницы — `root--<hex>`.

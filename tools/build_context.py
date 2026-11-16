@@ -161,9 +161,46 @@ def openspec_unselected(paths: list[str], docs: list[str]) -> list[str]:
             and (path.startswith("openspec/changes/archive/") or (m := _OPENSPEC_CHANGE.match(path)) and m.group(1) not in selected)]
 
 
+_OPENSPEC_CONTEXT = re.compile(r"^openspec/(?:changes/(?!archive/)[^/]+/)?[^/]+$")
+_OPENSPEC_FOLDER = re.compile(r"^openspec/(?:specs(?:/.+)?|changes/(?!archive$)([^/]+)|changes/archive/[^/]+)$")
+
+
 def openspec_context_only(path: str) -> bool:
-    """An ``openspec/`` file that is no spec and no archive (proposal, design, tasks, project): context, never requirement rows."""
-    return path.startswith("openspec/") and not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/")
+    """A file of the first level of a live change (proposal, design, tasks) or of ``openspec/`` (project): context, never requirement rows.
+    Any other file under ``openspec/`` is an ordinary document."""
+    return bool(_OPENSPEC_CONTEXT.fullmatch(path))
+
+
+def openspec_dir_files(folder: str, found: list[str]) -> list[str] | None:
+    """The ``found`` files a folder of ``--docs`` stands for: the ``spec.md`` of ``openspec/specs[/<area>]``, the deltas (and the
+    proposal, design, tasks as context) of ``openspec/changes/<name>``, all the deltas of ``openspec/changes/archive/<name>``.
+    ``None``: the folder is none of these."""
+    match = _OPENSPEC_FOLDER.fullmatch(folder)
+    if not match:
+        return None
+    context = {f"{folder}/{name}.md" for name in ("proposal", "design", "tasks")} if match.group(1) else set()
+    return [path for path in found if path in context or path.endswith("/spec.md") and (_OPENSPEC_PATH.fullmatch(path) or path.startswith(folder + "/specs/"))]
+
+
+def docs_over_limit(sizes: list[int]) -> bool:
+    """The sizes of documents beyond the limit of a file (256 KiB) or of all (1 MiB)."""
+    return max(sizes) > _DOCS_MAX_FILE or sum(sizes) > _DOCS_MAX_TOTAL
+
+
+def openspec_live_changes(paths: list[str]) -> set[str]:
+    """The live changes that have a delta ``spec.md`` among ``paths``."""
+    return {match.group(3) for path in paths if (match := _OPENSPEC_PATH.fullmatch(path)) and match.group(3)}
+
+
+def openspec_unnamed_baseline(path: str, docs: list[str]) -> bool:
+    """A baseline ``spec.md`` that ``--docs`` does not name: context for the model, no requirements of the run."""
+    return (match := _OPENSPEC_PATH.fullmatch(path)) is not None and match.group(1) == "specs" and path not in docs
+
+
+def openspec_unnamed_areas(docs: list[str], paths: list[str]) -> list[str]:
+    """The baseline ``spec.md`` (of ``paths``, the inventory) of the areas a named delta changes, that ``--docs`` does not name."""
+    areas = {f"openspec/specs/{match.group(4)}/spec.md" for doc in docs if (match := _OPENSPEC_PATH.fullmatch(doc)) and match.group(3)}
+    return sorted(path for path in areas if path in paths and path not in docs)
 
 
 def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[str]]:

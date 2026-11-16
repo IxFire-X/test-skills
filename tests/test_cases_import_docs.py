@@ -265,7 +265,7 @@ def _openspec_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     project = _docs_project(tmp_path)
     (project / "openspec" / "specs" / "catalog").mkdir(parents=True)
     (project / "openspec" / "specs" / "catalog" / "spec.md").write_bytes(SPEC.encode("utf-8"))
-    code, scan = _scan(project, monkeypatch, docs=["docs/req.md"])
+    code, scan = _scan(project, monkeypatch, docs=["docs/req.md", "openspec/specs/catalog/spec.md"])  # os2: the spec is a requirement of the run when --docs names it
     assert code == 0, scan
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
     entry = {"path": "openspec/specs/catalog/spec.md", "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}

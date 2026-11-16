@@ -101,6 +101,9 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
         except ValueError:
             rows.append(_row(check_id, CASES, "STOP", f"{raw} вне проекта", "положите документ внутрь проекта и укажите путь от его корня"))
             continue
+        if path.is_dir():  # scan opens it (build_context.openspec_dir_files); ready says so below if it cannot
+            rows.append(_row(check_id, CASES, "OK", f"{raw} — папка: scan берёт файлы OpenSpec под ней"))
+            continue
         if not path.is_file():
             rows.append(_row(check_id, CASES, "STOP", f"{raw} не найден", "проверьте путь от корня проекта"))
             continue
@@ -545,10 +548,11 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     rows.append(_git_row(project, profile))
     rows.extend(check_run_root(project))
     rows.extend(check_docs(project, docs))
-    from tools.run_pipeline import HostStop
+    from tools.run_pipeline import HostStop, expand_docs
 
     try:
-        _self_review_scan(project, docs, profile, module, target)  # the values every printed command of the run carries
+        _self_review_scan(project, docs, profile, module, target)  # the values every printed command of the run carries (the folders as typed)
+        typed, docs = docs, expand_docs(project, list(docs))  # the files of a folder, as scan takes them
     except HostStop as stop:  # scan refuses the same request: said here, before anything else
         rows.append(_row("command", CASES, "STOP", f"{stop.code}: {stop}", stop.fix))
         return {"status": "BLOCKED", "project": str(project), "profile": requested_profile, "checks": rows}
@@ -611,7 +615,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         # PT: the row is OK — there is nothing to fix; the scan with the SELF flag is data for the one case the human says yes to
         rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); если CLI этого не умеет — "
                          "спросите человека о прогоне с пометкой SELF; команду scan с флагом SELF (details.self_review_scan) — только после его «да»",
-                         None, {"self_review_scan": _self_review_scan(project, docs, profile, module, target)}))
+                         None, {"self_review_scan": _self_review_scan(project, typed, profile, module, target)}))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": requested_profile, "checks": rows}
 

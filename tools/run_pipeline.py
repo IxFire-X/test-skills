@@ -598,6 +598,39 @@ def _is_zephyr_csv(data: bytes) -> bool:
     return True
 
 
+def expand_docs(project: Path, docs: list[str] | None) -> list[str]:
+    """``--docs`` with each folder replaced by the files it stands for (``build_context.openspec_dir_files``), once at the start of a scan;
+    every reader of the request then sees files.  The walk is of the one named folder: no link, no reparse point (checked before it is
+    entered or listed), inside the project; the bytes are read later by ``_input_files`` and every file must be of the inventory."""
+    from tools.build_context import docs_over_limit, openspec_dir_files
+
+    root, expanded = project.resolve(), []
+    for raw in docs or []:
+        _local_input(raw, "--docs")  # a share or a device is never looked at
+        candidate = Path(raw)
+        path = candidate if candidate.is_absolute() else project / candidate
+        if not path.is_dir():  # a file (maybe path#Section): _docs_entries reads it
+            expanded.append(raw)
+            continue
+        found: list[str] = []
+        try:
+            confined = _confined(project, path)
+            for current, dirs, names in os.walk(confined, followlinks=False):
+                dirs[:] = sorted(name for name in dirs if not _is_reparse(Path(current) / name))
+                found += [(Path(current) / name).relative_to(root).as_posix() for name in sorted(names) if not _is_reparse(Path(current) / name)]
+            files = None if _is_reparse(path) else openspec_dir_files(confined.relative_to(root).as_posix(), found)
+        except ValueError:
+            raise HostStop("SNAPSHOT_DOCS", f"docs path is outside the project: {raw}", fix="укажите --docs путём внутри проекта") from None
+        if not files:
+            raise HostStop("SNAPSHOT_DOCS", f"в папке {raw} нет файлов OpenSpec для прогона (или это не папка, которую код раскрывает)",
+                           fix="папкой в --docs можно назвать openspec/specs, openspec/specs/<область>, openspec/changes/<имя> или openspec/changes/archive/<имя>; остальное — файлами")
+        sizes = [(root / name).stat().st_size for name in files]
+        if docs_over_limit(sizes):
+            raise HostStop("NEED_DOCS_LIMIT", f"файлы папки {raw}: {len(files)} шт., {sum(sizes)} байт — предел 256 КиБ на файл и 1 МиБ на всё")
+        expanded += files
+    return list(dict.fromkeys(expanded))
+
+
 def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]:
     from tools.doc_sections import resolve_spec
 
@@ -1338,6 +1371,7 @@ def cmd_scan(args: Any) -> int:
     _PRINTED.clear()
     try:
         _scan_profile(args)
+        args.docs = expand_docs(Path(args.project).resolve(), getattr(args, "docs", None))  # a folder is the files under it, before any reader sees the request
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
         return 2
@@ -1664,7 +1698,12 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
+    from tools.build_context import openspec_context_only, openspec_live_changes, openspec_unnamed_areas, openspec_unselected
+
     if not docs:
+        if len(live := sorted(openspec_live_changes(list(by_path)))) > 1:  # by the inventory (it keeps the .skillsrc exclusions): no answer of the model can compose two
+            raise HostStop("OPENSPEC_SOURCE_CONFLICT", "в проекте несколько живых изменений OpenSpec, а --docs не задан: " + ", ".join(live),
+                           fix="повторите scan с --docs: папка одного изменения (openspec/changes/<имя>) и папки или spec.md его областей (openspec/specs/<область>) — --new-run не нужен")
         warnings = []
         if to_do:
             size = sum(int(item.get("size") or 0) for item in to_do)
@@ -1679,18 +1718,20 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
                            + _exclusion_note(inventory, path), TASK_DOC_FIX)
         task_ids.append(str(item["opaque_id"]))
     others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
-    from tools.build_context import openspec_unselected
-
+    task_count = len(others)
+    if unnamed := openspec_unnamed_areas(task_paths, list(by_path)):  # a change of an area whose spec.md is no requirements of the run
+        raise HostStop("OPENSPEC_SOURCE_CONFLICT", "изменение OpenSpec меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
+                       fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
     skipped = openspec_unselected(list(by_path), task_paths)  # the other live changes and the archive: not selected by --docs, no context
     others |= {str(by_path[path]["opaque_id"]) for path in skipped}
-    warnings: list[str] = []
+    warnings = [f"{path} — OpenSpec контекст (proposal/design/tasks), не требования: строк требований из него нет" for path in task_paths if openspec_context_only(path)]
     if skipped:
         names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
         archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)
         size = sum(int(by_path[path].get("size") or 0) for path in skipped)
         warnings.append("OpenSpec: не применяются и в модель не идут: " + ", ".join(names + ([f"архив ({archive} файл(ов))"] if archive else []))
                         + f" — {len(skipped)} файл(ов), {size} байт; изменение выбирают файлы в --docs")
-    return task_ids, others, {"task_documents": task_paths, "other_tasks_skipped": len(others)}, warnings
+    return task_ids, others, {"task_documents": task_paths, "other_tasks_skipped": task_count}, warnings
 
 
 def _exclusion_note(inventory: Mapping[str, Any], path: str) -> str:
