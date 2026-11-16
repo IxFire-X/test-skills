@@ -56,6 +56,30 @@ def _relations(rows: list[Any], facts: Mapping[tuple[str, str, str], str]) -> st
     return "\n".join(lines)
 
 
+PART_BYTES, PART_LINES = 60_000, 1_800  # a part of the view of the cases: an agent's read is cut near 25 thousand tokens (about 65 KB of this text) and at 2 000 lines
+
+
+def _view_parts(stem: str, text: str) -> list[tuple[str, str, bytes]]:
+    """The view of the cases in files of at most PART_BYTES and PART_LINES: the head (requirements, capabilities, boundaries) comes first — alone, if it fills a part —
+    and a case is never cut.  A part starts with a line that says where it is, where the assertions are and where the legend is; the bodies, joined by a line break, are the view."""
+    groups: list[list[str]] = [[]]
+    size = lines = 0
+    for block in re.split(r"\n(?=### TC-)", text):  # the first block is the head
+        weight, height = len(block.encode("utf-8")) + 1, block.count("\n") + 1
+        if groups[-1] and (size + weight > PART_BYTES - 400 or lines + height > PART_LINES - 1):  # 400: room of the first line
+            groups.append([])
+            size = lines = 0
+        groups[-1].append(block)
+        size, lines = size + weight, lines + height
+    parts = []
+    for number, group in enumerate(groups, 1):
+        cases = [found[1] for block in group if (found := re.match(r"### (TC-\S+)", block))]
+        note = (f"часть {number} из {len(groups)}, " + (f"кейсы {cases[0]} … {cases[-1]}" if cases else "голова вида без кейсов")
+                + f"; утверждения (ASSERT) — в {stem}.tables.txt рядом с символом; легенда записи — в части 1")
+        parts.append((f"{stem}.autotest-review{f'.{number}' if len(groups) > 1 else ''}.md", "вид кейсов", (note + "\n" + "\n".join(group)).encode("utf-8")))
+    return parts
+
+
 def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any] | None = None) -> list[tuple[str, str, bytes]] | None:
     """``(file name, basis, bytes)`` of the files the reviewer reads instead of the JSON of the answer ``digest``; None leaves it whole.
     With the effective *document* the files hold its view of the cases in the short form too (the generator's view is not changed)."""
@@ -73,5 +97,5 @@ def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any]
                         f"## прочие поля (JSON)\n{_json(rest)}\n",
                         *(f"## {title}\n{text}\n" if text is not None else f"## {title} (JSON)\n{_json(rows)}\n" for title, text, rows in parts)])
     moved = [key for row in body["implementation_relations"] if relations is not None and (key := _key(row)) in facts]  # what the tables hold, the view leaves out
-    view = [] if document is None else [(f"{stem}.autotest-review.md", "вид кейсов", review_view.render(document, "autotest-review", moved=moved))]
+    view = [] if document is None else _view_parts(stem, review_view.render(document, "autotest-review", moved=moved).decode("utf-8"))
     return [*((name, "код", row["content"].encode("utf-8")) for name, row in zip(names, files)), (f"{stem}.tables.txt", "таблицы", tables.encode("utf-8")), *view]

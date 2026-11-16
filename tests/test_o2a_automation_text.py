@@ -273,7 +273,8 @@ def test_the_operation_and_the_assertions_of_a_related_step_are_in_the_tables_an
     parts = render(_answer(document), DIGEST, document)
     relations = _text(parts, ".tables.txt").split("## связи\n")[1].strip("\n").split("\n")
     short = [line for line in view_of(document, profile="autotest-review").decode("utf-8").split("\n") if not line.startswith(legend)]  # proved above to be the generator's view
-    shown, back = [line for line in _text(parts, ".autotest-review.md").split("\n") if not line.startswith(legend)], []
+    view = "\n".join(text.split("\n", 1)[1] for text in _view_files(parts))  # the bodies of the parts, as the test of the parts joins them
+    shown, back = [line for line in view.split("\n") if not line.startswith(legend)], []
     for line in relations:  # a fact of the tables, written as the short view writes it
         if line.startswith("    "):
             name, text = line.strip().split(" ", 1)
@@ -282,3 +283,47 @@ def test_the_operation_and_the_assertions_of_a_related_step_are_in_the_tables_an
             back.append(f"   Операция: {line.split(' | ', 1)[1]}")
     assert back and set(back) <= set(short) and sorted(shown + back) == sorted(short)  # the view and the tables hold the very lines of the short view
     assert sum(line.startswith("   Операция:") for line in shown) == 1 and any(line.strip().startswith("ASSERT-") for line in shown)  # the step without a relation keeps its operation and its assertions
+
+
+def _view_files(parts: list) -> list[str]:
+    return [data.decode("utf-8") for name, basis, data in sorted(parts) if basis == "вид кейсов"]
+
+
+def test_the_view_comes_in_parts_that_fit_one_read_and_their_bodies_are_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import automation_text
+
+    document = _example()
+    answer = _answer(document)
+    parts = automation_text.render(answer, DIGEST, document)
+    files = _view_files(parts)
+    names = sorted(name for name, basis, _data in parts if basis == "вид кейсов")
+    assert len(files) > 1 and names == [f"{DIGEST.removeprefix('sha256:')}.autotest-review.{number}.md" for number in range(1, len(files) + 1)]
+    assert all(len(text.encode("utf-8")) <= automation_text.PART_BYTES and text.count("\n") <= automation_text.PART_LINES for text in files[1:])
+    assert len(files[0].encode("utf-8")) > automation_text.PART_BYTES and "\n### TC-" not in files[0]  # the head of the example alone is over a part (110 KB; 33–46 KB on a real run): a part of its own
+    assert all(text.startswith(f"часть {number} из {len(files)}, ") and "tables.txt" in text.split("\n", 1)[0] and "легенда" in text.split("\n", 1)[0] for number, text in enumerate(files, 1))
+    assert "## Требования" in files[0] and not any("## Требования" in text for text in files[1:])
+    monkeypatch.setattr(automation_text, "PART_BYTES", 10**9)
+    monkeypatch.setattr(automation_text, "PART_LINES", 10**9)
+    whole, = _view_files(automation_text.render(answer, DIGEST, document))
+    assert "\n".join(text.split("\n", 1)[1] for text in files) == whole.split("\n", 1)[1]  # nothing lost, nothing twice
+    assert sum(text.count("\n### TC-") for text in files) == len(document["test_cases"])  # each case in one part
+
+
+def test_a_head_that_fills_a_part_is_alone_in_it_and_a_case_is_never_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import automation_text
+
+    document = _example()
+    monkeypatch.setattr(automation_text, "PART_BYTES", 5_000)  # the head and any case are longer
+    files = _view_files(automation_text.render(_answer(document), DIGEST, document))
+    assert files[0].split("\n", 1)[0].startswith("часть 1 из ") and "голова вида без кейсов" in files[0].split("\n", 1)[0] and "\n### TC-" not in files[0]
+    assert sum(text.count("\n### TC-") for text in files) == len(document["test_cases"]) and all(text.count("\n### TC-") >= 1 for text in files[1:])
+    assert all(len(text.encode("utf-8")) <= 5_000 for text in files[1:] if text.count("\n### TC-") > 1)  # a case longer than a part is a part of its own, never cut
+
+
+def test_a_head_that_fits_shares_its_part_with_the_first_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import automation_text
+
+    document = _example()
+    monkeypatch.setattr(automation_text, "PART_BYTES", 200_000)
+    first = _view_files(automation_text.render(_answer(document), DIGEST, document))[0]
+    assert "## Требования" in first and "\n### TC-B1-001 " in first and len(first.encode("utf-8")) <= 200_000
