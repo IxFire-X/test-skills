@@ -135,29 +135,27 @@ def _python_names(text: str) -> set[str]:
     return {name for name in names if name}
 
 
-def _excluded(project: Path) -> set[str]:
-    """Files the package wrote into the project (materialization ownership of any run): not the project's own tests.
+def own_files(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], int]:
+    """``({project path: run id}, runs not read)``: the files of ``inventory`` the package wrote in an earlier run of the project and nobody
+    changed since — their digest is a digest the run recorded (written, or quarantined).  Reads the receipts of the runs, not the files.
 
-    Every run's receipt is read through the journal of THAT run (``read_attempt_receipt`` for each of its attempts); a file the journal
-    of its run does not bind, or cannot read, excludes nothing.  A run planted whole — journal and receipt — is not told apart this way; what it
-    changes is a hint of the map, not a verdict."""
+    A run that does not read whole (moved project, damaged journal or receipt, a lock of another process) hides nothing and is counted:
+    a file we cannot tell stays in the model input.  A run planted whole — journal and receipt, consistent — is not told apart: its
+    ``test_root`` is taken from its own receipt, so it can hide from the model any file of the inventory whose digest it names, except the task
+    documents, ``.skillsrc`` and the closed manifests.  It gives no right to write (the baseline is the full inventory)."""
     from tools import pilot_state
 
-    paths: set[str] = set()
+    digests = {str(row.get("project_path")): row.get("content_digest") for row in inventory.get("files") or []}
+    own: dict[str, str] = {}
+    unread = 0
     for run_root in sorted(path for path in (project / ".pilot-runs").glob("*") if (path / "materialization-ownership").is_dir()):
         try:
-            attempts = [str(item["attempt_id"]) for item in pilot_state.derive_state(run_root)["attempts"]]
-        except (OSError, KeyError, TypeError, ValueError):
+            written = pilot_state.written_files(run_root)
+        except (OSError, KeyError, TypeError, AttributeError, ValueError):
+            unread += 1
             continue
-        for attempt_id in attempts:
-            try:
-                payload = pilot_state.read_attempt_receipt(run_root, attempt_id, "materialization-ownership", "ARTIFACT_READ_BACK")["record"].get("payload") or {}
-            except (OSError, KeyError, TypeError, ValueError):
-                continue
-            for row in payload.get("files") or []:
-                if isinstance(row, Mapping):
-                    paths.update(str(row[key]) for key in ("path", "project_path") if isinstance(row.get(key), str))
-    return paths
+        own.update({path: run_root.name[:8] for path, found in written.items() if digests.get(path) and digests[path] in found})
+    return own, unread
 
 
 def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str]) -> dict[str, dict[str, dict[str, list[str]]]]:
@@ -165,7 +163,7 @@ def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterab
     project = Path(project)
     sources = {Path(path).stem for path in context_paths if Path(path).suffix in {".java", ".py"} and not Path(path).stem.startswith("test_")
                and not Path(path).stem.endswith(("Test", "Tests", "IT"))}
-    owned = _excluded(project)
+    owned = own_files(project, inventory)[0]
     result: dict[str, dict[str, dict[str, list[str]]]] = {}
     for row in sorted(inventory.get("files") or [], key=lambda item: str(item.get("project_path"))):
         relative = str(row.get("project_path"))

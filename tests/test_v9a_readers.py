@@ -114,32 +114,15 @@ def test_the_output_large_warning_of_the_report_is_judged_by_the_stored_answer_a
 
 # --- A1-8: existing_tests -----------------------------------------------------------------------------------------------
 
-def test_an_ownership_receipt_nobody_bound_excludes_no_test_from_the_map(tmp_path: Path) -> None:
-    from tools.existing_tests import _excluded
+def test_an_ownership_receipt_nobody_bound_hides_no_test_and_the_run_is_counted_unread(tmp_path: Path) -> None:
+    from tools.existing_tests import own_files
 
     root, *_rest = _published_request(tmp_path)
     project = root.parent.parent
     planted = project / ".pilot-runs" / ("a" * 32) / "materialization-ownership" / ("b" * 32 + ".json")
     planted.parent.mkdir(parents=True)
     planted.write_text(json.dumps({"payload": {"files": [{"path": "src/part0.py"}]}}), encoding="utf-8")
-    assert _excluded(project) == set()
-
-
-def test_an_ownership_receipt_of_a_run_is_read_through_the_journal_of_that_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import existing_tests
-
-    root, attempt_id, *_rest = _published_request(tmp_path)
-    project = root.parent.parent
-    asked = []
-
-    def read(run_root, attempt, kind, event):
-        asked.append((Path(run_root).name, attempt, kind, event))
-        return {"record": {"payload": {"files": [{"path": "tests/test_generated.py"}]}}}
-
-    monkeypatch.setattr(pilot_state, "read_attempt_receipt", read)
-    (root / "materialization-ownership").mkdir(exist_ok=True)
-    assert existing_tests._excluded(project) == {"tests/test_generated.py"}
-    assert asked and asked[0][2:] == ("materialization-ownership", "ARTIFACT_READ_BACK") and asked[0][0] == root.name
+    assert own_files(project, {"files": [{"project_path": "src/part0.py", "content_digest": "sha256:x"}]}) == ({}, 1)
 
 
 def test_an_inventory_of_a_neighbour_run_under_the_expected_name_is_not_the_one_the_map_is_built_from(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

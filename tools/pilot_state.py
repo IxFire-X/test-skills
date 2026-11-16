@@ -4504,6 +4504,42 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
     return sorted(dict.fromkeys(digest for digest in wanted if digest not in present))
 
 
+def written_files(run_root: Path) -> dict[str, set[str]]:
+    """``{project path: {digests}}`` of the files the package wrote in this run: ``content_digest`` of the ownership receipt, ``quarantined_digest``
+    of a quarantined row of the final dispositions.  A light read for the model input and the map, not a proof: each receipt is read through
+    ``read_confined_bytes``, sealed, and counted only when the journal of the attempt read its digest back.  Anything unclear raises
+    ``ValueError`` — the caller then treats no file of the run as written by the package.  Needs no module of mode B; only reads."""
+    project, root = _run_root(run_root)
+    state, found = derive_state(root), {}
+    for attempt in state["attempts"]:
+        attempt_id = str(attempt["attempt_id"])
+        bound = {event["artifact_digest"] for event in state["events"] if event["event_type"] == "ARTIFACT_READ_BACK"
+                 and event.get("attempt_id") == attempt_id and event.get("batch_id") is None}
+        payloads = {}
+        for kind in ("materialization-ownership", "disposition-receipt"):
+            target = _receipt_target(root, attempt_id, kind)
+            if target.exists():
+                receipt = _read_artifact(project, root, target, kind)
+                if receipt["digest"] not in bound:
+                    raise ValueError(f"unbound {kind}")
+                payloads[kind] = receipt["payload"]
+        if "materialization-ownership" not in payloads:
+            continue
+        owned, test_root = payloads["materialization-ownership"], payloads["materialization-ownership"]["test_root"].rstrip("/") + "/"
+        prefix = "" if owned["module"] == "." else owned["module"].rstrip("/") + "/"
+        for row in owned["files"]:
+            path = row["path"].replace("\\", "/")
+            if not path.startswith(test_root) or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+                raise ValueError("written path outside the test root")
+            found.setdefault(prefix + path, set()).add(row["content_digest"])
+        final = payloads.get("disposition-receipt") or {}
+        for row in final.get("files", []) if final.get("stage") == "dispositions" else []:
+            key = prefix + row["path"].replace("\\", "/")
+            if row["disposition"] == "QUARANTINED" and key in found:
+                found[key].add(row["quarantined_digest"])
+    return found
+
+
 class ReceiptFileUnbound(ValueError):
     """The file of a receipt lies without its events and its bytes are not the ones being published (one code for every family)."""
 

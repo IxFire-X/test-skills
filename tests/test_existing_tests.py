@@ -105,10 +105,9 @@ def test_a_test_file_changed_after_the_scan_and_a_generated_one_are_not_in_the_m
     assert build_map(project, inventory, context) != {}  # V9a: a receipt no journal binds excludes nothing
     from tools import pilot_state
 
-    with pytest.MonkeyPatch.context() as journal:  # the receipt of a run, read through that run's journal
-        journal.setattr(pilot_state, "derive_state", lambda root: {"attempts": [{"attempt_id": "a" * 32}], "events": []})
-        journal.setattr(pilot_state, "read_attempt_receipt", lambda *_args: {"record": {"payload": {
-            "files": [{"path": "src/test/java/org/example/owner/OwnerControllerTests.java"}]}}})
+    java = next(row for row in inventory["files"] if row["project_path"].endswith("OwnerControllerTests.java"))
+    with pytest.MonkeyPatch.context() as journal:  # what a run wrote, as its reader says: the same path and digest
+        journal.setattr(pilot_state, "written_files", lambda root: {java["project_path"]: {java["content_digest"]}})
         assert build_map(project, inventory, context) == {}
 
 

@@ -1406,10 +1406,11 @@ def _asset_rule(project_path: str, contents: bytes) -> str | None:
 
 def context_filter(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
-    excludes: Iterable[str] = (), task_ids: Iterable[str] = (), includes: Iterable[str] = (),
+    excludes: Iterable[str] = (), task_ids: Iterable[str] = (), includes: Iterable[str] = (), own: Mapping[str, str] = {},
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """What the model gets — ``(kept ids, skipped [{project_path, size, reason, rule}])``; only reads.
 
+    ``own`` is ``{project path: run id}`` of the tests the package wrote in an earlier run: they are skipped, not given back to the model.
     Inventory and baseline do not change.  The task documents and closed manifests always stay; a source larger than
     a batch, an exclude of a task document, or nothing left of the code is a ContextStop with a fix.
     """
@@ -1447,6 +1448,9 @@ def context_filter(
         size = int(item.get("size", 0))
         if pattern is not None:
             skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_EXCLUDED_BY_USER", "rule": pattern})
+            continue
+        if project_path in own and include_mode(project_path, kept_by_user) != "full":  # a file the human named in paths.include stays
+            skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_OWN_TEST", "rule": f"записан пакетом, прогон {own[project_path]}"})
             continue
         contents = _read_context_file(Path(project_root).resolve(), project_path)
         rule = _asset_rule(project_path, contents)

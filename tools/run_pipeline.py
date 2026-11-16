@@ -13,6 +13,7 @@ import uuid
 from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
+from tools.existing_tests import own_files
 from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser, one_closure
 from tools.run_lock import JournalRefusal
@@ -834,10 +835,10 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
 
 
 def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: Path, selected_ids: list[str],
-                      task_ids: list[str], budget: int) -> tuple[list[str], list[dict[str, Any]]]:
-    """Assets, user excludes and large non-sources stay out of the model context, always listed (scan and ready)."""
+                      task_ids: list[str], budget: int, own: Mapping[str, str]) -> tuple[list[str], list[dict[str, Any]]]:
+    """Assets, user excludes, large non-sources and the tests of earlier runs (``own``) stay out of the model context, always listed (scan and ready)."""
     return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids,
-                          includes=skillsrc_include(project, module_root))
+                          includes=skillsrc_include(project, module_root), own=own)
 
 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
@@ -850,7 +851,7 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     selected = [opaque for opaque in selected if opaque not in sectioned]
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
-    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget)
+    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_files(project, inventory)[0])
     return kept, skipped, budget
 
 
@@ -1476,7 +1477,8 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
         selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
-    selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget)
+    own, unread = own_files(project, frozen_inventory)
+    selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget, own)
     context_skipped = skipped_summary(skipped)
     batches = select_context_batches(
         frozen_inventory,
@@ -1489,7 +1491,8 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
         context_summary["reference_cases"] = len(reference[2])
     if not batches:  # the closed manifest .skillsrc is always in the context, so this is not an honest run: nothing to cut or finish
         raise ContextSelectionError("the scan selected no context batch")
-    return {"batches": batches, "context_skipped": context_skipped, "reference": reference}
+    return {"batches": batches, "context_skipped": context_skipped, "reference": reference, "own_runs_unread": unread,
+            "own_files": sum(row["reason"] == "CONTEXT_OWN_TEST" for row in skipped)}  # the files hidden, not the files that are own
 
 
 def _publish_context(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -> None:
@@ -1512,6 +1515,9 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
                   abandoned: Sequence[str], **extra: Any) -> dict[str, Any]:
     """The answer of a scan that made (or finished) the run."""
     context_skipped = plan["context_skipped"]
+    if plan["own_runs_unread"]:  # the human must see why the input is larger than it was meant to be (a moved project, a damaged run)
+        context_warnings = [*context_warnings, f"OWN_TESTS_UNREAD: прошлых прогонов не прочитано: {plan['own_runs_unread']} (папка проекта перенесена или скопирована, "
+                            "прогон повреждён или занят другой командой); это не ошибка, работу можно продолжать — тесты, записанные ими в проект, остаются во входе модели, вход больше"]
     return _durable_status(
         project,
         run_root,
@@ -1528,6 +1534,8 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
         context_batch_count=len(plan["batches"]),
         context_summary=context_summary,
         **({"context_skipped": context_skipped} if context_skipped["files"] else {}),
+        **({"own_files": plan["own_files"]} if plan["own_files"] else {}),
+        **({"own_runs_unread": plan["own_runs_unread"]} if plan["own_runs_unread"] else {}),
         **({"warnings": list(context_warnings)} if context_warnings else {}),
         **_skillsrc_defaults(project, module),
         **({"abandoned_runs": list(abandoned)} if abandoned else {}),
