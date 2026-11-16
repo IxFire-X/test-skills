@@ -8,8 +8,9 @@ model in Test Data and is refused: machine text never becomes a human field.
 
 With ``--docs`` the model answers ``context-marker:requirements`` from the documents as in any run
 and links every case of the CSV to the source requirements it checks (``analytics_documentation.case_links``), checked
-before the write.  The merged marker keeps the linked requirements and adds one code-made requirement per case linked to
-none («вне документов»); a document requirement no case links is a gap of the report, never a model-made case.
+before the write.  The merged marker keeps every requirement of the answer and adds one code-made requirement per case linked
+to none («вне документов»); a document requirement no case links is a gap: the generator writes new cases for it
+beside the imported ones (the skeleton of its batch lists it in ``write``, the new cases have no Key), the report names it.
 """
 
 from __future__ import annotations
@@ -176,11 +177,10 @@ def require_case_links(cases: list[dict[str, Any]], requirements: list[Mapping[s
 
 
 def marker_requirements(path: str, data: bytes, requirements: list[Mapping[str, Any]], links: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """The requirements of the merged marker of an import with documents — the linked ones of the answer in its
-    order, then one per case linked to none (text the objective, else the name, provenance ``<csv>#строка N``);
-    ``display_order`` 1..N again, as the plan requires."""
-    linked = {item for link in links for item in link["source_requirement_ids"]}
-    kept = sorted((dict(item) for item in requirements if item["source_requirement_id"] in linked), key=lambda item: item["display_order"])
+    """The requirements of the merged marker of an import with documents — every requirement of the answer in its
+    order (one no case links stays: new cases are written for it), then one per case linked to none (text the objective,
+    else the name, provenance ``<csv>#строка N``); ``display_order`` 1..N again, as the plan requires."""
+    kept = sorted((dict(item) for item in requirements), key=lambda item: item["display_order"])
     by_row = {link["row"]: link for link in links}
     digest = "sha256:" + hashlib.sha256(data).hexdigest()
     outside = [{"source_requirement_id": f"{OUTSIDE}{case['row']}", "text": case["objective"] if case["objective"].strip() else case["title"],
@@ -190,7 +190,8 @@ def marker_requirements(path: str, data: bytes, requirements: list[Mapping[str, 
 
 
 def gaps(requirements: list[Mapping[str, Any]], links: list[Mapping[str, Any]]) -> list[dict[str, str]]:
-    """The document requirements no case of the CSV links — the gaps of the import, for the report and the analyst."""
+    """The document requirements no case of the CSV links — the gaps of the import: the generator writes new cases for them,
+    the report and the analyst name them."""
     linked = {item for link in links for item in link["source_requirement_ids"]}
     return [{"source_requirement_id": str(item["source_requirement_id"]), "text": str(item["text"])}
             for item in requirements if item["source_requirement_id"] not in linked]
@@ -250,8 +251,16 @@ def slice_value(imported: Mapping[str, Any], plan: Mapping[str, Any], batch_id: 
                    key=lambda case: (min(order.get(source, len(order)) for source in case_sources(case)), case["row"]))
     rows = {case["row"] for case in cases} | {step["row"] for case in cases for step in case["steps"]}
     normalized = [cell for cell in imported.get("normalized") or [] if cell["row"] in rows]
+    write = write_sources(imported, owned)
     return with_digest({"schema_version": "1.0.0", "csv": imported["csv"], "csv_digest": imported["csv_digest"], "plan_digest": plan["digest"],
-                        "batch_id": batch_id, "cases": cases, **({"normalized": normalized} if normalized else {})})
+                        "batch_id": batch_id, "cases": cases, **({"normalized": normalized} if normalized else {}),
+                        **({"write": write} if write else {})})
+
+
+def write_sources(imported: Mapping[str, Any], owned: list[str]) -> list[str]:
+    """The owned source requirements no case of the CSV links — the batch writes new cases for them."""
+    gaps = {row["source_requirement_id"] for row in imported.get("gaps") or []}
+    return [source for source in owned if source in gaps]
 
 
 def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:

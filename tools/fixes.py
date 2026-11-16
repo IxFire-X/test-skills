@@ -93,8 +93,8 @@ FIXES: dict[str, str] = {
     "BATCH_UNCOVERED_REQUIREMENT": "у каждого требования пачки должен быть кейс: добавь кейс с этим requirement_ids (или кейс с "
                                    "явным блокером) — это ошибка ответа, стадия имеет единственный повтор",
     "BATCH_CAPABILITY_CONFLICT": "одна capability_id — одно описание во всех пачках: сделай описания одинаковыми или дай разные id",
-    "IMPORT_HUMAN_FIELD_CHANGED": "кейс из CSV импорта не переписывается: верни человеческие поля (title, шаги, ожидания) как в CSV",
-    "IMPORT_TRACE_CHANGED": "requirement_ids кейса импорта должны вести только к требованиям его строки CSV: верни трассировку",
+    "IMPORT_HUMAN_FIELD_CHANGED": "кейс из CSV импорта не переписывается: верни человеческие поля (title, шаги, ожидания) как в CSV; кейсов в пачке — по одному на кейс CSV плюс новые под requirements из `write` скелета, у новых Key пуст",
+    "IMPORT_TRACE_CHANGED": "requirement_ids кейса импорта должны вести только к требованиям его строки CSV (новый кейс — только к требованиям из `write`): верни трассировку",
     # --- cases import (moved from cases_import._FIXES) ---
     "IMPORT_CASE_LINKS": "в ответе context-marker:requirements у каждой строки-кейса CSV ровно одна связь case_links: row — номер "
                          "строки кейса, source_requirement_ids — SREQ этого ответа, пустой список только с reason; отдай исправленный "

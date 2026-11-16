@@ -126,17 +126,19 @@ def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
             "imported": imported, "batch_skeletons": published.get("batch_skeletons", {})}
 
 
-def test_the_merged_marker_keeps_the_linked_requirements_and_adds_one_for_a_case_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_merged_marker_keeps_every_requirement_and_adds_one_for_a_case_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = _to_plan(tmp_path, monkeypatch)
     csv_digest = "sha256:" + hashlib.sha256(CSV.encode("utf-8")).hexdigest()
     assert [(row["source_requirement_id"], row["provenance"]) for row in run["requirements"]] == [
-        ("SREQ-0001", ["docs/req.md:3"]), ("SREQ-0003", ["docs/req.md:5"]), ("SREQ-CSV-3", ["cases/zephyr.csv#строка 3"])]
-    assert run["requirements"][2]["text"] == "Проверить склейку с пустой правой частью" and run["requirements"][2]["digest"] == csv_digest
+        ("SREQ-0001", ["docs/req.md:3"]), ("SREQ-0002", ["docs/req.md:4"]), ("SREQ-0003", ["docs/req.md:5"]),
+        ("SREQ-CSV-3", ["cases/zephyr.csv#строка 3"])]
+    assert [row["display_order"] for row in run["requirements"]] == [1, 2, 3, 4]
+    assert run["requirements"][3]["text"] == "Проверить склейку с пустой правой частью" and run["requirements"][3]["digest"] == csv_digest
     imported = run["imported"]
     assert [case["source_requirement_ids"] for case in imported["cases"]] == [["SREQ-0001", "SREQ-0003"], ["SREQ-CSV-3"]]
     assert imported["gaps"] == [{"source_requirement_id": "SREQ-0002", "text": "combine отказывает на None."}]
     [batch] = run["plan"]["batches"]
-    assert batch["owned_source_requirement_ids"] == ["SREQ-0001", "SREQ-0003", "SREQ-CSV-3"]
+    assert batch["owned_source_requirement_ids"] == ["SREQ-0001", "SREQ-0002", "SREQ-0003", "SREQ-CSV-3"]
 
 
 def test_the_cases_of_a_shared_requirement_and_its_requirements_are_one_group() -> None:
@@ -147,6 +149,10 @@ def test_the_cases_of_a_shared_requirement_and_its_requirements_are_one_group() 
                           {"source_requirement_ids": ["SREQ-2"]}, {"source_requirement_ids": ["SREQ-4"]}]}
     groups = _imported_groups(source, imported)
     assert groups["SREQ-1"] == groups["SREQ-3"] and len({groups["SREQ-1"], groups["SREQ-2"], groups["SREQ-4"]}) == 3
+
+
+NEW_MANAGEMENT = {"status": None, "folder": None, "components": [], "labels": [], "owner": None, "estimated_time": None,
+                  "external_keys": {}, "external_links": {"issues": [], "pages": []}, "custom_fields": {}}
 
 
 def _fragment(run: dict) -> dict:
@@ -160,6 +166,10 @@ def _fragment(run: dict) -> dict:
     owned = batch["owned_source_requirement_ids"]
     creq = {source: f"CREQ-{ns}-{n:03d}" for n, source in enumerate(owned, start=1)}
     text = {row["source_requirement_id"]: row["text"] for row in run["requirements"]}
+    new = [{"source_requirement_ids": [gap["source_requirement_id"]], "title": f"Новый кейс {gap['source_requirement_id']}", "objective": gap["text"],
+            "priority": "MEDIUM", "preconditions": [], "management": NEW_MANAGEMENT,
+            "steps": [{"action": "Проверить требование", "test_data": "—", "expectations": [gap["text"]]}]}
+           for gap in run["imported"].get("gaps") or []]  # one case per requirement without a case, Key empty
     return with_digest({
         "schema_version": "1.0.0", "status": "COMPLETE", "batch_id": batch["batch_id"], "namespace": ns, "plan_digest": run["plan"]["digest"],
         "header_digest": run["plan"]["header_digest"], "context_receipt_digest": run["context"]["digest"], "context_receipt": run["context"],
@@ -171,14 +181,14 @@ def _fragment(run: dict) -> dict:
         "test_cases": [{
             "case_id": f"TC-{ns}-{n:03d}", "display_order": n, "requirement_ids": [creq[source] for source in case_sources(row)], "title": row["title"],
             "objective": row["objective"], "categories": ["functional"], "priority": row["priority"], "preconditions": row["preconditions"],
-            "management": canonical_management(row),
+            "management": canonical_management(row) if "key" in row else row["management"],
             "steps": [{"step_id": f"STEP-{ns}-{n:03d}-{k}", "display_order": k, "action": step["action"], "test_data": step["test_data"],
                        "manual_only": True, "manual_reason": "Импорт: машинная часть ещё не достроена.", "automation_blockers": [],
                        "operation": None, "inputs": [], "outputs": [],
                        "expectations": [{"expectation_id": f"EXP-{ns}-{n:03d}-{k}-{j}", "display_order": j, "text": item, "assertions": []}
                                         for j, item in enumerate(step["expectations"], start=1)]}
                       for k, step in enumerate(row["steps"], start=1)],
-        } for n, row in enumerate(run["imported"]["cases"], start=1)],
+        } for n, row in enumerate([*run["imported"]["cases"], *new], start=1)],
         "diagnostics": [],
     })
 
@@ -226,10 +236,11 @@ def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_docume
     write_report(run["project"], run["root"].name)
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
     assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002"}]  # v0.6 fix6: the text of the requirement is not in the report
-    assert report["import"]["outside"] == [3]
-    assert "требований без кейса в CSV: 1 (SREQ-0002); кейсов вне документов: 1 (строки 3)" in (run["root"] / "report.md").read_text(encoding="utf-8")
+    assert report["import"]["outside"] == [3] and report["import"]["new"] == ["SREQ-0002"]
+    assert ("кейсов из CSV без изменений: 2, из них вне документов: 1 (строки 3); "
+            "требований без кейса в CSV (новые кейсы под них пишет генератор): 1 (SREQ-0002)") in (run["root"] / "report.md").read_text(encoding="utf-8")
     questions = (run["root"] / "questions-for-analyst.md").read_text(encoding="utf-8")
-    assert "## Требования без кейса в CSV" in questions and "SREQ-0002: combine отказывает на None. — в CSV нет кейса" in questions
+    assert "## Требования без кейса в CSV" in questions and "SREQ-0002: combine отказывает на None. — в CSV нет кейса; генератор пишет под него новый кейс" in questions
     assert "## Кейсы CSV вне документов" in questions and "строка 3" in questions
 
 
@@ -238,34 +249,16 @@ def test_the_review_view_names_the_gaps_of_an_import_with_documents() -> None:
     from tools.review_view import render
 
     text = render(canonical_fixture(), imported=True, import_gaps=(["SREQ-0002"], ["строка 3"])).decode("utf-8")
-    assert "требований без кейса в CSV — SREQ-0002; кейсов вне документов (SREQ-CSV-) — строка 3" in text
+    assert "требований без кейса в CSV (для них написаны новые кейсы) — SREQ-0002; кейсов вне документов (SREQ-CSV-) — строка 3" in text
     assert "Импорт с документами" not in render(canonical_fixture(), imported=True).decode("utf-8")  # stage 1 keeps its bytes
-
-
-def test_only_the_missing_openspec_requirement_of_a_gap_is_tolerated_on_the_merge() -> None:
-    from tools.pilot_state import _OPENSPEC_MISSING_TAIL, _gap_marks, _openspec_refusals
-
-    mark = "openspec/specs/catalog/spec.md:5 — capability=catalog; ### Requirement: Refuse"
-    answer = {"artifacts": {"analytics_documentation": {"requirements": [
-        {"source_requirement_id": "SREQ-0001", "provenance": ["openspec/specs/catalog/spec.md:3 — capability=catalog; ### Requirement: Join"]},
-        {"source_requirement_id": "SREQ-0002", "provenance": [mark]}]}}}
-    tolerated = _gap_marks(answer, [{"source_requirement_id": "SREQ-0001"}])
-    assert tolerated == {mark} and _gap_marks(answer, None) == set()
-    other = "openspec/specs/catalog/spec.md:3 — capability=catalog; ### Requirement: Join"
-    rows = [{"path": "p", "code": "OPENSPEC_MISSING", "message": mark + _OPENSPEC_MISSING_TAIL},
-            {"path": "p", "code": "OPENSPEC_MISSING", "message": other + _OPENSPEC_MISSING_TAIL},
-            {"path": "p", "code": "OPENSPEC_EXTRA", "message": mark + " — absent from final selected specification"},
-            {"path": "p", "code": "OPENSPEC_SOURCE_MISMATCH", "message": mark + " — normalized origin must retain exact source digest"}]
-    assert [row["code"] for row in _openspec_refusals(rows, tolerated)] == ["OPENSPEC_MISSING", "OPENSPEC_EXTRA", "OPENSPEC_SOURCE_MISMATCH"]
-    assert _openspec_refusals(rows, tolerated)[0]["message"].startswith(other)
 
 
 SPEC = ("## Requirements\n### Requirement: Join\ncombine joins two strings.\n#### Scenario: Joined\n- WHEN combine\n- THEN a:b\n"
         "### Requirement: Refuse\ncombine refuses None.\n#### Scenario: Refused\n- WHEN None\n- THEN error\n")
 
 
-def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import context_marker_parts, pilot_state
+def _openspec_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str, list[dict], dict]:
+    """A ``--cases`` + ``--docs`` run on a project with OpenSpec whose spec has two requirements, the requirements step asked: ``(root, attempt, rows, answer)``."""
     from tools.build_context import build_context
     from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 
@@ -280,9 +273,27 @@ def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypat
     assert len(rows) == 2
     links = [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]]}, {"row": 3, "source_requirement_ids": [], "reason": "нет в спеке"}]
     _request_requirements(root, attempt_id)
-    answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", {
-        "schema_version": "5.0.0", "stage": "context-marker", "warnings": [],
-        "artifacts": {"analytics_documentation": {"requirements": rows, "case_links": links}, "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}})
+    answer = {"schema_version": "5.0.0", "stage": "context-marker", "warnings": [],
+              "artifacts": {"analytics_documentation": {"requirements": rows, "case_links": links}, "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}}
+    return root, attempt_id, rows, answer
+
+
+def test_a_requirement_the_model_lost_from_openspec_is_still_refused_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state
+
+    root, attempt_id, rows, answer = _openspec_run(tmp_path, monkeypatch)
+    lost = {**answer, "artifacts": {**answer["artifacts"], "analytics_documentation": {
+        "requirements": rows[:1], "case_links": [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]]}, answer["artifacts"]["analytics_documentation"]["case_links"][1]]}}}
+    with pytest.raises(ValueError, match="OPENSPEC_MISSING"):
+        pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", lost)
+    assert _responses(root) == []
+
+
+def test_an_openspec_requirement_without_a_case_stays_in_the_marker_and_the_composition_check_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import context_marker_parts, pilot_state
+
+    root, attempt_id, rows, answer = _openspec_run(tmp_path, monkeypatch)
+    answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the first act of `submit --stage plan`
     value = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer["content_digest"])["artifact"]
     for part in [row for row in context_marker_parts.plan(root)["parts"] if row["stage"].startswith("context-marker:batch-")]:
@@ -290,6 +301,6 @@ def test_a_gap_of_an_openspec_requirement_still_merges(tmp_path: Path, monkeypat
                                           input_digests=part["input_digests"])
         pilot_state.publish_model_stage_artifact(root, attempt_id, part["stage"], {
             **value, "artifacts": {**value["artifacts"], "source_code_and_diff": {"sources": ["src/sample.py — combine"]}}})
-    merged = context_marker_parts.merge_parts(root)  # SREQ «Refuse» of OpenSpec is a gap: no case of the CSV links it
+    merged = context_marker_parts.merge_parts(root)  # SREQ «Refuse» of OpenSpec: no case of the CSV links it, it stays and gets new cases
     ids = [row["source_requirement_id"] for row in merged["artifact"]["artifacts"]["analytics_documentation"]["requirements"]]
-    assert ids == [rows[0]["source_requirement_id"], "SREQ-CSV-3"]
+    assert ids == [rows[0]["source_requirement_id"], rows[1]["source_requirement_id"], "SREQ-CSV-3"]

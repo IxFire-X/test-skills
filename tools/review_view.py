@@ -520,8 +520,10 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         *([f"- {context[:1].upper()}{context[1:]}."] if context else []),  # one line with more than one context batch
         *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
            " сверка человеческих полей идёт с ними"] if imported and normalized else []),
-        *([f"- Импорт с документами: требований без кейса в CSV — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
-           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"] if import_gaps else []),
+        *([f"- Импорт с документами: требований без кейса в CSV (для них написаны новые кейсы) — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
+           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"
+           + ("; новые кейсы под эти требования написал генератор, а не человек — их текст оценивай как обычно" if import_gaps[0] else "")]
+          if import_gaps else []),
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",

@@ -58,9 +58,9 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
-    if gap_rows:  # a requirement of the documents no imported case checks — no case is made for it
+    if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
-                  *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; нужен ли он?" for row in gap_rows), ""]
+                  *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; генератор пишет под него новый кейс — проверьте его" for row in gap_rows), ""]
     if outside:
         lines += ["## Кейсы CSV вне документов", "",
                   *(f"- строка {row} — кейс не проверяет ни одно требование документов; оставить его?" for row in outside), ""]
@@ -733,7 +733,8 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     from tools.cases_import import outside_rows
 
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
-            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": outside_rows(imported)} if "gaps" in imported else {})}
+            **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": outside_rows(imported),
+                "new": [row["source_requirement_id"] for row in imported["gaps"]]} if "gaps" in imported else {})}  # new cases are written for the gaps
 
 
 def _left(root: Path) -> str | None:
@@ -1247,10 +1248,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "
                   f"{_dash(summary['normalized'])} ячеек кодом (пустая Test Data → «—», пустой Objective → Name)",
-                  *([f"- требований без кейса в CSV: {len(summary['gaps'])}"
-                     + (" (" + ", ".join(row["source_requirement_id"] for row in summary["gaps"]) + ")" if summary["gaps"] else "")
-                     + f"; кейсов вне документов: {len(summary['outside'])}"
-                     + (" (строки " + ", ".join(map(str, summary["outside"])) + ")" if summary["outside"] else "")]
+                  *([f"- кейсов из CSV без изменений: {summary['cases']}, из них вне документов: {len(summary['outside'])}"
+                     + (" (строки " + ", ".join(map(str, summary["outside"])) + ")" if summary["outside"] else "")
+                     + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
+                     + (" (" + ", ".join(summary["new"]) + ")" if summary["new"] else "")]
                     if "gaps" in summary else []), ""]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]

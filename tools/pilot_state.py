@@ -2000,32 +2000,10 @@ def _validate_context_marker_sources(
 
         if is_code_requirements(root, attempt, answer):
             return  # the requirements of an import without documents are its cases, not an OpenSpec reading
-        tolerated = _gap_marks(answer, derived)
-    else:
-        tolerated = set()
     if snapshots:
-        diagnostics = _openspec_refusals(openspec_diagnostics(dict(value), snapshots), tolerated)
+        diagnostics = openspec_diagnostics(dict(value), snapshots)
         if diagnostics:
             raise ValueError("CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
-
-
-_OPENSPEC_MISSING_TAIL = " — missing from normalized requirement/scenario set"
-
-
-def _gap_marks(answer: Mapping[str, Any], derived: Sequence[Mapping[str, Any]] | None) -> set[str]:
-    """The provenance marks of the requirements of the answer the merged marker of an import leaves out — the gaps
-    (a document requirement no case of the CSV links), named in the report; nothing for any other marker."""
-    if derived is None:
-        return set()
-    kept = {item["source_requirement_id"] for item in derived}
-    return {str(mark) for item in answer["artifacts"]["analytics_documentation"]["requirements"]
-            if item["source_requirement_id"] not in kept for mark in item.get("provenance") or []}
-
-
-def _openspec_refusals(diagnostics: Sequence[Mapping[str, str]], tolerated: set[str]) -> list[Mapping[str, str]]:
-    """The OpenSpec diagnostics that refuse the marker — every one but OPENSPEC_MISSING of a gap mark."""
-    return [item for item in diagnostics if not (item["code"] == "OPENSPEC_MISSING" and item["message"].endswith(_OPENSPEC_MISSING_TAIL)
-                                                 and item["message"][:-len(_OPENSPEC_MISSING_TAIL)] in tolerated)]
 
 
 def _reconcile_requirements_openspec(

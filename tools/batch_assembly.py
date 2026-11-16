@@ -252,7 +252,8 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
                 documents: dict[str, str], imported: Mapping[str, Any] | None = None) -> tuple[list[list[str]] | None, list[str]]:
     """Batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
 
-    In an import the answer is the human fields of a case with its machine part (× 5), a case is its own group.
+    In an import the answer is the human fields of a case with its machine part (× 5), a case is its own group; a requirement
+    no case links (``gaps``) is measured by its text.
     The skeleton of a batch holds its own cases only, so the skeleton bytes of a case join its share as well."""
     if imported is not None:
         from tools.cases_import import case_sources
@@ -261,6 +262,8 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
         for case in imported["cases"]:  # a case counts once, on its first source requirement
             first = case_sources(case)[0]
             share[first] = share.get(first, 0) + _human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case))
+        for gap in imported.get("gaps") or []:  # new cases are written for it: measured by its text, as without a CSV
+            share[gap["source_requirement_id"]] = len(gap["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE
         expected = {item["source_requirement_id"]: share.get(item["source_requirement_id"], 0) for item in source}
     else:
         expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
@@ -625,15 +628,26 @@ def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str
 
 def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any], imported: Mapping[str, Any]) -> None:
     """The cases of the batch keep the human fields of the import byte for byte — one case per imported case of
-    the batch, in its order; the model completes only the machine part.  A difference names its path."""
-    from tools.cases_import import canonical_management, case_sources
+    the batch, in its order; the model completes only the machine part.  A difference names its path.  Besides them the
+    batch has new cases for the requirements of ``write`` (no case of the CSV links them): no Key, a trace to ``write`` only."""
+    from tools.cases_import import canonical_management, case_sources, write_sources
 
     owned = batch["owned_source_requirement_ids"]
     order = {source: index for index, source in enumerate(owned)}
     expected = sorted((case for case in imported["cases"] if set(case_sources(case)) & set(owned)),  # the order of slice_value
                       key=lambda case: (min(order.get(source, len(order)) for source in case_sources(case)), case["row"]))
-    cases = sorted(fragment["test_cases"], key=lambda case: case.get("display_order", 0))
-    differences: list[str] = []
+    sources: dict[str, set[str]] = {}  # canonical requirement -> the source requirements it stands for
+    for mapping in fragment.get("source_to_canonical_mappings") or []:
+        for requirement_id in mapping.get("canonical_requirement_ids") or []:
+            sources.setdefault(requirement_id, set()).add(mapping.get("source_requirement_id"))
+    write = set(imported.get("write") or write_sources(imported, owned))  # the skeleton of the batch names them, the whole one has the gaps
+    # a case that traces only to requirements no case of the CSV links is new; any other one is an imported case and is checked as such
+    ordered = sorted(fragment["test_cases"], key=lambda case: case.get("display_order", 0))
+    new = {index for index, case in enumerate(ordered)
+           if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) and found <= write}
+    cases = [case for index, case in enumerate(ordered) if index not in new]
+    differences: list[str] = [f"/test_cases/{index}/management" for index in sorted(new)
+                              if ((ordered[index].get("management") or {}).get("external_keys") or {}).get("zephyr_scale")]  # a new case has no Key
     if len(cases) != len(expected):
         differences.append(f"/test_cases: кейсов {len(cases)}, в импорте у пачки {len(expected)}")
     for index, (case, source) in enumerate(zip(cases, expected)):
@@ -655,10 +669,6 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
         raise BatchAssemblyError("IMPORT_HUMAN_FIELD_CHANGED", "человеческие поля импорта изменены: " + ", ".join(differences[:12])
                                  + " — верни их байт в байт из входа imported, достраивай только машинную часть")
     # the case of an imported row traces to that row's source requirement only — never to another case's one
-    sources: dict[str, set[str]] = {}
-    for mapping in fragment.get("source_to_canonical_mappings") or []:
-        for requirement_id in mapping.get("canonical_requirement_ids") or []:
-            sources.setdefault(requirement_id, set()).add(mapping.get("source_requirement_id"))
     traced = [f"/test_cases/{index}/requirement_ids: ведут к {', '.join(sorted(found)) or 'ничему'}, у кейса импорта {', '.join(case_sources(source))}"
               for index, (case, source) in enumerate(zip(cases, expected))
               if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) != set(case_sources(source))]
