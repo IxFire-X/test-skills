@@ -1189,14 +1189,18 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
 
 
 def _run_imported(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
-    """The skeleton of the attempt if it is an import of cases (its published cases are the human part); None otherwise."""
+    """The skeleton of the attempt if it is an import of cases (its published cases are the human part); None when the run is no import.
+    An import whose receipt is lost or spoiled is refused (``ModelInputsMismatch``), never taken for a run without human fields."""
+    from tools.cases_import import cases_path
     from tools.pilot_state import _imported_cases, _run_root, derive_state
 
     try:
         project, root = _run_root(Path(run_root))
-        return _imported_cases(project, root, derive_state(root), attempt_id)
+        if cases_path(root) is None:
+            return None
     except (KeyError, OSError, TypeError, ValueError):
         return None
+    return _imported_cases(project, root, derive_state(root), attempt_id)
 
 
 @_closure_cached

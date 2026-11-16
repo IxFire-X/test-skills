@@ -604,30 +604,36 @@ def expand_docs(project: Path, docs: list[str] | None) -> list[str]:
     entered or listed), inside the project; the bytes are read later by ``_input_files`` and every file must be of the inventory."""
     from tools.build_context import docs_over_limit, openspec_dir_files
 
-    root, expanded = project.resolve(), []
+    root, expanded, sized, named = project.resolve(), [], {}, {}
     for raw in docs or []:
         _local_input(raw, "--docs")  # a share or a device is never looked at
         candidate = Path(raw)
         path = candidate if candidate.is_absolute() else project / candidate
         if not path.is_dir():  # a file (maybe path#Section): _docs_entries reads it
             expanded.append(raw)
+            if "#" not in raw and path.is_file():  # a section is counted later, by what it holds
+                named[str(path.resolve())] = path.stat().st_size  # in the total only: a large named file has its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE)
             continue
         found: list[str] = []
+        files = None
         try:
             confined = _confined(project, path)
-            for current, dirs, names in os.walk(confined, followlinks=False):
-                dirs[:] = sorted(name for name in dirs if not _is_reparse(Path(current) / name))
-                found += [(Path(current) / name).relative_to(root).as_posix() for name in sorted(names) if not _is_reparse(Path(current) / name)]
-            files = None if _is_reparse(path) else openspec_dir_files(confined.relative_to(root).as_posix(), found)
+            folder = confined.relative_to(root).as_posix()
+            if openspec_dir_files(folder, []) is not None and not _is_reparse(path):  # the rule of the folder and the link first: no walk of what is no folder of OpenSpec
+                for current, dirs, names in os.walk(confined, followlinks=False):
+                    dirs[:] = sorted(name for name in dirs if not _is_reparse(Path(current) / name))
+                    found += [(Path(current) / name).relative_to(root).as_posix() for name in sorted(names) if not _is_reparse(Path(current) / name)]
+                files = openspec_dir_files(folder, found)
         except ValueError:
             raise HostStop("SNAPSHOT_DOCS", f"docs path is outside the project: {raw}", fix="укажите --docs путём внутри проекта") from None
         if not files:
             raise HostStop("SNAPSHOT_DOCS", f"в папке {raw} нет файлов OpenSpec для прогона (или это не папка, которую код раскрывает)",
                            fix="папкой в --docs можно назвать openspec/specs, openspec/specs/<область>, openspec/changes/<имя> или openspec/changes/archive/<имя>; остальное — файлами")
-        sizes = [(root / name).stat().st_size for name in files]
-        if docs_over_limit(sizes):
-            raise HostStop("NEED_DOCS_LIMIT", f"файлы папки {raw}: {len(files)} шт., {sum(sizes)} байт — предел 256 КиБ на файл и 1 МиБ на всё")
+        sized.update((str(root / name), (root / name).stat().st_size) for name in files)
         expanded += files
+    rest = [size for name, size in named.items() if name not in sized]
+    if docs_over_limit(list(sized.values()), rest):
+        raise HostStop("NEED_DOCS_LIMIT", f"документы --docs: {len(sized) + len(rest)} файл(ов), {sum(sized.values()) + sum(rest)} байт — предел 256 КиБ на файл папки и 1 МиБ на все")
     return list(dict.fromkeys(expanded))
 
 
@@ -881,7 +887,7 @@ def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
                     target: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
     """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
-    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs)
+    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
     sectioned = _sectioned_ids(inventory, project, docs)
@@ -1465,7 +1471,7 @@ def _scan(args: Any) -> int:
         frozen_inventory = frozen["inventory"]
         exclusion_receipt = frozen["exclusions"]
         task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
-            frozen_inventory, project, getattr(args, "docs", None))
+            frozen_inventory, project, getattr(args, "docs", None), module_root)
         context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         attempt = create_attempt(
             run_root,
@@ -1631,7 +1637,7 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
         prefix = "" if module_path == "." else module_path + "/"
         scope["parent_files"] = [item["project_path"] for item in frozen_inventory["files"]
                                  if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
-        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(frozen_inventory, project, getattr(args, "docs", None))
+        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(frozen_inventory, project, getattr(args, "docs", None), module_root)
         context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
         have = {str(event["artifact_digest"]) for event in state["events"]
@@ -1672,6 +1678,10 @@ TASK_DOC_FIX = ("документ задачи должен лежать вну�
                 "быть текстом без секретов и не лежать в самом пакете: перенесите его или уберите названную причину")
 
 
+def _task_doc_fix(path: str) -> str:
+    return TASK_DOC_FIX + ("; файл взят из папки в --docs? назовите области файлами, без этого" if path.startswith("openspec/") else "")
+
+
 def _under_to_do(project_path: str) -> bool:
     return "to_do" in project_path.split("/")[:-1]
 
@@ -1685,11 +1695,12 @@ def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None
     files, problems = outside_task_documents(project, module_root, [row["path"] for row in _docs_entries(project, docs)],
                                              skill_pack_root=_scan_skill_pack_root(project))
     for path, problem in problems.items():
-        raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не может войти в inventory: {problem}", TASK_DOC_FIX)
+        raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не может войти в inventory: {problem}", _task_doc_fix(path))
     return files
 
 
-def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
+def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None,
+                         module_root: Path | None = None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
     """``(ids of the task documents, ids of other tasks' files in to_do, summary, warnings)``.
 
     A document of --docs must be a file of the module's inventory (its bytes are bound by the inventory digest);
@@ -1699,9 +1710,11 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
     from tools.build_context import openspec_context_only, openspec_live_changes, openspec_unnamed_areas, openspec_unselected
+    from tools.scan_rules import include_mode
 
     if not docs:
-        if len(live := sorted(openspec_live_changes(list(by_path)))) > 1:  # by the inventory (it keeps the .skillsrc exclusions): no answer of the model can compose two
+        excludes = skillsrc_exclude(project, module_root) if module_root else ()  # the filter of the context leaves these out: the model does not get them
+        if len(live := sorted(openspec_live_changes([path for path in by_path if include_mode(path, excludes) != "full"]))) > 1:  # no answer of the model can compose two
             raise HostStop("OPENSPEC_SOURCE_CONFLICT", "в проекте несколько живых изменений OpenSpec, а --docs не задан: " + ", ".join(live),
                            fix="повторите scan с --docs: папка одного изменения (openspec/changes/<имя>) и папки или spec.md его областей (openspec/specs/<область>) — --new-run не нужен")
         warnings = []
@@ -1715,7 +1728,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
         item = by_path.get(path)
         if item is None:
             raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не входит в inventory выбранного модуля"
-                           + _exclusion_note(inventory, path), TASK_DOC_FIX)
+                           + _exclusion_note(inventory, path), _task_doc_fix(path))
         task_ids.append(str(item["opaque_id"]))
     others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
     task_count = len(others)

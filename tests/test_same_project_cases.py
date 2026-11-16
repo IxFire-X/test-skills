@@ -108,6 +108,17 @@ def test_a_planted_receipt_does_not_hide_a_test_outside_the_test_root_of_the_ski
     assert pilot_state.marker_reuse_suggestion(run_root, attempt_id)["run_id"] is None
 
 
+def test_the_test_roots_are_those_of_the_skillsrc_the_inventory_holds(tmp_path: Path) -> None:
+    """Guard and red: a ``.skillsrc`` changed since the scan names no root (by a run the drift guard of the context stops earlier, so this is the function itself)."""
+    document = {"schema_version": "5.0.0", "version": "3.0", "project": {"name": "demo"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+                "modules": [{"id": "fixture", "root": ".", "stack": {"language": "python", "build_tool": "pip"}, "paths": {"source": ["src"], "tests": ["src"]}, "detected_from": ["pyproject.toml"]}]}
+    raw = json.dumps(document).encode("utf-8")
+    (tmp_path / ".skillsrc").write_bytes(raw)
+    row = {"project_path": ".skillsrc", "content_digest": "sha256:" + hashlib.sha256(raw).hexdigest()}
+    assert pilot_state._test_roots(tmp_path, {"module": ".", "files": [row]}) == ("src/",)
+    assert pilot_state._test_roots(tmp_path, {"module": ".", "files": [{**row, "content_digest": "sha256:" + "0" * 64}]}) == ()
+
+
 def test_a_nested_skillsrc_does_not_widen_the_test_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Only the ``.skillsrc`` of the project root names the test roots; one in a directory that sorts before it (a file an agent may write) names none."""
     nested = {"schema_version": "5.0.0", "version": "3.0", "project": {"name": "demo"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},

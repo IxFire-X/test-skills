@@ -182,9 +182,9 @@ def openspec_dir_files(folder: str, found: list[str]) -> list[str] | None:
     return [path for path in found if path in context or path.endswith("/spec.md") and (_OPENSPEC_PATH.fullmatch(path) or path.startswith(folder + "/specs/"))]
 
 
-def docs_over_limit(sizes: list[int]) -> bool:
-    """The sizes of documents beyond the limit of a file (256 KiB) or of all (1 MiB)."""
-    return max(sizes) > _DOCS_MAX_FILE or sum(sizes) > _DOCS_MAX_TOTAL
+def docs_over_limit(sizes: list[int], named: tuple[int, ...] | list[int] = ()) -> bool:
+    """The ``sizes`` of the files of folders beyond the limit of a file (256 KiB), with the ``named`` files beyond that of all (1 MiB)."""
+    return max(sizes, default=0) > _DOCS_MAX_FILE or sum(sizes) + sum(named) > _DOCS_MAX_TOTAL
 
 
 def openspec_live_changes(paths: list[str]) -> set[str]:
@@ -198,8 +198,9 @@ def openspec_unnamed_baseline(path: str, docs: list[str]) -> bool:
 
 
 def openspec_unnamed_areas(docs: list[str], paths: list[str]) -> list[str]:
-    """The baseline ``spec.md`` (of ``paths``, the inventory) of the areas a named delta changes, that ``--docs`` does not name."""
-    areas = {f"openspec/specs/{match.group(4)}/spec.md" for doc in docs if (match := _OPENSPEC_PATH.fullmatch(doc)) and match.group(3)}
+    """The baseline ``spec.md`` (of ``paths``, the inventory) of the areas any delta of the selected change (named or not) changes, that ``--docs`` does not name."""
+    selected = openspec_selected_changes(docs)
+    areas = {f"openspec/specs/{match.group(4)}/spec.md" for path in paths if (match := _OPENSPEC_PATH.fullmatch(path)) and match.group(3) in selected}
     return sorted(path for path in areas if path in paths and path not in docs)
 
 

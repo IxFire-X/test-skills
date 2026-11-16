@@ -187,7 +187,7 @@ BASE_IMPORTED = "sha256:2aefa82e7ca59654409bb43caaa889e5d3472e0f650606b8363232ab
 REVIEW = "tc-reviewer:canonical"
 
 
-def _autofix(run: dict, number: int) -> tuple[int, dict]:
+def _autofix(run: dict, number: int, before_submit=None) -> tuple[int, dict]:
     """The generator answers the batch, the reviewer fixes the title of case ``number`` (1-based, as the generator numbers): ``submit`` of the review."""
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import journal_assembly
@@ -196,6 +196,8 @@ def _autofix(run: dict, number: int) -> tuple[int, dict]:
     assert _submit(run, _fragment(run))[0] == 0
     code, prepared = prepare_stage(run["root"], REVIEW, "--invocation-id", "reviewer-1", "--fresh-context", "yes")
     assert code == 0, prepared
+    if before_submit is not None:
+        before_submit()
     candidate = journal_assembly(run["root"], run["attempt_id"])[0]
     case = candidate["test_cases"][number - 1]
     selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": document_sha256(candidate)}
@@ -211,6 +213,12 @@ def _autofix(run: dict, number: int) -> tuple[int, dict]:
 def test_a_review_fix_of_the_text_of_a_new_case_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     code, answered = _autofix(_to_plan(tmp_path, monkeypatch), NEW + 1)
     assert code == 0, answered
+
+
+def test_a_review_fix_of_an_import_is_refused_when_the_receipt_of_the_import_is_lost(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _to_plan(tmp_path, monkeypatch)
+    code, refused = _autofix(run, 1, lambda: (run["root"] / "imported-cases" / f"{run['attempt_id']}.json").unlink())
+    assert code == 2 and "MODEL_INPUTS_MISMATCH" in str(refused), refused  # was: the check of the human fields went off and the fix of an imported case was accepted
 
 
 def test_a_review_fix_of_the_text_of_an_imported_case_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

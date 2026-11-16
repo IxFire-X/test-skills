@@ -5480,9 +5480,10 @@ def _test_roots(project: Path, inventory: Mapping[str, Any]) -> tuple[str, ...]:
     """The test roots the human's ``.skillsrc`` names for the module of the inventory, as project paths with a trailing «/» — none when it does not read."""
     from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 
-    if not any(row["project_path"] == ".skillsrc" for row in inventory["files"]):  # the one of the project root, as the scan reads it: a nested one may be a file of an agent
-        return ()
+    held = next((row.get("content_digest") for row in inventory["files"] if row["project_path"] == ".skillsrc"), None)  # the one of the project root, as the scan reads it: a nested one may be a file of an agent
     try:
+        if held is None or held != "sha256:" + hashlib.sha256((project / ".skillsrc").read_bytes()).hexdigest():  # a file changed since the scan names no root
+            return ()
         modules = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]
     except (OSError, SkillsrcError, KeyError, TypeError, ValueError):
         return ()

@@ -218,6 +218,67 @@ def test_a_change_of_an_area_whose_spec_is_not_named_stops_the_scan(tmp_path: Pa
     assert stop["reason"] == "OPENSPEC_SOURCE_CONFLICT" and BASE in stop["fix"]
 
 
+def test_a_delta_of_a_second_area_of_the_selected_change_stops_the_scan_before_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, SPEC)
+    _write(project, "openspec/changes/add-search/specs/visits/spec.md", REMOVED)
+    stop = _scan(project, monkeypatch, [BASE, ADD], expect=2)  # one delta named, the change touches visits too
+    assert stop["reason"] == "OPENSPEC_SOURCE_CONFLICT" and VISITS in stop["fix"]
+
+
+def test_an_excluded_change_is_no_live_change_without_docs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.init_skillsrc import _payload
+    from tools.skillsrc_manifest import load_skillsrc
+
+    project = _project(tmp_path)
+    _scan(project, monkeypatch, [BASE, ADD])  # writes the .skillsrc
+    document = load_skillsrc(project / ".skillsrc")
+    document["modules"][0].setdefault("paths", {})["exclude"] = ["openspec/changes/drop-fax/**"]
+    (project / ".skillsrc").write_bytes(_payload(document))
+    _scan(project, monkeypatch, [])  # the model would get one change: add-search
+
+
+def test_the_folders_of_docs_are_over_the_limit_together(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    for area in "ab":
+        for part in "xyz":
+            _write(project, f"openspec/specs/{area}/{part}/spec.md", SPEC + "x" * 200_000)  # 600 KB a folder: each is under 1 MiB, both are not
+    stop = _scan(project, monkeypatch, ["openspec/specs/a", "openspec/specs/b"], expect=2)
+    assert stop["reason"] == "NEED_DOCS_LIMIT" and not (project / ".pilot-runs").exists()
+
+
+def test_the_named_files_count_in_the_total_beside_a_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    for part in "xyz":
+        _write(project, f"openspec/specs/a/{part}/spec.md", SPEC + "x" * 230_000)
+    for name in ("one", "two"):
+        _write(project, f"docs/{name}.md", "REQ-1 SHALL work.\n" + "x" * 230_000)
+    stop = _scan(project, monkeypatch, ["openspec/specs/a", "docs/one.md", "docs/two.md"], expect=2)
+    assert stop["reason"] == "NEED_DOCS_LIMIT"
+
+
+def test_the_root_of_the_project_as_a_folder_is_refused_without_a_walk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    monkeypatch.setattr(run_pipeline.os, "walk", lambda *_args, **_kw: pytest.fail("the project is walked"))
+    stop = _scan(project, monkeypatch, ["."], expect=2)
+    assert stop["reason"] == "SNAPSHOT_DOCS"
+
+
+def test_a_file_of_a_folder_out_of_the_inventory_names_the_way_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, "## Requirements\n### Requirement: Login\npassword = 'hunter2hunter2'\n")  # a suspected secret: not a file of the inventory
+    stop = _scan(project, monkeypatch, ["openspec/specs"], expect=2)
+    assert stop["reason"] == "TASK_DOC_OUTSIDE_CONTEXT" and "файлами" in stop["fix"], stop
+
+
+def test_ready_stops_with_the_exact_fix_where_scan_stops_on_an_area_not_named(tmp_path: Path) -> None:
+    from tools import ready
+
+    report = ready.check(_project(tmp_path), ["openspec/changes/add-search"], "cases-only-v1", None)
+    [row] = [row for row in report["checks"] if row["id"].startswith("context") and row["level"] == "STOP"]  # was a WARN «контекст не посчитан»: the report said READY
+    assert report["status"] == "BLOCKED" and "OPENSPEC_SOURCE_CONFLICT" in row["message"] and BASE in row["fix"], row
+
+
 def test_a_change_of_a_new_area_needs_no_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project(tmp_path)
     _write(project, "openspec/changes/add-pets/specs/pets/spec.md", ADDED)
