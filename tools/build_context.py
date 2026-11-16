@@ -145,6 +145,27 @@ _OPENSPEC_PATH = re.compile(r"^openspec/(?:(specs)/(.+)|changes/([^/]+)/specs/(.
 _OPENSPEC_HEADING = re.compile(r"^(##\s+[^\n]+|### Requirement:\s*[^\n]+|#### Scenario:\s*[^\n]+)$", re.M)
 
 
+_OPENSPEC_CHANGE = re.compile(r"^openspec/changes/(?!archive/)([^/]+)/")
+
+
+def openspec_selected_changes(docs: list[str]) -> set[str]:
+    """The live changes the task documents name: any file under ``openspec/changes/<name>/`` selects ``<name>``."""
+    return {match.group(1) for doc in docs if (match := _OPENSPEC_CHANGE.match(doc.replace("\\", "/")))}
+
+
+def openspec_unselected(paths: list[str], docs: list[str]) -> list[str]:
+    """The ``paths`` of other live changes and of the archive — no part of the selection the task documents make."""
+    selected = openspec_selected_changes(docs)
+    named = set(docs)
+    return [path for path in paths if path not in named and path.startswith("openspec/changes/")
+            and (path.startswith("openspec/changes/archive/") or (m := _OPENSPEC_CHANGE.match(path)) and m.group(1) not in selected)]
+
+
+def openspec_context_only(path: str) -> bool:
+    """An ``openspec/`` file that is no spec and no archive (proposal, design, tasks, project): context, never requirement rows."""
+    return path.startswith("openspec/") and not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/")
+
+
 def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[str]]:
     """Compose only standard spec documents explicitly present in authorized inputs."""
     baseline: dict[tuple[str, str], dict[str, Any]] = {}
@@ -324,6 +345,9 @@ def build_context(
             raise RequirementConflict("NEED_DOCS_LIMIT", "docs snapshot exceeds 1MiB")
         if _OPENSPEC_PATH.fullmatch(rel.replace("\\", "/")) or rel.replace("\\", "/").startswith("openspec/changes/archive/"):
             openspec_entries.append(entry)
+            continue
+        if openspec_context_only(rel.replace("\\", "/")):
+            warnings.append(f"{rel} — OpenSpec контекст (proposal/design/tasks), не требования: строк требований из него нет")
             continue
         rows = extract_inventory(text, id_re)
         for row in rows:

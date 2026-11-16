@@ -629,6 +629,10 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
             entry["sha256"] = _digest_bytes(entry["content"].encode("utf-8"))  # what the code's inventory is built from
         entries.append(entry)
     entries.sort(key=lambda row: row["path"])
+    from tools.build_context import openspec_selected_changes
+
+    if len(named := sorted(openspec_selected_changes([row["path"] for row in entries]))) > 1:  # one change per run; before any run exists
+        raise HostStop("OPENSPEC_SOURCE_CONFLICT", "в --docs названы файлы нескольких живых изменений OpenSpec: " + ", ".join(named))
     return entries
 
 
@@ -1675,7 +1679,18 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
                            + _exclusion_note(inventory, path), TASK_DOC_FIX)
         task_ids.append(str(item["opaque_id"]))
     others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
-    return task_ids, others, {"task_documents": task_paths, "other_tasks_skipped": len(others)}, []
+    from tools.build_context import openspec_unselected
+
+    skipped = openspec_unselected(list(by_path), task_paths)  # the other live changes and the archive: not selected by --docs, no context
+    others |= {str(by_path[path]["opaque_id"]) for path in skipped}
+    warnings: list[str] = []
+    if skipped:
+        names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
+        archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)
+        size = sum(int(by_path[path].get("size") or 0) for path in skipped)
+        warnings.append("OpenSpec: не применяются и в модель не идут: " + ", ".join(names + ([f"архив ({archive} файл(ов))"] if archive else []))
+                        + f" — {len(skipped)} файл(ов), {size} байт; изменение выбирают файлы в --docs")
+    return task_ids, others, {"task_documents": task_paths, "other_tasks_skipped": len(others)}, warnings
 
 
 def _exclusion_note(inventory: Mapping[str, Any], path: str) -> str:
