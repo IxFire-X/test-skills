@@ -147,8 +147,8 @@ def _baseline_test_paths(baseline: Mapping[str, Any]) -> set[str]:
 
 def held_indexes(baseline: Mapping[str, Any], generated: Sequence[Any]) -> list[int]:
     """The rows of the generated files whose path the frozen baseline already holds — the files ``materialize`` refuses (``baseline-absence``)."""
-    held = _baseline_test_paths(baseline)
-    return [index for index, row in enumerate(generated) if isinstance(row, Mapping) and isinstance(row.get("path"), str) and row["path"].replace("\\", "/") in held]
+    held = {path.casefold() for path in _baseline_test_paths(baseline)}  # a case-blind file system holds Test_A.py where test_a.py lies
+    return [index for index, row in enumerate(generated) if isinstance(row, Mapping) and isinstance(row.get("path"), str) and row["path"].replace("\\", "/").casefold() in held]
 
 
 def _frozen_attempt(

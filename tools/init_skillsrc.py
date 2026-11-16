@@ -533,6 +533,8 @@ def _why_not_written(error: BaseException, receipt: dict[str, Any]) -> dict[str,
     """The core refused to write ``.skillsrc``: the person is told why, beside the code — the refusal itself, and what lies in the place most often."""
     if isinstance(error, OutputConfinementError):
         receipt.update(_message=f".skillsrc не записан: ядро записи отказало ({error}); чаще всего на месте .skillsrc лежит ссылка или каталог — пакет не пишет поверх ссылок", _fix="замените .skillsrc обычным файлом и повторите init")
+    elif isinstance(error, OSError):  # a read-only file, or one another program holds open
+        receipt.update(_message=f".skillsrc не записан: система отказала ({type(error).__name__}: {error})", _fix="снимите у .skillsrc «только для чтения», закройте программу, которая держит файл, и повторите init")
     return receipt
 
 

@@ -35,6 +35,15 @@ def test_a_path_the_project_holds_is_refused_at_submit_with_both_ways_out(tmp_pa
     assert (tmp_path / "tests" / "test_products.py").read_text(encoding="utf-8") == "def test_old():\n    pass\n"
 
 
+def test_a_path_that_differs_from_the_held_one_only_in_case_is_refused_at_submit(tmp_path: Path) -> None:
+    """On Windows ``Test_Products.py`` is the held file: ``materialize`` refuses it, so ``submit`` must too."""
+    run = _held_run(tmp_path)
+    prepare_stage(run["root"], GENERATOR)
+    put_in_slot(run["root"], GENERATOR, _answer(run, "tests/Test_Products.py"))
+    code, out = submit_stage(run["root"], GENERATOR, None)
+    assert code == 2 and "/artifacts/generated_files/0/path MATERIALIZATION_CONFLICT" in out["message"], out
+
+
 def test_another_path_beside_the_held_one_is_taken(tmp_path: Path) -> None:
     run = _held_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)

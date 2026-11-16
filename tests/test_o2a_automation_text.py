@@ -124,6 +124,16 @@ def test_two_files_that_would_get_one_name_leave_the_whole_answer_as_it_was() ->
     assert render(artifact, DIGEST) is None
 
 
+def test_two_files_whose_names_differ_only_in_case_leave_the_whole_answer_as_it_was() -> None:
+    """On Windows ``FILE-A.txt`` and ``FILE-a.txt`` are one file."""
+    from tools.automation_text import render
+
+    artifact = _artifact()
+    for row, name in zip(artifact["artifacts"]["generated_files"], ("FILE-A", "FILE-a")):
+        row.update(file_id=name, path="tests/test_x.py")
+    assert render(artifact, DIGEST) is None
+
+
 def test_the_text_form_of_an_answer_with_many_relations_is_smaller_than_its_json() -> None:
     from tools.automation_text import render
 
@@ -201,7 +211,7 @@ def test_the_rows_of_a_big_answer_are_smaller_than_its_json_and_the_hint_check_s
     from tools.step_size import automation_text_rows
 
     run = _prepared(tmp_path)
-    big = tmp_path / "big.json"
+    big = run["root"] / "big.json"  # a file of the run: it is read through the core
     big.write_bytes(json.dumps(_artifact(cases=30, asserts=8), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
     digest = "sha256:" + hashlib.sha256(big.read_bytes()).hexdigest()
     rows = automation_text_rows(tmp_path, run["root"], [big], digest, True)

@@ -604,9 +604,11 @@ def automation_text_rows(project: Path, root: Path, paths: Iterable[Path], diges
     try:
         from tools.execution_gate import from_mode_b
         render, = from_mode_b("automation_text", "render")
-        raw = paths[0].read_bytes() if len(paths) == 1 else b""
+        from tools.confined_output import read_confined_bytes
+
+        raw = (read_confined_bytes(project, root, paths[0]) or b"") if len(paths) == 1 else b""  # a file of the run is read through the core
         parts = render(json.loads(raw), digest) if "sha256:" + hashlib.sha256(raw).hexdigest() == digest else None
-    except (RuntimeError, OSError, ValueError, KeyError, TypeError, AttributeError):  # RuntimeError: a delivery without mode B
+    except (RuntimeError, OSError, ValueError):  # RuntimeError: a delivery without mode B; OSError: unreadable; ValueError: not JSON, or the core refused the path
         return None
     for name, _basis, data in parts or []:
         _write_view(project, root, Path(root) / "review-views" / name, data, write)

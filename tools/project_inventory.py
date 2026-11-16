@@ -1160,7 +1160,8 @@ def _read_json_receipt(project_root: Path, run_root: Path, path: Path, label: st
     try:
         raw = read_confined_bytes(project_root, run_root, Path(path))
     except OutputConfinementError as error:
-        raise InventoryError(f"{label} target is a symlink or reparse point") from error
+        link = "symlink or reparse point" in str(error) or "unsafe" in str(error)  # the core's text says which: a link, or a path outside the run, a file that is none
+        raise InventoryError(f"{label} target is a symlink or reparse point ({error})" if link else f"{label} refused: {error}") from error
     except OSError as error:
         raise InventoryError(f"{label} is unreadable") from error
     if raw is None:

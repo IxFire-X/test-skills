@@ -50,7 +50,7 @@ def render(artifact: Mapping[str, Any], digest: str) -> list[tuple[str, str, byt
     """``(file name, basis, bytes)`` of the files the reviewer reads instead of the JSON of the answer ``digest``; None leaves it whole."""
     stem, body, files = digest.removeprefix("sha256:"), artifact["artifacts"], artifact["artifacts"]["generated_files"]
     names = [f"{stem}.{re.sub(r'[^A-Za-z0-9._-]', '_', row['file_id'])}{re.sub(r'[^A-Za-z0-9.]', '', Path(row['path']).suffix)[:12]}.txt" for row in files]  # .txt: inert text, no file of a language is written before the review
-    if len(set(names)) != len(names):
+    if len({name.casefold() for name in names}) != len(names):  # a case-blind file system keeps FILE-A and FILE-a as one file
         return None
     rest = {**artifact, "artifacts": {**{key: item for key, item in body.items() if key not in ("generated_symbols", "implementation_relations")},
                                       "generated_files": [{key: item for key, item in row.items() if key != "content"} for row in files]}}
