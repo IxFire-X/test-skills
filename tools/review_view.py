@@ -31,7 +31,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Collection, Iterable, Mapping
 
 from tools.canonical_document import param_groups
 from tools.json_cli import JsonArgumentParser, cli_error
@@ -393,11 +393,26 @@ def _short(value: Mapping[str, Any]) -> str:
     return f"{value['step_id']}.{value['output_id']}" if kind == "step_output" and rest == ["output_id", "step_id"] else _exact(value)
 
 
-def _autotest_step(step: Mapping[str, Any], short: bool = False) -> list[str]:
-    exact, operation = (_short if short else _exact), step["operation"]
+def _step_operation(step: Mapping[str, Any], short: bool) -> str:
+    operation = step["operation"]
+    return operation["capability_id"] if short and isinstance(operation, Mapping) and list(operation) == ["capability_id", "kind"] and operation["kind"] == "project_action" else _json(operation)
+
+
+def _check(row: Mapping[str, Any], exact: Any) -> str:
+    return f"{exact(row['actual'])} {row['operator']}" + (f" {exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
+
+
+def autotest_facts(document: Mapping[str, Any]) -> dict[tuple[str, str, str], str]:
+    """``(case_id, step_id, "")`` is the operation of a step, ``(case_id, step_id, assertion_id)`` is ``actual operator expected``: as the reviewer's view writes them.
+    ``tools.automation_text`` puts those of the steps and assertions an implementation relates into its tables, and the view leaves them out (*moved*)."""
+    return {(case["case_id"], step["step_id"], part): text for case in document["test_cases"] for step in case["steps"]
+            for part, text in [("", _step_operation(step, True)), *((row["assertion_id"], _check(row, _short)) for item in step["expectations"] for row in item["assertions"])]}
+
+
+def _autotest_step(step: Mapping[str, Any], short: bool = False, moved: Collection[str] = ()) -> list[str]:
+    exact = _short if short else _exact
     manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
-    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}",
-             "   Операция: " + (operation["capability_id"] if short and isinstance(operation, Mapping) and list(operation) == ["capability_id", "kind"] and operation["kind"] == "project_action" else _json(operation))]
+    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", *([] if "" in moved else [f"   Операция: {_step_operation(step, short)}"])]
     for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
         # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
         secret = " (секрет)" if item["target"].get("sensitive") else ""
@@ -408,17 +423,19 @@ def _autotest_step(step: Mapping[str, Any], short: bool = False) -> list[str]:
               for blocker in step["automation_blockers"]]
     for expectation in sorted(step["expectations"], key=lambda row: row["display_order"]):
         lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
-        lines += [f"     {row['assertion_id']}: {exact(row['actual'])} {row['operator']}"
-                  + (f" {exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
-                  for row in sorted(expectation["assertions"], key=lambda row: row["display_order"])]
+        lines += [f"     {row['assertion_id']}: {_check(row, exact)}" for row in sorted(expectation["assertions"], key=lambda row: row["display_order"]) if row["assertion_id"] not in moved]
     return lines
 
 
 REVIEW_LEGEND = ("- Вид для ревьюера, короткая запись: `Операция: CAP-…` — операция project_action этой capability; `@x` — project_result{\"name\":\"x\"}; `STEP-….x` — step_output этого шага и выхода x;"
-                 " у `Выход x тип` источник — project_result того же имени. Остальное — как в JSON.")
+                 " у `Выход x тип` источник — project_result того же имени. Операция шага и ASSERT (оператор, значение), у которых есть связь с кодом, — в `tables.txt`"
+                 " у символа: у такого шага в виде нет строк `Операция:` и `ASSERT-…`. Остальное — как в JSON.")
 
 
-def _autotest(document: Mapping[str, Any], digest: str, short: bool = False) -> list[str]:
+def _autotest(document: Mapping[str, Any], digest: str, short: bool = False, moved: Iterable[tuple[str, str, str]] = ()) -> list[str]:
+    hidden: dict[tuple[str, str], set[str]] = {}
+    for case_id, step_id, part in moved:
+        hidden.setdefault((case_id, step_id), set()).add(part)
     lines = [
         f"# Вид для генератора автотестов {document['document_id']} r{document['revision']}", "",
         f"- Вид: {AUTOTEST_VIEW_VERSION}, построен кодом из effective-документа; одинаковый документ — одинаковые байты.",
@@ -447,7 +464,7 @@ def _autotest(document: Mapping[str, Any], digest: str, short: bool = False) -> 
                   f"- Цель: {case['objective']}"]
         lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
         for step in sorted(case["steps"], key=lambda row: row["display_order"]):
-            lines += _autotest_step(step, short)
+            lines += _autotest_step(step, short, hidden.get((case["case_id"], step["step_id"]), ()))
     return lines
 
 
@@ -466,7 +483,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
            reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
            context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None,
-           basis: Mapping[str, Any] | None = None) -> bytes:
+           basis: Mapping[str, Any] | None = None, moved: Iterable[tuple[str, str, str]] = ()) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` for the
     automation generator. With the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before. With the map of *existing* project tests the hints add
@@ -481,7 +498,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
     real = document if basis is None else basis
     require_valid_canonical_document(dict(real))
     if profile in ("autotest", "autotest-review"):  # the second is the reviewer's: the same facts in the short form (the generator's view is not changed)
-        return ("\n".join(_autotest(document, document_sha256(dict(document)), profile == "autotest-review")) + "\n").encode("utf-8")
+        return ("\n".join(_autotest(document, document_sha256(dict(document)), profile == "autotest-review", moved)) + "\n").encode("utf-8")
     sources: dict[str, list[str]] = {}
     for mapping in document["source_to_canonical_mappings"]:
         for requirement_id in mapping["canonical_requirement_ids"]:

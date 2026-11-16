@@ -51,7 +51,7 @@ def _read_back(parts: list[tuple[str, str, bytes]]) -> dict:
         row["content"] = next(data for name, data in by_name.items() if name.startswith(row["file_id"] + ".")).decode("utf-8")
     artifacts["generated_symbols"] = [_symbol(line) for line in sections["символы"].split("\n")] if "символы" in sections else json.loads(sections["символы (JSON)"])
     artifacts["implementation_relations"] = (
-        [row for line in sections["связи"].split("\n") for row in _relation(line)] if "связи" in sections else json.loads(sections["связи (JSON)"]))
+        _relations(sections["связи"]) if "связи" in sections else json.loads(sections["связи (JSON)"]))
     return value
 
 
@@ -61,17 +61,19 @@ def _symbol(line: str) -> dict:
     return {"file_id": file_id, "symbol_id": symbol, "locator": {"kind": kind, **dict(zip(names, value.split("#")))}}
 
 
-def _relation(line: str) -> list[dict]:
-    head, *cells = line.split(" | ")
-    symbol, file_id, case, step = head.split(" ")
-    ids = {"case_id": case, "step_id": step, "file_id": file_id, "symbol_id": symbol}
-    rows = []
-    for cell in cells:
-        if cell == OPERATION:
-            rows.append({"kind": OPERATION, **ids})
+def _relations(section: str) -> list[dict]:
+    """``SYMBOL FILE TC STEP[ | operation]``, then ``  EXP`` and ``    ASSERT[ text]`` lines."""
+    rows, ids, expectation = [], {}, ""
+    for line in section.split("\n"):
+        if not line.startswith(" "):
+            head, *operation = line.split(" | ", 1)
+            symbol, file_id, case, step = head.split(" ")
+            ids = {"case_id": case, "step_id": step, "file_id": file_id, "symbol_id": symbol}
+            rows += [{"kind": OPERATION, **ids}] if operation else []
+        elif not line.startswith("    "):
+            expectation = line.strip()
         else:
-            expectation, assertions = cell.split(" = ")
-            rows += [{"kind": ASSERTION, **ids, "expectation_id": expectation, "assertion_id": name} for name in assertions.split(" ")]
+            rows.append({"kind": ASSERTION, **ids, "expectation_id": expectation, "assertion_id": line.split()[0]})
     return rows
 
 
@@ -99,6 +101,7 @@ def test_a_file_of_code_is_its_content_byte_for_byte_and_its_sha256_is_the_conte
     (lambda a: a["implementation_relations"][1].update(extra=1), "связи (JSON)"),
     (lambda a: a["implementation_relations"][0].update(kind="other"), "связи (JSON)"),
     (lambda a: a["implementation_relations"][0].update(case_id="TC 0"), "связи (JSON)"),
+    (lambda a: a["implementation_relations"].insert(2, dict(a["implementation_relations"][0])), "связи (JSON)"),  # an operation row after the assertion of its head: its place would be lost
     (lambda a: a["generated_symbols"][0]["locator"].update(kind="unknown_kind"), "символы (JSON)"),
     (lambda a: a["generated_symbols"][1]["locator"].update(extra="x"), "символы (JSON)"),
     (lambda a: a["generated_symbols"][2].update(symbol_id="SYMBOL | 3"), "символы (JSON)"),
@@ -229,3 +232,53 @@ def test_the_generator_reads_what_it_read_before(tmp_path: Path) -> None:
     run = _prepared(tmp_path)
     found = request_files(run["root"], GENERATOR)
     assert [row["basis"] for row in found["files"]] == ["вид"] and not list((run["root"] / "review-views").glob("*.tables.txt"))
+
+
+EXAMPLE = Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
+
+
+def _example() -> dict:
+    return json.loads(EXAMPLE.read_text(encoding="utf-8"))
+
+
+def _answer(document: dict) -> dict:
+    """An answer that relates every step of the example but the last step of the first case, and of the second step of the first case only its first assertion."""
+    rows = []
+    for case_index, case in enumerate(document["test_cases"]):
+        for step_index, step in enumerate(case["steps"]):
+            if case_index == 0 and step_index == len(case["steps"]) - 1:
+                continue
+            ids = {"case_id": case["case_id"], "step_id": step["step_id"], "file_id": "FILE-1", "symbol_id": "SYMBOL-1"}
+            rows.append({"kind": "operation", **ids})
+            for expectation in step["expectations"]:
+                for assertion in expectation["assertions"][: 1 if (case_index, step_index) == (0, 1) else None]:
+                    rows.append({"kind": "assertion", **ids, "expectation_id": expectation["expectation_id"], "assertion_id": assertion["assertion_id"]})
+    code = "class B {}\n"
+    return {"schema_version": "5.0.0", "stage": "tc-to-autotest", "warnings": [], "artifacts": {
+        "automation_status": "GENERATED", "automation_revision": 1, "manual_dispositions": [], "diagnostics": [], "implementation_relations": rows,
+        "generated_files": [{"file_id": "FILE-1", "path": "src/test/java/a/B.java", "language": "java", "framework": "junit5", "content": code,
+                             "content_digest": "sha256:" + hashlib.sha256(code.encode("utf-8")).hexdigest()}],
+        "generated_symbols": [{"file_id": "FILE-1", "symbol_id": "SYMBOL-1", "locator": {"kind": "java_class_method", "class_fqn": "a.B", "method_name": "t"}}]}}
+
+
+def _text(parts: list, suffix: str) -> str:
+    return next(data for name, _basis, data in parts if name.endswith(suffix)).decode("utf-8")
+
+
+def test_the_operation_and_the_assertions_of_a_related_step_are_in_the_tables_and_not_in_the_view() -> None:
+    from tools.automation_text import render
+    from tools.review_view import render as view_of
+
+    document, legend = _example(), "- Вид для ревьюера"
+    parts = render(_answer(document), DIGEST, document)
+    relations = _text(parts, ".tables.txt").split("## связи\n")[1].strip("\n").split("\n")
+    short = [line for line in view_of(document, profile="autotest-review").decode("utf-8").split("\n") if not line.startswith(legend)]  # proved above to be the generator's view
+    shown, back = [line for line in _text(parts, ".autotest-review.md").split("\n") if not line.startswith(legend)], []
+    for line in relations:  # a fact of the tables, written as the short view writes it
+        if line.startswith("    "):
+            name, text = line.strip().split(" ", 1)
+            back.append(f"     {name}: {text}")
+        elif not line.startswith("  "):
+            back.append(f"   Операция: {line.split(' | ', 1)[1]}")
+    assert back and set(back) <= set(short) and sorted(shown + back) == sorted(short)  # the view and the tables hold the very lines of the short view
+    assert sum(line.startswith("   Операция:") for line in shown) == 1 and any(line.strip().startswith("ASSERT-") for line in shown)  # the step without a relation keeps its operation and its assertions

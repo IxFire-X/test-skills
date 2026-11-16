@@ -28,8 +28,13 @@ def _symbols(rows: list[Any]) -> str | None:
     return "\n".join(lines)
 
 
-def _relations(rows: list[Any]) -> str | None:
-    """One line for the consecutive rows of a symbol, a case and a step: ``SYMBOL FILE TC STEP | operation | EXP = ASSERT ASSERT``; the order is the rows'."""
+def _key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return row["case_id"], row["step_id"], row.get("assertion_id", "")
+
+
+def _relations(rows: list[Any], facts: Mapping[tuple[str, str, str], str]) -> str | None:
+    """``SYMBOL FILE TC STEP | operation`` for the consecutive rows of a symbol, a case and a step, then ``  EXP`` and ``    ASSERT actual operator expected`` for its assertions
+    (the operation and the check as the document has them — *facts*; ``operation`` and none without); the order is the rows'.  An operation row after another row of its head stays JSON."""
     lines: list[str] = []
     head = expectation = None
     for row in rows:
@@ -39,12 +44,15 @@ def _relations(rows: list[Any]) -> str | None:
         if new != head:
             head, expectation = new, None
             lines.append(new)
+        elif row["kind"] == "operation":
+            return None
         if row["kind"] == "operation":
-            lines[-1], expectation = lines[-1] + " | operation", None
-        elif row["expectation_id"] == expectation:
-            lines[-1] += " " + row["assertion_id"]
+            lines[-1] += " | " + facts.get(_key(row), "operation")
         else:
-            lines[-1], expectation = lines[-1] + f" | {row['expectation_id']} = {row['assertion_id']}", row["expectation_id"]
+            if row["expectation_id"] != expectation:
+                expectation = row["expectation_id"]
+                lines.append(f"  {expectation}")
+            lines.append(f"    {row['assertion_id']} {facts.get(_key(row), '')}".rstrip())
     return "\n".join(lines)
 
 
@@ -57,9 +65,13 @@ def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any]
         return None
     rest = {**artifact, "artifacts": {**{key: item for key, item in body.items() if key not in ("generated_symbols", "implementation_relations")},
                                       "generated_files": [{key: item for key, item in row.items() if key != "content"} for row in files]}}
-    parts = (("символы", _symbols(body["generated_symbols"]), body["generated_symbols"]), ("связи", _relations(body["implementation_relations"]), body["implementation_relations"]))
-    tables = "\n".join([f"# Автоматизация r{body['automation_revision']}, id полные; код — файлы {stem}.FILE-… байт в байт; символы: SYMBOL FILE вид класс#метод; "
-                        "связи: SYMBOL FILE TC STEP | operation | EXP = ASSERT …\n", f"## прочие поля (JSON)\n{_json(rest)}\n",
+    facts = {} if document is None else review_view.autotest_facts(document)
+    relations = _relations(body["implementation_relations"], facts)
+    parts = (("символы", _symbols(body["generated_symbols"]), body["generated_symbols"]), ("связи", relations, body["implementation_relations"]))
+    tables = "\n".join([f"# Автоматизация r{body['automation_revision']}, id полные; код — файлы {stem}.FILE-… байт в байт; символы: SYMBOL FILE вид класс#метод; связи: SYMBOL FILE TC STEP | "
+                        "операция (capability), под ней `  EXP` и `    ASSERT актуальное оператор ожидаемое` — то, чего нет в виде кейсов (запись вида — в его части 1)\n",
+                        f"## прочие поля (JSON)\n{_json(rest)}\n",
                         *(f"## {title}\n{text}\n" if text is not None else f"## {title} (JSON)\n{_json(rows)}\n" for title, text, rows in parts)])
-    view = [] if document is None else [(f"{stem}.autotest-review.md", "вид кейсов", review_view.render(document, "autotest-review"))]
+    moved = [key for row in body["implementation_relations"] if relations is not None and (key := _key(row)) in facts]  # what the tables hold, the view leaves out
+    view = [] if document is None else [(f"{stem}.autotest-review.md", "вид кейсов", review_view.render(document, "autotest-review", moved=moved))]
     return [*((name, "код", row["content"].encode("utf-8")) for name, row in zip(names, files)), (f"{stem}.tables.txt", "таблицы", tables.encode("utf-8")), *view]
