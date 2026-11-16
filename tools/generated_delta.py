@@ -145,6 +145,11 @@ def _baseline_test_paths(baseline: Mapping[str, Any]) -> set[str]:
     return paths
 
 
+def occupied_paths(baseline: Mapping[str, Any]) -> list[str]:  # what ``held_indexes`` refuses and the generator can name: the frozen paths under the test root
+    root = str(baseline.get("test_root") or "").rstrip("/") + "/"
+    return sorted(path for path in _baseline_test_paths(baseline) if path.startswith(root))
+
+
 def held_indexes(baseline: Mapping[str, Any], generated: Sequence[Any]) -> list[int]:
     """The rows of the generated files whose path the frozen baseline already holds — the files ``materialize`` refuses (``baseline-absence``)."""
     held = {path.casefold() for path in _baseline_test_paths(baseline)}  # a case-blind file system holds Test_A.py where test_a.py lies

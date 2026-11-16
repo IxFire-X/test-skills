@@ -661,7 +661,8 @@ def autotest_view(root: Path, document_digest: str) -> Path:
 def request_files(run_root: Path, stage: str) -> dict[str, Any]:
     """:func:`stage_inputs` of the published model request of ``stage``, plus for the
     automation stages the Java level of the module's build and whether it has junit-jupiter-params."""
-    from tools.pilot_state import derive_state
+    from tools.execution_gate import from_mode_b
+    from tools.pilot_state import derive_state, frozen_baseline
 
     root = Path(run_root).resolve()
     project = root.parent.parent
@@ -682,7 +683,16 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
             result["junit_params"] = {"available": params, "rule": (
                 "группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\"), строки литералами по display_order"
                 if params else "junit-jupiter-params нет в зависимостях тестов: по методу @Test на каждый кейс группы, зависимость не добавлять")}
+        if stage.startswith("tc-to-autotest:") and (held := from_mode_b("generated_delta", "occupied_paths")[0](frozen_baseline(root, attempt))):  # the paths ``submit`` refuses (the same frozen baseline)
+            result["occupied_paths"] = occupied_field(held)
     return result
+
+
+def occupied_field(paths: list[str], limit: int = 4096) -> dict[str, Any]:  # printed within ``limit`` bytes: the rest is counted, the guard is the refusal of ``submit``
+    size, shown = 360, 0  # the keys, the count and the rule
+    while shown < len(paths) and (size := size + len(paths[shown].encode("utf-8")) + 4) <= limit:
+        shown += 1
+    return {"paths": paths[:shown], **({"more": f"и ещё {len(paths) - shown}"} if shown < len(paths) else {}), "rule": "эти пути заняты файлами проекта: новый файл называй иначе; `submit` откажет на занятый путь, в том числе отличающийся только регистром букв"}
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
