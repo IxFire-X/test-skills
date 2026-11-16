@@ -2961,20 +2961,21 @@ def scan_incomplete_message(have: int, total: int) -> str:
             "fix: повтори тот же scan (те же --module, --docs, --profile) — он достроит недостающие пачки в этом прогоне")
 
 
-def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
+def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str, *, live: bool = True) -> Mapping[str, Any]:
     """Read a C-lite receipt only when immutable bytes and attempt event both bind it. Once per closure — the receipt is
-    content-addressed and its event is in the journal for good."""
+    content-addressed and its event is in the journal for good.  ``live=False`` (the receipt of a reuse source, compared as it was recorded) does not
+    read the files of the project again: the digest of the body, the frozen inventory and the event still bind it."""
     kept = _CLOSURE_CACHE.get()
-    key = ("context-selection", str(run_root), attempt_id, receipt_digest)
+    key = ("context-selection", str(run_root), attempt_id, receipt_digest, live)
     if kept is not None and key in kept:
         return copy.deepcopy(kept[key])
-    receipt = _read_context_selection_checked(run_root, attempt_id, receipt_digest)
+    receipt = _read_context_selection_checked(run_root, attempt_id, receipt_digest, live)
     if kept is not None:
         kept[key] = copy.deepcopy(receipt)
     return receipt
 
 
-def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
+def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_digest: str, live: bool = True) -> Mapping[str, Any]:
     from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
@@ -2985,8 +2986,15 @@ def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_dig
         if raw is None:
             raise FileNotFoundError(str(target.name))
         receipt = loads_json_strict(raw.decode("utf-8"))
+        if not isinstance(receipt, dict):
+            raise ContextSelectionError("context receipt is not an object")
         inventory = _frozen_inventory(project, root, str(receipt.get("inventory_digest", "")))
-        validate_context_receipt_binding(inventory, project, receipt)
+        if live:
+            validate_context_receipt_binding(inventory, project, receipt)
+        else:
+            body = json.dumps({key: value for key, value in receipt.items() if key != "digest"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")  # as the scan sealed it
+            if receipt.get("digest") != "sha256:" + hashlib.sha256(body).hexdigest() or receipt.get("inventory_digest") != inventory.get("digest"):
+                raise ContextSelectionError("context receipt digest or inventory binding is invalid")
     except (OSError, UnicodeDecodeError, StrictJsonError, ContextSelectionError, OutputConfinementError) as error:
         raise ValueError("invalid context selection readback") from error
     state = derive_state(root)
@@ -5453,6 +5461,41 @@ def _input_differences(source: Mapping[str, Any], root: Path, attempt: Mapping[s
     return [{"input": name, "given": get(mine), "source": get(theirs)} for name, get in _BASELINE_INPUTS.items() if get(mine) != get(theirs)]
 
 
+def _comparable(project: Path, inventory: Mapping[str, Any]) -> dict[str, Any]:
+    """The inventory as «the same project» reads it — the whole body but its digest, without the files the package wrote in earlier runs (``own_files``)
+    and the build directories (BUILD_OUTPUT: not walked, the model never sees them).  What else the inventory says (path, bytes, kind, language, origin, the other exclusions) stays."""
+    from tools.existing_tests import own_files
+
+    own = own_files(project, inventory)[0]
+    return {**{key: value for key, value in inventory.items() if key != "digest"}, "files": [row for row in inventory["files"] if row["project_path"] not in own],
+            "exclusions": [row for row in inventory["exclusions"] if row["reason_code"] != "BUILD_OUTPUT"]}
+
+
+def _tokens(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], live: bool = True) -> dict[str, str]:
+    """``{digest: token}`` of the inventory and of each context receipt of the attempt: what it says of the project.  The inventory by ``_comparable``; a receipt by its body
+    but its digests (they hold the inventory's) and the own tests it skipped.  Two digests of one token are one project to a reuse; a digest not here is compared as it is."""
+    attempt_id = str(attempt["attempt_id"])
+    inventory = _frozen_inventory(project, root, str(frozen_baseline(root, attempt)["inventory_digest"]))
+    seal = lambda body: "same-project:" + hashlib.sha256(_canonical_bytes(body)).hexdigest()  # noqa: E731
+    tokens = {inventory["digest"]: seal(_comparable(project, inventory))}
+    for digest in dict.fromkeys(str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"):
+        receipt = read_context_selection(root, attempt_id, digest, live=live)
+        body = {key: value for key, value in receipt.items() if key not in ("digest", "inventory_digest", "skipped")}
+        tokens[digest] = seal({**body, "skipped": [row for row in receipt.get("skipped", []) if row["reason"] != "CONTEXT_OWN_TEST"]})
+    return tokens
+
+
+def _marker_differences(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], source: Mapping[str, Any],
+                        mine: Sequence[str], theirs: Sequence[str]) -> list[dict[str, Any]]:
+    """The inputs of a marker (this run's ``mine``, the source's ``theirs``: requirements, inventory, the context receipts…) that differ, the projects compared by composition
+    (``_tokens``) — the one place the scan's hint and ``prepare --reuse-from`` decide it.  Rows as ``_input_differences``; the receipts of the source are read as recorded."""
+    here = _tokens(project, root, state, attempt)
+    there = _strict(source["run_id"], "context-selections", lambda: _tokens(project, source["root"], source["state"], source["attempt"], live=False))
+    names = ["requirements", "inventory", *(f"квитанция контекста {index}" for index in range(1, max(len(mine), len(theirs))))]
+    rows = [{"input": name, "given": given, "source": other} for name, given, other in zip(names, mine, theirs) if here.get(given, given) != there.get(other, other)]
+    return rows + ([{"input": "число квитанций контекста", "given": len(mine) - 2, "source": len(theirs) - 2}] if len(mine) != len(theirs) else [])
+
+
 def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, source: dict[str, Any], family: str) -> str | None:
     """The cases of the source accepted whole: not reworked, the review session completed without evidence, the set published, and the word of the generator not named
     by a reviewer that said fresh (the word of a new run is another one: the answer would look independent there).  For the review also: the new run holds the very
@@ -5581,7 +5624,7 @@ def _reuse_source(
     given, here = list(request["input_digests"]), list(inputs)
     if family in ("review", "automation"):  # the second input holds the path of the published set (package_digest; the receipt of the bundle): compared whole above, or put again
         given, here = given[:1], here[:1]
-    if given != here:
+    if _marker_differences(project, root, state, attempt, source, here, given) if family == "marker" else given != here:  # a marker: the project by its composition
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: входы иные: у источника {given}, здесь {here}; fix: prepare без --reuse-from")
     if str(request.get("model_id") or "").startswith("controller:"):
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {stage_instance_id} источника сделан кодом (merge) — сделай его тем же merge")
@@ -5628,10 +5671,12 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
     if _REWORK_REVIEW_STAGE in stages:  # the rework and its second round (a source with the rework unfinished is refused above); the independence is the labels of the source
         same = stages[_REWORK_REVIEW_STAGE][0]["invocation_id"] == stages[_REWORK_STAGE][0]["invocation_id"]
         rows += [row(_REWORK_STAGE, response_digest=stages[_REWORK_STAGE][1]), row(_REWORK_REVIEW_STAGE, response_digest=stages[_REWORK_REVIEW_STAGE][1], review="SELF" if same else "independent", **(consent if same else {}))]
+    if why := next((why for item in rows if (why := _other_pack(source, item["stage"], skill_pack_digest()))), None):  # the package of each stage, rework included, as ``prepare`` asks
+        return [], {"cases": {"reused": False, "reason": why}}
     if "tc-to-autotest:r1" not in source["stages"]:
         return rows, {}
     try:  # the autotests, after the cases: the same project and execution, accepted by the review of revision 1
-        skipped = _automation_refusal(project, source, attempt)
+        skipped = _automation_refusal(project, source, attempt) or _other_pack(source, "tc-to-autotest:r1", skill_pack_digest())
     except ReuseSourceInvalid as error:
         skipped = str(error)
     if skipped is not None:
@@ -5641,7 +5686,7 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
 
 def _changed_files(project: Path, root: Path, attempt: Mapping[str, Any], source: Mapping[str, Any]) -> tuple[str, dict[str, Any] | None]:
     """The files of the project that differ between the inventory of this run and the source's — paths and counts (at most 10 paths of each kind), and the words of it."""
-    inventory = lambda base, owner: _frozen_inventory(project, base, str(frozen_baseline(base, owner)["inventory_digest"]))  # noqa: E731
+    inventory = lambda base, owner: _comparable(project, _frozen_inventory(project, base, str(frozen_baseline(base, owner)["inventory_digest"])))  # noqa: E731
     try:
         inventories = inventory(root, attempt), inventory(source["root"], source["attempt"])
         mine, theirs = ({row["project_path"]: row["content_digest"] for row in item["files"]} for item in inventories)
@@ -5652,10 +5697,8 @@ def _changed_files(project: Path, root: Path, attempt: Mapping[str, Any], source
             ("changed", "изменились", sorted(path for path in mine.keys() & theirs.keys() if mine[path] != theirs[path])))
     found = {kind: {"count": len(paths), "paths": paths[:10]} for kind, _word, paths in rows if paths}
     said = [f"{word} {len(paths)}: {', '.join(paths[:10])}{' …' if len(paths) > 10 else ''}" for _kind, word, paths in rows if paths]
-    for kind, word, pairs in (("excluded_added", "появились", sorted(left - right)), ("excluded_removed", "пропали", sorted(right - left))):  # the directories the tests of a run leave (build, .gradle) are excluded paths, not files
-        built = [path for path, reason in pairs if reason == "BUILD_OUTPUT"]
-        said += [f"{word} каталоги сборки: {', '.join(built[:10])}"] if built else []
-        other = [f"{path} ({reason})" for path, reason in pairs if reason != "BUILD_OUTPUT"]
+    for kind, word, pairs in (("excluded_added", "появились", sorted(left - right)), ("excluded_removed", "пропали", sorted(right - left))):  # the build directories are no difference (``_comparable``)
+        other = [f"{path} ({reason})" for path, reason in pairs]
         said += [f"{word} исключённые пути: {', '.join(other[:10])}"] if other else []
         found.update({kind: {"count": len(pairs), "paths": [f"{path} ({reason})" for path, reason in pairs[:10]]}} if pairs else {})
     return (": в проекте " + ("изменились файлы — " if found.keys() & {"added", "removed", "changed"} else "") + "; ".join(said)) if said else "", found or None
@@ -5689,18 +5732,17 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             refusal = _source_refusal(source, str(attempt.get("module")))  # a run whose files do not read is skipped, the search goes on
         except (ValueError, OSError, KeyError, TypeError, StopIteration):
             continue
-        base = _marker_base(source)
-        differences = [{"input": name, "given": given, "source": other} for name, given, other in
-                       zip(["requirements", "inventory", *(f"квитанция контекста {index}" for index in range(1, len(current) - 1))], current, base)
-                       if given != other]
-        if len(base) != len(current):
-            differences.append({"input": "число квитанций контекста", "given": len(current) - 2, "source": len(base) - 2})
+        differences = []
+        if refusal is None:
+            try:  # the same decision as ``prepare --reuse-from``: the project by its composition, a receipt of the source that does not read is a refusal with its name
+                differences = _marker_differences(project, root, state, attempt, source, current, _marker_base(source))
+            except ReuseSourceInvalid as error:
+                refusal = str(error)
         model_stages = [stage for stage in sorted(source["stages"], key=_marker_stage_order)
                         if reuse_family(stage) == "marker" and not str(source["stages"][stage][0].get("model_id") or "").startswith("controller:")]
         if refusal is None and differences:
             refusal = "входы иные"
-        if refusal is None and (pack is None or any(source["stages"][stage][0].get("skill_pack_digest") != pack for stage in model_stages)):
-            refusal = "пакет иной (skill_pack_digest не совпал или не записан: прогон до FaT-CR)"
+        refusal = refusal or next((why for stage in model_stages or ["context-marker:baseline"] if (why := _other_pack(source, stage, pack))), None)  # the package of each stage, as ``prepare`` asks
         try:
             refusal = refusal or _outcome_refusal(source)  # the last of the cheap ones: only for a run that is otherwise good
         except (ValueError, OSError, KeyError, TypeError, StopIteration):

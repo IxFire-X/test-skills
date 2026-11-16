@@ -238,6 +238,7 @@ def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, inputs: list[s
             "stages": stages, "verdict": "ПРИНЯТО", "drift": False}
     monkeypatch.setattr(pilot_state, "_run_source", lambda project, run_id, whole=True: fake if run_id == source_id else (_ for _ in ()).throw(ValueError()))
     monkeypatch.setattr(pilot_state, "_input_differences", lambda source, root, attempt: [])
+    monkeypatch.setattr(pilot_state, "_marker_differences", lambda *args: [])  # the source is no run on disk: its project is not compared here
     return source_id
 
 

@@ -276,14 +276,13 @@ def test_the_scan_names_the_files_of_the_project_that_changed_since_the_source(t
     assert offered["reason"] == "входы иные: в проекте изменились файлы — появились 1: src/added_one.py"
 
 
-def test_the_scan_names_the_build_directories_that_appeared_since_the_source(tmp_path: Path) -> None:
+def test_a_build_directory_that_appeared_since_the_source_is_no_change_of_the_project(tmp_path: Path) -> None:
     src = _source(tmp_path)
     (src["project"] / "build").mkdir()
     (src["project"] / "build" / "out.txt").write_text("x\n", encoding="utf-8")
     run_root, attempt_id = _new(src["project"])
     offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
-    assert offered["run_id"] is None and offered["files"] == {"excluded_added": {"count": 1, "paths": ["build (BUILD_OUTPUT)"]}}, offered
-    assert offered["reason"] == "входы иные: в проекте появились каталоги сборки: build"
+    assert "files" not in offered and "inventory" not in [row["input"] for row in offered["differences"]], offered  # the new run has no context receipt yet: that is its only difference
 
 
 def test_a_difference_of_the_inventories_that_is_in_no_file_and_no_exclusion_leaves_no_dash_and_no_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
