@@ -20,6 +20,41 @@ def test_an_automation_stage_reads_the_adapter_the_run_froze(tmp_path: Path, sta
     assert request_files(run_root, stage)["adapter"]["id"] == "pytest:selected-symbols-v1"
 
 
+@pytest.mark.parametrize("stage", AUTOTEST_STAGES)
+def test_an_automation_stage_gets_the_adapter_as_a_reference_not_a_rule_it_cannot_follow(tmp_path: Path, stage: str) -> None:
+    from tools.step_size import request_files
+
+    _project_path, run_root, _attempt_id, _values = _project(tmp_path)
+    assert "capability" not in request_files(run_root, stage)["adapter"]["rule"]  # the stage that writes ``capability.adapter`` is the generator of the cases
+
+
+def test_a_batch_of_the_case_generator_reads_the_adapter_the_run_froze(tmp_path: Path) -> None:
+    from tools.step_size import with_test_env
+
+    _project_path, run_root, attempt_id, _values = _project(tmp_path)
+    found = with_test_env(run_root, {"stage": "tc-generator:BATCH-fixture", "attempt_id": attempt_id, "files": []})
+    assert found["adapter"]["id"] == "pytest:selected-symbols-v1" and "capability.adapter" in found["adapter"]["rule"] and found["files"] == []
+
+
+def test_a_batch_of_a_cases_only_run_reads_no_adapter_and_is_not_refused(tmp_path: Path) -> None:
+    from tests.test_step_inputs import _generator_run, _request
+    from tools.step_size import request_files
+
+    root, attempt_id, _baseline, receipts, marker, plan, header, *_rest = _generator_run(tmp_path)
+    _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
+    assert "adapter" not in request_files(root, "tc-generator:BATCH-fixture")
+
+
+def test_a_baseline_receipt_the_code_cannot_read_is_a_refusal_for_a_batch_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state
+    from tools.step_size import with_test_env
+
+    _project_path, run_root, attempt_id, _values = _project(tmp_path)
+    monkeypatch.setattr(pilot_state, "frozen_baseline", lambda *_args: (_ for _ in ()).throw(ValueError("BASELINE_UNBOUND")))
+    with pytest.raises(ValueError, match="BASELINE_UNBOUND"):
+        with_test_env(run_root, {"stage": "tc-generator:BATCH-fixture", "attempt_id": attempt_id, "files": []})
+
+
 def test_a_receipt_of_the_inventory_the_code_cannot_read_is_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import pilot_state
     from tools.step_size import stage_inputs, with_test_env

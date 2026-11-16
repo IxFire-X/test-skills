@@ -704,16 +704,21 @@ def build_file_rows(project: Path, inventory: Mapping[str, Any], module_root: Pa
 
 
 def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, state: Any = None) -> dict[str, Any]:
-    """*found* of an automation stage plus the ``adapter`` the run froze, the build files of the module and the imports of the project's tests
+    """*found* of a generator batch plus the ``adapter`` the run froze (when it froze one); *found* of an automation stage plus it, the build files of the module and the imports of the project's tests
     (``basis: файл сборки`` / ``окружение тестов``); the frozen baseline and inventory are read strictly — a bad receipt is a refusal."""
     from tools.existing_tests import env_view
     from tools.pilot_state import derive_state, frozen_baseline, frozen_inventory
 
-    if not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
+    batch = found["stage"].startswith("tc-generator:BATCH-")  # the stage that writes ``capability.adapter``
+    if not batch and not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
         return found
     project = (root := Path(root).resolve()).parent.parent
     attempt = next(item for item in (state or derive_state(root))["attempts"] if item["attempt_id"] == found["attempt_id"])
-    baseline = frozen_baseline(root, attempt)
+    if batch and not attempt.get("baseline_digest"):
+        return found
+    baseline = frozen_baseline(root, attempt)  # strict: a receipt that is not the frozen one is a refusal
+    if batch:  # a cases-only baseline freezes no adapter: nothing to tell
+        return {**found, "adapter": {"id": baseline["adapter_id"], "rule": "`capability.adapter` — этот id"}} if baseline.get("adapter_id") else found
     inventory = frozen_inventory(project, root, baseline["inventory_digest"])
     module = str(attempt.get("module") or ".")
     files = build_file_rows(project, inventory, project.joinpath(*module.split("/")))
@@ -722,7 +727,7 @@ def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, stat
         target = root / "review-views" / (hashlib.sha256(data).hexdigest() + ".test-env.md")
         _write_view(project, root, target, data, write)
         files.append({"digest": "sha256:" + hashlib.sha256(data).hexdigest(), "path": str(target), "bytes": len(data), "basis": "окружение тестов"})
-    return {**found, "adapter": {"id": baseline["adapter_id"], "rule": "`capability.adapter` — этот id"}, "files": [*found["files"], *files]}
+    return {**found, "adapter": {"id": baseline["adapter_id"], "rule": "адаптер запуска модуля (справка)"}, "files": [*found["files"], *files]}
 
 
 def occupied_field(paths: list[str], limit: int = 4096) -> dict[str, Any]:  # printed within ``limit`` bytes: the rest is counted, the guard is the refusal of ``submit``

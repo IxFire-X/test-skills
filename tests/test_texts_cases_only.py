@@ -208,7 +208,7 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
     mechanics = {"plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "diagnostics", "digest"}  # V6: the code puts them
     assert sorted(set(schema["required"]) - set(fragment) - mechanics) == [] and sorted(set(fragment) - set(schema["properties"])) == []
     tokens = {"<ns>": "B1", "<SREQ-… этой пачки>": "SREQ-0001", "<SREQ-…>": "SREQ-0001", "<имя>": "batch_ids", "<имя операции>": "batch_ids",
-              "<адаптер из входов>": "project_native_junit"}
+              "<adapter.id из read; нет его — одно имя раннера тестов проекта на весь прогон>": "project_native_junit"}
 
     def fill(value):
         if isinstance(value, str):

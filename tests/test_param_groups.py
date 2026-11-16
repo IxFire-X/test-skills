@@ -201,6 +201,19 @@ def test_markdown_shows_a_group_once_with_a_parameter_and_a_row_per_case() -> No
     assert "| Ожидаемый результат |" in text and "| 2 | Boris | 2 |" in rows[1] and "| 1 | Anna | 1 |" in rows[0]
 
 
+def test_an_empty_or_blank_value_of_a_group_is_shown_in_quotes_in_the_published_set_and_the_reviewer_view() -> None:
+    from tools.review_view import render
+    from tools.test_case_projections import render_html_preview, render_markdown
+
+    document = grouped(("Anna", "", "   "))
+    rows = [line for line in render_markdown(document).payload.decode("utf-8").splitlines() if line.startswith("| ") and "TC-B1-001" in line]
+    assert '| 2 | "" |' in rows[1] and '| 3 | "   " |' in rows[2]
+    page = render_html_preview(document).payload.decode("utf-8")
+    assert "<td>&quot;&quot;</td>" in page and "<td>&quot;   &quot;</td>" in page
+    view = render(document).decode("utf-8")
+    assert '| 2 | "" |' in view and '| 3 | "   " |' in view
+
+
 def test_the_zephyr_csv_keeps_one_case_per_variant() -> None:
     from tools.test_case_projections import render_zephyr_csv
 

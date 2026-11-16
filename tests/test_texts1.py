@@ -22,11 +22,15 @@ def test_the_reviewer_makes_an_import_that_differs_from_the_build_file_a_blockin
     assert "ошибка компиляции: `BLOCKING`" in _text("skills/autotest-reviewer/SKILL.md")
 
 
+def test_the_generator_changes_the_code_of_r1_by_corrections_and_blocking_findings_only() -> None:
+    assert "`WARNING` and `INFO` are notes for the person" in _text("skills/tc-to-autotest/SKILL.md")
+
+
 def test_the_guide_says_a_failed_row_of_a_parameterized_test_takes_the_whole_method_into_quarantine() -> None:
     assert "весь метод" in _text("HOW-TO-USE-MODE-B.md").split("@ParameterizedTest")[-1]
 
 
-def test_the_sample_of_an_automation_answer_passes_the_schema_in_the_part_the_model_writes() -> None:
+def test_the_sample_of_an_automation_answer_passes_the_schema_with_only_the_digests_the_code_puts_in_r1() -> None:
     import json
     import re
 
@@ -36,7 +40,6 @@ def test_the_sample_of_an_automation_answer_passes_the_schema_in_the_part_the_mo
     answer = json.loads(re.sub(r"<[^>]*>", "x", block))
     artifacts = answer["artifacts"]
     artifacts["source"].update(source_digest="sha256:" + "0" * 64, effective_bundle_receipt_digest="sha256:" + "0" * 64)
-    artifacts.update(predecessor_automation_sha256=None, correction_review_sha256=None)
     artifacts["source"]["document_id"] = "TCDOC-x"
     for row in artifacts["generated_files"]:
         row["content_digest"] = "sha256:" + "0" * 64

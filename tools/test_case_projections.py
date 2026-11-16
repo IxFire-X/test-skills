@@ -181,8 +181,9 @@ def _group_view(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, s
     def slot(texts: list[str], into: list[list[str]]) -> str:
         text, middles = template_texts(texts)
         for own, middle in zip(into, middles):
-            if middle.strip() and middle.strip() not in own:
-                own.append(middle.strip())
+            shown = middle.strip() or json.dumps(middle, ensure_ascii=False)  # an empty or blank value is told apart by its quotes, as in the reviewer's view
+            if shown not in own:
+                own.append(shown)
         return text
 
     view["title"], _ = template_texts([case["title"] for case in cases])
