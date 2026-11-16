@@ -507,6 +507,14 @@ def check_rework_answer(run_root: Path, attempt_id: str, value: Mapping[str, Any
     except SelectionError as error:
         rows = [{"path": row["path"], "code": row["code"], "message": row["message"], "fix": REWORK_FIX} for row in error.diagnostics]
         raise BatchAssemblyError(rows[0]["code"], rows[0]["message"], rows, REWORK_FIX) from None
+    imported = _run_imported(run_root, attempt_id)
+    if imported:  # a rejected imported case keeps its human fields byte for byte in the rework too; a new case is free
+        reworked = {case["case_id"] for case in value["test_cases"]}
+        changed = _imported_human_changes({**basis["candidate"], "test_cases": [case for case in basis["candidate"]["test_cases"] if case["case_id"] in reworked]},
+                                          _plain(value), imported)
+        if changed:
+            message = "человеческие поля импорта изменены: " + ", ".join(changed[:12]) + " — верни их байт в байт, доработай только машинную часть"
+            raise BatchAssemblyError("IMPORT_HUMAN_FIELD_CHANGED", message, [{"path": path, "code": "IMPORT_HUMAN_FIELD_CHANGED", "message": message, "fix": REWORK_FIX} for path in changed[:12]], REWORK_FIX)
     return {"rework": {"cases": len(value["test_cases"]), "set": len(r3["test_cases"])}}
 
 
@@ -1093,7 +1101,7 @@ def _blocking_notes(report: Mapping[str, Any]) -> list[str]:
             for row in report.get("findings") or [] if row.get("severity") == "BLOCKING"]
 
 
-def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
+def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: Mapping[str, Any] | bool | None = False,
                     candidate_receipt: Receipt | None = None, canaries: Sequence[Mapping[str, Any]] | None = None,
                     share: int = DEFAULT_REJECT_SHARE) -> tuple[Any, Any]:
     """``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
@@ -1124,7 +1132,7 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
             require_valid_canonical_document(successor)
         except CanonicalDocumentError as error:
             raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_SUCCESSOR"), candidate_receipt) from None
-        changed = _imported_human_changes(candidate_value, _plain(successor)) if imported else []
+        changed = _imported_human_changes(candidate_value, _plain(successor), imported) if imported else []
         if changed:
             raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag(path, "IMPORT_HUMAN_FIELD_CHANGED") for path in changed[:12]],
                                      candidate_receipt) from None
@@ -1148,16 +1156,23 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
 _IMPORTED_CASE_FIELDS = ("title", "objective", "preconditions", "priority")
 
 
-def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any]) -> list[str]:
-    """In an import the reviewer's fix may not touch the human fields the import fixed (the fields
+def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any], imported: Mapping[str, Any] | bool = True) -> list[str]:
+    """In an import the reviewer's fix (or the rework) may not touch the human fields the import fixed (the fields
     batch_assembly.require_imported_human_fields keeps): case title/objective/preconditions/priority, step action,
-    test data and expectation texts — the machine part only."""
+    test data and expectation texts — the machine part only.  A new case (the generator wrote it for a requirement no case
+    of the CSV links — ``is_new_case``, the rule of the batch check) is free."""
+    from tools.cases_import import is_new_case
+
+    gaps = {row["source_requirement_id"] for row in imported.get("gaps") or []} if isinstance(imported, Mapping) else set()  # True: every case is imported
+    mappings = candidate.get("source_to_canonical_mappings") or []
     before = {case["case_id"]: case for case in candidate.get("test_cases", [])}
     changed: list[str] = []
     for index, case in enumerate(successor.get("test_cases", [])):
         source = before.get(case.get("case_id"))
         if source is None:
             changed.append(f"/test_cases/{index}")
+            continue
+        if is_new_case(source, mappings, gaps):
             continue
         changed += [f"/test_cases/{index}/{field}" for field in _IMPORTED_CASE_FIELDS if case.get(field) != source.get(field)]
         steps, original = case.get("steps") or [], source.get("steps") or []
@@ -1173,15 +1188,15 @@ def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str
     return changed
 
 
-def _run_imported(run_root: Path, attempt_id: str) -> bool:
-    """Whether the attempt is an import of cases: its published cases are the human part."""
+def _run_imported(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
+    """The skeleton of the attempt if it is an import of cases (its published cases are the human part); None otherwise."""
     from tools.pilot_state import _imported_cases, _run_root, derive_state
 
     try:
         project, root = _run_root(Path(run_root))
-        return _imported_cases(project, root, derive_state(root), attempt_id) is not None
+        return _imported_cases(project, root, derive_state(root), attempt_id)
     except (KeyError, OSError, TypeError, ValueError):
-        return False
+        return None
 
 
 @_closure_cached

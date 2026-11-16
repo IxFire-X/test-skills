@@ -630,7 +630,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
     """The cases of the batch keep the human fields of the import byte for byte — one case per imported case of
     the batch, in its order; the model completes only the machine part.  A difference names its path.  Besides them the
     batch has new cases for the requirements of ``write`` (no case of the CSV links them): no Key, a trace to ``write`` only."""
-    from tools.cases_import import canonical_management, case_sources, write_sources
+    from tools.cases_import import canonical_management, case_sources, is_new_case, write_sources
 
     owned = batch["owned_source_requirement_ids"]
     order = {source: index for index, source in enumerate(owned)}
@@ -641,16 +641,16 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
         for requirement_id in mapping.get("canonical_requirement_ids") or []:
             sources.setdefault(requirement_id, set()).add(mapping.get("source_requirement_id"))
     write = set(imported.get("write") or write_sources(imported, owned))  # the skeleton of the batch names them, the whole one has the gaps
-    # a case that traces only to requirements no case of the CSV links is new; any other one is an imported case and is checked as such
-    ordered = sorted(fragment["test_cases"], key=lambda case: case.get("display_order", 0))
-    new = {index for index, case in enumerate(ordered)
-           if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) and found <= write}
-    cases = [case for index, case in enumerate(ordered) if index not in new]
+    # a case that traces only to requirements no case of the CSV links is new; any other one is an imported case and is checked as such;
+    # a pointer names the place in the array of the fragment, which the display_order only sorts
+    ordered = sorted(enumerate(fragment["test_cases"]), key=lambda pair: pair[1].get("display_order", 0))
+    new = {index for index, case in ordered if is_new_case(case, fragment.get("source_to_canonical_mappings") or [], write)}
+    cases = [(index, case) for index, case in ordered if index not in new]
     differences: list[str] = [f"/test_cases/{index}/management" for index in sorted(new)
-                              if ((ordered[index].get("management") or {}).get("external_keys") or {}).get("zephyr_scale")]  # a new case has no Key
+                              if ((fragment["test_cases"][index].get("management") or {}).get("external_keys") or {}).get("zephyr_scale")]  # a new case has no Key
     if len(cases) != len(expected):
         differences.append(f"/test_cases: кейсов {len(cases)}, в импорте у пачки {len(expected)}")
-    for index, (case, source) in enumerate(zip(cases, expected)):
+    for (index, case), source in zip(cases, expected):
         for field in ("title", "objective", "preconditions", "priority"):
             if case.get(field) != source[field]:
                 differences.append(f"/test_cases/{index}/{field}")
@@ -670,7 +670,7 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
                                  + " — верни их байт в байт из входа imported, достраивай только машинную часть")
     # the case of an imported row traces to that row's source requirement only — never to another case's one
     traced = [f"/test_cases/{index}/requirement_ids: ведут к {', '.join(sorted(found)) or 'ничему'}, у кейса импорта {', '.join(case_sources(source))}"
-              for index, (case, source) in enumerate(zip(cases, expected))
+              for (index, case), source in zip(cases, expected)
               if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) != set(case_sources(source))]
     if traced:
         raise BatchAssemblyError("IMPORT_TRACE_CHANGED", "трассировка кейсов импорта ведёт не к их строке CSV: " + "; ".join(traced[:12])

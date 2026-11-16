@@ -45,6 +45,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     the documents.
     """
     gap_rows = list((imported or {}).get("gaps") or [])
+    written = set((imported or {}).get("new") or [])  # the gaps the plan owns; the human left the others out on the pause
     outside = list((imported or {}).get("outside") or [])
     groups: dict[str, list[list[str]]] = {}
     loose: list[str] = []
@@ -60,7 +61,9 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     lines = ["# Вопросы аналитику", ""]
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
-                  *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; генератор пишет под него новый кейс — проверьте его" for row in gap_rows), ""]
+                  *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; "
+                    + ("генератор пишет под него новый кейс — проверьте его" if row["source_requirement_id"] in written else "исключено из охвата — кейс не пишется")
+                    for row in gap_rows), ""]
     if outside:
         lines += ["## Кейсы CSV вне документов", "",
                   *(f"- строка {row} — кейс не проверяет ни одно требование документов; оставить его?" for row in outside), ""]
@@ -730,11 +733,11 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
         imported = pilot_state.read_attempt_receipt(root, str(attempts[-1]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     except (KeyError, OSError, ValueError):
         return {"csv": path, "cases": None, "normalized": None}
-    from tools.cases_import import outside_rows
+    from tools.cases_import import outside_rows, planned_gaps
 
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
             **({"gaps": [{"source_requirement_id": row["source_requirement_id"]} for row in imported["gaps"]], "outside": outside_rows(imported),
-                "new": [row["source_requirement_id"] for row in imported["gaps"]]} if "gaps" in imported else {})}  # new cases are written for the gaps
+                "new": planned_gaps(root, str(attempts[-1]), imported)} if "gaps" in imported else {})}  # new cases are written for the gaps the plan owns
 
 
 def _left(root: Path) -> str | None:

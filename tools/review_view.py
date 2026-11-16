@@ -505,6 +505,10 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
     for mapping in document["source_to_canonical_mappings"]:
         for requirement_id in mapping["canonical_requirement_ids"]:
             sources.setdefault(requirement_id, []).append(mapping["source_requirement_id"])
+    from tools.cases_import import is_new_case
+
+    new = [case["case_id"] for case in real["test_cases"]
+           if import_gaps and is_new_case(case, real["source_to_canonical_mappings"], set(import_gaps[0]))]  # the cases the generator wrote for the gaps
     hints = data_mismatches(real)
     path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(real, groups, batches))
     path_hint += _existing_lines(real, existing or {})
@@ -522,7 +526,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
            " сверка человеческих полей идёт с ними"] if imported and normalized else []),
         *([f"- Импорт с документами: требований без кейса в CSV (для них написаны новые кейсы) — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
            f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"
-           + ("; новые кейсы под эти требования написал генератор, а не человек — их текст оценивай как обычно" if import_gaps[0] else "")]
+           + (f"; новые кейсы ({', '.join(new)}) написал генератор, а не человек — их текст оценивай и правь как обычно" if new else "")]
           if import_gaps else []),
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
@@ -609,16 +613,17 @@ def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[s
 def _import_gaps(root: Path, state: Mapping[str, Any]) -> tuple[list[str], list[str]] | None:
     """(requirements without a case of the CSV, rows of the cases outside the documents) of an import with
     documents; None for any other run or before the skeleton."""
-    from tools.cases_import import outside_rows
+    from tools.cases_import import outside_rows, planned_gaps
     from tools.pilot_state import read_attempt_receipt
 
     try:
-        imported = read_attempt_receipt(root, str(state["attempts"][-1]["attempt_id"]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+        attempt_id = str(state["attempts"][-1]["attempt_id"])
+        imported = read_attempt_receipt(root, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     except (KeyError, IndexError, OSError, ValueError):
         return None
     if "gaps" not in imported:
         return None
-    return [row["source_requirement_id"] for row in imported["gaps"]], [f"строка {row}" for row in outside_rows(imported)]
+    return planned_gaps(root, attempt_id, imported), [f"строка {row}" for row in outside_rows(imported)]
 
 
 def _normalized(root: Path, state: Mapping[str, Any]) -> int:

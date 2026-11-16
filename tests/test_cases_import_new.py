@@ -2,6 +2,7 @@
 writes new cases for it beside the imported ones (Key empty), the imported cases are checked as before."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,81 @@ def test_a_new_case_traced_only_to_an_imported_requirement_is_refused(tmp_path: 
     assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases: кейсов 3" in refused["message"], refused
 
 
+def test_a_refusal_points_at_the_array_of_the_fragment_when_a_new_case_stands_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _to_plan(tmp_path, monkeypatch)
+
+    def first(value: dict) -> None:
+        cases = value["test_cases"]
+        cases.insert(0, cases.pop(NEW))  # the array: new, imported, imported
+        for number, case in enumerate(cases, start=1):
+            case["display_order"] = number
+        cases[2]["title"] += "!"
+
+    code, refused = _submit(run, _changed(_fragment(run), first))
+    assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/2/title" in refused["message"], refused
+
+
+def test_a_requirement_the_human_left_out_on_the_pause_gets_no_new_cases_in_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.run_report import write_report
+
+    run = _to_plan(tmp_path, monkeypatch, exclude=("SREQ-0002",))
+    write_report(run["project"], run["root"].name)
+    report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
+    assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002"}] and report["import"]["new"] == []
+    assert "новые кейсы под них пишет генератор): 0" in (run["root"] / "report.md").read_text(encoding="utf-8")
+    assert "генератор пишет под него" not in (run["root"] / "questions-for-analyst.md").read_text(encoding="utf-8")
+
+
+def test_the_review_view_names_no_new_cases_for_a_requirement_left_out_on_the_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.pilot_state import derive_state
+    from tools.review_view import _import_gaps
+
+    run = _to_plan(tmp_path, monkeypatch, exclude=("SREQ-0002",))
+    assert _import_gaps(run["root"], derive_state(run["root"]))[0] == []
+
+
+def _rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int) -> tuple[int, dict]:
+    """The review sends case ``number`` (1-based) back; the generator answers the rework with a new title: ``submit`` of ``tc-generator:rework-1``."""
+    import copy
+
+    from tests.test_review_canaries import _answer, _boundary_and_removed, _candidate, _finding, _open, _select
+    from tests.test_rework_stage import STAGE
+    from tests.test_stage_steps import _call, _put
+    from tools import orchestrate_test_case_revision as orchestrate
+
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
+    run = _to_plan(tmp_path, monkeypatch)
+    run["run_root"] = run["root"]
+    assert _submit(run, _fragment(run))[0] == 0
+    _open(run, monkeypatch)
+    target = _candidate(run)["test_cases"][number - 1]
+    findings = [*_boundary_and_removed(run), _finding("BLOCKING", [target["case_id"]], "Нет проверки состояния.")]
+    assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == "REWORK_PENDING"
+    assert _call(capsys, "prepare", run["root"], STAGE)[0] == 0
+    _put(run["root"], STAGE, {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1",
+                              "test_cases": [{**copy.deepcopy(target), "title": "Доработанный кейс"}]})
+    return _call(capsys, "submit", run["root"], STAGE)
+
+
+def test_a_rework_may_not_rewrite_the_human_title_of_an_imported_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    code, refused = _rework(tmp_path, monkeypatch, capsys, 1)
+    assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/title" in refused["message"], refused
+
+
+def test_a_rework_may_rewrite_the_text_of_a_new_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    code, answered = _rework(tmp_path, monkeypatch, capsys, NEW + 1)
+    assert code == 0, answered
+
+
+def test_the_review_view_names_the_new_cases_by_their_ids() -> None:
+    from tests.test_requirement_traceability import canonical_fixture
+    from tools.review_view import render
+
+    text = render(canonical_fixture(), imported=True, import_gaps=(["SREQ-batch-a-001", "SREQ-batch-a-002"], [])).decode("utf-8")
+    assert "новые кейсы (TC-batch-a-001) написал генератор, а не человек — их текст оценивай и правь как обычно" in text
+
+
 def test_the_size_estimate_counts_a_requirement_without_a_case_by_its_text() -> None:
     from tools.batch_assembly import _size_split
 
@@ -106,3 +182,37 @@ def test_a_run_without_a_requirement_lacking_a_case_keeps_its_bytes(tmp_path: Pa
 # the digests of the merged marker and of the skeleton of this run on the base 9c7a0f78 (before upd-a)
 BASE_MARKER = "sha256:17a9c0fbea13f035b99b7b8b71fc46c1c8de35710e2b5407c749c07e73848b78"
 BASE_IMPORTED = "sha256:2aefa82e7ca59654409bb43caaa889e5d3472e0f650606b8363232ab7fcdeddb"
+
+
+REVIEW = "tc-reviewer:canonical"
+
+
+def _autofix(run: dict, number: int) -> tuple[int, dict]:
+    """The generator answers the batch, the reviewer fixes the title of case ``number`` (1-based, as the generator numbers): ``submit`` of the review."""
+    from tools.canonical_document import document_sha256
+    from tools.orchestrate_test_case_revision import journal_assembly
+    from tools.review_edits import reviewer_successor
+
+    assert _submit(run, _fragment(run))[0] == 0
+    code, prepared = prepare_stage(run["root"], REVIEW, "--invocation-id", "reviewer-1", "--fresh-context", "yes")
+    assert code == 0, prepared
+    candidate = journal_assembly(run["root"], run["attempt_id"])[0]
+    case = candidate["test_cases"][number - 1]
+    selected = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": document_sha256(candidate)}
+    edits = [{"correction_id": "FIX-1", "case_id": case["case_id"], "field": "title", "old": case["title"], "new": case["title"] + "."}]
+    report = {"verdict": "AUTO_FIX_APPLIED", "candidate": selected, "reviewed_case_ids": [item["case_id"] for item in candidate["test_cases"]],
+              "corrections": [{"id": "FIX-1", "correction_kind": "MECHANICAL", "related_ids": [case["case_id"]], "description": "опечатка в названии", "evidence": ["REQ"]}],
+              "findings": []}
+    successor = reviewer_successor(candidate, {"validation_report": report, "successor_edits": edits})
+    report["effective"] = {"document_id": successor["document_id"], "revision": successor["revision"], "document_sha256": document_sha256(successor)}
+    return submit_stage(run["root"], REVIEW, {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report, "successor_edits": edits}, "warnings": []})
+
+
+def test_a_review_fix_of_the_text_of_a_new_case_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, answered = _autofix(_to_plan(tmp_path, monkeypatch), NEW + 1)
+    assert code == 0, answered
+
+
+def test_a_review_fix_of_the_text_of_an_imported_case_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, refused = _autofix(_to_plan(tmp_path, monkeypatch), 1)
+    assert code == 2 and "IMPORT_HUMAN_FIELD_CHANGED" in refused["message"], refused

@@ -144,6 +144,29 @@ def case_sources(case: Mapping[str, Any]) -> list[str]:
     return list(case["source_requirement_ids"]) if "source_requirement_ids" in case else [str(case["source_requirement_id"])]
 
 
+def is_new_case(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], write: set[str]) -> bool:
+    """A case of a candidate is new — written by the generator, not the human — when every source requirement it traces to
+    (its canonical requirements through ``mappings``) is one no case of the CSV links (``write``).  The one rule the batch
+    check and the review of an import use."""
+    ids = set(case.get("requirement_ids") or [])
+    found = {mapping.get("source_requirement_id") for mapping in mappings if ids & set(mapping.get("canonical_requirement_ids") or [])}
+    return bool(found) and found <= write
+
+
+def planned_gaps(root: Path, attempt_id: str, imported: Mapping[str, Any]) -> list[str]:
+    """The gaps the generator writes new cases for: those the published plan owns — the human may exclude one on the pause
+    (``SCOPE_PENDING``); before the plan every gap."""
+    from tools.pilot_state import read_attempt_receipt
+
+    found = [row["source_requirement_id"] for row in imported.get("gaps") or []]
+    try:
+        plan = read_attempt_receipt(Path(root), attempt_id, "batch-plan", "ARTIFACT_READ_BACK")["record"]["plan"]
+    except (KeyError, OSError, ValueError):
+        return found
+    owned = {item for batch in plan["batches"] for item in batch["owned_source_requirement_ids"]}
+    return [item for item in found if item in owned]
+
+
 def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
     """The canonical management of an imported case — Key, folder, labels, custom fields as the CSV has them."""
     management = case["management"]

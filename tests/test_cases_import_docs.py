@@ -94,7 +94,7 @@ def test_wrong_case_links_are_refused_before_the_write(tmp_path: Path, monkeypat
     assert _responses(root) == []
 
 
-def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exclude: tuple[str, ...] = ()) -> dict:
     from tests.test_batch_assembly import _header
     from tools import context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
@@ -119,7 +119,14 @@ def _to_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     header = pilot_state.publish_generator_input(root, attempt_id, "header", _header())
     imported = pilot_state.read_attempt_receipt(root, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     requirements = marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"]
-    plan = plan_batches(requirements, {"header_digest": header["digest"], "context_receipt_digest": context["digest"]}, imported=imported)
+    out_of_scope = ()
+    if exclude:  # the human leaves a requirement out on the pause
+        from tools import scope_pause
+
+        scope_pause.commit_decision(root, attempt_id, scope_pause.prepare_decision(
+            root, attempt_id, {"decision": "exclude", "excluded": list(exclude), "reason": "нет стенда"}))
+        out_of_scope = scope_pause.out_of_scope(scope_pause.read_decision(root, attempt_id))
+    plan = plan_batches(requirements, {"header_digest": header["digest"], "context_receipt_digest": context["digest"]}, imported=imported, out_of_scope=out_of_scope)
     published = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
     return {"project": project, "root": root, "attempt_id": attempt_id, "marker": marker["content_digest"], "requirements": requirements,
             "context": context, "header": _header(), "header_digest": header["digest"], "plan": plan, "plan_digest": published["digest"],
