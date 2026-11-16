@@ -666,6 +666,13 @@ def _build_inventory(
                 if passage is not None and include_mode(project_path, include) != "full":
                     exclusions.append(_exclusion(project_path, passage[0], passage[1], "excluded-directory"))
                     continue
+                try:  # a device (nul on Windows) or a FIFO (reading it hangs) is no file of the project: left out before any read
+                    regular = stat.S_ISREG(os.stat(path, follow_symlinks=False).st_mode)
+                except OSError:
+                    regular = True  # unreadable: the read below says so, as before
+                if not regular:
+                    exclusions.append(_exclusion(project_path, "UNREADABLE", "regular-file-v1", "not-a-regular-file"))
+                    continue
                 suffix = path.suffix.casefold()
                 if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
                     exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
