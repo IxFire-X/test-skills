@@ -439,6 +439,14 @@ def restored_tail(run_root: Path, attempt_id: str) -> bytes:
     return b"" if final and final["kind"] == "ALL" else restored_csv([item["row"] for item in partial.get("restored", [])])
 
 
+def published_csv(run_root: Path, attempt_id: str, document: Mapping[str, Any], csv_profile: str = _PROFILE) -> bytes:
+    """The bytes of the Zephyr CSV of the set a run published: the CSV of its document and, after it, the tail of the human's cases (``restored_tail``).  The one place that says what the
+    file must be: the export by the template and the assembly of the runs of a document's sections compare a file with it."""
+    from tools.publish_test_case_bundle import build_bundle
+
+    return build_bundle(dict(document), csv_profile).csv_bytes + restored_tail(run_root, attempt_id)
+
+
 def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any] | None, texts: bool = False) -> dict[str, Any] | None:
     """What the report says of the review's outcome — the verdict as the reviewer gave it, the outcome the code drew from it and the numbers; a function of
     the recorded answer, the candidate and the canaries of the journal (nothing is stored).  ``texts``: the cases of the human the export keeps carry their title and

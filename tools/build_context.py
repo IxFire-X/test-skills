@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
 import unicodedata
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from tools.json_cli import JsonArgumentParser, emit_error
 from tools.schema_validation import schema_diagnostics
@@ -93,11 +95,25 @@ def document_labels(text: str) -> list[str]:
     return [match.group(1) or match.group(2) or match.group(3) for match in _LABEL.finditer(text)]
 
 
+_NAME = re.compile(r"[^\W\d_]+")
+
+
+def counted_labels(text: str) -> list[tuple[int, str]]:
+    """``(line, label)`` of the labels that stand for requirements.  A label that another label of the document continues (``1.1`` before ``1.1.1``) is the
+    number of a section; a letter prefix with one distinct label in the document (``UTF-8``, ``SHA-256``) is a name, not a numbering."""
+    ends = [match.start() for match in re.finditer("\n", text)]
+    found = [(bisect.bisect_left(ends, match.start()) + 1, match.group(1) or match.group(2) or match.group(3)) for match in _LABEL.finditer(text)]
+    distinct = {label for _line, label in found}
+    parents = {".".join(parts[:cut]) for label in distinct for parts in [label.split(".")] for cut in range(1, len(parts))}
+    names = Counter(match.group() for label in distinct if (match := _NAME.match(label)))
+    return [(line, label) for line, label in found if label not in parents and not ((match := _NAME.match(label)) and names[match.group()] == 1)]
+
+
 def document_label_counts(documents: dict[str, str], project: Path) -> dict[str, list[str]]:
     """path → the distinct labels of each plain document (OpenSpec paths and a project with ``requirements.id_pattern`` are no case), ``{}`` where they are fewer than LABELS_MIN."""
     if _project_id_pattern(project) is not None:
         return {}
-    found = {path: list(dict.fromkeys(document_labels(text))) for path, text in documents.items() if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/")}
+    found = {path: list(dict.fromkeys(label for _line, label in counted_labels(text))) for path, text in documents.items() if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/")}
     found = {path: labels for path, labels in found.items() if labels}
     return found if sum(len(labels) for labels in found.values()) >= LABELS_MIN else {}
 
@@ -120,6 +136,93 @@ def label_warning(requirements: int, found: dict[str, list[str]]) -> str | None:
     if not found or requirements >= total:
         return None
     return f"ВНИМАНИЕ: в документе {', '.join(sorted(found))[:300]} номеров {total}, требований в разметке {requirements} — сверьте, что ни одно требование не пропущено и не склеено"
+
+
+# Measures of the live runs of 16–17.11 (view of the review, B per number of the document; control errors caught of 3):
+#   w3-big 967 883 / 128 = 7 562 (no review) · w3-sec 324 685 / 39 = 8 325 (1) · w3-mm 190 851 / 35 = 5 453 (3) · w1-pq1 228 079 / 26 = 8 772 (3) · w1-rw 246 574 / 34 = 7 252 (3)
+#   pq1-v06a 252 197 / 33 = 7 642 (2) · pq1-v06a-after 191 442 / 27 = 7 090 (2) · w2-upd 187 557 / 44 = 4 263 (2) · w2-micro 148 674 / 24 = 6 195 (3) · w2-osb 114 751 / 16 = 7 172 (3)
+#   input of the autotest review per number: pq1 16 497 · rw 10 442 · micro 10 000 · osb 11 155 · pq1-v06a 12 366 · w3-big (computed) 10 514
+REVIEW_PER_NUMBER = 8_000  # B of the review view per number: up to 8.8 KB on the live runs (w3-sec 8.3); the hard bound, so 8 000 and not the mean of 6.5 KB
+AUTOTEST_PER_NUMBER = 13_000  # B of the input of the autotest review per number: 10.0–16.5 KB on the live runs; with it w3-sec (39 × 13 000) is over the step, pq1/rw/micro/osb are not
+IMPORT_PER_CASE = 4_500  # B of the review view per case of an imported CSV: w2-upd 187 557 / 44 cases = 4 263 (the case is the human's, not a numbered statement of 8 KB)
+REVIEW_SOFT = 300_000  # the view up to 250 KB caught 3 of 3 in 6 runs of 8 and never fewer than 2; at 252 KB 2, at 325 KB 1: a warning from 300 KB (37 numbers), w3-mm (35 numbers, 280 KB) has none
+
+
+NOT_DIVISIBLE = "по заголовкам документ разделить нечем"
+NOT_DIVISIBLE_FIX = (NOT_DIVISIBLE + ": разделите требования по файлам (не больше 37 на файл, `--docs` — файл на прогон, прогоны по очереди) или попросите человека сузить документ; "
+                     "этот прогон дальше не вести — ревью такого набора не состоится")
+OPENSPEC_ADVICE = "назовите меньше областей: --docs openspec/specs/<область> по одной-две на прогон (прогоны по очереди одним запросом; где мы и сборка — tools.assemble_sections)"
+
+
+def large_document(project: Path, documents: Mapping[str, str], named: Mapping[str, Any], automation: bool, requirements: int | None = None,
+                   openspec: bool = False) -> tuple[bool, str, str | None] | None:
+    """The numbers of the plain documents (*documents*: shown path → text; *named*: path → the headings ``--docs`` names, none for the whole file) against what one review holds,
+    before any model: None where the set fits, else ``(hard, estimate, advice)`` — hard: the estimate is over the step budget (the plan refuses), else over the size that was
+    checked well (a warning); the advice (None: no headings tell the numbers apart) names the runs by sections, taken together up to REVIEW_SOFT; ``say`` joins it to the estimate.
+    *requirements*: the plan knows the requirements of the marker — the exact number, whatever the document is (without numbers, OpenSpec, ``id_pattern``): the estimate is theirs,
+    the sections still come from the numbers of the document where it has them; *openspec*: the advice is fewer areas."""
+    from tools.doc_sections import SectionMissing, find_section, split_sections
+    from tools.step_size import role_files, step_budget
+
+    if requirements is None and _project_id_pattern(project) is not None:
+        return None
+    marks = {}
+    for path, text in documents.items():
+        if _OPENSPEC_PATH.fullmatch(path) or path.startswith("openspec/") or _project_id_pattern(project) is not None:
+            continue
+        try:
+            within = [find_section(text, heading, path) for heading in named.get(path) or ()]
+        except SectionMissing:
+            continue  # the docs row of ready says it
+        lines = sorted(line for line, _label in counted_labels(text) if not within or any(item.first <= line <= item.last for item in within))
+        if lines:
+            marks[path] = (text, lines, within)
+    total = requirements if requirements is not None else sum(len(lines) for _text, lines, _within in marks.values())
+    budget = step_budget(project)
+    room = budget - sum(item.stat().st_size for item in role_files("tc-reviewer"))
+    pairs = [(total * REVIEW_PER_NUMBER, room)]
+    if automation:
+        pairs.append((total * AUTOTEST_PER_NUMBER, budget - sum(item.stat().st_size for item in role_files("autotest-reviewer"))))
+    over = next(((size, limit) for size, limit in pairs if size > limit), None)
+    if over is None and total * REVIEW_PER_NUMBER <= REVIEW_SOFT:
+        return None
+    cap = min(REVIEW_SOFT // REVIEW_PER_NUMBER, *(limit // (REVIEW_PER_NUMBER if index == 0 else AUTOTEST_PER_NUMBER) for index, (_size, limit) in enumerate(pairs)))
+    leaves: list[tuple[str, str | None, int]] | None = []
+    for path, (text, lines, within) in marks.items():
+        found = split_sections(text, lines, cap, within) if within or len(lines) > cap else [(None, len(lines))]
+        if found is None:
+            leaves = None
+            break
+        leaves += [(path, title, number) for title, number in found]
+    runs: list[list[tuple[str, str | None, int]]] = []
+    for leaf in leaves or []:
+        if runs and sum(item[2] for item in runs[-1]) + leaf[2] <= cap:
+            runs[-1].append(leaf)
+        else:
+            runs.append([leaf])
+    head = (f"оценка вида {'ревью' if over == pairs[0] else 'ревью автотестов'} {over[0]} Б при {total} номерах больше бюджета шага {over[1]} Б: ревью не состоится" if over else
+            f"оценка вида ревью {total * REVIEW_PER_NUMBER} Б при {total} номерах: такой объём ревью на прошлых прогонах проверялся слабее (190 КБ — контрольные ошибки 3 из 3, 325 КБ — 1 из 3)")
+    if len(runs) < 2:
+        return bool(over), head, OPENSPEC_ADVICE if openspec else None
+    from tools.run_pipeline import printed_or
+
+    def argument(path: str, title: str | None) -> str:  # a heading the shell would read otherwise (a quote…) is not printed: the advice says so
+        return "--docs " + printed_or(f"{path}#{title}" if title else path, f'"{path}#…" (заголовок «{title}» с символом, который оболочка читает иначе: набери аргумент сам)')
+
+    listed = " | ".join(f"прогон {index} ({sum(item[2] for item in run)} ном.): " + " ".join(argument(item[0], item[1]) for item in run) for index, run in enumerate(runs, start=1))
+    return bool(over), head, "по разделам, одним запросом, прогоны по очереди (каждый — от scan до report; где мы и сборка — tools.assemble_sections): " + listed
+
+
+def csv_import_size(cases: int) -> tuple[bool, str, str] | None:
+    """An import of cases without documents: its requirements are the cases of the CSV (4.3 KB of the view a case on the live run, not the 8 KB of a numbered statement), so only the warning —
+    the step budget stays the guard."""
+    if cases * IMPORT_PER_CASE <= REVIEW_SOFT:
+        return None
+    return False, f"при {cases} кейсах CSV ревью такого объёма на прошлых прогонах проверялось слабее", f"выгрузите из Zephyr меньше кейсов за раз (до {REVIEW_SOFT // IMPORT_PER_CASE} на прогон)"
+
+
+def say(head: str, advice: str | None) -> str:
+    return f"{head}; {advice or NOT_DIVISIBLE + ' — прогон идёт как есть'}"
 
 
 def _project_id_pattern(project: Path) -> str | None:

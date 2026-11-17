@@ -1200,6 +1200,13 @@ def _tests_clause(report: Mapping[str, Any]) -> str:
     return f"Автотесты: {tests}. Прогон {'принят' if counts.get('accepted') else 'не принят'}."
 
 
+def _label_lines(report: Mapping[str, Any]) -> list[str]:
+    """The warning for fewer requirements than the numbers of the documents (the paths and the numbers), whatever the outcome of the review."""
+    found = report.get("requirement_labels")
+    return [] if not found else [f"> **Внимание: в документе {', '.join(row['path'] for row in found['documents'])} номеров {sum(row['labels'] for row in found['documents'])}, требований в разметке {found['requirements']}.** "
+                                 "Сверьте, что ни одно требование не пропущено и не склеено.", ""]
+
+
 def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     """The «Итог» block at the top: the outcome of the review in a line, the warning when the reviewer missed a control error and, for a partial
     acceptance, the numbers, the files to work with and the requirements left without a case."""
@@ -1208,7 +1215,7 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
 
     acc = report.get("acceptance")
     if not acc:
-        return []
+        return _label_lines(report)  # no review (a set the review could not hold): the warning of the numbers still stands first
     total, accepted, removed, rework = acc["generated"], acc["accepted"], acc["removed"], acc.get("rework")
     left, tests = total - accepted, _tests_clause(report)  # the cases not in the set
     if acc["outcome"] == "ACCEPTED_WHOLE":
@@ -1232,10 +1239,7 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
                   "> Ревью могло пропустить и настоящие ошибки — просмотрите принятые кейсы внимательнее перед импортом.", ""]
-    if report.get("requirement_labels"):
-        found = report["requirement_labels"]
-        lines += [f"> **Внимание: в документе {', '.join(row['path'] for row in found['documents'])} номеров {sum(row['labels'] for row in found['documents'])}, требований в разметке {found['requirements']}.** "
-                  "Сверьте, что ни одно требование не пропущено и не склеено.", ""]
+    lines += _label_lines(report)
     who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
     if acc["outcome"] != "PARTIAL":
         return lines + ([f"Ревью: {who}, 2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])

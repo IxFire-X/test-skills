@@ -1980,9 +1980,34 @@ def _named_docs(project: Path, root: Path) -> list[str]:
     return [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
 
 
+def _named_sections(project: Path, root: Path) -> dict[str, list[str]]:
+    """path → the headings ``--docs`` names of the file (none: the whole file), the paths as ``_named_docs`` gives them."""
+    from tools.doc_sections import resolve_spec
+    from tools.run_pipeline import relative_to_project
+
+    named: dict[str, list[str]] = {}
+    for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []:
+        path, heading = resolve_spec(project, doc)
+        headings = named.setdefault(relative_to_project(project.resolve(), path), [])
+        if heading and heading not in headings:
+            headings.append(heading)
+    return named
+
+
 def _label_found(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, list[str]]:
-    """The labels of the plain documents ``--docs`` names (``tools.build_context.document_label_counts``), read where the receipts hold them, by the digest."""
+    """The labels of the plain documents ``--docs`` names (``tools.build_context.document_label_counts``) — of the named sections of a file, not of the whole file."""
     from tools.build_context import document_label_counts
+    from tools.doc_sections import find_section, view
+
+    texts = _named_texts(project, root, attempt, receipts)
+    for path, headings in _named_sections(project, root).items():
+        if headings and path in texts:
+            texts[path] = view(texts[path], [find_section(texts[path], heading, path) for heading in headings], path, note=False)
+    return document_label_counts(texts, project)
+
+
+def _named_texts(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, str]:
+    """The plain documents ``--docs`` names (whole files), read where the receipts hold them, by the digest."""
     from tools.output_guard import OutputRefused, project_file
 
     named, texts = set(_named_docs(project, root)), {}
@@ -1996,7 +2021,24 @@ def _label_found(project: Path, root: Path, attempt: Mapping[str, Any], receipts
                     continue
                 if "sha256:" + hashlib.sha256(raw).hexdigest() == item["content_digest"]:
                     texts[path] = raw.decode("utf-8", errors="replace")
-    return document_label_counts(texts, project)
+    return texts
+
+
+def _outside_sections(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str], rows: Sequence[Any]) -> list[str]:
+    """The ids of the requirements whose provenance ``path:line`` is a line outside the sections ``--docs`` names of that file (the rest of the file is context)."""
+    from tools.doc_sections import find_section
+
+    named = {path: headings for path, headings in _named_sections(project, root).items() if headings}
+    texts = _named_texts(project, root, attempt, receipts) if named else {}
+    ranges = {path: [(item.first, item.last) for item in (find_section(texts[path], heading, path) for heading in headings)] for path, headings in named.items() if path in texts}
+    outside = []
+    for row in rows:
+        for reference in (row.get("provenance") or []) if isinstance(row, Mapping) else []:
+            found = re.fullmatch(r"(.+):(\d+)(?:[-–]\d+)?", str(reference))
+            if found and found.group(1) in ranges and not any(first <= int(found.group(2)) <= last for first, last in ranges[found.group(1)]):
+                outside.append(str(row.get("source_requirement_id")))
+                break
+    return outside
 
 
 def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], receipts: Sequence[str], value: Mapping[str, Any]) -> str | None:
@@ -2007,6 +2049,10 @@ def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any
     rows = (((value.get("artifacts") or {}).get("analytics_documentation") or {}).get("requirements"))
     if not isinstance(rows, list):
         return None
+    outside = _outside_sections(project, root, attempt, receipts, rows)
+    if outside:
+        raise ValueError(f"CONTEXT_MARKER_REQUIREMENT_OUTSIDE_SECTION: требования {', '.join(outside[:5])} взяты со строк вне разделов, которые назвал --docs; fix: требования прогона — только "
+                         "из названных разделов (остальной документ — контекст); отдай исправленный ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")
     found = _label_found(project, root, attempt, receipts)
     why = label_refusal(len(rows), found)
     if why:
@@ -2063,7 +2109,7 @@ def _validate_context_marker_sources(
 
 def _reconcile_requirements_openspec(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
-) -> str | None:
+) -> None:
     """The merged marker keeps the requirements of this answer and adds the part warnings, so its OpenSpec
     reconciliation is decided here, against every receipt of the attempt — before the write, while the stage keeps its retry.
     Write time only: a journal written before reads as before; the merge keeps its own check."""
@@ -2073,17 +2119,15 @@ def _reconcile_requirements_openspec(
 
     stage_instance_id = str(request["stage_instance_id"])
     if is_code_requirements(root, attempt, value):  # the requirements of an import are its cases, by the CSV bytes
-        return None
+        return
     receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
     snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
     diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
-    note = _check_requirement_labels(project, root, state, attempt, receipts, value)  # the refusal first, the warning is returned
     if diagnostics:
         raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # a code
                          + json.dumps(diagnostics, ensure_ascii=False)
                          + "; fix: требования ответа — по OpenSpec из квитанций контекста; отдай исправленный ответ единственным "
                          "повтором стадии (--transport-attempts 2), ничего не записано")
-    return note
 
 
 def _validate_model_request_predecessors(
@@ -2797,10 +2841,14 @@ def _publish_model_stage_artifact(
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     labels_note = None
-    if stage_instance_id == "context-marker:baseline" and not _context_marker_parts(state, attempt_id)[1]:  # one context batch: the marker is one answer; at its write only, never at the read of a written one
-        labels_note = _check_requirement_labels(project, root, state, attempt, _context_marker_receipt_digests(project, root, state, attempt_id, stage_instance_id, request["input_digests"]), value)
+    from tools.cases_import import is_code_requirements
+
+    if stage_instance_id == "context-marker:requirements" or (stage_instance_id == "context-marker:baseline" and not _context_marker_parts(state, attempt_id)[1]):  # one context batch: the marker is one answer; at its write only, never at the read of a written one
+        if not is_code_requirements(root, attempt, value):  # the requirements of an import are its cases, no numbers of a document
+            labels_note = _check_requirement_labels(project, root, state, attempt, _published_context_receipts(state, attempt_id, stage_instance_id) if stage_instance_id.endswith("requirements")
+                                                    else _context_marker_receipt_digests(project, root, state, attempt_id, stage_instance_id, request["input_digests"]), value)
     if stage_instance_id == "context-marker:requirements":
-        labels_note = _reconcile_requirements_openspec(project, root, state, attempt, request, value)
+        _reconcile_requirements_openspec(project, root, state, attempt, request, value)
         from tools.cases_import import check_requirements_answer
 
         from tools.cases_scope import scope
@@ -6059,7 +6107,15 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)
-    shown = {"plan": plan_view(item_plan), "header": {"digest": header_digest}, "notes": list(plan.notes)}
+    from tools.build_context import NOT_DIVISIBLE_FIX, csv_import_size, large_document, say
+
+    named = _named_sections(project, root)  # the plan knows the requirements of the marker, whatever the document is: their number is the estimate (``ready`` has the numbers of the document only)
+    count = len(found["requirements"]) - len(found["out_of_scope"] or [])
+    size = (csv_import_size(count) if not request.get("docs") and request.get("cases") else  # an import without documents: its requirements are the cases of the CSV, a warning only — the step budget is the guard
+            large_document(project, _named_texts(project, root, attempt, receipts), named, attempt.get("policy_profile") == "local-pilot-v1", count, any(path.startswith("openspec/") for path in named)))
+    if size and size[0]:  # the review of this set cannot be held: before the generator writes a byte, the sections `ready` names — or, where nothing tells them apart, the honest way out
+        raise ValueError(f"PLAN_REVIEW_TOO_LARGE: {size[1]}; fix: {size[2] or NOT_DIVISIBLE_FIX}")
+    shown = {"plan": plan_view(item_plan), "header": {"digest": header_digest}, "notes": [*plan.notes, *([f"ВНИМАНИЕ: {say(size[1], size[2])}"] if size else [])]}
     if dry_run:
         return shown
     if cases_path(root):  # the skeleton of an import with documents is published by the plan

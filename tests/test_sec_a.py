@@ -230,6 +230,7 @@ UNC_ARGV = {  # every CLI of tools/: one flag on a share, the other required one
     "step_size": ["--project", "p", "--files", "a.md", SHARE + r"\b.md"],
     "validate_artifact": [SHARE + r"\schema.json", "a.json"],
     "zephyr_template_export": ["--project", "p", "--run", "r", "--cases", SHARE + r"\c.json"],
+    "assemble_sections": ["--project", SHARE + r"\p", "--doc", "d.md"],
 }
 
 

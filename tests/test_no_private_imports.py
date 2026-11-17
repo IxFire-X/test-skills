@@ -105,6 +105,7 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("run_tests", "pilot_state", "_canonical_runner_output"): 1,
     ("scope_pause", "pilot_state", "_generator_input"): 1,
     ("step_size", "pilot_state", "_model_request_target"): 1,
+    ("assemble_sections", "run_pipeline", "_read_run_coordinate"): 2,
     ("zephyr_csv", "test_case_projections", "_CUSTOM_KEYS"): 1,
     ("zephyr_csv", "test_case_projections", "_HEADERS"): 1,
     ("zephyr_csv", "test_case_projections", "_PRIORITIES"): 1,

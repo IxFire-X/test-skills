@@ -346,6 +346,26 @@ def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
     return rels
 
 
+def check_size(project: Path, docs: Sequence[str], automation: bool) -> list[dict[str, Any]]:
+    """The numbers of the plain documents against what one review holds (``build_context.large_document``): a line, never a stop — the plan stops a run that cannot be reviewed."""
+    from tools.build_context import large_document, say
+    from tools.doc_sections import resolve_spec
+
+    root = Path(project).resolve()
+    documents: dict[str, str] = {}
+    named: dict[str, list[str]] = {}
+    for raw in docs:
+        for rel in _docs_rels(root, [raw]):
+            try:
+                documents[rel] = (root / rel).read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # the docs row says it
+            if heading := resolve_spec(root, raw)[1]:
+                named.setdefault(rel, []).append(heading)
+    found = large_document(root, documents, named, automation)
+    return [_row("docs:size", CASES, "WARN", say(found[1], found[2]))] if found else []
+
+
 def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = ()) -> tuple[dict[str, Any], Mapping[str, Any]]:
     from tools.project_inventory import build_inventory, outside_task_documents
     from tools.scan_rules import exclusion_summary
@@ -643,6 +663,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish: иначе status покажет дрейф (drift) "
                   "и предложит вернуть файлы или начать новый scan")
     rows.append(_row("run:freeze", CASES, "OK", freeze))
+    rows.extend(check_size(project, typed, profile == "local-pilot-v1" and any(row["id"] == "execution:build" and row["level"] == "OK" for row in rows)))
     # a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     from tools.skillsrc_manifest import skillsrc_review_self
 

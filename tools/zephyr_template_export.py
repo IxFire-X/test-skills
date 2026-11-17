@@ -235,11 +235,10 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     closed, automated = _automation_facts(root)
     if not closed:
         raise ZephyrTemplateError("ZEPHYR_EXPORT_NOT_CLOSED")
-    from tools.orchestrate_test_case_revision import restored_tail
-    from tools.publish_test_case_bundle import build_bundle
+    from tools.orchestrate_test_case_revision import published_csv
 
     try:  # the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has; the cases of the human the review rejected follow, derived again from the journal
-        expected = build_bundle(document).csv_bytes + restored_tail(root, state["attempts"][-1]["attempt_id"])
+        expected = published_csv(root, state["attempts"][-1]["attempt_id"], document)
     except Exception:  # noqa: BLE001 - a document that cannot build its bundle is not a document to export
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
     if expected != cases_bytes:

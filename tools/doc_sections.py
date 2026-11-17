@@ -8,8 +8,9 @@ section keep the numbers they have in the source file — the provenance ``пу�
 
 from __future__ import annotations
 
+import bisect
 import re
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+")  # the opening of a heading line; the title is cut by hand below: a lazy `(.*?)[ \t]*$` and a `[ \t]+#+$` are n squared on a long run of blanks
@@ -23,6 +24,9 @@ def _title_of(rest: str) -> str:
     if bare != rest and bare.endswith((" ", "\t")):
         rest = bare
     return " ".join(rest.split())
+
+
+SECTION_JOIN = " || "  # the headings of several sections of one file in the one ``section`` of an entry
 
 
 class Section(NamedTuple):
@@ -82,14 +86,46 @@ def find_section(text: str, heading: str, path: str = "") -> Section:
                          "fix: --docs путь#Заголовок — точный текст заголовка без # (регистр важен)")
 
 
-def view(text: str, section: Section, path: str, *, note: bool = True) -> str:
-    """The file with the lines outside *section* empty: the lines of the section keep their source numbers.  ``note`` puts
+def split_sections(text: str, lines: Sequence[int], cap: int, within: Sequence[Section] = ()) -> list[tuple[str | None, int]] | None:
+    """The sections a file (or the sections *within* it) is told apart by, in file order, as ``(heading, numbers)``; *lines* — the sorted 1-based lines that carry a number.
+    A section of more than *cap* numbers whose own lines above its first sub-heading carry none gives its sub-sections instead; a section without numbers below another is left out.
+    None where headings do not tell the numbers apart: one section only, or a title another heading repeats (``find_section`` would take the first)."""
+    rows = headings(text)
+
+    def count(first: int, last: int) -> int:
+        return bisect.bisect_right(lines, last) - bisect.bisect_left(lines, first)
+
+    def expand(title: str | None, line: int, level: int, last: int) -> list[tuple[str | None, int, int]]:
+        found = count(line, last)
+        below = [row for row in rows if line < row[0] <= last and row[1] > level]
+        if found <= cap or not below:
+            return [(title, found, line)]
+        top = min(row[1] for row in below)
+        tops = [row for row in below if row[1] == top]
+        if count(line, tops[0][0] - 1):
+            return [(title, found, line)]
+        ends = [row[0] - 1 for row in tops[1:]] + [last]
+        return [leaf for (child, _level, name), end in zip(tops, ends) for leaf in expand(name, child, top, end) if leaf[1]]
+
+    roots = [(item.heading, item.first, item.level, item.last) for item in within] or [(None, 0, 0, len(text.splitlines()))]
+    leaves = [leaf for root in roots for leaf in expand(*root)]
+    if (not within and len(leaves) < 2) or any(title is not None and find_section(text, title).first != line for title, _n, line in leaves):
+        return None
+    return [(title, found) for title, found, _line in leaves]
+
+
+def view(text: str, section: Section | Sequence[Section], path: str, *, note: bool = True) -> str:
+    """The file with the lines outside *section* (one, or several of one file) empty: the lines of the section keep their source numbers.  ``note`` puts
     on the empty line 1 what the file is (for the model); without it the text is the section alone (for the code's inventory)."""
+    sections = [section] if isinstance(section, Section) else sorted(section, key=lambda item: item.first)
     lines = text.splitlines()
     out = [""] * len(lines)
-    out[section.first - 1:section.last] = lines[section.first - 1:section.last]
-    if note and section.first > 1:
-        out[0] = f"<!-- раздел «{section.heading}» файла {path}, строки {section.first}–{section.last}; остальные строки пусты, номера строк исходные -->"
+    for item in sections:
+        out[item.first - 1:item.last] = lines[item.first - 1:item.last]
+    if note and sections[0].first > 1:
+        names = ", ".join(f"«{item.heading}»" for item in sections)
+        out[0] = (f"<!-- {'раздел' if len(sections) == 1 else 'разделы'} {names} файла {path}, строки {', '.join(f'{item.first}–{item.last}' for item in sections)}; "
+                  "остальные строки пусты, номера строк исходные -->")
     return "\n".join(out) + "\n"
 
 
@@ -105,8 +141,9 @@ def resolve_spec(project, raw: str) -> tuple[str, str | None]:
     return split_spec(raw)
 
 
-def view_name(path: str, heading: str) -> str:
-    """The file name of the view of a section inside ``<run>/doc-sections/`` (one view per path and heading)."""
+def view_name(path: str, heading: str | Sequence[str]) -> str:
+    """The file name of the view of the sections of a file inside ``<run>/doc-sections/`` (one view per path and headings; one heading — as it always was)."""
     import hashlib
 
-    return hashlib.sha256(f"{path}#{' '.join(heading.split())}".encode("utf-8")).hexdigest()[:16] + ".md"
+    names = [heading] if isinstance(heading, str) else list(heading)
+    return hashlib.sha256((f"{path}#" + "#".join(" ".join(name.split()) for name in names)).encode("utf-8")).hexdigest()[:16] + ".md"

@@ -643,18 +643,20 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
     from tools.doc_sections import resolve_spec
 
     entries: list[dict[str, str]] = []
-    sections: dict[str, str | None] = {}  # --docs path#Section — one section of the file, its heading by path
+    sections: dict[str, list[str] | None] = {}  # --docs path#Section — the sections of the file, their headings by path (None: the whole file)
     files: list[tuple[str, bytes]] = []
     for raw in docs or []:
         _local_input(raw, "--docs")  # before resolve_spec looks for a file named with its #
         path, heading = resolve_spec(project, raw)
         for rel, data in _input_files(project, [path], "--docs"):
             if rel in sections:
-                if sections[rel] != heading:
-                    raise HostStop("TASK_DOC_SECTION_CONFLICT", f"{rel} указан дважды с разными разделами",
-                                   fix="один раздел на файл: --docs путь#Раздел один раз (или весь файл без #)")
+                if (sections[rel] is None) != (heading is None):
+                    raise HostStop("TASK_DOC_SECTION_CONFLICT", f"{rel} указан целиком и разделом",
+                                   fix="файл — целиком (--docs путь) или разделами (--docs путь#Раздел, по одному на раздел), не вместе")
+                if heading is not None and heading not in (sections[rel] or []):
+                    sections[rel].append(heading)  # type: ignore[union-attr]
                 continue
-            sections[rel] = heading
+            sections[rel] = None if heading is None else [heading]
             files.append((rel, data))
     for rel, data in files:
         if _is_zephyr_csv(data):  # an export of cases is not a requirements document
@@ -666,7 +668,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
             raise ValueError(f"DOCS_ENCODING: docs file is not UTF-8: {rel}; fix: сохрани документ в UTF-8 и повтори scan") from error
         entry = {"path": rel, "sha256": _digest_bytes(data), "content": text}
         if sections[rel] is not None:
-            entry.update(_section_entry(rel, text, str(sections[rel])))
+            entry.update(_section_entry(rel, text, list(sections[rel] or [])))
             entry["sha256"] = _digest_bytes(entry["content"].encode("utf-8"))  # what the code's inventory is built from
         entries.append(entry)
     entries.sort(key=lambda row: row["path"])
@@ -697,19 +699,19 @@ def scope_fix(error: Exception) -> str:
             "или папкой openspec/changes/archive/<имя>; живое — папкой openspec/changes/<имя>")
 
 
-def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
-    """The entry of ``path#Section``: ``content`` is the section at its source line numbers (the rest of the lines
+def _section_entry(rel: str, text: str, headings: list[str]) -> dict[str, str]:
+    """The entry of ``path#Section`` (one or several sections of the file): ``content`` is the sections at their source line numbers (the rest of the lines
     empty), ``view`` the same with the note the model reads.  The digest is that of ``content`` and the requirement digest also
-    binds the heading (``_docs_projection``); a change of the file is drift of the inventory as before."""
-    from tools.doc_sections import SectionMissing, find_section, view
+    binds the headings, joined by ``SECTION_JOIN`` in the order given (``_docs_projection``); a change of the file is drift of the inventory as before."""
+    from tools.doc_sections import SECTION_JOIN, SectionMissing, find_section, view
 
     try:
-        section = find_section(text, heading, rel)
+        found = [find_section(text, heading, rel) for heading in headings]
     except SectionMissing as error:
         message, _, fix = str(error).partition("; fix: ")
         raise HostStop("TASK_DOC_SECTION_MISSING", message.removeprefix("TASK_DOC_SECTION_MISSING: "), fix=fix or None) from None
-    return {"content": view(text, section, rel, note=False), "view": view(text, section, rel), "section": section.heading,
-            "lines": f"{section.first}-{section.last}"}
+    return {"content": view(text, found, rel, note=False), "view": view(text, found, rel), "section": SECTION_JOIN.join(item.heading for item in found),
+            "lines": ", ".join(f"{item.first}-{item.last}" for item in sorted(found, key=lambda item: item.first))}
 
 
 def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, list[dict[str, Any]]] | None:
@@ -921,33 +923,23 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root, cases=bool(cases))
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
-    sectioned = _sectioned_ids(inventory, project, docs)
-    selected = [opaque for opaque in selected if opaque not in sectioned]
     selected = _without_cases_csv(selected, inventory, cases and relative_to_project(project.resolve(), cases))
-    task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
     kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_tests(project, inventory)[0])
     return kept, skipped, budget
-
-
-def _sectioned_ids(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> set[str]:
-    """The inventory ids of the documents given as ``path#Section``.  The model reads their section view, not the file:
-    they stay out of the context receipts (else the whole file would reach the model once more)."""
-    paths = {row["path"] for row in _docs_entries(project, docs) if "section" in row}
-    return {str(item["opaque_id"]) for item in inventory.get("files", []) if isinstance(item, Mapping) and str(item["project_path"]) in paths}
 
 
 def _write_section_views(project: Path, run_root: Path, docs: list[str] | None) -> list[dict[str, str]]:
     """``<run>/doc-sections/<name>.md`` — the view of each ``path#Section`` (the lines of the section at their source
     numbers); the rows tell the agent which file the model reads instead of the document."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
-    from tools.doc_sections import view_name
+    from tools.doc_sections import SECTION_JOIN, view_name
 
     rows = []
     for entry in _docs_entries(project, docs):
         if "section" not in entry:
             continue
-        name = view_name(entry["path"], entry["section"])
+        name = view_name(entry["path"], entry["section"].split(SECTION_JOIN))
         target = run_root / "doc-sections" / name
         atomic_write_confined_bytes_at_root(project, run_root, target, entry["view"].encode("utf-8"))
         rows.append({"path": entry["path"], "section": entry["section"], "lines": entry["lines"],
@@ -1552,9 +1544,6 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
     # the task document of --docs always goes to the model; the other tasks of to_do do not.
     selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
     selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
-    sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # path#Section is no context file
-    selected_ids = [opaque for opaque in selected_ids if opaque not in sectioned]
-    task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
     by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
     reference = _reference_cases(project, getattr(args, "reference", None))

@@ -275,15 +275,16 @@ def _commands(project: Path, root: Path) -> dict[str, tuple[str, list[str]]]:
         "review_view": ("tools.review_view", [*run, "--candidate", str(project / "c.json")]),
         "step_size": ("tools.step_size", ["--project", str(project), "--run", root.name, "--stage", "tc-generator:b1"]),
         "zephyr_template_export": ("tools.zephyr_template_export", [*run, "--cases", name]),
+        "assemble_sections": ("tools.assemble_sections", ["--project", str(project), "--run", root.name, "--write"]),
     }
 
 
 def test_every_command_with_a_run_argument_is_in_the_table_below() -> None:
-    assert _modules_with_a_run_argument() == {"api", "exec_commands", "review_view", "run_pipeline", "step_size", "zephyr_template_export"}
+    assert _modules_with_a_run_argument() == {"api", "assemble_sections", "exec_commands", "review_view", "run_pipeline", "step_size", "zephyr_template_export"}
 
 
 _TABLE = ["run_pipeline", "finish", "report", "exec_commands", "ingest", "api", "review_view", "step_size",
-          "zephyr_template_export"]
+          "zephyr_template_export", "assemble_sections"]
 
 
 def _call(module: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, hold) -> tuple[Path, str]:

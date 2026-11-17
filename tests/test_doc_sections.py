@@ -100,12 +100,14 @@ def test_the_entry_of_a_section_holds_only_the_section_and_binds_it(tmp_path: Pa
     assert not any("REQ-3" in text or "вводный" in text for text in texts)
 
 
-def test_a_file_with_two_different_sections_is_refused(tmp_path: Path) -> None:
+def test_a_file_with_two_different_sections_is_one_entry_and_with_the_whole_file_is_refused(tmp_path: Path) -> None:
     from tools.run_pipeline import HostStop, _docs_entries
 
     project = _project_with_sections(tmp_path)
+    (both,) = _docs_entries(project, [f"{DOCS}#{FUNCTIONAL}", f"{DOCS}#Нефункциональные требования"])  # sections: several sections of one file are one entry
+    assert "REQ-1" in both["content"] and "REQ-3" in both["content"]
     with pytest.raises(HostStop) as stopped:
-        _docs_entries(project, [f"{DOCS}#{FUNCTIONAL}", f"{DOCS}#Нефункциональные требования"])
+        _docs_entries(project, [DOCS, f"{DOCS}#{FUNCTIONAL}"])
     assert stopped.value.code == "TASK_DOC_SECTION_CONFLICT"
     assert len(_docs_entries(project, [f"{DOCS}#{FUNCTIONAL}", f"{DOCS}#{FUNCTIONAL}"])) == 1
 
@@ -118,7 +120,7 @@ def test_a_missing_section_stops_the_scan_before_a_run_exists(tmp_path: Path, mo
     assert not (project / ".pilot-runs").exists() or not any((project / ".pilot-runs").iterdir())
 
 
-def test_the_scan_gives_the_model_the_view_and_keeps_the_file_out_of_the_receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_scan_gives_the_model_the_view_as_the_requirements_and_the_file_whole_as_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import pilot_state, step_size
 
     project = _project_with_sections(tmp_path)
@@ -134,13 +136,13 @@ def test_the_scan_gives_the_model_the_view_and_keeps_the_file_out_of_the_receipt
     view = project / rows[0]["view"]
     assert view.is_file() and view.relative_to(run_root).parts[0] == "doc-sections"
     assert view.read_text(encoding="utf-8").splitlines()[6] == "REQ-1 Оплата картой."  # line 7 of the source file
-    # the requirements step reads the view, not the file; no context receipt holds the file
+    # the requirements step reads the view, not the file; the file itself is context of the other steps (sections: the rest of the document is context)
     assert step_size.journal_files(project, run_root.name, "context-marker:requirements", None) == [view]
     state = pilot_state.derive_state(run_root)
     attempt_id = state["attempts"][-1]["attempt_id"]
     receipts = [pilot_state.read_context_selection(run_root, attempt_id, str(event["artifact_digest"]))
                 for event in state["events"] if event["event_type"] == "CONTEXT_SELECTED"]
-    assert DOCS not in [item["project_path"] for receipt in receipts for item in receipt["files"]]
+    assert DOCS in [item["project_path"] for receipt in receipts for item in receipt["files"]]
     baseline = json.loads(next((run_root / "baselines").iterdir()).read_text(encoding="utf-8"))
     assert baseline["requirements"]["digest"] != whole_digest  # the requirement digest binds the section
     manifest = json.loads((run_root / "run-manifest.json").read_text(encoding="utf-8"))

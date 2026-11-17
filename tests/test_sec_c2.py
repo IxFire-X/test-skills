@@ -35,6 +35,7 @@ _PATHISH = re.compile(r"(?<!pro)file|path|dir|root|out|candidate|edits|answers|a
 # checkout, given by the person who runs a maintainer command, never by an agent.
 PATH_FLAGS = {
     "api.py": {"--run-root": "guard"},
+    "assemble_sections.py": {"--project": "parser", "--run": "run"},  # sections: --doc goes through output_guard.input_file inside the project; the output is below the last run, by confined_output
     "autotest_hints.py": {"--automation": "guard"},
     "build_context.py": {"--project": "parser", "--docs": "guard"},
     "ci_gate.py": {"--root": "maintainer"},

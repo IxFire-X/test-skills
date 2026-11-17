@@ -219,15 +219,20 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
     request = read_run(root)["manifest"].get("scan_request") or {}
     from tools.doc_sections import resolve_spec, view_name
 
-    files: list[Path] = []
+    files: list[Path | str] = []
+    headings: dict[str, list[str]] = {}
     for raw in request.get("docs") or []:
-        path, heading = resolve_spec(project, raw)  # the model reads the view of path#Section, not the file
+        path, heading = resolve_spec(project, raw)  # the model reads the view of path#Section (all the sections of the file), not the file
         if heading is None:
             files.append(Path(path) if Path(path).is_absolute() else project / path)
         else:
             candidate = Path(path)
             rel = (candidate if candidate.is_absolute() else project / candidate).resolve().relative_to(project.resolve()).as_posix()
-            files.append(root / "doc-sections" / view_name(rel, heading))
+            if rel not in headings:
+                files.append(rel)  # the place of the view, named below once every heading of the file is known
+            if heading not in headings.setdefault(rel, []):
+                headings[rel].append(heading)
+    files = [root / "doc-sections" / view_name(item, headings[item]) if isinstance(item, str) else item for item in files]
     if docs_run(root):
         csv = Path(str(cases_path(root)))
         files.append(csv if csv.is_absolute() else project / csv)
