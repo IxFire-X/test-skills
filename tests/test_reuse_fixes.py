@@ -225,7 +225,7 @@ def test_the_new_run_ends_as_the_source_did_with_the_same_control_errors(caught:
     assert review_canaries.summary(run["run_root"], run["attempt_id"]) == review_canaries.summary(caught["run_root"], caught["attempt_id"])  # caught and missed
 
 
-def test_a_source_that_rejected_a_real_case_is_not_taken_and_the_scan_names_the_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_source_that_rejected_a_real_case_gives_its_marker_and_the_scan_names_the_outcome_for_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import orchestrate_test_case_revision as orchestrate, review_canaries
     from tests.test_review_canaries import _finding, _ids
 
@@ -238,7 +238,8 @@ def test_a_source_that_rejected_a_real_case_is_not_taken_and_the_scan_names_the_
     assert _select(src, _answer(src, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")]))["outcome"] == "PARTIAL"
     run_root, attempt_id = _scanned(src)
     offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
-    assert offered["run_id"] is None and "исход PARTIAL" in offered["reason"], offered
+    assert offered["run_id"] == src["run_root"].name and [row["stage"] for row in offered["stages"]] == ["context-marker:baseline"], offered
+    assert offered["cases"]["reused"] is False and "исход PARTIAL" in offered["cases"]["reason"], offered
 
 
 def test_a_source_of_another_package_is_named_so_even_with_the_review_that_needs_its_outcome(caught: dict, monkeypatch: pytest.MonkeyPatch, seeded: None) -> None:

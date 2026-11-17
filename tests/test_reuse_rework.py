@@ -116,11 +116,13 @@ def test_the_requests_of_the_rework_and_of_its_review_hold_digests_of_content_th
 # ---- what is not taken ------------------------------------------------------------------------------------------------------------------
 
 def _not_taken(src: dict) -> None:
+    """The marker of the source is taken (tails13); its cases are not — the plan and the batches say that the rework is not finished."""
+    run = _follow(src)
     with pytest.raises(pilot_state.ModelReuseRefused, match="доработка не завершена"):
-        _follow(src)
+        _reuse(run, run["stages"][0])
 
 
-def test_a_rework_nobody_reviewed_and_a_second_round_closed_with_abort_are_not_taken_and_the_reason_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_a_rework_nobody_reviewed_and_a_second_round_closed_with_abort_give_the_marker_not_the_cases_and_the_reason_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                                          capsys: pytest.CaptureFixture[str]) -> None:
     src = _ready(tmp_path, monkeypatch, capsys)  # the rework is answered, the second round is not
     _not_taken(src)
@@ -129,7 +131,7 @@ def test_a_rework_nobody_reviewed_and_a_second_round_closed_with_abort_are_not_t
     _not_taken(src)
 
 
-def test_a_rework_given_up_is_not_taken_and_the_reason_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_rework_given_up_gives_the_marker_not_the_cases_and_the_reason_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     src, _done = _reviewed(tmp_path, monkeypatch)
     assert _call(capsys, "submit", src["run_root"], REWORK, "--abort", "REWORK_UNUSABLE")[0] == 0
     _not_taken(src)
@@ -150,18 +152,19 @@ def test_a_damaged_answer_of_the_second_round_is_refused_and_the_journal_of_the_
         target.write_bytes(data)
 
 
-def test_a_damaged_receipt_of_the_rework_makes_the_source_invalid_and_the_scan_goes_on_without_it(accepted: dict) -> None:
-    from tests.test_reuse_cases import _new
+def test_a_damaged_receipt_of_the_rework_gives_the_marker_and_makes_the_cases_invalid_and_the_scan_names_it(accepted: dict) -> None:
+    from tests.test_reuse_cases import _scanned
 
     src = accepted
+    run = _follow(src)  # the marker does not need the receipt of the rework (tails13)
     target = pilot_state._receipt_target(src["run_root"], src["attempt_id"], "rework-round")
     data = target.read_bytes()
     target.write_bytes(data[:-5])
     try:
         with pytest.raises(pilot_state.ReuseSourceInvalid, match="rework-round"):
-            _follow(src)
-        offered = pilot_state.marker_reuse_suggestion(*_new(src["project"]))  # the search does not fail for one damaged run: the source is skipped
-        assert offered["run_id"] != src["run_root"].name
+            _reuse(run, run["stages"][0])
+        offered = pilot_state.marker_reuse_suggestion(*_scanned(src))  # the search does not fail for one damaged run: a marker is offered (the project holds other runs of the file too: the newest one is, never the cases)
+        assert offered["run_id"] is not None and offered["stages"][0]["stage"] == "context-marker:baseline" and offered["cases"]["reused"] is False, offered
     finally:
         target.write_bytes(data)
 

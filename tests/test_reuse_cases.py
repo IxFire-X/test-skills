@@ -228,7 +228,7 @@ def test_a_source_whose_cases_were_sent_back_is_not_taken(tmp_path: Path) -> Non
     stage_steps.prepare(src["run_root"], REVIEW, invocation_id="reviewer-subagent-1", fresh_context=True)
     _select(src, _answer(src, "ТРЕБУЕТ ДОРАБОТКИ", findings=[{"severity": "BLOCKING", "code": "REVIEW_REJECTED", "message": "Нужна доработка.", "evidence": ["REQ"],
                                                               "related_ids": [json.loads(Path(src["fragments"][0]).read_bytes())["test_cases"][0]["case_id"]]}], effective=None))
-    run = _follow(src, reuse_marker=False)  # the marker of a source whose review did not accept is no reuse either
+    run = _follow(src, reuse_marker=False)  # its marker is taken (tails13) but not through this fixture: the plan, the batches and the review are what is refused
     assert "ревью кейсов не принято" in str(_refused(run, run["stages"][0]))
 
 
