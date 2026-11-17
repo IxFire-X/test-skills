@@ -256,6 +256,27 @@ def test_a_wrong_display_order_is_refused_with_the_fix_that_removes_the_field() 
     assert rows and "удали поле display_order" in rows[0]["fix"], refused.value.diagnostics
 
 
+def test_arguments_and_results_written_out_of_order_are_put_in_order_by_the_code() -> None:
+    from tools.batch_assembly import validate_fragment
+
+    plan, header, context = _synthetic()
+    lean = _lean(_full_fragment(plan, context))
+    for capability in lean["operation_capabilities"]:
+        capability["arguments"].reverse()
+        capability["results"].reverse()
+    result = validate_fragment(lean, plan, header, context)  # was BATCH_SEMANTIC_CONFLICT: CANONICAL_ARGUMENT_ORDER / CANONICAL_RESULT_ORDER
+    assert "/operation_capabilities/0/arguments" in result["normalized"] and "/operation_capabilities/0/results" in result["normalized"], result
+
+
+def test_the_bytes_of_a_fragment_already_in_order_are_not_changed() -> None:
+    from tools.batch_assembly import canonical_bytes, normalize_fragment
+
+    plan, _header_, context = _synthetic()
+    full = _full_fragment(plan, context)
+    done, names = normalize_fragment(copy.deepcopy(full))
+    assert names == [] and canonical_bytes(done) == canonical_bytes(full)
+
+
 def test_a_type_mismatch_names_the_type_written_and_the_type_of_the_source() -> None:
     from tools.batch_assembly import BatchAssemblyError, validate_fragment
 

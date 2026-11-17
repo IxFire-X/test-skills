@@ -102,7 +102,7 @@ def test_a_source_is_refused_unless_every_condition_holds(tmp_path: Path, case: 
     from tools import pilot_state
 
     if case == "review not accepted":  # the marker reached the generator, the review of the cases did not accept them
-        monkeypatch.setattr(pilot_state, "_review_verdict", lambda *args: "ТРЕБУЕТ ДОРАБОТКИ")
+        monkeypatch.setattr(pilot_state, "_review_verdict", lambda *args: None)  # no review at all: the marker is not taken (a rejected set is: tails13)
     source_root, _attempt = _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path, changed=case == "other inputs")
     source = {"unknown run": "0" * 32, "the same run": run_root.name}.get(case, source_root.name)
@@ -155,6 +155,22 @@ def test_the_scan_suggestion_names_the_source_and_the_commands(tmp_path: Path) -
     [stage] = reuse["stages"]
     assert stage["stage"] == "context-marker:baseline" and stage["response_digest"] == digest
     assert stage["command"] == f'python -m tools.api prepare --run-root "{run_root}" --stage context-marker:baseline --reuse-from {source_root.name}'
+
+
+@pytest.mark.parametrize("outcome, state", [("REWORK", None), ("PARTIAL", "unfinished")])
+def test_a_marker_is_taken_from_a_run_whose_set_was_not_accepted_and_the_cases_are_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, state: str | None) -> None:
+    from tools import orchestrate_test_case_revision as revision, pilot_state, review_canaries
+
+    source_root, _attempt = _source(tmp_path)
+    monkeypatch.setattr(pilot_state, "_review_verdict", lambda *args: "ТРЕБУЕТ ДОРАБОТКИ")
+    monkeypatch.setattr(review_canaries, "recorded_answer", lambda *args: None)
+    monkeypatch.setattr(revision, "rework_state", lambda *args: state)
+    monkeypatch.setattr(revision, "acceptance_summary", lambda *args: {"outcome": outcome})
+    run_root, attempt_id, inputs = _fresh(tmp_path)
+    reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert reuse["run_id"] == source_root.name and [row["stage"] for row in reuse["stages"]] == ["context-marker:baseline"], reuse
+    assert reuse["cases"]["reused"] is False and f"исход {outcome}" in reuse["cases"]["reason"], reuse
+    assert _request(run_root, attempt_id, inputs, source_root.name)["reuse"]["run_id"] == source_root.name  # prepare --reuse-from takes it too
 
 
 def test_the_scan_suggestion_says_which_input_differs(tmp_path: Path) -> None:

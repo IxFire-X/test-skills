@@ -87,7 +87,7 @@ The HTML preview and the default v5 Zephyr CSV display only `action`, `test_data
 
 ## Canonical physical order
 
-Canonical order recipe: operation_capabilities by capability_id; arguments and results by name; both use ascending Unicode code-point order. Order categories by the precedence enforced by the current canonical validator. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
+In a batch fragment the code puts in order `arguments` and `results` (by name, Unicode code points), `categories` (V3 precedence), `requirement_ids` and the document's `operation_capabilities` (by capability_id); `normalized` in the `submit` result names what it moved. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
 
 Never invent capability arguments, values, operations, assertions, roles, or environment facts. Validate before publication; a projection cannot repair invalid semantics.
 

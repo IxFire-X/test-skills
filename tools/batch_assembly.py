@@ -682,7 +682,8 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
 
 def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """The order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
-    display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for the check of a fragment and
+    display_order of the fragment's requirements, ``categories`` by V3 precedence and the ``arguments`` and ``results`` of
+    every capability by ``name``.  One function for the check of a fragment and
     submit; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
     left where it is for the refusal; nothing else is touched."""
     if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
@@ -707,6 +708,12 @@ def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[s
                 if ordered != items:
                     case[field] = ordered
                     names.append(f"/test_cases/{index}/{field}")
+    for index, capability in enumerate(value.get("operation_capabilities") or []):
+        for field in ("arguments", "results") if isinstance(capability, dict) else ():
+            rows = capability.get(field)
+            if isinstance(rows, list) and all(isinstance(row, dict) and isinstance(row.get("name"), str) for row in rows) and rows != sorted(rows, key=lambda row: row["name"]):
+                capability[field] = sorted(rows, key=lambda row: row["name"])  # by name, code points; a reference to a member is by its name, never its place
+                names.append(f"/operation_capabilities/{index}/{field}")
     return value, names
 
 

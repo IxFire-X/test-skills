@@ -84,6 +84,31 @@ def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None =
     return found
 
 
+_LABEL = re.compile(r"^ {0,3}(?:[-*]\s+)?(?:([^\W\d_]{1,4}[-_]\d{1,3})[.):]?|([^\W\d_]{1,3}\d{1,3})[.):]|(\d{1,3}(?:\.\d{1,3}){1,3})\.?)(?=[ \t])", re.M)  # FR-01 REQ_12 ТР-3: · D01. U12) FR3: · 1.2.3. 2.10; not a heading, not «1.», not a date
+LABELS_MIN = 8
+
+
+def document_labels(text: str) -> list[str]:
+    """The labels (numbers of statements) at the start of the lines of a plain document, in the order of its lines."""
+    return [match.group(1) or match.group(2) or match.group(3) for match in _LABEL.finditer(text)]
+
+
+def label_refusal(requirements: int, documents: dict[str, str], project: Path) -> str | None:
+    """Why an answer of ``requirements`` rows cannot stand for the plain documents (path → text; OpenSpec paths and a project with ``requirements.id_pattern`` are no case): they carry at
+    least LABELS_MIN labels and the answer has fewer than half as many requirements — the sections of the document were taken for the requirements.  Only paths, labels and numbers are said."""
+    if _project_id_pattern(project) is not None:
+        return None
+    documents = {path: text for path, text in documents.items() if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/")}
+    found = {path: list(dict.fromkeys(document_labels(text))) for path, text in documents.items()}
+    total = sum(len(labels) for labels in found.values())
+    if total < LABELS_MIN or requirements * 2 >= total:
+        return None
+    where = ", ".join(f"{path}: {len(labels)} ({', '.join(labels[:4])}…)" for path, labels in sorted(found.items()) if labels)
+    return (f"в документе меток {total} ({where[:300]}), в ответе требований {requirements} — меньше половины; fix: требование — каждое утверждение со своим номером "
+            "или меткой, в порядке строк документа (роль разметки, шаг 2), заголовки разделов не требования; если эти метки — не номера требований (нумерованный "
+            "список, приложение), проверку снимает человек: requirements.id_pattern в .skillsrc, затем новый scan")
+
+
 def _project_id_pattern(project: Path) -> str | None:
     """``requirements.id_pattern`` of the project's ``.skillsrc``; None when absent or unreadable."""
     manifest = project / ".skillsrc"
@@ -394,6 +419,7 @@ def build_context(
     normalized_rows: list[tuple[str, str, str, str]] = []
     openspec_entries: list[dict[str, str]] = []
     openspec_provenance: dict[tuple[str, str, str, str], list[str]] = {}
+    lines: dict[tuple[str, str, str, str], int] = {}
     for entry in doc_entries:
         rel = entry.get("path")
         digest = entry.get("sha256")
@@ -418,6 +444,7 @@ def build_context(
         for row in rows:
             snippet = str(row.get("text") or row["title"])
             normalized_rows.append((_compare_key(rel.replace("\\", "/")), digest, snippet, _norm(row["title"])))
+            lines[normalized_rows[-1]] = text.count("\n", 0, max(text.find(snippet), 0)) + 1  # the line of the section: the order of a plain document and its provenance ``path:line``
 
     openspec_rows, openspec_warnings = _openspec_rows(openspec_entries)
     warnings.extend(openspec_warnings)
@@ -429,7 +456,7 @@ def build_context(
     # Snapshot order is not provenance. Collect/dedupe/sort the complete normalized set
     # before assigning any generated SREQ ID, so a resumed/controller-provided snapshot
     # has exactly the same identity as an equivalent CLI snapshot.
-    deduped_rows = sorted(set(normalized_rows), key=lambda row: (row[0], row[1], _compare_key(row[2]), row[2], row[3]))
+    deduped_rows = sorted(set(normalized_rows), key=lambda row: (row[0], row[1], lines.get(row, 0), _compare_key(row[2]), row[2], row[3]))
     for index, (rel, digest, snippet, title) in enumerate(deduped_rows, start=1):
         req_id = _source_requirement_id(index)
         mark = f"{rel} — {_nfc(title)}: {_nfc(snippet)}"
@@ -438,7 +465,7 @@ def build_context(
             "source_requirement_id": req_id,
             "display_order": len(requirements) + 1,
             "text": snippet,
-            "provenance": [mark, digest_mark] + openspec_provenance.get((rel, digest, snippet, title), []),
+            "provenance": ([f"{rel}:{lines[(rel, digest, snippet, title)]}"] if (rel, digest, snippet, title) in lines else []) + [mark, digest_mark] + openspec_provenance.get((rel, digest, snippet, title), []),
             "digest": digest,
         }
         requirements.append(item)

@@ -1980,6 +1980,31 @@ def _named_docs(project: Path, root: Path) -> list[str]:
     return [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
 
 
+def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], receipts: Sequence[str], value: Mapping[str, Any]) -> None:
+    """tails13: the requirements of a plain document are its numbered statements — an answer of far fewer rows than the labels of the documents ``--docs`` names is refused
+    (``tools.build_context.label_refusal``).  Not for a project with ``requirements.id_pattern``, not for OpenSpec; the documents are read where the receipts hold them, by the digest."""
+    from tools.build_context import label_refusal
+    from tools.output_guard import OutputRefused, project_file
+
+    rows = (((value.get("artifacts") or {}).get("analytics_documentation") or {}).get("requirements"))
+    if not isinstance(rows, list):
+        return
+    named, texts = set(_named_docs(project, root)), {}
+    for digest in receipts:
+        for item in read_context_selection(root, str(attempt["attempt_id"]), digest)["files"]:
+            path = item["project_path"].replace("\\", "/")
+            if path in named:
+                try:
+                    raw = project_file(project, path).read_bytes()
+                except (OSError, OutputRefused):  # a document that is gone or is no plain file is no check here: its drift stops the plan stage (_context_documents)
+                    continue
+                if "sha256:" + hashlib.sha256(raw).hexdigest() == item["content_digest"]:
+                    texts[path] = raw.decode("utf-8", errors="replace")
+    why = label_refusal(len(rows), texts, project)
+    if why:
+        raise ValueError(f"CONTEXT_MARKER_REQUIREMENT_LABELS: {why}; отдай исправленный ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")
+
+
 def _validate_context_marker_sources(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> None:
@@ -2033,6 +2058,7 @@ def _reconcile_requirements_openspec(
     receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
     snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
     diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
+    _check_requirement_labels(project, root, state, attempt, receipts, value)
     if diagnostics:
         raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # a code
                          + json.dumps(diagnostics, ensure_ascii=False)
@@ -2750,6 +2776,8 @@ def _publish_model_stage_artifact(
                                      (getattr(error, "fix", None) + "; " if getattr(error, "fix", None) else "исправь фрагмент и ") + retry) from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
+    if stage_instance_id == "context-marker:baseline" and not _context_marker_parts(state, attempt_id)[1]:  # one context batch: the marker is one answer; at its write only, never at the read of a written one
+        _check_requirement_labels(project, root, state, attempt, _context_marker_receipt_digests(project, root, state, attempt_id, stage_instance_id, request["input_digests"]), value)
     if stage_instance_id == "context-marker:requirements":
         _reconcile_requirements_openspec(project, root, state, attempt, request, value)
         from tools.cases_import import check_requirements_answer
@@ -5373,7 +5401,7 @@ def reuse_family(stage: str) -> str | None:
     return next((family for pattern, family in REUSE_STAGES.items() if fnmatch.fnmatchcase(stage, pattern)), None)
 
 
-# a marker is reused only from a run whose review accepted the cases; AUTO_FIX_APPLIED fixes human fields only, not the marker
+# a marker is reused only from a run that has a review of its cases, whatever its outcome (a rejected set too: the marker does not depend on it; the cases of such a run are not taken); AUTO_FIX_APPLIED fixes human fields only, not the marker
 ACCEPTED_REVIEW = frozenset({"ПРИНЯТО", "AUTO_FIX_APPLIED"})
 _REUSE_FREE = "нет прошлого прогона с разметкой"
 
@@ -5453,7 +5481,7 @@ def _source_refusal(source: Mapping[str, Any], module: str, family: str = "marke
 
 def _outcome_refusal(source: Mapping[str, Any], family: str = "marker") -> str | None:
     """The last of the cheap refusals, for a source otherwise good: a ТРЕБУЕТ ДОРАБОТКИ review accepted the cases whole by its outcome (the control errors it caught reject nothing) or by the rework."""
-    if family == "automation" or source["verdict"] != "ТРЕБУЕТ ДОРАБОТКИ":
+    if family in ("automation", "marker") or source["verdict"] != "ТРЕБУЕТ ДОРАБОТКИ":  # the marker does not depend on the outcome of the review of the cases (tails13: it is taken from a rejected set too)
         return None
     from tools.orchestrate_test_case_revision import acceptance_summary, rework_state
     from tools.review_canaries import recorded_answer
@@ -5710,7 +5738,7 @@ def _cases_rows(project: Path, root: Path, state: Mapping[str, Any], attempt_id:
     attempt = _attempt_of(state, attempt_id)
     try:
         changed = _input_differences(source, root, attempt)  # the cases ask the baseline too: the .skillsrc, the profile, the module
-        reason = "входы иные: " + ", ".join(row["input"] for row in changed) if changed else _cases_refusal(project, root, state, attempt_id, source, "plan")
+        reason = "входы иные: " + ", ".join(row["input"] for row in changed) if changed else _outcome_refusal(source, "plan") or _cases_refusal(project, root, state, attempt_id, source, "plan")
     except ReuseSourceInvalid as error:
         reason = str(error)
     if reason is not None:
@@ -5796,10 +5824,6 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
         if refusal is None and differences:
             refusal = "входы иные"
         refusal = refusal or next((why for stage in model_stages or ["context-marker:baseline"] if (why := _other_pack(source, stage, pack))), None)  # the package of each stage, as ``prepare`` asks
-        try:
-            refusal = refusal or _outcome_refusal(source)  # the last of the cheap ones: only for a run that is otherwise good
-        except (ValueError, OSError, KeyError, TypeError, StopIteration):
-            continue
         if refusal is not None:
             said, files = _changed_files(project, root, attempt, source) if first_refusal is None and refusal == "входы иные" and any(row["input"] == "inventory" for row in differences) else ("", None)
             first_refusal = first_refusal or {"run_id": None, "source_run_id": path.name, "reason": refusal + said,

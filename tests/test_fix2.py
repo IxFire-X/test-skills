@@ -101,7 +101,7 @@ def test_the_scan_writes_nothing_into_an_earlier_run_whose_rework_file_lacks_its
     run_root, attempt_id = _scanned(src)
     before = (Path(src["run_root"]) / "events.jsonl").read_bytes()
     offered = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
-    assert offered["run_id"] is None, offered  # a run whose review is not selected is no source
+    assert offered["run_id"] == Path(src["run_root"]).name and offered["cases"]["reused"] is False, offered  # a run whose review is not selected gives its marker (tails13), not its cases
     assert (Path(src["run_root"]) / "events.jsonl").read_bytes() == before  # and it was only read
 
 
