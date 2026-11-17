@@ -139,6 +139,8 @@ def retry_prompt(artifact: Any, errors: list[dict[str, str]]) -> str:
     for error in errors[:RETRY_ERRORS]:
         path = _short(error.get("path") or "/")
         line = f"- {path}: ожидается {error.get('code', '')} ({_short(error.get('message', ''))}); пришло {_at(artifact, error.get('path') or '')}"
+        if error.get("code") == "SCHEMA_ADDITIONAL_PROPERTIES":  # the path ends at the extra key: not a code the value should have been
+            line = f"- {path}: лишний ключ {(error.get('path') or '').rsplit('/', 1)[-1]} — убери его"
         if len(line.encode("utf-8")) + 1 > budget:
             break
         budget -= len(line.encode("utf-8")) + 1

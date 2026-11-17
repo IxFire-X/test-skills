@@ -78,6 +78,16 @@ def test_a_failed_run_of_the_tests_is_not_called_accepted_in_the_first_line() ->
     assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75 методов, в карантине 18. Прогон не принят.**"
 
 
+def test_a_run_with_a_quarantine_says_what_the_disabled_tests_are_and_where_the_list_is() -> None:
+    from tools.run_report import _acceptance_lines
+
+    report = {"acceptance": _acceptance(outcome="ACCEPTED_WHOLE", accepted=76, generated=76, removed=0), "review_canaries": None, "reviewer_isolation_state": "verified",
+              "counts": {"automation": True, "execution": "FAIL", "accepted": False}, "execution_stats": {"total": 75, "passed": 57, "failed": 18, "errors": 0}, "quarantine": [{}] * 18}
+    text = "\n".join(_acceptance_lines(report))
+    assert "Отключённые в карантине тесты упали при запуске" in text and "раздел" in text and "«Карантин»" in text and "не считает их падением" in text, text
+    assert "Отключённые в карантине" not in "\n".join(_acceptance_lines({**report, "quarantine": []}))
+
+
 def test_a_green_run_of_the_tests_is_accepted_in_the_first_line() -> None:
     assert _first_line("PASS", True, {"total": 75, "passed": 75, "failed": 0, "errors": 0}) == "**Кейсы: принято 76 из 76. Автотесты: прошли 75 из 75 методов. Прогон принят.**"
 

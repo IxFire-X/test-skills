@@ -1092,7 +1092,8 @@ def cmd_ingest(args: Any) -> int:
     again = f"запустите команду из materialize (она напечатается снова: materialize --run {root.name}), затем повторите ingest"
     if not entries:
         return _ingest_refusal(attempt_id, "INGEST_REPORT_MISSING", f"в {location} нет XML-отчётов",
-                               f"{again}; если сборка не дошла до тестов — ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED. Команда: {command_text}")
+                               f"{again}; отчёты ищутся там, где напечатал materialize, — --reports не нужен, а с ним путь абсолютный (относительный считается от текущей папки команды); "
+                               f"если сборка не дошла до тестов — ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED. Команда: {command_text}")
     if not fresh:
         return _ingest_refusal(attempt_id, "INGEST_REPORT_STALE", "все отчёты лежали здесь до materialize, не менялись или старше его (время изменения файла раньше materialize)",
                                f"{again}. Команда: {command_text}")

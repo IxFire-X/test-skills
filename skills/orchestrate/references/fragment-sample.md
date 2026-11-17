@@ -97,7 +97,7 @@
 
 3. **Группа вариантов `param_group`** (`SEMANTIC_PARAM_GROUP_MISMATCH`). Кейсы одной группы различаются только значениями литералов, `case_id`, названием, целью и текстами шагов; `requirement_ids`, `priority`, `categories`,
    предусловия, `operation`, операторы, число шагов и ссылки между ними — одни и те же. Группа — кейсы с одним меняющимся параметром дизайна: в `design_refs` у каждого свой класс одного `parameter`, остальные `design_refs` равны
-   (`SEMANTIC_PARAM_GROUP_PARAMETER`). «Поле × значение» (разные поля — разные параметры) одной группой не делается.
+   (`SEMANTIC_PARAM_GROUP_PARAMETER`). Группа — значения одного поля; меняются два поля — не группа.
 
 Проекции входа: список `read` называет файлы `<run>/review-views/` (опись — `inventory-view-v1`, план пачек — `plan-view-v1` без строк требований: они в ответе разметки, `requirements[]` по `source_requirement_id`). Читай их, а не `inventories/` и `batch-plans/`.
 

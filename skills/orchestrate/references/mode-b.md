@@ -40,10 +40,10 @@
 
 ```powershell
 python -m tools.run_pipeline materialize --project "$project" --module "$moduleId" --run "$runId"
-python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId" --reports "$reports"
+python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId"
 ```
 
-`ingest --reports <каталог в модуле или <run>/incoming/>` (относительный путь — от текущего каталога команды) сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. Прерванный `ingest` повторяют теми же отчётами.
+`ingest` берёт отчёты по `report_location` из `materialize`: `--reports` не нужен, с ним — абсолютный путь в модуле или `<run>/incoming/`. Он сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. Прерванный `ingest` повторяют теми же отчётами.
 Нет отчёта — `UNKNOWN`; timeout точного теста по отчёту фреймворка — `FAIL`. После `EXECUTION_STARTED` прерывание автоматически не перезапускай; продолжение — новый scan.
 
 ## 6. Закрытие

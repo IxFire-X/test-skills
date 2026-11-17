@@ -69,6 +69,10 @@ def _storage_equal(actual: dict[str, Any], stored: dict[str, Any]) -> bool:
     return actual == stored
 
 
+def _compact(descriptor: Any) -> str:
+    return json.dumps(descriptor, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def _representation(descriptor: dict[str, Any]) -> str:
     return descriptor.get("type") if descriptor.get("kind") == "json" else descriptor.get("representation")
 
@@ -650,7 +654,8 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
         target, stored = binding["target"], binding["semantic_type"]
         resolved = _source_type(index, case_index, step_index, binding["source"], (*input_path, "source"), diagnostics)
         if resolved is not None and not _storage_equal(resolved, stored):
-            diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TYPE_MISMATCH", "input semantic_type is incompatible with its resolved source"))
+            diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TYPE_MISMATCH",
+                                               f"input semantic_type is {_compact(stored)}, its source gives {_compact(resolved)}"))
         location = target["location"]
         if operation_kind == "http":
             if location == "arg":

@@ -1203,6 +1203,9 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     else:
         head = "**ТРЕБУЕТ ДОРАБОТКИ:** замечание ревьюера относится ко всему набору."
     lines = ["## Итог", "", head, ""]
+    if report.get("quarantine"):
+        lines += ["Отключённые в карантине тесты упали при запуске: это расхождения кода с требованиями или ошибки самих тестов — разберите каждый (список — в разделе «Карантин»). "
+                  "Обычный запуск тестов проекта теперь не считает их падением.", ""]
     canaries = report.get("review_canaries") or {}
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",

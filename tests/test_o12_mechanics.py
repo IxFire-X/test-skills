@@ -256,6 +256,18 @@ def test_a_wrong_display_order_is_refused_with_the_fix_that_removes_the_field() 
     assert rows and "удали поле display_order" in rows[0]["fix"], refused.value.diagnostics
 
 
+def test_a_type_mismatch_names_the_type_written_and_the_type_of_the_source() -> None:
+    from tools.batch_assembly import BatchAssemblyError, validate_fragment
+
+    plan, header, context = _synthetic()
+    full = _full_fragment(plan, context)
+    full["test_cases"][0]["steps"][0]["inputs"][0]["semantic_type"] = {"kind": "json", "type": "object"}  # the literal of this input is not an object
+    with pytest.raises(BatchAssemblyError) as refused:
+        validate_fragment(full, plan, header, context)
+    row = next(row for row in refused.value.diagnostics if row["code"] == "SEMANTIC_TYPE_MISMATCH")
+    assert '"type":"object"' in row["message"] and "source gives" in row["message"], row
+
+
 def test_a_collision_of_a_written_id_with_a_put_one_is_refused() -> None:
     from tools.batch_assembly import BatchAssemblyError, validate_fragment
 

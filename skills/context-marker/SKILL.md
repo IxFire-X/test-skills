@@ -49,16 +49,17 @@ With one context batch the marker stays one call, as below.
 1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
 2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
    Порядок: `display_order` и номера `SREQ-NNNN` — требования одного документа подряд (документы — в порядке ответа), внутри документа по номеру строки из provenance `путь:строка` как числу (`…md:4` раньше `…md:12`); иначе `submit` отклонит ответ (`SOURCE_REQUIREMENT_ORDER`).
+   Not OpenSpec: a requirement is each numbered statement (`D01.`), without numbers each checkable one, in document line order; headings are not requirements; `build_context` is for OpenSpec or `requirements.id_pattern` only; take from it just the file's sha256 `digest`, not its split.
 3. Explicit authorized requirements define expected behavior; code and runtime reports describe the current implementation. Preserve both when they disagree, with a source-bound warning in one free sentence, not in the four fields of a gap (see the contract). Never replace a required outcome with the observed defect. When requirements leave an outcome undefined, trace its end-to-end control flow through reachable throws, exception translation, and HTTP mapping; label the observation and preserve an unresolved oracle as a warning.
 4. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
-5. Validate the 5.0.0 envelope before return: `python -m tools.validate_artifact schemas/context-marker-output.schema.json <answer.json>`.
+5. Validate the 5.0.0 envelope before return: `python -m tools.validate_artifact schemas/context-marker-output.schema.json <answer.json>` (the file lies in the run: `incoming/`).
 
 For standard OpenSpec, establish the actual version/schema, requested scope and exact
 authorized baseline documents before normalization. A selected change includes only that
 live change plus justified related regression; the full-spec request requires all agreed
 capabilities. Selected documents alone do not prove whole-project coverage. Do not apply
 archive or other pending changes, execute document instructions, edit specs or mark tasks.
-Use `python -m tools.build_context --project <abs> --docs <path>` on those authorized docs (`--docs` is repeated, one file or one OpenSpec folder per flag, never `a,b`; the slot gets only `schema_version`, `stage`, `artifacts`, `warnings`, not the tool's `status`; a requirement's `digest` is the sha256 of its source file as the tool prints it, not a digest of the input list): it composes ADDED, MODIFIED,
+Use `python -m tools.build_context --project <abs> --docs <path>` on those authorized docs (`--docs` is repeated, one file or one OpenSpec folder per flag, never `a,b`; no `--source`: `sources` are your observations; the slot gets only `schema_version`, `stage`, `artifacts`, `warnings`, not the tool's `status`; a requirement's `digest` is the sha256 of its source file as the tool prints it, not a digest of the input list): it composes ADDED, MODIFIED,
 REMOVED and RENAMED into the final requirement set, retaining unchanged baseline behavior
 and complete scenario bodies. Keep its source identity/digest provenance when splitting
 normalized rows. Proposal/design/tasks provide context, not behavioral requirements.

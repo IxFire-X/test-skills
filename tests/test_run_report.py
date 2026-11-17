@@ -199,6 +199,14 @@ def test_a_long_error_list_is_cut_to_twenty_and_four_kilobytes() -> None:
     assert f"и ещё {100 - shown} ошибок" in prompt
 
 
+def test_an_extra_key_is_told_as_an_extra_key_not_as_a_code_the_value_should_be() -> None:
+    from tools.validate_artifact import retry_prompt
+
+    errors = [{"path": "/status", "code": "SCHEMA_ADDITIONAL_PROPERTIES", "message": "Additional properties are not allowed ('status' was unexpected)"}]
+    line = retry_prompt({"status": "ok"}, errors).splitlines()[1]
+    assert line == "- /status: лишний ключ status — убери его", line
+
+
 def test_questions_read_the_merged_marker_of_all_parts(tmp_path: Path) -> None:
     from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
     from tools.context_marker_parts import merge_parts

@@ -298,6 +298,14 @@ def test_story_the_report_written_by_hand_with_the_right_word_passes_for_a_run_a
     assert code == 0 and output["execution_source"]["run_by"] == "human" and "не воспроизводил" in output["execution_source"]["note"]
 
 
+def test_missing_reports_fix_says_where_they_are_looked_for_and_that_reports_is_not_needed(tmp_path: Path, capsys) -> None:
+    project, run_root, _attempt_id = _project(tmp_path)
+    _materialize(project, run_root, capsys)
+    code, output = _ingest(project, run_root, capsys)
+    assert code == 2 and output["reason"] == "INGEST_REPORT_MISSING" and "test-results" in output["message"], output
+    assert "где напечатал materialize" in output["fix"] and "--reports не нужен" in output["fix"] and "абсолютный" in output["fix"], output["fix"]
+
+
 def test_the_commands_are_in_the_parser_and_exec_still_parses_so_that_it_can_answer(tmp_path: Path) -> None:
     from tools.run_pipeline import build_parser
 
