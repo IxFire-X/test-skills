@@ -388,25 +388,27 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
     """A document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
     from tools.project_inventory import outside_task_documents
-    from tools.run_pipeline import TASK_DOC_FIX, _exclusion_note
+    from tools.run_pipeline import _exclusion_note, task_doc_fix
 
     root = Path(project).resolve()
     paths = {str(item["project_path"]) for item in inventory["files"]}
     module_root = (root / str(inventory.get("module") or ".")).resolve()
     _files, problems = outside_task_documents(root, module_root, _docs_rels(root, docs))
     for raw in docs:
-        row = next((item for item in rows if item["id"] == f"docs:{raw}"), None)
-        if row is None or row["level"] != "OK":
+        row = next((item for item in rows if item["id"] == f"docs:{raw}"), None) or _row(f"docs:{raw}", CASES, "OK", "", None)  # a file of a folder has no row of its own: one only when it stops
+        if row["level"] != "OK":
             continue
         from tools.doc_sections import resolve_spec
 
         candidate = Path(resolve_spec(root, raw)[0])
         relative = (candidate if candidate.is_absolute() else root / candidate).resolve().relative_to(root).as_posix()
         if relative in problems:  # outside the module, left out by a rule of the inventory
-            row.update(level="STOP", fix=TASK_DOC_FIX, message=f"{raw}: документ задачи не может войти в inventory: {problems[relative]} — модель его не получит")
+            row.update(level="STOP", fix=task_doc_fix(relative), message=f"{raw}: документ задачи не может войти в inventory: {problems[relative]} — модель его не получит")
         elif relative not in paths:
-            row.update(level="STOP", fix=TASK_DOC_FIX,
+            row.update(level="STOP", fix=task_doc_fix(relative),
                        message=f"{raw}: документ задачи не входит в inventory выбранного модуля{_exclusion_note(inventory, relative)} — модель его не получит")
+        if row["level"] == "STOP" and row not in rows:
+            rows.append(row)
 
 
 def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:

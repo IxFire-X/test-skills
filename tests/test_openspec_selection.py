@@ -271,6 +271,15 @@ def test_a_file_of_a_folder_out_of_the_inventory_names_the_way_out(tmp_path: Pat
     assert stop["reason"] == "TASK_DOC_OUTSIDE_CONTEXT" and "файлами" in stop["fix"], stop
 
 
+def test_ready_stops_on_a_file_of_a_folder_out_of_the_inventory_as_scan_does(tmp_path: Path) -> None:
+    from tools import ready
+
+    project = _project(tmp_path)
+    _write(project, VISITS, "## Requirements\n### Requirement: Login\npassword = 'hunter2hunter2'\n")  # a suspected secret: not a file of the inventory
+    report = ready.check(project, ["openspec/specs"], "cases-only-v1", None)
+    assert [row["message"] for row in report["checks"] if row["level"] == "STOP" and row["id"] == f"docs:{VISITS}"], report
+
+
 def test_ready_stops_with_the_exact_fix_where_scan_stops_on_an_area_not_named(tmp_path: Path) -> None:
     from tools import ready
 
@@ -317,3 +326,44 @@ def test_docs_with_commas_are_refused_with_the_way_out(tmp_path: Path, monkeypat
     monkeypatch.setattr("sys.argv", ["build_context", "--project", str(project), "--docs", f"{BASE},{ADD}"])
     assert build_context.main() == 2
     assert "один файл на каждый --docs" in capsys.readouterr().out
+
+
+def _build_context_out(project: Path, docs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> tuple[int, dict]:
+    from tools import build_context as module
+
+    monkeypatch.setattr("sys.argv", ["build_context", "--project", str(project)] + [item for doc in docs for item in ("--docs", doc)])
+    code = module.main()
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_build_context_takes_a_folder_of_openspec_as_scan_does(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(project, VISITS, SPEC)
+    code, out = _build_context_out(project, ["openspec/specs"], monkeypatch, capsys)
+    assert code == 0 and len(out["artifacts"]["analytics_documentation"]["requirements"]) == 4
+
+
+def test_build_context_says_which_folders_the_code_opens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(project, "docs/a.md", "text\n")
+    code, out = _build_context_out(project, ["docs"], monkeypatch, capsys)
+    assert code == 2 and "fix: папкой в --docs можно назвать openspec/specs" in out["errors"][0]["message"]
+
+
+def test_build_context_refuses_a_folder_outside_the_project_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(tmp_path, "outside/openspec/specs/a/spec.md", SPEC)
+    code, out = _build_context_out(project, [str(tmp_path / "outside" / "openspec" / "specs")], monkeypatch, capsys)
+    assert code == 2 and "must stay inside the project" in out["errors"][0]["message"]
+
+
+def test_build_context_does_not_walk_a_linked_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    project = _project(tmp_path)
+    _write(tmp_path, "outside/a/spec.md", SPEC)
+    link = project / "openspec" / "linked"
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(tmp_path / "outside")], capture_output=True, check=True)
+    else:
+        link.symlink_to(tmp_path / "outside", target_is_directory=True)
+    code, out = _build_context_out(project, ["openspec/linked"], monkeypatch, capsys)
+    assert code == 2 and "requirements" not in json.dumps(out)

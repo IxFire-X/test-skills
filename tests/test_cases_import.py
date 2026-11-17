@@ -554,3 +554,38 @@ def test_the_csv_of_the_import_fixtures_have_no_false_password() -> None:
     from tools.cases_import import password_cells, read_cases
 
     assert password_cells(read_cases(CSV.encode("utf-8"))) == []
+
+
+def _imported_sample() -> tuple[dict, dict]:
+    import re
+
+    text = (Path(__file__).parents[1] / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)\n```", text.split("## Импортированный кейс", 1)[1], re.S)
+    return json.loads(blocks[0]), json.loads(blocks[1])
+
+
+def test_the_sample_of_an_imported_case_keeps_the_human_fields_of_its_skeleton_row() -> None:
+    from tools.batch_assembly import require_imported_human_fields
+
+    row, case = _imported_sample()
+    fragment = {"source_to_canonical_mappings": [{"source_requirement_id": "SREQ-0003", "canonical_requirement_ids": ["CREQ-B1-003"]}], "test_cases": [case]}
+    require_imported_human_fields(fragment, {"owned_source_requirement_ids": ["SREQ-0003"]}, {"cases": [row]})  # no refusal
+
+
+def test_the_sample_of_an_imported_case_is_a_case_of_the_schema(tmp_path: Path) -> None:
+    import shutil as copying
+
+    from tools.batch_assembly import fill_fragment_mechanics
+    from tools.schema_validation import schema_diagnostics
+
+    _row, case = _imported_sample()
+    capability = {"capability_id": "CAP-B1-search", "action": "search", "adapter": "project_native_junit", "arguments": [],
+                  "results": [{"name": "count", "semantic_type": {"kind": "json", "type": "integer"}}], "provenance": ["поиск"]}
+    laid, _summary = fill_fragment_mechanics({"status": "COMPLETE", "requirements": [], "operation_capabilities": [capability], "test_cases": [case]})
+    root = Path(__file__).parents[1]
+    schemas = tmp_path / "schemas"
+    copying.copytree(root / "schemas", schemas)
+    target = schemas / "sample-case.schema.json"
+    target.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "schemas/sample-case.schema.json",
+                                  "$ref": "canonical-test-document.schema.json#/$defs/test_case"}), encoding="utf-8")
+    assert schema_diagnostics(laid["test_cases"][0], target, tmp_path) == []

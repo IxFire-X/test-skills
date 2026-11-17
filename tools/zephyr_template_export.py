@@ -246,12 +246,14 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     data = build_import_csv(cases_bytes, document, template, automated_case_ids=automated)
     target = bundle_csv.with_name(base + ".zephyr-import.csv")
     _install(project, root, target, data)
+    added = [column for column in template.header if column not in _HEADERS]
+    named = [column for column in added if len(column) <= 80 and column == " ".join(column.split())]  # a long or many-line name of the human's template is counted, not printed
     result = {
         "status": "ok", "output": str(target), "template_path": template.path, "template_digest": template.digest,
-        "delimiter": template.delimiter, "columns_added": [column for column in template.header if column not in _HEADERS],
+        "delimiter": template.delimiter, "columns_added": named, **({"columns_added_other": len(added) - len(named)} if len(added) > len(named) else {}),
         "rows": sum(1 for _ in csv.reader(io.StringIO(data.decode("utf-8-sig"), newline=""), delimiter=template.delimiter)) - 1,
     }
-    record = {key: result[key] for key in ("output", "template_path", "template_digest", "columns_added", "rows")}
+    record = {key: result[key] for key in ("output", "template_path", "template_digest", "columns_added", "columns_added_other", "rows") if key in result}
     atomic_write_confined_bytes_at_root(project, root, root / "zephyr-import.json",
                                         json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n")
     return result

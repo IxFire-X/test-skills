@@ -1718,7 +1718,7 @@ TASK_DOC_FIX = ("документ задачи должен лежать вну�
                 "быть текстом без секретов и не лежать в самом пакете: перенесите его или уберите названную причину")
 
 
-def _task_doc_fix(path: str) -> str:
+def task_doc_fix(path: str) -> str:
     return TASK_DOC_FIX + ("; файл взят из папки в --docs? назовите области файлами, без этого" if path.startswith("openspec/") else "")
 
 
@@ -1735,7 +1735,7 @@ def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None
     files, problems = outside_task_documents(project, module_root, [row["path"] for row in _docs_entries(project, docs)],
                                              skill_pack_root=_scan_skill_pack_root(project))
     for path, problem in problems.items():
-        raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не может войти в inventory: {problem}", _task_doc_fix(path))
+        raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не может войти в inventory: {problem}", task_doc_fix(path))
     return files
 
 
@@ -1770,7 +1770,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
         item = by_path.get(path)
         if item is None:
             raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не входит в inventory выбранного модуля"
-                           + _exclusion_note(inventory, path), _task_doc_fix(path))
+                           + _exclusion_note(inventory, path), task_doc_fix(path))
         task_ids.append(str(item["opaque_id"]))
     others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
     task_count = len(others)

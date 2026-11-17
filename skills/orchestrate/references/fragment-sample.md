@@ -101,6 +101,25 @@
 
 Проекции входа: список `read` называет файлы `<run>/review-views/` (опись — `inventory-view-v1`, план пачек — `plan-view-v1` без строк требований: они в ответе разметки, `requirements[]` по `source_requirement_id`). Читай их, а не `inventories/` и `batch-plans/`.
 
+## Импортированный кейс (строка `imported` → кейс фрагмента)
+
+Строка `imported` и её кейс (`SREQ-0003` строки отображён на `CREQ-B1-003`):
+
+```json
+{"row": 5, "key": "PC-T7", "source_requirement_ids": ["SREQ-0003"], "title": "Поиск", "objective": "Найти владельца", "preconditions": ["Есть Davis"], "priority": "HIGH", "management": {"status": "Approved", "folder": "/Owners", "components": [], "labels": ["smoke"], "owner": null, "estimated_time": null, "issues": [], "pages": [], "custom_fields": {"АС": "Petclinic"}}, "steps": [{"row": 5, "action": "Ввести Davis", "test_data": "Davis", "expectations": ["Найден 1"]}]}
+```
+
+```json
+{"case_id": "TC-B1-001", "categories": ["functional"], "requirement_ids": ["CREQ-B1-003"], "title": "Поиск", "objective": "Найти владельца", "preconditions": ["Есть Davis"], "priority": "HIGH",
+ "management": {"status": "Approved", "folder": "/Owners", "components": [], "labels": ["smoke"], "owner": null, "estimated_time": null, "external_keys": {"zephyr_scale": "PC-T7"}, "external_links": {"issues": [], "pages": []}, "custom_fields": {"АС": "Petclinic"}},
+ "steps": [{"action": "Ввести Davis", "test_data": "Davis", "operation": {"kind": "project_action", "capability_id": "CAP-B1-search"},
+            "inputs": [{"target": {"location": "arg", "name": "query"}, "source": {"kind": "literal", "value": "Davis"}}], "outputs": [{"source": {"kind": "project_result", "name": "count"}}],
+            "expectations": [{"text": "Найден 1", "assertions": [{"operator": "equals", "actual": {"kind": "project_result", "name": "count"}, "expected": {"kind": "literal", "value": 1}}]}]}]}
+```
+
+Из строки — как есть: `title`, `objective`, `preconditions`, `priority`, у шага `action`, `test_data`, тексты ожиданий; `management` те же поля, `key` → `external_keys.zephyr_scale`
+(пустой — `{}`), `issues`/`pages` → `external_links`. Твоё: `case_id`, `categories`, `requirement_ids`, `operation`, `inputs`, `outputs`, `assertions`.
+
 ## Как собрать фрагмент на десятки кейсов
 
 1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id шагов и проверок ставит код по схеме выше, `case_id` у тебя уникальны в пачке.

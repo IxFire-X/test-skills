@@ -316,30 +316,43 @@ def _is_read_only_open(node: ast.Call) -> bool:
     return bool(names) and not numbers and names <= {name for name in names if name.startswith("O_") or name in {"os", "getattr"}} and not names & {"O_CREAT", "O_WRONLY", "O_RDWR"}
 
 
+def _write_calls(tree: ast.AST) -> int:
+    """The number of calls that can create, change or remove a file in a module (``import tempfile as t`` and ``from tempfile import mkdtemp as m`` too)."""
+    temp_modules = {"tempfile"} | {item.asname for node in ast.walk(tree) if isinstance(node, ast.Import) for item in node.names if item.name == "tempfile" and item.asname}
+    temp_names = {item.asname: item.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "tempfile" for item in node.names if item.asname}
+    count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        name = function.attr if isinstance(function, ast.Attribute) else function.id if isinstance(function, ast.Name) else None
+        base = function.value.id if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name) else None
+        name = temp_names.get(name, name) if base is None else name
+        hit = (
+            (name in _TEMPFILE_WRITE and (base is None or base in temp_modules))
+            or (base == "os" and name in _OS_WRITE)
+            or (base == "shutil" and name in _SHUTIL_WRITE)
+            or (isinstance(function, ast.Attribute) and base not in {"os", "shutil"} | temp_modules and name in _PATH_WRITE)
+        )
+        if name == "open" and base != "os":
+            mode = node.args[1].value if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) else None
+            mode = next((k.value.value for k in node.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)), mode)
+            hit = isinstance(mode, str) and any(char in mode for char in "wax+")
+        if name == "open" and base == "os":
+            hit = not _is_read_only_open(node)
+        count += bool(hit)
+    return count
+
+
 def _write_sites() -> dict[str, int]:
     """``module -> number of calls that can create, change or remove a file`` outside ``confined_output.py``."""
-    found: dict[str, int] = {}
-    for path in sorted(TOOLS.glob("*.py")):
-        if path.name == "confined_output.py":
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.Call):
-                continue
-            function = node.func
-            name = function.attr if isinstance(function, ast.Attribute) else function.id if isinstance(function, ast.Name) else None
-            base = function.value.id if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name) else None
-            hit = (name in _TEMPFILE_WRITE and base in {None, "tempfile"}) \
-                or (base == "os" and name in _OS_WRITE) or (base == "shutil" and name in _SHUTIL_WRITE) \
-                or (isinstance(function, ast.Attribute) and base not in {"os", "shutil", "tempfile"} and name in _PATH_WRITE)
-            if name == "open" and base != "os":
-                mode = node.args[1].value if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) else None
-                mode = next((k.value.value for k in node.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)), mode)
-                hit = isinstance(mode, str) and any(char in mode for char in "wax+")
-            if name == "open" and base == "os":
-                hit = not _is_read_only_open(node)
-            if hit:
-                found[path.name] = found.get(path.name, 0) + 1
-    return found
+    counts = {path.name: _write_calls(ast.parse(path.read_text(encoding="utf-8"))) for path in sorted(TOOLS.glob("*.py")) if path.name != "confined_output.py"}
+    return {name: count for name, count in counts.items() if count}
+
+
+@pytest.mark.parametrize("source", ["import tempfile as t" + chr(10) + "t.mkdtemp()", "from tempfile import mkdtemp as made" + chr(10) + "made()", "import tempfile" + chr(10) + "tempfile.TemporaryDirectory()"])
+def test_the_detector_of_writes_sees_a_renamed_tempfile(source: str) -> None:
+    assert _write_calls(ast.parse(source)) == 1
 
 
 # module -> (number of write calls, why none of them is a write of the run of a command).  A module that is not here writes nothing
@@ -410,3 +423,32 @@ def test_h6_the_import_csv_is_written_only_below_the_published_directory_of_the_
     tree = ast.parse(source)
     names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)} | {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     assert "NamedTemporaryFile" not in names and "link" not in names and "confined_output" in source
+
+
+# --- K-n: the package opens no connection and calls no model ----------------------------------------------------------------
+
+_NETWORK = {"socket", "ssl", "socketserver", "http.client", "http.server", "http.cookiejar", "urllib.request", "urllib.error", "urllib3", "ftplib", "smtplib",
+            "poplib", "imaplib", "telnetlib", "xmlrpc", "requests", "httpx", "aiohttp", "websockets", "websocket",
+            "anthropic", "openai", "google.generativeai", "google.genai", "cohere", "mistralai", "ollama", "langchain"}
+
+
+def _imported_names(tree: ast.AST) -> set[str]:
+    """The dotted names a module imports (``from a import b`` is ``a`` and ``a.b``)."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {item.name for item in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found |= {node.module} | {f"{node.module}.{item.name}" for item in node.names}
+    return found
+
+
+def test_no_module_of_tools_imports_a_network_module_or_a_model_client() -> None:
+    hits = {f"{path.relative_to(TOOLS).as_posix()}: {name}" for path in TOOLS.rglob("*.py") for name in _imported_names(ast.parse(path.read_text(encoding="utf-8")))
+            if any(name == banned or name.startswith(banned + ".") for banned in _NETWORK)}
+    assert not hits, sorted(hits)
+
+
+@pytest.mark.parametrize("source", ["import socket", "from urllib import request", "import urllib.request as r", "from http.client import HTTPSConnection", "import anthropic"])
+def test_the_detector_of_imports_sees_a_network_module(source: str) -> None:
+    assert any(name == banned or name.startswith(banned + ".") for name in _imported_names(ast.parse(source)) for banned in _NETWORK)

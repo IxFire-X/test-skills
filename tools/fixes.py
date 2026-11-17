@@ -97,7 +97,7 @@ FIXES: dict[str, str] = {
     "IMPORT_TRACE_CHANGED": "requirement_ids кейса импорта должны вести только к требованиям его строки CSV (новый кейс — только к требованиям из `write`): верни трассировку",
     # --- cases import (moved from cases_import._FIXES) ---
     "IMPORT_CASE_LINKS": "в ответе context-marker:requirements у каждой строки-кейса CSV ровно одна связь case_links: row — номер "
-                         "строки кейса, source_requirement_ids — SREQ этого ответа, пустой список только с reason; verdict (fits / rewrite / obsolete) "
+                         "записи кейса в CSV (шапка — 1, первый кейс — 2), source_requirement_ids — SREQ этого ответа, пустой список только с reason; verdict (fits / rewrite / obsolete) "
                          "обязателен на судимых строках — их назвала строка отказа, rewrite — со связями и reason, obsolete — без связей, с reason и removed "
                          "{capability, name} из REMOVED дельты; отдай исправленный "
                          "ответ единственным повтором стадии (--transport-attempts 2), ничего не записано",

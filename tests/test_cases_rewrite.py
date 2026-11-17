@@ -169,3 +169,20 @@ def test_an_obsolete_case_is_not_asked_about_as_a_case_outside_the_documents(tmp
     report, markdown, questions = _report(tmp_path, monkeypatch, [LINKS[0], gone])
     assert report["import"]["outside"] == [] and [row["row"] for row in report["import"]["verdicts"]["obsolete"]] == [3]
     assert "устарел: «" in questions and "Кейсы CSV вне документов" not in questions
+
+
+def test_the_rows_of_a_group_are_written_as_ranges() -> None:
+    from tools.run_report import row_ranges
+
+    assert row_ranges([2, 3, 4, 12, 15, 16, 117]) == "2–4, 12, 15–16, 117" and row_ranges([]) == ""
+
+
+def test_the_report_names_the_rows_left_as_they_are_and_the_analyst_is_told_where_they_stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _report_json, markdown, questions = _report(tmp_path, monkeypatch, TWO_ON_ONE)
+    assert "без изменений: 1 (строки 3)" in markdown
+    assert "- без изменений: 1 — строки 3; вне документов: 0\n" in questions  # the closing line of «Проверьте», rows and counts only
+
+
+def test_the_closing_line_of_the_checks_points_to_the_cases_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _report_json, _markdown, questions = _report(tmp_path, monkeypatch, REWRITE)
+    assert "- без изменений: 0; вне документов: 1 — см. раздел ниже\n" in questions and "## Кейсы CSV вне документов" in questions

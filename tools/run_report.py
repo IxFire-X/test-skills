@@ -41,6 +41,17 @@ def _one_line(text: Any) -> str:
     return " ".join(str(text or "").split())
 
 
+def row_ranges(rows: Sequence[int]) -> str:
+    """The numbers of rows as ranges — «2–12, 15–116»."""
+    parts: list[list[int]] = []
+    for row in sorted(rows):
+        if parts and row == parts[-1][1] + 1:
+            parts[-1][1] = row
+        else:
+            parts.append([row, row])
+    return ", ".join(str(first) if first == last else f"{first}–{last}" for first, last in parts)
+
+
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
                       autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None) -> str:
     """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
@@ -74,7 +85,8 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
                       + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not key else ""))
                       + (f"; удалено требование {_one_line(row['removed']['capability'])}/{_one_line(row['removed']['name'])}" if row["removed"] else "")
                       + (f"; причина: {reason}" if reason else "")]
-        lines.append("")
+        kept = [row["row"] for row in ((imported or {}).get("verdicts") or {}).get("unchanged") or []]  # the rows left as they are: numbers only, no text of a case
+        lines += [f"- без изменений: {len(kept)}" + (f" — строки {row_ranges(kept)}" if kept else "") + f"; вне документов: {len(outside)}" + (" — см. раздел ниже" if outside else ""), ""]
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
         lines += ["## Требования без кейса в CSV", "",
                   *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; "
@@ -1299,7 +1311,7 @@ _VERDICT_GROUPS = (("unchanged", "без изменений"), ("manual", "пр�
 
 def _verdict_line(summary: Mapping[str, Any]) -> str:
     """The six groups of an update of cases in the report — counts and rows, never a text of a case or of a verdict."""
-    groups = [f"{label}: {len(rows)}" + (" (строки " + ", ".join(str(row["row"]) for row in rows) + ")" if rows and name != "unchanged" else "")
+    groups = [f"{label}: {len(rows)}" + (f" (строки {row_ranges([row['row'] for row in rows])})" if rows else "")
               for name, label in _VERDICT_GROUPS for rows in [summary["verdicts"][name]]]
     return (f"- кейсов из CSV: {summary['cases']}, судилось: {summary['judged']}; " + "; ".join(groups)
             + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"

@@ -492,12 +492,17 @@ def main() -> int:
     if not project.is_dir():
         emit_error(f"project not found: {project}")
         return 2
+    from tools.run_pipeline import HostStop, expand_docs  # a folder of OpenSpec is the files it stands for, by the one function of ``scan``
+
     try:
         envelope = build_context(
             project,
-            [Path(item) for item in args.docs],
+            [Path(item) for item in expand_docs(project, args.docs)],
             [Path(item) for item in args.source],
         )
+    except HostStop as stop:
+        emit_error(f"{stop}; fix: {stop.fix}")
+        return 2
     except ValueError as error:
         emit_error(str(error))
         return 2

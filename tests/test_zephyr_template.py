@@ -337,3 +337,13 @@ def test_a_copy_of_the_set_outside_the_project_is_refused_fat_b(tmp_path: Path, 
     assert main(["--project", str(project), "--run", run_root.name, "--cases", str(copy)]) == 2
     assert json.loads(capsys.readouterr().out)["code"] == "ZEPHYR_EXPORT_CASES"
     assert not list(outside.glob("*.zephyr-import.csv"))
+
+
+def test_a_column_name_of_the_template_longer_than_a_line_is_counted_not_named(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.zephyr_template_export import export_import_csv
+
+    project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
+    (project / "zephyr" / "stubs.csv").write_bytes(_template_bytes().replace(b"Story Points", b"P" * 81))
+    result = export_import_csv(project, run_root.name, bundle_csv)
+    assert result["columns_added"] == [] and result["columns_added_other"] == 1
+    assert "P" * 81 not in (run_root / "zephyr-import.json").read_text(encoding="utf-8")

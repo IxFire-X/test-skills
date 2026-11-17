@@ -244,7 +244,7 @@ def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_docume
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
     assert report["import"]["gaps"] == [{"source_requirement_id": "SREQ-0002"}]  # v0.6 fix6: the text of the requirement is not in the report
     assert report["import"]["outside"] == [3] and report["import"]["new"] == ["SREQ-0002"]
-    assert ("кейсов из CSV: 2, судилось: 2; без изменений: 1; проверить вручную: 0; переписаны: 0; устарели: 0; вне документов: 1 (строки 3); "  # every row is judged in a plain document
+    assert ("кейсов из CSV: 2, судилось: 2; без изменений: 1 (строки 2); проверить вручную: 0; переписаны: 0; устарели: 0; вне документов: 1 (строки 3); "  # every row is judged in a plain document
             "требований без кейса в CSV (новые кейсы под них пишет генератор): 1 (SREQ-0002)") in (run["root"] / "report.md").read_text(encoding="utf-8")
     questions = (run["root"] / "questions-for-analyst.md").read_text(encoding="utf-8")
     assert "## Требования без кейса в CSV" in questions and "SREQ-0002: combine отказывает на None. — в CSV нет кейса; генератор пишет под него новый кейс" in questions
@@ -312,3 +312,10 @@ def test_an_openspec_requirement_without_a_case_stays_in_the_marker_and_the_comp
     merged = context_marker_parts.merge_parts(root)  # SREQ «Refuse» of OpenSpec: no case of the CSV links it, it stays and gets new cases
     ids = [row["source_requirement_id"] for row in merged["artifact"]["artifacts"]["analytics_documentation"]["requirements"]]
     assert ids == [rows[0]["source_requirement_id"], rows[1]["source_requirement_id"], "SREQ-CSV-3"]
+
+
+def test_the_role_and_the_fix_count_the_row_of_a_case_from_the_header_as_one() -> None:
+    from tools.fixes import FIXES
+
+    role = (PACK_ROOT / "skills" / "context-marker" / "SKILL.md").read_text(encoding="utf-8")
+    assert "the header being 1, the first case 2" in role and "шапка — 1, первый кейс — 2" in FIXES["IMPORT_CASE_LINKS"]
