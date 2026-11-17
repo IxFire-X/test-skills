@@ -827,10 +827,13 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
     return run, receipt
 
 
-def _skillsrc_receipt_exit(project: Path, run_root: Path, receipt: Mapping[str, Any]) -> int | None:
+def _skillsrc_receipt_exit(project: Path, run_root: Path, receipt: Mapping[str, Any], module: str | None = None) -> int | None:
     status = receipt.get("status")
     if status in {"needs_input", "conflict"}:
-        _print(_durable_status(project, run_root, stage="skillsrc", status=status, reason=status))
+        from tools.ready import module_choice
+
+        choice = module_choice(project) if module is None else None  # several modules and none named: that is the answer asked for, not a question about one of them
+        _print(_durable_status(project, run_root, stage="skillsrc", status=status, reason=status, **({"fix": choice} if choice else {})))
         return 3
     if status not in {"created", "updated", "unchanged"}:
         reason = "SOURCE_TARGET_INVALID" if receipt.get("errors") == ["source_target_invalid"] else status or "error"
@@ -1472,7 +1475,7 @@ def _scan(args: Any) -> int:
             cut_runs.append(f"{open_root.name} ({outcome})")
     run, receipt = _init_skillsrc_run(project, args, request)
     run_root = Path(str(run["run_root"]))
-    stopped = _skillsrc_receipt_exit(project, run_root, receipt)
+    stopped = _skillsrc_receipt_exit(project, run_root, receipt, getattr(args, "module", None))
     if stopped is not None:
         return stopped
     scope: dict[str, Any] = {"module": None, "parent_files": None, "dependency_files": []}

@@ -219,3 +219,20 @@ def test_ready_names_the_inventory_rule_of_a_secret_document_with_and_without_a_
         row = _docs_row(project, spec)
         assert row["level"] == "STOP" and "token-assignment-v1" in row["message"] and "сузьте" not in row["fix"], (spec, row)
         assert "не входит в inventory выбранного модуля" not in row["message"], (spec, row)
+
+
+def test_ready_without_a_module_says_to_name_one_and_lists_the_modules(tmp_path: Path) -> None:
+    from tools.ready import check
+
+    report = check(_project(tmp_path), [DOC], profile="cases-only-v1", module=None)
+    row = next(item for item in report["checks"] if item["id"] == "module")
+    assert row["level"] == "STOP" and "--module <id>" in row["message"] and "api" in row["message"] and "core" in row["message"], row
+
+
+def test_the_list_of_modules_in_that_line_stops_at_twelve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import discover_project
+    from tools.ready import module_choice
+
+    monkeypatch.setattr(discover_project, "discover_project", lambda _root: {"modules": [{"id": f"m{number:02d}"} for number in range(15)]})
+    line = module_choice(tmp_path)
+    assert "m11" in line and "m12" not in line and line.endswith("…и ещё 3")

@@ -79,7 +79,8 @@ def test_the_stop_of_ready_prints_the_format_of_the_answers_and_the_command(tmp_
 
     _module(tmp_path, "app")
     _module(tmp_path, "scripts", sources=None)
-    row = check_skillsrc(tmp_path)[0]
+    assert check_skillsrc(tmp_path) == []  # no module named: the module row asks for it first, no question about one of them
+    row = check_skillsrc(tmp_path, "scripts")[0]
     fix = str(row["fix"])
     assert row["level"] == "STOP" and "--answers" in fix and "--write" in fix, row
     assert '"module:scripts:paths.source"' in fix, fix

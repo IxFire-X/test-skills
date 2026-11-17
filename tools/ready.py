@@ -201,6 +201,8 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
                      "значения этих ключей (в JSON): " + " | ".join(keys), {"legacy_yaml_keys": keys})]
     receipt = ensure_skillsrc(Path(project), {}, write=False, selected_module=module)
     status = receipt.get("status")
+    if module is None and (status == "conflict" or status == "needs_input" and not (Path(project) / ".skillsrc").is_file()) and module_choice(project):
+        return []  # no question about a module (the first of the list) before the module is named: the module row says so
     if not (Path(project) / ".skillsrc").is_file():
         return [_row("skillsrc", CASES, "OK", ".skillsrc нет — первый scan создаст его по проекту")] if status in {"preview", "created"} else \
             [_row("skillsrc", CASES, "STOP", f".skillsrc не создаётся: {status} {receipt.get('errors') or receipt.get('questions')}",
@@ -281,7 +283,22 @@ def select_module(modules: Sequence[Mapping[str, Any]], module_id: str | None) -
     return None, f"модулей несколько: {', '.join(str(m.get('id')) for m in modules)}" if modules else "модулей нет"
 
 
+def module_choice(project: Path) -> str | None:
+    """«назовите модуль: --module <id>; модули: …» for a project of several modules when none is named (up to 12 ids), else None."""
+    from tools.discover_project import discover_project
+
+    try:
+        found = _modules(project) if (Path(project) / ".skillsrc").is_file() else discover_project(Path(project).resolve())["modules"]
+    except Exception:  # the other rows say what is wrong with the project
+        return None
+    ids = [str(item["id"]) for item in found]
+    return f"назовите модуль: --module <id>; модули: {', '.join(ids[:12])}" + (f" …и ещё {len(ids) - 12}" if len(ids) > 12 else "") if len(ids) > 1 else None
+
+
 def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], Mapping[str, Any] | None]:
+    choice = module_choice(project) if module_id is None else None
+    if choice:
+        return _row("module", CASES, "STOP", choice, "повторите ready и scan с --module <id> из этого списка"), None
     module, problem = select_module(_modules(project, module_id), module_id)
     if module is None:
         return _row("module", CASES, "STOP", str(problem), "укажите --module <ID> из списка"), None

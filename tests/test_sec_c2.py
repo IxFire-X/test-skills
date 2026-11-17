@@ -362,6 +362,7 @@ WRITES_OUTSIDE_CONFINED_OUTPUT = {
     "publish_test_case_bundle.py": (6, "the bundle of the run: <run>/published only (orchestrate.published_dir asks output_guard.run_output_directory at every entry; a link out is refused), hard link install"),
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),
+    "api.py": (1, "the descriptor of the process's own stdout, pointed at os.devnull after the reader of a pipe went away (``| head``): no file of the project or of the run"),
     "init_skillsrc.py": (1, "the --output report of init: its target comes from acquire_confined_output (below docs/to_do); the .skillsrc of the project is written by confined_output"),
 }
 

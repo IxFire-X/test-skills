@@ -139,7 +139,8 @@ def test_a_v02_run_without_a_single_refusal_prints_zero(tmp_path: Path) -> None:
     report, markdown = _report(run["project"], run["run_root"])
     assert report["refusals"]["total"] == 0 and report["refusals"]["by_command_code"] == [] and report["refusals"]["first_at"] is None
     section = markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
-    assert "Всего: 0" in section and "до v0.2" not in section and "журнала отказов нет" not in section
+    assert "Отказов при записи: 0 (проверки `--dry-run` журнал не пишет" in section and "до v0.2" not in section and "журнала отказов нет" not in section
+    assert "## Отказы записи" in markdown  # the heading says what is counted
 
 
 def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> None:

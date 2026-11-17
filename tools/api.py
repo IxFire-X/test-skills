@@ -13,6 +13,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -193,7 +194,14 @@ def _parser() -> JsonArgumentParser:
 def _print(payload: Mapping[str, Any]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    try:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        sys.stdout.flush()
+    except OSError:  # the reader (``| head -c``) went away (BrokenPipeError, on Windows EINVAL): its cut is no fault of the command; the refusal is still recorded and returned
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())  # the flush at exit meets the pipe no more
+        except (OSError, ValueError):
+            pass
 
 
 def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:

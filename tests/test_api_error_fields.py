@@ -92,3 +92,19 @@ def test_an_os_error_without_a_file_has_no_empty_tail() -> None:
     from tools.json_cli import error_fields
 
     assert error_fields(OSError(5, "Input/output error"))["message"] == "OSError: Input/output error"
+
+
+@pytest.mark.parametrize("error", [BrokenPipeError(), OSError(22, "Invalid argument")], ids=["posix", "windows"])
+def test_a_reader_that_went_away_leaves_no_traceback_and_the_refusal_is_still_returned(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
+    """``submit … | head -c N``: the pipe closes under the refusal that is being printed — the error of the write was a traceback after the JSON."""
+    from tools import api
+
+    class Gone:
+        def write(self, _text: str) -> int:
+            raise error
+
+        def fileno(self) -> int:
+            raise OSError
+
+    monkeypatch.setattr(api.sys, "stdout", Gone())
+    api._print({"status": "error", "code": "X"})

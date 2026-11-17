@@ -1139,8 +1139,8 @@ def _step_size_lines(report: Mapping[str, Any]) -> list[str]:
 def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
     summary = report.get("refusals")
     if summary is None:
-        return ["## Отказы", "", "журнала отказов нет (прогон до v0.2)", ""]
-    return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.",
+        return ["## Отказы записи", "", "журнала отказов нет (прогон до v0.2)", ""]
+    return ["## Отказы записи", "", f"Отказов при записи: {summary['total']} (проверки `--dry-run` журнал не пишет и не считает); с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.",
             f"Число {summary.get('basis') or REFUSALS_BASIS}.",
             *([f"Контрольное слово генератора: повторный запрос у {', '.join(summary['codeword_lost'])} — слово показывали один раз, вывод мог быть потерян."]
               if summary.get("codeword_lost") else []),
