@@ -355,7 +355,7 @@ def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = (
 
 
 def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any],
-                  target: str | None = None, cases: bool = False) -> dict[str, Any]:
+                  target: str | None = None, cases: str | None = None) -> dict[str, Any]:
     """What will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
     from tools.cases_scope import ScopeSourceError
     from tools.project_inventory import ContextStop, skipped_summary
@@ -597,7 +597,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                 scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
-                rows.append(check_context(project, selected, docs, inventory, target, bool(cases)))
+                rows.append(check_context(project, selected, docs, inventory, target, cases))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1" and ((selected.get("stack") or {}) if isinstance(selected.get("stack"), Mapping) else {}).get("language") == "documents":

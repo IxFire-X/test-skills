@@ -160,16 +160,15 @@ def test_the_generator_reads_the_plan_without_the_texts_of_the_requirements(tmp_
     assert row["basis"] == "plan-view-v1" and row["path"].endswith(".plan-view.json")
     view = json.loads(Path(row["path"]).read_text(encoding="utf-8"))
     assert [item["source_requirement_id"] for item in view["source_requirements"]] == [item["source_requirement_id"] for item in plan["source_requirements"]]
-    assert all("text" not in item for item in view["source_requirements"])
-    assert all(item["display_order"] == original["display_order"] and item["provenance"] == original["provenance"] and item["digest"] == original["digest"]
-               for item, original in zip(view["source_requirements"], plan["source_requirements"]))
+    assert all(set(item) == {"source_requirement_id", "display_order"} for item in view["source_requirements"])  # the rest of a row is the marker's: below
+    assert all(item["display_order"] == original["display_order"] for item, original in zip(view["source_requirements"], plan["source_requirements"]))
     assert view["batches"] == plan["batches"] and view["view"] == "plan-view-v1"
     raw = Path(row["path"]).read_text(encoding="utf-8")
     assert not any(item["text"] in raw for item in plan["source_requirements"])  # no text of a requirement is left in the view
-    # the texts the generator needs are those of the markup, byte for byte
-    marker = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", run["marker_digest"])["artifact"]
-    texts = {item["source_requirement_id"]: item["text"] for item in marker["artifacts"]["analytics_documentation"]["requirements"]}
-    assert texts == {item["source_requirement_id"]: item["text"] for item in plan["source_requirements"]}
+    # the rows the view leaves out (text, provenance, digest) are those of the markup, byte for byte, and the markup is in the same input
+    read = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", run["marker_digest"])
+    assert str(Path(root) / read["path"]) in [item["path"] for item in found["files"]]
+    assert read["artifact"]["artifacts"]["analytics_documentation"]["requirements"] == plan["source_requirements"]
     assert _journal(root) == before  # the plan of the journal is not changed, no event is added
     assert pilot_state._generator_input(run["project"], root, pilot_state.derive_state(root), attempt_id, "plan")["source_requirements"] == plan["source_requirements"]
 

@@ -906,14 +906,21 @@ def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: 
                           includes=skillsrc_include(project, module_root), own=own)
 
 
+def _without_cases_csv(ids: list[str], inventory: Mapping[str, Any], *paths: str | None) -> list[str]:
+    """The CSV of ``--cases`` (the model gets its skeleton) and of ``--reference`` (a hint) is never context of a model; the inventory keeps it."""
+    named = {str(item["opaque_id"]) for item in inventory["files"] if item["project_path"] in paths and item["project_path"]}
+    return [opaque for opaque in ids if opaque not in named]
+
+
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
-                    target: str | None = None, cases: bool = False) -> tuple[list[str], list[dict[str, Any]], int]:
+                    target: str | None = None, cases: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
     """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
-    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root, cases=cases)
+    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root, cases=bool(cases))
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
     sectioned = _sectioned_ids(inventory, project, docs)
     selected = [opaque for opaque in selected if opaque not in sectioned]
+    selected = _without_cases_csv(selected, inventory, cases and relative_to_project(project.resolve(), cases))
     task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
     kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_tests(project, inventory)[0])
@@ -1548,8 +1555,7 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
     context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
     by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
     reference = _reference_cases(project, getattr(args, "reference", None))
-    if reference is not None:  # the reference CSV is never context of a model
-        selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
+    selected_ids = _without_cases_csv(selected_ids, frozen_inventory, getattr(args, "cases", None), reference and reference[0])
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
     own, unread = own_tests(project, frozen_inventory)

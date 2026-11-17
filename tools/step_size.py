@@ -584,11 +584,11 @@ def inventory_view_bytes(project: Path, root: Path, inventory_digest: str) -> by
 
 
 def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
-    """The batch plan without the texts of the source requirements - the generator reads them in the markup (the plan
-    rows are those of the marker, byte for byte).  The plan the journal keeps is not changed."""
-    rows = [{key: value for key, value in row.items() if key != "text"} for row in plan.get("source_requirements") or []]
+    """The batch plan without the copy of the marker rows - the generator reads the texts, ``provenance`` and ``digest`` in the markup (the plan
+    rows are those of the marker, byte for byte); a row keeps its id and order.  The plan the journal keeps is not changed."""
+    rows = [{key: row[key] for key in ("source_requirement_id", "display_order") if key in row} for row in plan.get("source_requirements") or []]
     return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
-                     "view": PLAN_VIEW, "texts": "тексты требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[].text по source_requirement_id"})
+                     "view": PLAN_VIEW, "texts": "тексты, provenance и digest требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[] по source_requirement_id"})
 
 
 def _write_view(project: Path, root: Path, target: Path, data: bytes, write: bool) -> None:
@@ -752,7 +752,8 @@ def measure(project: Path, files: Iterable[Path], role: str | None = None, *, to
     budget_bytes = step_budget(project) if budget is None else budget
     fits = total <= budget_bytes
     hint = None if fits else (f"вход шага {total} Б больше бюджета {budget_bytes} Б: сузьте контекст — --target <путь> модуля, "
-                              "paths/include модуля в .skillsrc или меньше файлов шага; бюджет — .skillsrc limits.step_input_bytes")
+                              "paths/include модуля в .skillsrc, файлы, которые модели не нужны, — в .skillsrc paths.exclude (только контекст; опись их держит) "
+                              "или меньше файлов шага; бюджет — .skillsrc limits.step_input_bytes")
     return {"bytes": total, "input_bytes": input_bytes, "role_bytes": role_bytes, "role": role, "files": len(paths),
             "tokens_est": round(total * tokens_per_byte), "tokens_per_byte": tokens_per_byte, "budget_bytes": budget_bytes,
             "fits": fits, "warning": None if fits else OVER_BUDGET, "hint": hint}
