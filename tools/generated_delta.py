@@ -650,7 +650,7 @@ def plan_quarantine(
     if payload.get("verdict") != "FAIL" or payload.get("evidence_authoritative") is not True or not isinstance(evidence, list):
         return None
     failed = {(row.get("file_id"), row.get("symbol_id")) for row in evidence if isinstance(row, Mapping) and row.get("status") in {"FAILED", "ERROR"}}
-    # a group method is disabled whole — the mark names its failed rows, the receipt also the passed rows it took along
+    # a group method is marked whole — the mark names its failed rows, the receipt also the passed rows that go with it
     group_rows = {(row.get("file_id"), row.get("symbol_id")): row["rows"] for row in evidence
                   if isinstance(row, Mapping) and isinstance(row.get("rows"), list)}
     located = {(row.get("file_id"), row.get("symbol_id")): row.get("locator") for row in symbols if isinstance(row, Mapping)}
@@ -661,12 +661,13 @@ def plan_quarantine(
         row.get("nodeid"): str(row.get("message") or "")
         for row in payload.get("failed_methods") or [] if isinstance(row, Mapping)
     }
+    kinds = {row.get("nodeid"): row["kind"] for row in payload.get("failed_methods") or [] if isinstance(row, Mapping) and isinstance(row.get("kind"), str)}
     plan: dict[str, dict[str, Any]] = {}
     for file_id, row in by_id.items():
         path, content = row.get("path"), row.get("content")
         if not isinstance(path, str) or not isinstance(content, str):
             return None
-        methods, rows_of = [], {}
+        methods, rows_of, kind_of = [], {}, {}
         for symbol in symbols:
             pair = (symbol.get("file_id"), symbol.get("symbol_id"))
             if pair[0] == file_id and pair in failed:
@@ -677,6 +678,8 @@ def plan_quarantine(
                     message = f"rows {'+'.join(failed_rows)}: {message}"[:120].rstrip()
                     rows_of[_method_name(symbol["locator"])] = {"failed_rows": failed_rows, "disabled_passed_rows": passed_rows}
                 methods.append((symbol["locator"], ref, message))
+                if f"{pair[0]}::{pair[1]}" in kinds:
+                    kind_of[_method_name(symbol["locator"])] = kinds[f"{pair[0]}::{pair[1]}"]
         if not methods:
             plan[path] = {"quarantine": [], "quarantined_digest": None, "content": None}
             continue
@@ -687,7 +690,8 @@ def plan_quarantine(
         if marked == content.encode("utf-8"):
             return None
         plan[path] = {
-            "quarantine": [{"method": _method_name(locator), "ref": ref, "message": message, **rows_of.get(_method_name(locator), {})}
+            "quarantine": [{"method": _method_name(locator), "ref": ref, "message": message,
+                            **({"kind": kind_of[_method_name(locator)]} if _method_name(locator) in kind_of else {}), **rows_of.get(_method_name(locator), {})}
                            for locator, ref, message in methods],
             "quarantined_digest": _digest(marked), "content": marked,
         }

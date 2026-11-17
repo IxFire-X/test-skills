@@ -347,15 +347,15 @@ materialization -> execution -> execution trace -> retain/cleanup decision
 Для всего generated file set:
 
 - `PASS` + valid trace/path/digests: `RETAINED` до finalization;
-- `FAIL` (карантин, по умолчанию): упавшие методы — те, что отчёт запуска отметил FAILED/ERROR
-  в своём отчёте, — получают одну строку `@org.junit.jupiter.api.Disabled("test-skills
-  quarantine: <ASSERT-… или FAIL> <первая строка сообщения>")` или
-  `@pytest.mark.xfail(strict=True, reason="…")`; файл с ними — `QUARANTINED` (новый digest
+- `FAIL` (находки, по умолчанию): упавшие методы — те, что отчёт запуска отметил FAILED/ERROR
+  в своём отчёте, — остаются активными и получают одну строку-метку
+  `@org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: <ASSERT-… или FAIL> <первая строка сообщения>`
+  или `@pytest.mark.test_skills_finding  # test-skills finding: …`; файл с ними — `QUARANTINED` (новый digest
   в receipt), файл без упавших — `RETAINED`. Если упали все методы, файл остаётся, помечен
   каждый метод. Правятся только byte-identical pipeline-owned файлы, иначе — `PRESERVED_*`.
   Если отказ нельзя однозначно сопоставить с методом, файлы очищаются (`CLEANED`,
-  `QUARANTINE_UNRESOLVED`). `finish`/`status` выводят `quarantine` (файл, метод, ref,
-  сообщение). Приёмка не меняется: `FAIL` даёт `accepted=false`. Прежняя очистка —
+  `QUARANTINE_UNRESOLVED`). `finish`/`status` выводят `quarantine` (файл, метод, ref, kind,
+  сообщение); `kind` — вид падения из отчёта запуска (`assertion_failed`/`error`), в записи старого прогона его может не быть. Приёмка не меняется: `FAIL` даёт `accepted=false`. Прежняя очистка —
   `scan --disposition-policy cleanup` или `"disposition_policy": "cleanup"` в `.skillsrc`;
   выбор фиксируется в authorization receipt на scan, флаг сильнее `.skillsrc`;
 - `NOT_RUNNABLE` (и `FAIL` при `cleanup`): byte-identical pipeline-owned files получают `CLEANED`;

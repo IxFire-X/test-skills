@@ -51,8 +51,8 @@ python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --
 `ingest` сам проходит закрытие; повторный вызов возвращает тот же итог. `finish` не вовремя — `FINISH_FACT_UNDETERMINED` с недостающим: сделай этот шаг. Цепочка автоматизации не продолжается — `finish --abandon <код>` из `fix`. Итог с `FINALIZATION_INVALID` — прогон закрыт невалидным, `accepted=false`: передай как есть, `finish` не повторяй, файлы не правь.
 Частичная автоматизация (кейсы с блокерами канона ручные): `ingest` печатает `automation_split` — передай человеку его `summary` как есть; итог `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
 
-Судьба файлов (проверяет код): `PASS` — `RETAINED`; `FAIL` — карантин: упавшие методы помечаются `@Disabled`/`xfail`, прошедшие остаются; упавшие не сопоставить — очистка с `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — очистка byte-identical файлов пакета;
-`UNKNOWN` — очистка запрещена. После `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку `quarantine_unresolved` как есть; `@Disabled`/`xfail` не снимай, тесты не чини. `scan --disposition-policy cleanup` — только по просьбе человека.
+Судьба файлов (проверяет код): `PASS` — `RETAINED`; `FAIL` — находки: упавшие методы остаются активными и получают метку `test-skills-finding`, прошедшие остаются; упавшие не сопоставить — очистка с `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — очистка byte-identical файлов пакета;
+`UNKNOWN` — очистка запрещена. После `FAIL` покажи человеку список `quarantine` (файл, метод, ref, kind) и строку `quarantine_unresolved` как есть; метки не снимай, тесты не чини. `scan --disposition-policy cleanup` — только по просьбе человека.
 `style_checks_skipped` и `format_hint` передай человеку как есть; файлы не форматируй.
 
 ## 7. Итог прогона
@@ -61,4 +61,4 @@ python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --
 
 ## Что пишет режим Б и как это откатить
 
-Сверх `<project>/.pilot-runs/`: сгенерированные тесты в тестовый корень модуля (`materialize`), строки карантина (`@Disabled`/`xfail`) после `FAIL` и `.skillsrc` — только переключением на системный `mvn` с подтверждения человека. Откат: `finish`/`ingest` по квитанциям убирают тесты и аннотации; изменённые после `materialize` файлы возвращает `materialize --restore`; каталог `<run>` удаляется целиком. Это заменяет для режима Б правило «код проекта не запускается»: тесты и сборку запускает человек.
+Сверх `<project>/.pilot-runs/`: сгенерированные тесты в тестовый корень модуля (`materialize`), метки находок (`test-skills-finding`) после `FAIL` и `.skillsrc` — только переключением на системный `mvn` с подтверждения человека. Откат: `finish`/`ingest` по квитанциям убирают тесты и аннотации; изменённые после `materialize` файлы возвращает `materialize --restore`; каталог `<run>` удаляется целиком. Это заменяет для режима Б правило «код проекта не запускается»: тесты и сборку запускает человек.

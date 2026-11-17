@@ -297,8 +297,8 @@ def test_a_failed_row_quarantines_the_method_and_names_the_rows() -> None:
     assert item["failed_rows"] == ["TC-B1-002"] and item["disabled_passed_rows"] == ["TC-B1-001", "TC-B1-003"]
     assert item["message"].startswith("rows TC-B1-002")
     marked = plan["src/test/java/p/GroupTest.java"]["content"].decode("utf-8")
-    assert '@org.junit.jupiter.api.Disabled("test-skills quarantine: FAIL rows TC-B1-002' in marked
-    assert marked.count("@org.junit.jupiter.api.Disabled") == 1  # the whole method, the plain test untouched
+    assert '@org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: FAIL rows TC-B1-002' in marked
+    assert marked.count("@org.junit.jupiter.api.Tag") == 1  # the whole method, the plain test untouched
 
 
 def test_the_report_names_the_passed_rows_disabled_with_the_method(tmp_path: Path) -> None:
@@ -310,7 +310,7 @@ def test_the_report_names_the_passed_rows_disabled_with_the_method(tmp_path: Pat
     report["quarantine"] = [{"file": "GroupTest.java", "method": "tc_group_age", "ref": "FAIL", "failed_rows": ["TC-B1-002"],
                              "disabled_passed_rows": ["TC-B1-001", "TC-B1-003"]}]
     markdown = render_markdown(report)
-    assert ("- GroupTest.java :: tc_group_age (FAIL); упали строки TC-B1-002; вместе с методом отключены прошедшие строки: "
+    assert ("- GroupTest.java :: tc_group_age (FAIL); упали строки TC-B1-002; вместе с методом помечены и прошедшие строки: "
             "TC-B1-001, TC-B1-003") in markdown
 
 

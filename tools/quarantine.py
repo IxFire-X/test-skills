@@ -1,13 +1,13 @@
-"""Quarantine of individual test methods (wave 3, F; contract amendment A4).
+"""Marking of the failed test methods as findings (wave 3, F; contract amendment A4; q1).
 
-The package marks only its own failed methods, one line each, directly above the method:
+A test that failed by the requirement is a finding, not a quarantined test: it stays active, and the package only labels it, one line
+directly above the method, so the human can leave the label out of the build with one option:
 
-* JUnit 5 — ``@org.junit.jupiter.api.Disabled("test-skills quarantine: <REASON> <ref>")`` (fully
-  qualified, so no import changes);
-* pytest — ``@pytest.mark.xfail(strict=True, reason="test-skills quarantine: <REASON> <ref>")``
-  (``import pytest`` is added when the module has none).
+* JUnit 5 — ``@org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: <ref> <note>`` (fully qualified, no import changes);
+* pytest — ``@pytest.mark.test_skills_finding  # test-skills finding: <ref> <note>`` (``import pytest`` is added when the module has none).
 
-``release`` removes exactly those lines.  Nothing else in the file changes.
+A file of an earlier run may still carry the old line (``@Disabled("test-skills quarantine: …")`` / strict ``xfail``): it is recognised, not doubled.
+Nothing else in the file changes.
 """
 from __future__ import annotations
 
@@ -16,9 +16,13 @@ from typing import Iterable, Mapping, Sequence
 
 from tools.code_slices import slice_file
 
-MARK = "test-skills quarantine"
-_JAVA_LINE = re.compile(r'^\s*@org\.junit\.jupiter\.api\.Disabled\("' + re.escape(MARK) + r':[^\n]*\)\s*$')
-_PYTHON_LINE = re.compile(r'^\s*@pytest\.mark\.xfail\(strict=True, reason="' + re.escape(MARK) + r':[^\n]*\)\s*$')
+TAG = "test-skills-finding"
+MARK = "test-skills finding"
+_OLD = re.escape("test-skills quarantine")
+_JAVA_LINE = re.compile(r'^\s*(?:@org\.junit\.jupiter\.api\.Tag\("' + TAG + r'"\) // ' + re.escape(MARK) + r':[^\n]*|'
+                        r'@org\.junit\.jupiter\.api\.Disabled\("' + _OLD + r':[^\n]*\))\s*$')
+_PYTHON_LINE = re.compile(r'^\s*(?:@pytest\.mark\.test_skills_finding  # ' + re.escape(MARK) + r':[^\n]*|'
+                          r'@pytest\.mark\.xfail\(strict=True, reason="' + _OLD + r':[^\n]*\))\s*$')
 _SAFE = re.compile(r"[^A-Za-z0-9 ._:/#@=+-]")
 
 
@@ -68,7 +72,7 @@ def is_marked(line: str) -> bool:
 
 
 def quarantine(path: str, content: str, methods: Iterable[tuple[Mapping[str, object], str, str]]) -> str:
-    """Mark each ``(locator, reason, ref)`` method; an already marked method keeps its mark."""
+    """Label each ``(locator, reason, ref)`` method as a finding; an already marked method keeps its mark."""
     methods = list(methods)
     if not methods:
         return content
@@ -80,7 +84,8 @@ def quarantine(path: str, content: str, methods: Iterable[tuple[Mapping[str, obj
         if member.start >= 2 and is_marked(lines[member.start - 2]) or any(is_marked(line) for line in lines[member.start - 1:member.end]):
             continue
         indent = first[:len(first) - len(first.lstrip())]
-        text = f'@org.junit.jupiter.api.Disabled("{_note(reason, ref)}")' if language == "java" else f'@pytest.mark.xfail(strict=True, reason="{_note(reason, ref)}")'
+        text = (f'@org.junit.jupiter.api.Tag("{TAG}") // {_note(reason, ref)}' if language == "java"
+                else f"@pytest.mark.test_skills_finding  # {_note(reason, ref)}")
         inserts.append((member.start - 1, indent + text))
     for index, line in sorted(inserts, reverse=True):
         lines.insert(index, line)

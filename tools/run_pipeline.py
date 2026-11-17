@@ -244,7 +244,7 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
         return {}
     quarantine = [
         {"file": row["path"], "method": item["method"], "ref": item["ref"], "message": item["message"],
-         **{key: item[key] for key in ("failed_rows", "disabled_passed_rows") if key in item}}  # a group method's rows
+         **{key: item[key] for key in ("kind", "failed_rows", "disabled_passed_rows") if key in item}}  # the kind of the failure and a group method's rows
         for row in rows if row.get("disposition") == "QUARANTINED" for item in row["quarantine"]
     ]
     unresolved = [row["path"] for row in rows if row.get("reason_code") == "QUARANTINE_UNRESOLVED"]

@@ -112,7 +112,7 @@ def test_the_report_has_steps_counts_and_no_project_content(tmp_path: Path) -> N
     assert report["steps"] and all({"seq", "event", "at"} <= set(row) for row in report["steps"])
     assert report["model_calls"] and all("transport_attempts" in row and "tokens_est" in row and "budget_bytes" in row for row in report["model_calls"])
     assert {"requirements", "batches", "cases", "review_verdict", "automation", "execution"} <= set(report["counts"])
-    assert report["quarantine"] == [{"file": "tests/test_generated.py", "method": "test_selected", "ref": "ASSERT-batch-a-001"}]
+    assert report["quarantine"] == [{"file": "tests/test_generated.py", "method": "test_selected", "ref": "ASSERT-batch-a-001", "kind": "assertion_failed"}]
     assert {"python", "os", "adapter"} <= set(report["environment"])
 
     blob = (run_root / "report.json").read_bytes() + markdown.encode("utf-8")

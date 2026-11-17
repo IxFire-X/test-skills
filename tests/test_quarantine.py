@@ -1,4 +1,4 @@
-"""FaT-8: a FAIL run quarantines only its failed methods and keeps the rest of the generated tests."""
+"""FaT-8, q1: a FAIL run marks only its failed methods as findings (the tests stay active) and keeps the rest of the generated tests."""
 from __future__ import annotations
 
 import ast
@@ -76,7 +76,7 @@ def test_java_three_methods_one_failed_marks_only_that_method() -> None:
     ref, message = failure_note(FAILURE)
     changed = quarantine("src/test/java/org/example/OwnerTest.java", JAVA, [(_java_locator("findsOwner"), ref, message)])
     added = [line for line in changed.splitlines() if line not in JAVA.splitlines()]
-    assert added == [f'    @org.junit.jupiter.api.Disabled("test-skills quarantine: {ref} {message}")']
+    assert added == [f'    @org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: {ref} {message}']
     assert changed.replace(added[0] + "\n", "") == JAVA
 
 
@@ -85,17 +85,17 @@ def test_java_all_methods_failed_marks_every_method_and_keeps_the_file() -> None
 
     methods = [(_java_locator(name), "FAIL", "boom") for name in ("createsOwner", "findsOwner", "deletesOwner")]
     changed = quarantine("src/test/java/org/example/OwnerTest.java", JAVA, methods)
-    assert changed.count("@org.junit.jupiter.api.Disabled(") == 3 and "class OwnerTest" in changed
+    assert changed.count('@org.junit.jupiter.api.Tag("test-skills-finding")') == 3 and "Disabled" not in changed and "class OwnerTest" in changed
 
 
-def test_pytest_marks_with_strict_xfail_and_adds_the_import() -> None:
+def test_pytest_marks_with_a_finding_marker_and_adds_the_import() -> None:
     from tools.quarantine import quarantine
 
     source = "def test_a():\n    assert True\n\n\ndef test_b():\n    assert False\n"
     changed = quarantine("tests/test_x.py", source, [({"kind": "python_module_function", "function_name": "test_b"}, "FAIL", "boom")])
     ast.parse(changed)
     assert changed.splitlines()[0] == "import pytest"
-    assert '@pytest.mark.xfail(strict=True, reason="test-skills quarantine: FAIL boom")' in changed.splitlines()
+    assert "@pytest.mark.test_skills_finding  # test-skills finding: FAIL boom" in changed.splitlines() and "xfail" not in changed
     assert "def test_a():\n    assert True\n" in changed
 
 
@@ -119,7 +119,7 @@ def test_two_files_one_failed_method_quarantines_one_file_and_retains_the_other(
     plan = plan_quarantine(files, symbols, payload)
     assert plan["tests/test_b.py"] == {"quarantine": [], "quarantined_digest": None, "content": None}
     entry = plan["tests/test_a.py"]
-    assert entry["quarantine"] == [{"method": "test_selected", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_"}]
+    assert entry["quarantine"] == [{"method": "test_selected", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_", "kind": "assertion_failed"}]
     assert entry["quarantined_digest"] == _digest(entry["content"]) and "def test_other_one() -> None:\n    assert 1 == 1\n" in entry["content"].decode()
 
 
@@ -138,12 +138,57 @@ def test_java_plan_quarantine_marks_only_the_failed_method() -> None:
         "failed_methods": [{"nodeid": "FILE-j::SYMBOL-findsOwner", "kind": "assertion_failed", "message": FAILURE}],
     }
     entry = plan_quarantine(files, symbols, payload)[path]
-    assert entry["quarantine"] == [{"method": "OwnerTest.findsOwner", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_"}]
+    assert entry["quarantine"] == [{"method": "OwnerTest.findsOwner", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_", "kind": "assertion_failed"}]
     text = entry["content"].decode()
-    mark = '    @org.junit.jupiter.api.Disabled("test-skills quarantine: ASSERT-batch-a-001 expected: _2_ but was: _3_")'
+    mark = '    @org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: ASSERT-batch-a-001 expected: _2_ but was: _3_'
     lines = text.splitlines()
     assert lines[lines.index("    void findsOwner() {") - 2] == mark
     assert text.replace(mark + "\n", "") == JAVA and entry["quarantined_digest"] == _digest(entry["content"])
+
+
+def test_a_method_with_an_old_quarantine_line_is_not_marked_again() -> None:
+    from tools.quarantine import quarantine
+
+    old = JAVA.replace("    @Test\n    void findsOwner", '    @org.junit.jupiter.api.Disabled("test-skills quarantine: FAIL boom")\n    @Test\n    void findsOwner')
+    assert old != JAVA
+    assert quarantine("src/test/java/org/example/OwnerTest.java", old, [(_java_locator("findsOwner"), "FAIL", "boom")]) == old
+
+
+def test_a_method_with_a_finding_label_is_not_marked_again() -> None:
+    from tools.quarantine import quarantine
+
+    path, method = "src/test/java/org/example/OwnerTest.java", [(_java_locator("findsOwner"), "FAIL", "boom")]
+    once = quarantine(path, JAVA, method)
+    assert quarantine(path, once, method) == once
+
+
+def test_a_failure_without_a_kind_gives_a_quarantine_row_without_one() -> None:
+    from tools.generated_delta import plan_quarantine
+
+    files = [{"file_id": "FILE-a", "path": "tests/test_a.py", "content": THREE_FUNCTIONS}]
+    symbols = [{"file_id": "FILE-a", "symbol_id": "SYMBOL-a", "locator": {"kind": "python_module_function", "function_name": "test_selected"}}]
+    payload = {"verdict": "FAIL", "evidence_authoritative": True, "execution_evidence": [{"file_id": "FILE-a", "symbol_id": "SYMBOL-a", "status": "ERROR"}],
+               "failed_methods": [{"nodeid": "FILE-a::SYMBOL-a", "message": FAILURE}]}
+    assert "kind" not in plan_quarantine(files, symbols, payload)["tests/test_a.py"]["quarantine"][0]
+
+
+def test_the_kind_of_an_error_reaches_the_summary(tmp_path: Path) -> None:
+    from tools.finalize_attempt import decide_dispositions
+    from tools.run_pipeline import _quarantine_summary
+
+    run_root, attempt_id, delta = _fail(tmp_path, kind="error")
+    decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
+    assert _quarantine_summary(run_root, attempt_id)["quarantine"][0]["kind"] == "error"
+
+
+def test_a_quarantine_row_without_a_kind_is_valid_and_a_known_kind_too() -> None:
+    from jsonschema import Draft202012Validator
+
+    document = json.loads(Path("schemas", "disposition-receipt.schema.json").read_text(encoding="utf-8"))
+    row = {"method": "test_selected", "ref": "FAIL", "message": "boom"}
+    validator = Draft202012Validator({"$ref": "#/$defs/quarantine", "$defs": document["$defs"]})
+    assert not list(validator.iter_errors([row])) and not list(validator.iter_errors([{**row, "kind": "error"}]))
+    assert list(validator.iter_errors([{**row, "kind": "other"}]))
 
 
 @pytest.mark.parametrize("payload", [
@@ -161,7 +206,7 @@ def test_a_failure_that_cannot_be_tied_to_a_method_is_unresolved(payload: dict) 
 
 # --- the durable FAIL branch ------------------------------------------------------------------
 
-def _fail(tmp_path: Path, *, content: str | None = None, message: str | None = FAILURE):
+def _fail(tmp_path: Path, *, content: str | None = None, message: str | None = FAILURE, kind: str = "assertion_failed"):
     from tests.test_durable_execution_trace import _publish_execution
     from tests.test_execution_receipt import _execution_facts
 
@@ -169,7 +214,7 @@ def _fail(tmp_path: Path, *, content: str | None = None, message: str | None = F
         tmp_path, project=tmp_path, failed=True, generated_content=content,
     )
     if message is not None:
-        report["failed_methods"] = [{"nodeid": "FILE-products::SYMBOL-products", "kind": "assertion_failed", "message": message}]
+        report["failed_methods"] = [{"nodeid": "FILE-products::SYMBOL-products", "kind": kind, "message": message}]
     _publish_execution(run_root, attempt_id, report, request=request)
     return run_root, attempt_id, durable["delta"]
 
@@ -189,10 +234,10 @@ def test_fail_quarantines_the_failed_method_and_keeps_the_others(tmp_path: Path)
 
     assert [row["disposition"] for row in result["files"]] == ["QUARANTINED"]
     text = generated.read_text(encoding="utf-8")
-    mark = '@pytest.mark.xfail(strict=True, reason="test-skills quarantine: ASSERT-batch-a-001 expected: _2_ but was: _3_")'
+    mark = "@pytest.mark.test_skills_finding  # test-skills finding: ASSERT-batch-a-001 expected: _2_ but was: _3_"
     assert [line for line in text.splitlines() if line not in THREE_FUNCTIONS.splitlines()] == [mark]
     [row] = _receipt(run_root, attempt_id)["files"]
-    assert row["quarantine"] == [{"method": "test_selected", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_"}]
+    assert row["quarantine"] == [{"method": "test_selected", "ref": "ASSERT-batch-a-001", "message": "expected: _2_ but was: _3_", "kind": "assertion_failed"}]
     assert row["quarantined_digest"] == _digest(generated.read_bytes()) != row["content_digest"]
 
 
@@ -210,7 +255,7 @@ def test_an_interruption_after_the_quarantine_write_closes_once_on_retry(tmp_pat
     result = apply_dispositions(tmp_path, delta, {relative: "QUARANTINED"}, run_root=run_root, attempt_id=attempt_id, verification="FAIL")
 
     assert [row["disposition"] for row in result["files"]] == ["QUARANTINED"]
-    assert generated.read_text(encoding="utf-8").count("test-skills quarantine:") == 1
+    assert generated.read_text(encoding="utf-8").count("test-skills finding:") == 1
     [row] = _receipt(run_root, attempt_id)["files"]
     assert row["quarantined_digest"] == _digest(generated.read_bytes())
 
@@ -259,7 +304,7 @@ def test_quarantine_summary_lists_file_method_and_ref(tmp_path: Path) -> None:
     decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
     summary = _quarantine_summary(run_root, attempt_id)
     assert summary["quarantine"] == [{"file": delta["files"][0]["path"], "method": "test_selected", "ref": "ASSERT-batch-a-001",
-                                      "message": "expected: _2_ but was: _3_"}]
+                                      "message": "expected: _2_ but was: _3_", "kind": "assertion_failed"}]
     assert "quarantine_unresolved" not in summary
 
 
@@ -312,7 +357,7 @@ def test_finish_closes_a_failed_run_with_a_quarantined_method_end_to_end(tmp_pat
     [row] = _receipt(run_root, attempt_id)["files"]
     assert row["disposition"] == "QUARANTINED" and [item["method"] for item in row["quarantine"]] == ["test_selected"], row
     text = (tmp_path / delta["files"][0]["path"]).read_text(encoding="utf-8")
-    assert text.count("test-skills quarantine: ASSERT-batch-a-001") == 1 and "def test_other_one" in text
+    assert text.count("test-skills finding: ASSERT-batch-a-001") == 1 and "def test_other_one" in text
     assert code == 1, (code, output)  # a verdict other than PASS is not a green exit
 
 
@@ -394,7 +439,7 @@ def test_ingest_prints_the_quarantine_for_the_human_when_it_closes_and_when_it_i
     exec_commands._finish_ingest(coordinates, {})
     closed = json.loads(capsys.readouterr().out)
     assert closed["quarantine"] == [{"file": delta["files"][0]["path"], "method": "test_selected", "ref": "ASSERT-batch-a-001",
-                                     "message": "expected: _2_ but was: _3_"}], closed
+                                     "message": "expected: _2_ but was: _3_", "kind": "assertion_failed"}], closed
     exec_commands._terminal_answer(coordinates, "ingest")
     assert json.loads(capsys.readouterr().out)["quarantine"] == closed["quarantine"]
 

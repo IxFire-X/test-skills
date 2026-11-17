@@ -75,17 +75,18 @@ def _first_line(execution: str | None, accepted: bool | None, stats: dict | None
 
 def test_a_failed_run_of_the_tests_is_not_called_accepted_in_the_first_line() -> None:
     line = _first_line("FAIL", False, {"total": 75, "passed": 57, "failed": 18, "errors": 0}, quarantine=18)
-    assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75 методов, в карантине 18. Прогон не принят.**"
+    assert line == "**Кейсы: принято 76 из 76. Автотесты: упали 18 из 75 методов. Прогон не принят.**"
 
 
-def test_a_run_with_a_quarantine_says_what_the_disabled_tests_are_and_where_the_list_is() -> None:
+def test_a_run_with_findings_says_the_build_is_red_and_how_to_leave_them_out_and_where_the_list_is() -> None:
     from tools.run_report import _acceptance_lines
 
     report = {"acceptance": _acceptance(outcome="ACCEPTED_WHOLE", accepted=76, generated=76, removed=0), "review_canaries": None, "reviewer_isolation_state": "verified",
               "counts": {"automation": True, "execution": "FAIL", "accepted": False}, "execution_stats": {"total": 75, "passed": 57, "failed": 18, "errors": 0}, "quarantine": [{}] * 18}
     text = "\n".join(_acceptance_lines(report))
-    assert "Отключённые в карантине тесты упали при запуске" in text and "раздел" in text and "«Карантин»" in text and "не считает их падением" in text, text
-    assert "Отключённые в карантине" not in "\n".join(_acceptance_lines({**report, "quarantine": []}))
+    assert "Находки: тесты упали при запуске" in text and "«Находки»" in text and "сборка проекта красная" in text, text
+    assert "-DexcludedGroups=test-skills-finding" in text and "not test_skills_finding" in text and "ключа командной строки нет" in text and "markers = test_skills_finding" in text, text
+    assert "Находки:" not in "\n".join(_acceptance_lines({**report, "quarantine": []}))
 
 
 def test_a_green_run_of_the_tests_is_accepted_in_the_first_line() -> None:
@@ -94,7 +95,7 @@ def test_a_green_run_of_the_tests_is_accepted_in_the_first_line() -> None:
 
 @pytest.mark.parametrize("total, words", [(1, "из 1 метода"), (2, "из 2 методов"), (5, "из 5 методов"), (11, "из 11 методов"), (21, "из 21 метода"), (57, "из 57 методов")])
 def test_the_unit_of_the_tests_in_the_first_line_is_declined_after_from(total: int, words: str) -> None:
-    assert f"упали 1 {words}," in _first_line("FAIL", False, {"total": total, "passed": total - 1, "failed": 1, "errors": 0}, quarantine=1)
+    assert f"упали 1 {words}." in _first_line("FAIL", False, {"total": total, "passed": total - 1, "failed": 1, "errors": 0}, quarantine=1)
 
 
 def test_a_set_accepted_in_part_names_the_unit_of_the_tests_too() -> None:

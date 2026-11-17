@@ -1058,7 +1058,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
         "execution_stats": execution.get("stats"),
-        "quarantine": [{key: row[key] for key in ("file", "method", "ref", "failed_rows", "disabled_passed_rows") if key in row}
+        "quarantine": [{key: row[key] for key in ("file", "method", "ref", "kind", "failed_rows", "disabled_passed_rows") if key in row}
                        for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
@@ -1209,12 +1209,12 @@ def _tests_clause(report: Mapping[str, Any]) -> str:
         return ""
     from tools.publish_test_case_bundle import plural
 
-    failed, quarantine = stats.get("failed", 0) + stats.get("errors", 0), len(report.get("quarantine") or [])
+    failed = stats.get("failed", 0) + stats.get("errors", 0)
     unit = f"{stats.get('total')} {plural(stats.get('total') or 0, 'метода', 'методов', 'методов')}"  # Maven and Gradle show the runs: the unit is named
     tests = ("тесты не запустились (сборка или окружение)" if counts.get("execution") == "NOT_RUNNABLE" else
              "результаты запуска не получены" if counts.get("execution") == "UNKNOWN" else  # closed without reports (the numbers of such a close are zeros) or no verdict
              f"прошли {stats['passed']} из {unit}" if counts.get("execution") == "PASS" and stats else
-             f"упали {failed} из {unit}" + (f", в карантине {quarantine}" if quarantine else "") if stats else "запуск не выполнен")
+             f"упали {failed} из {unit}" if stats else "запуск не выполнен")
     return f"Автотесты: {tests}. Прогон {'принят' if counts.get('accepted') else 'не принят'}."
 
 
@@ -1251,8 +1251,11 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
         head = "**ТРЕБУЕТ ДОРАБОТКИ:** замечание ревьюера относится ко всему набору."
     lines = ["## Итог", "", head, ""]
     if report.get("quarantine"):
-        lines += ["Отключённые в карантине тесты упали при запуске: это расхождения кода с требованиями или ошибки самих тестов — разберите каждый (список — в разделе «Карантин»). "
-                  "Обычный запуск тестов проекта теперь не считает их падением.", ""]
+        lines += ["Находки: тесты упали при запуске, это расхождения кода с требованиями или ошибки самих тестов — разберите каждый (список — в разделе «Находки»; "
+                  "вид падения: assertion_failed — не совпала проверка, возможный дефект приложения; error — исключение при выполнении, чаще ошибка теста или окружения). "
+                  "Тесты остались в проекте активными, поэтому обычная сборка проекта красная, пока находки не разобраны. Исключить их из сборки одной строкой: "
+                  "Maven — `-DexcludedGroups=test-skills-finding` (не действует, если в `pom.xml` свой `excludedGroups`); pytest — `-m \"not test_skills_finding\"` (при `--strict-markers` зарегистрируйте метку строкой `markers = test_skills_finding` в pytest.ini или pyproject.toml); "
+                  "Gradle — только строкой `excludeTags 'test-skills-finding'` в `useJUnitPlatform` файла `build.gradle`: ключа командной строки нет.", ""]
     canaries = report.get("review_canaries") or {}
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
@@ -1356,8 +1359,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     if report.get("autotest_assertions"):
         lines += [render_autotest_assertions(report["autotest_assertions"]), ""]
     if report["quarantine"] or report["quarantine_unresolved"]:
-        lines += ["## Карантин", "", *(f"- {row['file']} :: {row['method']} ({row['ref']})" + (
-            f"; упали строки {', '.join(row['failed_rows'])}; вместе с методом отключены прошедшие строки: "
+        lines += ["## Находки", "", *(f"- {row['file']} :: {row['method']} ({row['ref']}{', ' + row['kind'] if row.get('kind') else ''})" + (
+            f"; упали строки {', '.join(row['failed_rows'])}; вместе с методом помечены и прошедшие строки: "
             f"{', '.join(row['disabled_passed_rows']) or 'нет'}" if "failed_rows" in row else "") for row in report["quarantine"])]
         lines += [f"- {report['quarantine_unresolved']}"] if report["quarantine_unresolved"] else []
         lines.append("")
