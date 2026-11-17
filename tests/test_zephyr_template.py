@@ -347,3 +347,20 @@ def test_a_column_name_of_the_template_longer_than_a_line_is_counted_not_named(t
     result = export_import_csv(project, run_root.name, bundle_csv)
     assert result["columns_added"] == [] and result["columns_added_other"] == 1
     assert "P" * 81 not in (run_root / "zephyr-import.json").read_text(encoding="utf-8")
+
+
+def test_the_label_of_an_obsolete_case_goes_to_the_bundle_and_to_the_import_file(tmp_path: Path) -> None:
+    import copy
+
+    from tools.publish_test_case_bundle import publish_bundle
+    from tools.zephyr_template_export import build_import_csv, read_template
+
+    document = copy.deepcopy(canonical_fixture())
+    document["test_cases"][0]["management"]["labels"] = ["устарел"]
+    bundle = Path(publish_bundle(document, tmp_path / "cases").csv_path)
+    (tmp_path / "stubs.csv").write_bytes(_template_bytes())
+    _delimiter, ours = _rows(bundle.read_bytes())
+    _delimiter, theirs = _rows(build_import_csv(bundle.read_bytes(), document, read_template(tmp_path, "stubs.csv"), automated_case_ids=set()))
+    for header, rows in ((ours[0], ours[1:]), (theirs[0], theirs[1:])):
+        labels = [dict(zip(header, row))["Labels"] for row in rows if dict(zip(header, row))["Name"]]
+        assert labels[0] == "устарел" and not any(labels[1:])

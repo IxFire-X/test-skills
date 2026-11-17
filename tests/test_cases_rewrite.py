@@ -186,3 +186,81 @@ def test_the_report_names_the_rows_left_as_they_are_and_the_analyst_is_told_wher
 def test_the_closing_line_of_the_checks_points_to_the_cases_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _report_json, _markdown, questions = _report(tmp_path, monkeypatch, REWRITE)
     assert "- без изменений: 0; вне документов: 1 — см. раздел ниже\n" in questions and "## Кейсы CSV вне документов" in questions
+
+
+# ---- the label of an obsolete case: code puts it into the skeleton, the model copies it ----------------------------------------------------
+
+GONE = {"row": 3, "source_requirement_ids": [], "verdict": "obsolete", "reason": "требование удалено", "removed": {"capability": "catalog", "name": "Refuse"}}
+
+
+def _obsolete_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    from tools import cases_import
+
+    monkeypatch.setattr(cases_import, "check_requirements_answer", lambda *_args, **_kwargs: None)  # a delta that removes a requirement is no part of this fixture
+    return _plan(tmp_path, monkeypatch, [LINKS[0], GONE])
+
+
+def test_code_puts_the_label_of_an_obsolete_case_into_its_skeleton_row_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.cases_import import OBSOLETE_LABEL
+
+    fits, gone = _receipt(_obsolete_plan(tmp_path, monkeypatch))["cases"]
+    assert gone["management"]["labels"] == [OBSOLETE_LABEL] and fits["management"]["labels"] == []
+
+
+def test_a_skeleton_differs_from_the_one_without_the_verdict_in_the_label_of_the_obsolete_row_only() -> None:
+    from tests.test_cases_import import CSV
+    from tools.cases_import import imported_value
+
+    requirements = [{"source_requirement_id": "SREQ-0001", "text": "x"}]
+    plain = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), [LINKS[0], {"row": 3, "source_requirement_ids": []}], requirements)["cases"]
+    judged = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), [LINKS[0], GONE], requirements)["cases"]
+    assert plain[0] == judged[0] and {key: value for key, value in judged[1].items() if key not in {"management", "verdict", "verdict_reason", "removed"}} == {
+        key: value for key, value in plain[1].items() if key != "management"}
+    assert plain[1]["management"]["labels"] == [] and judged[1]["management"] == {**plain[1]["management"], "labels": ["устарел"]}
+
+
+def test_the_label_is_not_put_twice_into_a_case_that_has_it() -> None:
+    from tests.test_cases_import import CSV
+    from tools.cases_import import imported_value
+
+    lines = CSV.split("\r\n")
+    data = "\r\n".join([lines[0] + ",Labels", lines[1] + ",", lines[2] + ',"smoke, Устарел"', lines[3] + ","]).encode("utf-8")
+    cases = imported_value("cases/zephyr.csv", data, [LINKS[0], GONE], [{"source_requirement_id": "SREQ-0001", "text": "x"}])["cases"]
+    assert cases[1]["management"]["labels"] == ["smoke", "Устарел"]
+
+
+def _label_submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change) -> tuple[int, dict]:
+    run = _obsolete_plan(tmp_path, monkeypatch)
+    return _submit(run, _changed(_fragment(run), change))
+
+
+def test_the_fragment_that_copies_the_label_of_the_skeleton_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, answered = _label_submit(tmp_path, monkeypatch, lambda value: None)
+    assert code == 0, answered
+
+
+def test_the_model_may_not_take_the_label_off_an_obsolete_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, refused = _label_submit(tmp_path, monkeypatch, lambda value: value["test_cases"][1]["management"].update(labels=[]))
+    assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/1/management" in refused["message"], refused
+
+
+def test_the_model_may_not_put_the_label_on_a_case_that_fits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, refused = _label_submit(tmp_path, monkeypatch, lambda value: value["test_cases"][0]["management"].update(labels=["устарел"]))
+    assert code == 2 and refused["code"] == "IMPORT_HUMAN_FIELD_CHANGED" and "/test_cases/0/management" in refused["message"], refused
+
+
+def test_the_report_has_no_label_text_besides_the_name_of_the_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import cases_import
+
+    monkeypatch.setattr(cases_import, "check_requirements_answer", lambda *_args, **_kwargs: None)
+    report, markdown, _questions = _report(tmp_path, monkeypatch, [LINKS[0], GONE])
+    assert markdown.replace("устарели", "").count("устарел") == 0 and "устарел" not in json.dumps({**report, "import": {**report["import"], "verdicts": {}}}, ensure_ascii=False)
+
+
+def test_the_texts_name_the_label_of_an_obsolete_case_as_the_constant_has_it() -> None:
+    from tools.cases_import import OBSOLETE_LABEL
+
+    root = Path(__file__).resolve().parents[1]
+    how_to = " ".join((root / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
+    import_md = (root / "skills" / "orchestrate" / "references" / "import.md").read_text(encoding="utf-8")
+    assert f"метка `{OBSOLETE_LABEL}` в колонке Labels; снять её — вручную" in how_to and f"метку `{OBSOLETE_LABEL}` в `labels`" in import_md

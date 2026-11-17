@@ -137,6 +137,7 @@ def source_requirements(path: str, data: bytes, cases: list[dict[str, Any]]) -> 
 
 
 OUTSIDE = "SREQ-CSV-"  # the requirement code makes for a case linked to no document requirement («вне документов»)
+OBSOLETE_LABEL = "устарел"  # the one label code puts on a case of the CSV: its requirement was removed (verdict ``obsolete``)
 
 
 def case_sources(case: Mapping[str, Any]) -> list[str]:
@@ -168,7 +169,7 @@ def planned_gaps(root: Path, attempt_id: str, imported: Mapping[str, Any]) -> li
 
 
 def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
-    """The canonical management of an imported case — Key, folder, labels, custom fields as the CSV has them."""
+    """The canonical management of an imported case — Key, folder, labels, custom fields as the skeleton has them (the CSV's, and the label of an obsolete case)."""
     management = case["management"]
     return {"status": management["status"], "folder": management["folder"], "components": management["components"],
             "labels": management["labels"], "owner": management["owner"], "estimated_time": management["estimated_time"],
@@ -302,9 +303,16 @@ def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imp
     return len(same) == 1 and same[0].get("verdict") == "rewrite"
 
 
+def _labelled(management: Mapping[str, Any], link: Mapping[str, Any]) -> Mapping[str, Any]:  # the label of an obsolete case last, unless an element is that label already
+    labels = management["labels"]
+    obsolete = link.get("verdict") == "obsolete" and not any(item.casefold() == OBSOLETE_LABEL for item in labels)
+    return {**management, "labels": [*labels, OBSOLETE_LABEL]} if obsolete else management
+
+
 def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None = None,
                    requirements: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
-    """The skeleton of the import: the human fields of every case as the CSV has them, one source requirement per case.
+    """The skeleton of the import: the human fields of every case as the CSV has them (one exception: the label ``OBSOLETE_LABEL`` that code
+    puts on a case with the verdict ``obsolete``), one source requirement per case.
 
     Preconditions are one element (the cell), the expected result of a step is cut at blank lines (v5 joins the
     expectations with one), an empty priority is MEDIUM.  The model completes only the machine part around it.
@@ -328,7 +336,7 @@ def imported_value(path: str, data: bytes, links: list[Mapping[str, Any]] | None
             **sources, **_verdict_keys(link), "row": case["row"], "key": case["key"],
             "title": case["title"], "objective": case["objective"] if case["objective"].strip() else case["title"],
             "preconditions": [case["preconditions"]] if case["preconditions"].strip() else [],
-            "priority": case["priority"] or "MEDIUM", "management": case["management"],
+            "priority": case["priority"] or "MEDIUM", "management": _labelled(case["management"], link),
             "steps": [{"row": step["row"], "action": step["action"], "test_data": step["test_data"] if step["test_data"].strip() else "—",
                        "expectations": split_expected(step["expected"])}
                       for step in case["steps"]],
