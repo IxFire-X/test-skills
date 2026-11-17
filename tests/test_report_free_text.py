@@ -100,6 +100,27 @@ def test_the_zephyr_import_of_the_report_names_only_columns_of_the_template_and_
     assert FREE not in json.dumps(shown, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("other, shown", [(2, 2), (0, 0), (-1, None), (True, None), ("2", None)])
+def test_the_zephyr_import_of_the_report_counts_the_columns_it_does_not_name(tmp_path: Path, capsys: pytest.CaptureFixture[str], other: object, shown: int | None) -> None:
+    from tests.test_zephyr_template import _cases_only_run
+    from tools.run_report import _zephyr_import
+    from tools.zephyr_template_export import export_import_csv
+
+    project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
+    export_import_csv(project, run_root.name, bundle_csv)
+    record = json.loads((run_root / "zephyr-import.json").read_text(encoding="utf-8"))
+    (run_root / "zephyr-import.json").write_text(json.dumps({**record, "columns_added_other": other}), encoding="utf-8")
+    assert _zephyr_import(run_root).get("columns_added_other") == shown
+    assert "columns_added_other" not in _zephyr_import_without(run_root, record)
+
+
+def _zephyr_import_without(run_root: Path, record: dict) -> dict:
+    from tools.run_report import _zephyr_import
+
+    (run_root / "zephyr-import.json").write_text(json.dumps(record), encoding="utf-8")
+    return _zephyr_import(run_root)
+
+
 # 5. a spoiled terminal result ---------------------------------------------------------------------------------------------
 
 def test_the_report_is_written_for_a_closed_run_with_a_spoiled_terminal_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

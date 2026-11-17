@@ -325,7 +325,7 @@ def test_docs_with_commas_are_refused_with_the_way_out(tmp_path: Path, monkeypat
     project = _project(tmp_path)
     monkeypatch.setattr("sys.argv", ["build_context", "--project", str(project), "--docs", f"{BASE},{ADD}"])
     assert build_context.main() == 2
-    assert "один файл на каждый --docs" in capsys.readouterr().out
+    assert "один файл или одна папка OpenSpec на каждый --docs" in capsys.readouterr().out
 
 
 def _build_context_out(project: Path, docs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> tuple[int, dict]:
@@ -347,7 +347,7 @@ def test_build_context_says_which_folders_the_code_opens(tmp_path: Path, monkeyp
     project = _project(tmp_path)
     _write(project, "docs/a.md", "text\n")
     code, out = _build_context_out(project, ["docs"], monkeypatch, capsys)
-    assert code == 2 and "fix: папкой в --docs можно назвать openspec/specs" in out["errors"][0]["message"]
+    assert code == 2 and out["errors"][0]["message"].startswith("SNAPSHOT_DOCS: ") and "fix: папкой в --docs можно назвать openspec/specs" in out["errors"][0]["message"]
 
 
 def test_build_context_refuses_a_folder_outside_the_project_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

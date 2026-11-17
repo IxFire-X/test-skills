@@ -525,16 +525,16 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
                  f"автотесты — только API Java {level['level']}, новее отклонит submit генератора (RUNNER_API_LEVEL)")]
 
 
-def _cases_row(project: Path, cases: str) -> dict[str, Any]:
-    """``--cases`` of the request: the check scan makes of the CSV (only reads, the same code)."""
+def _cases_row(project: Path, cases: str) -> tuple[dict[str, Any], str | None]:
+    """``--cases`` of the request: the check scan makes of the CSV (only reads, the same code); the row and the path in the project it returned (None on a stop)."""
     from tools.cases_import import CasesImportError
     from tools.run_pipeline import HostStop, check_cases
 
     try:
         rel, count = check_cases(project, cases)
     except (HostStop, CasesImportError) as refusal:
-        return _row("cases", CASES, "STOP", f"{refusal.code}: {refusal}", refusal.fix)
-    return _row("cases", CASES, "OK", f"{rel}: кейсов {count} — scan --cases возьмёт их")
+        return _row("cases", CASES, "STOP", f"{refusal.code}: {refusal}", refusal.fix), None
+    return _row("cases", CASES, "OK", f"{rel}: кейсов {count} — scan --cases возьмёт их"), rel
 
 
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None, cases: str | None = None) -> str:
@@ -567,8 +567,8 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     rows.append(_git_row(project, profile))
     rows.extend(check_run_root(project))
     rows.extend(check_docs(project, docs))
-    if cases:
-        rows.append(_cases_row(project, cases))
+    cases_row, cases_rel = _cases_row(project, cases) if cases else (None, None)  # the path scan takes; no context of the cases where the CSV stops
+    rows.extend([cases_row] if cases_row else [])
     from tools.run_pipeline import HostStop, expand_docs
 
     try:
@@ -599,7 +599,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                 scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
-                rows.append(check_context(project, selected, docs, inventory, target, cases))
+                rows.append(check_context(project, selected, docs, inventory, target, cases_rel))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1" and ((selected.get("stack") or {}) if isinstance(selected.get("stack"), Mapping) else {}).get("language") == "documents":

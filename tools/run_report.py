@@ -743,7 +743,8 @@ def _zephyr_import(root: Path) -> Any:
 
         header, added = read_template(Path(root).parent.parent, shown["template_path"]).header, shown["columns_added"]
         return {**shown, "columns_added": [column for column in added if column in header] if isinstance(added, list) else [],  # only names the checked template has
-                "rows": _count(shown["rows"]), "basis": ZEPHYR_BASIS}
+                "rows": _count(shown["rows"]), "basis": ZEPHYR_BASIS,
+                **({"columns_added_other": other} if type(other := record.get("columns_added_other")) is int and other >= 0 else {})}  # the columns the export did not name: a number only
     except (OSError, ValueError, KeyError, TypeError):
         return None
 

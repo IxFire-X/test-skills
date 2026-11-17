@@ -37,14 +37,17 @@ def test_the_csv_stays_in_the_inventory_and_the_run_reads_it(tmp_path: Path, mon
     assert found is not None and found[0] == CSV_PATH and found[1] == CSV.encode("utf-8")
 
 
-def test_the_requirements_step_of_an_import_with_documents_still_reads_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.step_size import journal_files
+def test_the_requirements_step_of_an_import_with_documents_still_reads_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import api
+    from tools.step_size import stage_inputs
 
-    project = _project(tmp_path)
-    code, scan = _scan(project, monkeypatch, docs=["docs/req.md"])
+    code, scan = _scan(_project(tmp_path), monkeypatch, docs=["docs/req.md"])
     assert code == 0, scan
-    files = journal_files(project, Path(scan["run_root"]).name, "context-marker:requirements", None)
-    assert CSV_PATH in [path.relative_to(project).as_posix() for path in files]
+    run_root = Path(scan["run_root"])
+    assert api.main(["prepare", "--run-root", str(run_root), "--stage", "context-marker:requirements"]) == 0
+    capsys.readouterr()
+    paths = [Path(row["path"]).relative_to(run_root.parents[1]).as_posix() for row in stage_inputs(run_root, "context-marker:requirements", write_views=False)["files"]]
+    assert [path for path in paths if not path.startswith(".pilot-runs/")] == ["docs/req.md", CSV_PATH]  # the documents of the run and the CSV (besides the view of the inventory); no file of a context receipt
 
 
 def test_ready_leaves_the_csv_of_cases_out_of_the_context_as_scan_does(tmp_path: Path) -> None:
@@ -78,3 +81,21 @@ def test_the_over_budget_hint_names_the_target_and_the_exclude() -> None:
 
     hint = measure(Path("."), [], "tc-generator", budget=1)["hint"]
     assert "--target" in hint and "paths.exclude" in hint and hint.count("\n") <= 2
+
+
+def _context_cases_of_ready(project: Path, monkeypatch: pytest.MonkeyPatch, typed: str) -> list:
+    from tools import ready
+
+    seen: list = []
+    real = ready.check_context
+    monkeypatch.setattr(ready, "check_context", lambda *args, **kwargs: (seen.append(args[-1]), real(*args, **kwargs))[1])
+    ready.check(project, ["docs/req.md"], "cases-only-v1", None, None, typed)
+    return seen
+
+
+def test_ready_gives_the_context_the_path_of_the_cases_that_the_check_of_the_csv_returned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _context_cases_of_ready(_project(tmp_path), monkeypatch, "./cases/../cases/zephyr.csv") == [CSV_PATH]
+
+
+def test_ready_has_no_cases_in_the_context_when_the_check_of_the_csv_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _context_cases_of_ready(_project(tmp_path), monkeypatch, "cases/missing.csv") == [None]
