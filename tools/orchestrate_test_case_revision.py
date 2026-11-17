@@ -414,9 +414,35 @@ def answer_outcome(run_root: Path, attempt_id: str, report: Mapping[str, Any]) -
     return review_outcome(journal_assembly(Path(run_root), attempt_id)[0], _plain(report), verify(run_root, attempt_id) or (), reject_share(run_root, attempt_id))
 
 
-def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def _partial_of(run_root: Path, attempt_id: str, candidate: Mapping[str, Any], outcome: Mapping[str, Any]) -> tuple[str, dict[str, Any] | None, dict[str, Any]]:
+    """``(rework state, rework_final or None, partial_context)`` of a ``PARTIAL`` outcome of the attempt, from the journal."""
+    state, final = rework_state(run_root, attempt_id), None
+    if state == "reviewed":  # the second round: the set is what rework_final makes of the answer and its review
+        data = rework_round_data(run_root, attempt_id)
+        final = rework_final(data["candidate"], data["outcome"], data["answer"], data["report2"])
+    return state, final, partial_context(candidate, outcome, {"state": state, **({"final": final} if final else {})} if state else None, _run_imported(run_root, attempt_id))
+
+
+def restored_tail(run_root: Path, attempt_id: str) -> bytes:
+    """The records the CSV of the published set carries after its accepted cases (the human's cases the review left out; ``b""`` when none), derived again from the journal."""
+    from tools.review_canaries import recorded_answer, verify
+    from tools.test_case_projections import restored_csv
+
+    report = (((recorded_answer(run_root, attempt_id) or {}).get("artifacts")) or {}).get("validation_report")
+    if not isinstance(report, Mapping) or report.get("verdict") != "ТРЕБУЕТ ДОРАБОТКИ":
+        return b""
+    candidate = journal_assembly(Path(run_root), attempt_id)[0]
+    outcome = review_outcome(candidate, _plain(report), verify(run_root, attempt_id) or (), reject_share(run_root, attempt_id))
+    if outcome["kind"] != "PARTIAL":
+        return b""
+    _state, final, partial = _partial_of(run_root, attempt_id, candidate, outcome)
+    return b"" if final and final["kind"] == "ALL" else restored_csv([item["row"] for item in partial.get("restored", [])])
+
+
+def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any] | None, texts: bool = False) -> dict[str, Any] | None:
     """What the report says of the review's outcome — the verdict as the reviewer gave it, the outcome the code drew from it and the numbers; a function of
-    the recorded answer, the candidate and the canaries of the journal (nothing is stored)."""
+    the recorded answer, the candidate and the canaries of the journal (nothing is stored).  ``texts``: the cases of the human the export keeps carry their title and
+    what the reviewer said (for the analyst's file; the report never has them)."""
     from tools.pilot_state import read_effective_canonical_if_present, terminal_reviewer_evidence
     from tools.review_canaries import verify
 
@@ -444,11 +470,7 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     summary.update(outcome=outcome["kind"], reason=outcome["reason"], share=share, removed=outcome["removed"], rejected_by_findings=len(outcome["rejected"]),
                    rejected_with_group=len(outcome["with_group"]), accepted=0 if outcome["kind"] == "REWORK" else total - outcome["removed"])
     if outcome["kind"] == "PARTIAL":
-        state, final = rework_state(run_root, attempt_id), None
-        if state == "reviewed":  # the second round: the set is what rework_final makes of the answer and its review
-            data = rework_round_data(run_root, attempt_id)
-            final = rework_final(data["candidate"], data["outcome"], data["answer"], data["report2"])
-        partial = partial_context(candidate, outcome, {"state": state, **({"final": final} if final else {})} if state else None)
+        state, final, partial = _partial_of(run_root, attempt_id, candidate, outcome)
         name = f"published/{candidate['document_id']}.r{partial['revision']}"
         if state:  # the first review sent cases back for a rework: what became of it
             summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": len(final["accepted_after"]) if final else 0, "accepted_first": total - outcome["removed"],
@@ -460,6 +482,10 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
                 summary.update(outcome="ACCEPTED_WHOLE", removed=0, rejected_by_findings=0, rejected_with_group=0)
                 return summary
         codes = lambda rows: sorted({finding_code(code) for row in rows for code, _text in row["said"]})  # noqa: E731  (the report carries codes, never the reviewer's texts: they are in the set's files)
+        out = {row["case_id"]: row for row in partial["rejected"]}
+        summary.update(**({"restored": [{"row": item["row"]["row"], "key": item["row"]["key"], "codes": codes([out[item["case_id"]]]),
+                                         **({"title": item["row"]["title"], "said": [text for _code, text in out[item["case_id"]]["said"]]} if texts else {})}
+                                        for item in partial["restored"]]} if partial.get("restored") else {}))
         summary.update(coverage_gaps=[{"requirement": gap["requirement"], "labels": gap["labels"], "codes": codes(row for row in partial["rejected"] if gap["requirement"] in row["requirements"])}
                                       for gap in partial["gaps"]],
                        rejected_cases=[{"case_id": row["case_id"], "label": row["label"], "with_group": row["with_group"], "codes": codes([row])} for row in partial["rejected"]],
@@ -678,7 +704,8 @@ def _publish_final(run_root: Path, attempt_id: str, data: Mapping[str, Any], fin
 
     candidate, outcome, published = data["candidate"], data["outcome"], published_dir(run_root)
     effective = final["effective"] if final else outcome["effective"]
-    partial = None if final and final["kind"] == "ALL" else partial_context(candidate, outcome, {"state": "reviewed", "final": final} if final else {"state": rework_state(run_root, attempt_id)})
+    partial = None if final and final["kind"] == "ALL" else partial_context(candidate, outcome, {"state": "reviewed", "final": final} if final else {"state": rework_state(run_root, attempt_id)},
+                                                                              _run_imported(run_root, attempt_id))
     receipt = publish_bundle(effective, published, _PROFILE, partial=partial)
     if verify_bundle(effective, published, _PROFILE, partial=partial) != receipt:
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
@@ -1242,7 +1269,7 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     verdict = report["verdict"]
     second = effective is not None and _plain(effective)["revision"] > 1  # AUTO_FIX or a subtraction: a second bundle beside the candidate's
     # a subtraction: its files say so, number the cases as the reviewer read them and say which requirements are left without a case
-    extra = {"partial": partial_context(candidate_value, review_outcome(candidate_value, _plain(report), canaries or (), share))} if second and verdict == "ТРЕБУЕТ ДОРАБОТКИ" else {}
+    extra = {"partial": partial_context(candidate_value, review_outcome(candidate_value, _plain(report), canaries or (), share), None, _run_imported(run_root, attempt_id))} if second and verdict == "ТРЕБУЕТ ДОРАБОТКИ" else {}
     facts = validate_reviewer_session(
         reviewer_session, package_binding, review_value,
         run_root=run_root, attempt_id=attempt_id,

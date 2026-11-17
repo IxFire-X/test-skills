@@ -22,6 +22,7 @@ from tools.test_case_projections import (
     _render_markdown_validated,
     _render_zephyr_csv_validated,
     escape_inline,
+    restored_csv,
     section_labels,
 )
 
@@ -120,7 +121,8 @@ def build_bundle(document: dict[str, Any], csv_profile: str = _PROFILE, *, _allo
     markdown = _render_markdown_validated(document, csv_profile, extras).payload if csv_profile in _CURRENT_PROFILES else b""
     if partial is not None:
         warnings, preview, markdown = preview.warnings, _partial_html(preview.payload, partial), _partial_markdown(markdown, partial)
-        return BundlePayloads(canonical_bytes(document), preview, csv.payload, warnings + csv.warnings, markdown)
+        tail = restored_csv([item["row"] for item in partial.get("restored", [])])  # the human's cases the set left out, as the CSV had them: after the accepted ones
+        return BundlePayloads(canonical_bytes(document), preview, csv.payload + tail, warnings + csv.warnings, markdown)
     return BundlePayloads(canonical_bytes(document), preview.payload, csv.payload, preview.warnings + csv.warnings, markdown)
 
 
@@ -349,11 +351,12 @@ def plural(number: int, one: str, few: str, many: str) -> str:
     return one if number % 10 == 1 and number % 100 != 11 else few if number % 10 in (2, 3, 4) and number % 100 not in (12, 13, 14) else many
 
 
-def partial_context(candidate: dict[str, Any], outcome: dict[str, Any], rework: dict[str, Any] | None = None) -> dict[str, Any]:
+def partial_context(candidate: dict[str, Any], outcome: dict[str, Any], rework: dict[str, Any] | None = None, imported: dict[str, Any] | None = None) -> dict[str, Any]:
     """What the files and the report of a ``PARTIAL`` outcome say, a function of the reviewer's set r1 and the outcome (nothing is stored):
     the numbers of r1, the cases taken out with what the reviewer said of them, and the requirements left without a case.  ``rework`` — what became of
     the rework: ``{"state": "not_started" | "unfinished"}`` or ``{"state": "reviewed", "final": rework_final(...)}`` (the cases not accepted are shown in the
-    last reworked version, with the findings of both rounds)."""
+    last reworked version, with the findings of both rounds).  ``imported``: the skeleton of an import run — its cases left out stay in the CSV (``restored``)."""
+    from tools.cases_import import restored_rows
     from tools.revision_selection import coverage_gaps
 
     final = (rework or {}).get("final")
@@ -372,8 +375,9 @@ def partial_context(candidate: dict[str, Any], outcome: dict[str, Any], rework: 
                 for case in candidate["test_cases"] if case["case_id"] in out]
     gaps = [{"requirement": item, "labels": [row["label"] for row in rejected if item in row["requirements"]],
              "said": list(dict.fromkeys(text for row in rejected if item in row["requirements"] for _code, text in row["said"]))} for item in coverage_gaps(outcome["effective"])]
+    restored = [{"case_id": case_id, "row": row} for case_id, row in restored_rows(candidate, out, imported)] if imported else []
     return {"total": len(candidate["test_cases"]), "kept": len(outcome["effective"]["test_cases"]), "labels": labels, "rejected": rejected, "gaps": gaps,
-            "rework": (rework or {}).get("state"), "versions": final["reworked"] if final else {}, "revision": outcome["effective"]["revision"],
+            **({"restored": restored} if restored else {}), "rework": (rework or {}).get("state"), "versions": final["reworked"] if final else {}, "revision": outcome["effective"]["revision"],
             "file": f"{candidate['document_id']}.r{outcome['effective']['revision']}.REJECTED-CASES.md"}
 
 
@@ -386,7 +390,13 @@ def _partial_header(partial: dict[str, Any]) -> tuple[str, str]:
     gaps = len(partial["gaps"])
     left = (f" Без принятого кейса {plural(gaps, 'осталось', 'остались', 'остались')} {gaps} {plural(gaps, 'требование', 'требования', 'требований')}"
             " — см. раздел «Пробелы покрытия» в конце.") if gaps else ""
-    return f"Принят частично: {partial['kept']} из {partial['total']} кейсов.", where + left
+    return f"Принят частично: {partial['kept']} из {partial['total']} кейсов.", where + left + restored_sentence(partial)
+
+
+def restored_sentence(partial: dict[str, Any]) -> str:
+    """The words about the human's cases the export keeps as the CSV had them («» when there are none): Key and row of each."""
+    names = ", ".join((f"Key {item['row']['key']}" if item["row"]["key"] else "Key нет") + f" (строка {item['row']['row']})" for item in partial.get("restored", []))
+    return f" В файл для Zephyr из них вошли прежним текстом из CSV: {names}." if names else ""
 
 
 def gap_rows(partial: dict[str, Any]) -> list[tuple[str, str, str]]:
@@ -442,5 +452,5 @@ def rejected_cases(candidate: dict[str, Any], partial: dict[str, Any], run_id: s
     name = subject["name"] if subject["kind"] != "http_endpoint" else f"{subject['method']} {subject['path']}"
     why = REJECTED_WHY[partial["rework"] or "not_started"]
     intro = (f"Прогон {run_id[:8]}…, набор «{name}». Эти кейсы не прошли ревью{why} "
-             "Их можно доработать вручную или запросить новый прогон для этих требований.")
+             "Их можно доработать вручную или запросить новый прогон для этих требований." + restored_sentence(partial))
     return shown, {"labels": {**partial["labels"], **{row["case_id"]: row["label"] for row in partial["rejected"]}}, "notes": notes}, intro

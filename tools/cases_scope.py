@@ -33,6 +33,7 @@ class Scope(NamedTuple):
     source: str  # "all", "change", "archive" or "change+archive"
     affected: frozenset[Name]  # added, modified or renamed (the new name) by the delta
     gone: frozenset[Name]  # removed by the delta
+    added: frozenset[Name] = frozenset()  # the ADDED ones: a requirement that did not exist, so no old case can check it
 
 
 def _path(entry: Mapping[str, str]) -> str:
@@ -41,8 +42,14 @@ def _path(entry: Mapping[str, str]) -> str:
 
 def delta_names(entries: Sequence[Mapping[str, str]]) -> tuple[set[Name], set[Name]]:
     """``(affected, gone)`` of delta files: ADDED, MODIFIED and the new name of RENAMED touch a requirement, REMOVED takes one away."""
+    return _delta(entries)[:2]
+
+
+def _delta(entries: Sequence[Mapping[str, str]]) -> tuple[set[Name], set[Name], set[Name]]:
+    """``(affected, gone, added)``: ``added`` is the part of ``affected`` the ADDED sections name."""
     affected: set[Name] = set()
     gone: set[Name] = set()
+    added: set[Name] = set()
     for entry in entries:
         capability = _DELTA.fullmatch(_path(entry))["capability"]
         text, section = entry["content"], ""
@@ -58,9 +65,11 @@ def delta_names(entries: Sequence[Mapping[str, str]]) -> tuple[set[Name], set[Na
             name = (capability, title[len("### Requirement:"):].strip())
             if section in ("ADDED", "MODIFIED"):
                 affected.add(name)
+                if section == "ADDED":
+                    added.add(name)
             elif section == "REMOVED":
                 gone.add(name)
-    return affected, gone
+    return affected, gone, added
 
 
 def scope(snapshots: Sequence[Mapping[str, str]], docs: Sequence[str]) -> Scope:
@@ -81,8 +90,8 @@ def scope(snapshots: Sequence[Mapping[str, str]], docs: Sequence[str]) -> Scope:
         raise ScopeSourceError(f"в файле нет операций ADDED / MODIFIED / REMOVED / RENAMED: {', '.join(empty)}")
     if not live and not archived:
         return Scope("all", frozenset(), frozenset())
-    affected, gone = delta_names([*live, *archived])
-    return Scope("+".join(label for label, found in (("change", live), ("archive", archived)) if found), frozenset(affected), frozenset(gone))
+    affected, gone, added = _delta([*live, *archived])
+    return Scope("+".join(label for label, found in (("change", live), ("archive", archived)) if found), frozenset(affected), frozenset(gone), frozenset(added))
 
 
 def identities(requirement: Mapping[str, Any]) -> set[Name]:

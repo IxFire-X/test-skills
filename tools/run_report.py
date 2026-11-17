@@ -79,12 +79,12 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     if checks:  # no question: what the update did to the old cases, for the analyst to check
         lines += ["## Проверьте: кейсы после обновления", ""]
         for row in checks:
-            label = {"rewritten": "переписан", "obsolete": "устарел", "manual": "сомнение"}[row["group"]]
+            label = {"rewritten": "переписан", "obsolete": "устарел", "manual": "сомнение", "restored": "отклонён ревью, в выгрузку вошёл прежним (как в CSV)"}[row["group"]]
             key, was, now, reason = (_one_line(row[name]) for name in ("key", "was", "now", "reason"))  # one line each, as the notes of the review
             lines += [f"- строка {row['row']}" + (f", Key {key}" if key else "") + f" — {label}: «{was}»"
-                      + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] == "rewritten" and not key else ""))
+                      + (f" → «{now}»" if now else (" (Key нет: Zephyr создаст дубль)" if row["group"] in ("rewritten", "restored") and not key else ""))
                       + (f"; удалено требование {_one_line(row['removed']['capability'])}/{_one_line(row['removed']['name'])}" if row["removed"] else "")
-                      + (f"; причина: {reason}" if reason else "")]
+                      + (f"; {'замечание ревьюера' if row['group'] == 'restored' else 'причина'}: {reason}" if reason else "")]
         kept = [row["row"] for row in ((imported or {}).get("verdicts") or {}).get("unchanged") or []]  # the rows left as they are: numbers only, no text of a case
         lines += [f"- без изменений: {len(kept)}" + (f" — строки {row_ranges(kept)}" if kept else "") + f"; вне документов: {len(outside)}" + (" — см. раздел ниже" if outside else ""), ""]
     if gap_rows:  # a requirement of the documents no imported case checks — new cases are written for it
@@ -773,6 +773,16 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
             **({"judged": len(judged), "verdicts": {name: [{"row": row, "key": keys[row]} for row in rows] for name, rows in verdict_groups(imported).items()}} if judged else {})}
 
 
+def _with_restored(summary: dict[str, Any] | None, acceptance: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The cases of the human the export keeps after the review rejected them are a group of their own, in no other (not in «без изменений»)."""
+    rows = {row["row"] for row in (acceptance or {}).get("restored") or []}
+    if not rows or not (summary or {}).get("verdicts"):
+        return summary
+    groups = summary["verdicts"]
+    return {**summary, "verdicts": {**{name: [row for row in items if row["row"] not in rows] for name, items in groups.items()},
+                                    "restored": sorted((row for items in groups.values() for row in items if row["row"] in rows), key=lambda row: row["row"])}}
+
+
 def _left(root: Path) -> str | None:
     """«оставлен до ревью кейсов» of a run left by finish --abandon LEFT_BEFORE_REVIEW."""
     from tools.pilot_state import left_attempt
@@ -953,6 +963,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             acceptance = acceptance_summary(root, attempt_id, answer)
         except (KeyError, OSError, TypeError, ValueError):
             acceptance = None
+        if acceptance and acceptance.get("restored"):  # the Key of a case of the CSV is a name, or nothing: the report copies no other text
+            acceptance = {**acceptance, "restored": [{**row, "key": _identifier(row["key"])} for row in acceptance["restored"]]}
         if answer is not None:
             codeword = review_canaries.codeword_state(root, attempt_id, answer)
     reviewed_from = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("stage") == "tc-reviewer:canonical" and call.get("by") == "reuse"), None)
@@ -996,7 +1008,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         **({"requirement_labels": labels} if labels else {}),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
-        "import": _import_summary(root, events),
+        "import": _with_restored(_import_summary(root, events), acceptance),
         "automation_split": _split(root, attempt_id),
         "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
@@ -1225,7 +1237,8 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
     if acc["outcome"] != "PARTIAL":
         return lines + ([f"Ревью: {who}, 2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])
-    gaps, files = acc["coverage_gaps"], acc["files"]
+    gaps, files, kept = acc["coverage_gaps"], acc["files"], acc.get("restored") or []  # kept: the cases of the CSV the export has as the human wrote them
+    names = [f"{row['key'] or 'Key нет'} (строка {row['row']})" for row in kept]
     rework = rework if rework and rework["state"] != "not_started" else None  # nothing was sent back: the three rows of V6
     first = rework["accepted_first"] if rework else accepted
     lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {first} |",
@@ -1234,8 +1247,10 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
               f"Ревью: {who}, "
               + ("2 круга: весь набор, затем только доработанный кейс." if rework and rework["state"] == "reviewed" else "1 круг: весь набор."),
               (f"Пробелы покрытия: {len(gaps)} {plural(len(gaps), 'требование осталось', 'требования остались', 'требований остались')} без принятого кейса — см. «Пробелы покрытия»." if gaps
-               else "Пробелов покрытия нет: у каждого требования остался принятый кейс."), "",
-              "Файлы для работы:", f"- Набор для импорта в Zephyr: {files['csv']} ({accepted} {plural(accepted, 'кейс', 'кейса', 'кейсов')})", f"- Набор для чтения: {files['set']}",
+               else "Пробелов покрытия нет: у каждого требования остался принятый кейс."),
+              *([f"Из CSV отклонено ревью и вошло в выгрузку прежним: {', '.join(names)}; коды замечаний: {', '.join(sorted({code for row in kept for code in row['codes']})) or '—'}."] if kept else []), "",
+              "Файлы для работы:", f"- Набор для импорта в Zephyr: {files['csv']} ({accepted} {plural(accepted, 'кейс', 'кейса', 'кейсов')}"
+              + (f" + {len(kept)} из CSV как были" if kept else "") + ")", f"- Набор для чтения: {files['set']}",
               f"- Не принятые кейсы — не импортировать: {files['rejected']}", "- Вопросы аналитику: questions-for-analyst.md", ""]
     if gaps:
         lines += ["## Пробелы покрытия", "", "| Требование | Почему нет кейса | Что сказал ревьюер |", "|---|---|---|",
@@ -1324,13 +1339,14 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-_VERDICT_GROUPS = (("unchanged", "без изменений"), ("manual", "проверить вручную"), ("rewritten", "переписаны"), ("obsolete", "устарели"), ("outside", "вне документов"))
+_VERDICT_GROUPS = (("unchanged", "без изменений"), ("manual", "проверить вручную"), ("rewritten", "переписаны"), ("obsolete", "устарели"), ("outside", "вне документов"),
+                   ("restored", "отклонены ревью, в выгрузке как в CSV"))
 
 
 def _verdict_line(summary: Mapping[str, Any]) -> str:
     """The six groups of an update of cases in the report — counts and rows, never a text of a case or of a verdict."""
     groups = [f"{label}: {len(rows)}" + (f" (строки {row_ranges([row['row'] for row in rows])})" if rows else "")
-              for name, label in _VERDICT_GROUPS for rows in [summary["verdicts"][name]]]
+              for name, label in _VERDICT_GROUPS for rows in [summary["verdicts"].get(name, [])] if rows or name != "restored"]
     return (f"- кейсов из CSV: {summary['cases']}, судилось: {summary['judged']}; " + "; ".join(groups)
             + f"; требований без кейса в CSV (новые кейсы под них пишет генератор): {len(summary['new'])}"
             + (" (" + ", ".join(filter(None, summary["new"])) + ")" if summary["new"] else "") + "; тексты — в questions-for-analyst.md")
@@ -1352,7 +1368,7 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     report, warnings = build_report(project, run_id)
     summary = report.get("import")
     imported = {**summary, "gaps": _gap_texts(root)} if summary and "gaps" in summary else summary  # the text of a requirement goes to the analyst only
-    if imported and imported.get("verdicts"):
+    if imported and (imported.get("verdicts") or (report.get("acceptance") or {}).get("restored")):
         imported = {**imported, "verdict_texts": _verdict_texts(root)}  # so do the texts of the cases and of the verdicts
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
@@ -1378,10 +1394,11 @@ def _gap_texts(root: Path) -> list[Any]:
 
 
 def _verdict_texts(root: Path) -> list[dict[str, Any]]:
-    """The rewritten, obsolete and doubtful cases of the newest attempt with their text — for ``questions-for-analyst.md`` only, never for the
-    report; «now» is the title the accepted set has for the Key (nothing without a Key or an accepted set)."""
-    from tools import pilot_state
+    """The rewritten, obsolete and doubtful cases of the newest attempt, and the ones of the CSV the review rejected and the export keeps, with their text — for
+    ``questions-for-analyst.md`` only, never for the report; «now» is the title the accepted set has for the Key (nothing without a Key or an accepted set)."""
+    from tools import pilot_state, review_canaries
     from tools.cases_import import verdict_groups
+    from tools.orchestrate_test_case_revision import acceptance_summary
 
     try:
         attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
@@ -1391,8 +1408,14 @@ def _verdict_texts(root: Path) -> list[dict[str, Any]]:
     now = {((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"): case["title"]
            for case in (_effective_document(root, attempt_id)[0] or {}).get("test_cases") or []}
     group = {row: name for name, rows in verdict_groups(imported).items() if name in ("rewritten", "obsolete", "manual") for row in rows}
+    try:
+        kept = {row["row"]: row for row in (acceptance_summary(root, attempt_id, review_canaries.recorded_answer(root, attempt_id), True) or {}).get("restored") or []}
+    except (KeyError, OSError, TypeError, ValueError):
+        kept = {}
+    group.update({row: "restored" for row in kept})  # what the review rejected is shown by that, whatever the update made of the case
     return [{"group": group[case["row"]], "row": case["row"], "key": case["key"], "was": case["title"], "now": now.get(case["key"]) if case["key"] and group[case["row"]] == "rewritten" else None,
-             "reason": case.get("verdict_reason"), "removed": case.get("removed")} for case in imported["cases"] if case["row"] in group]
+             "reason": " ".join(kept[case["row"]]["said"]) if case["row"] in kept else case.get("verdict_reason"), "removed": None if case["row"] in kept else case.get("removed")}
+            for case in imported["cases"] if case["row"] in group]
 
 
 def _attempt_notes(run_root: Path) -> tuple[list[Any], list[Any]]:

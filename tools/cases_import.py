@@ -180,15 +180,17 @@ def canonical_management(case: Mapping[str, Any]) -> dict[str, Any]:
 
 def _verdict_errors(links: list[Mapping[str, Any]], requirements: list[Mapping[str, Any]], found: Any) -> list[str]:
     """The verdict rules of an answer: a row the scope judges has one, ``rewrite`` and ``obsolete`` only inside the scope, ``obsolete`` only for a requirement the delta removes."""
-    from tools.cases_scope import judged_rows, unmatched
+    from tools.cases_scope import identities, judged_rows, unmatched
 
     missing = unmatched(requirements, found)
     if found.affected and len(missing) == len(found.affected):
         return ["имена дельты не найдены среди требований: " + ", ".join(f"{cap}/{name}" for cap, name in missing[:5]) + " — повторите scan: он назовёт причину"]  # the scan stops on it before the model; no advice the model cannot do
     judged, errors = set(judged_rows(links, requirements, found)), []
+    added = {str(item["source_requirement_id"]) for item in requirements if identities(item) & found.added}
     for link in links:
         row, verdict, ids = link["row"], link.get("verdict"), link["source_requirement_ids"]
         removed = link.get("removed") or {}
+        errors += [f"строка {row}: {', '.join(item for item in ids if item in added)} добавлено изменением, у добавленного требования старых кейсов нет — убери его из связей строки"] * bool(added & set(ids))
         if verdict is None:
             errors += [f"строка {row}: нет verdict"] * (row in judged)
         elif verdict != "fits" and row not in judged:
@@ -294,13 +296,28 @@ def is_rewritten(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imp
     a rewrite keeps), else traces to exactly the source requirements of that case — its text is the generator's, its ``priority`` and
     ``management`` stay the human's.  Without a Key and with several imported cases of the same sources (a positive and a negative case of one
     requirement) the k-th such case of the candidate by ``display_order`` is the k-th by row (``peers``: the cases of the candidate)."""
+    same = rows_of(case, mappings, imported, peers)
+    return len(same) == 1 and same[0].get("verdict") == "rewrite"
+
+
+def rows_of(case: Mapping[str, Any], mappings: list[Mapping[str, Any]], imported: Mapping[str, Any], peers: Sequence[Mapping[str, Any]] = ()) -> list[Mapping[str, Any]]:
+    """The skeleton rows an imported case may be: by its Key, else by exactly its sources, of several the k-th by row for the k-th such case (``peers``); several when that cannot tell."""
     found = _found(case, mappings)
     key = ((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale")
     same = [item for item in imported["cases"] if key and item["key"] == key] or [item for item in imported["cases"] if set(case_sources(item)) == found]
     if len(same) > 1 and not key:
         mates = sorted((peer for peer in peers if _found(peer, mappings) == found), key=lambda peer: peer.get("display_order", 0))
         same = [sorted(same, key=lambda item: item["row"])[mates.index(case)]] if len(mates) == len(same) and case in mates else same
-    return len(same) == 1 and same[0].get("verdict") == "rewrite"
+    return same
+
+
+def restored_rows(candidate: Mapping[str, Any], out: Sequence[str], imported: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
+    """``(case_id, skeleton row)`` of the imported cases the set left out (``out``), by row — the human's cases the export keeps; a new case is not among them; rows that
+    cannot be told apart are all kept (a duplicate in Zephyr is better than a lost case)."""
+    mappings, gaps = candidate.get("source_to_canonical_mappings") or [], {row["source_requirement_id"] for row in imported.get("gaps") or []}
+    cases = candidate["test_cases"]
+    found = {row["row"]: (case["case_id"], row) for case in cases if case["case_id"] in out and not is_new_case(case, mappings, gaps) for row in rows_of(case, mappings, imported, cases)}
+    return [found[number] for number in sorted(found)]
 
 
 def _labelled(management: Mapping[str, Any], link: Mapping[str, Any]) -> Mapping[str, Any]:  # the label of an obsolete case last, unless an element is that label already

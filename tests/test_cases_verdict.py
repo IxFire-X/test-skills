@@ -263,3 +263,20 @@ def test_ready_with_cases_stops_where_scan_stops_on_an_archived_area_not_named(t
 def test_ready_with_cases_stops_where_scan_stops_on_one_of_two_deltas_of_an_archive(tmp_path: Path) -> None:
     status, row = _ready_stop(tmp_path, {ARCHIVE: MODIFY, SECOND: MODIFY, BASE: SPEC}, [BASE, ARCHIVE])
     assert status == "BLOCKED" and "openspec/changes/archive/2026-11-01-update" in row["fix"], row
+
+
+ADD = "## ADDED Requirements\n### Requirement: Trim\ncombine trims blanks.\n#### Scenario: Trimmed\n- WHEN combine\n- THEN trimmed\n"
+
+
+def test_a_row_linked_to_a_requirement_the_delta_adds_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _project_dir, root, attempt_id, rows = _run(tmp_path, monkeypatch, ADD, LIVE_DOCS)
+    names = _by_name(rows)
+    links = [{"row": 2, "source_requirement_ids": [names["Join"], names["Trim"]], "verdict": "fits"}, {"row": 3, "source_requirement_ids": [names["Refuse"]]}]
+    _refused(root, attempt_id, rows, links, f"строка 2: {names['Trim']} добавлено изменением")
+
+
+def test_an_added_requirement_no_row_links_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _project_dir, root, attempt_id, rows = _run(tmp_path, monkeypatch, ADD, LIVE_DOCS)
+    names = _by_name(rows)
+    links = [{"row": 2, "source_requirement_ids": [names["Join"]]}, {"row": 3, "source_requirement_ids": [names["Refuse"]]}]
+    assert _publish(root, attempt_id, rows, links)["content_digest"]

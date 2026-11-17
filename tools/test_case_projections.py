@@ -9,7 +9,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
 from tools.canonical_document import param_groups, require_valid_canonical_document
@@ -704,3 +704,17 @@ def _render_zephyr_csv_validated(document: dict[str, Any], profile: str = _PROFI
     writer = csv.writer(output, delimiter=",", quotechar='"', lineterminator="\r\n")
     writer.writerows(records)
     return Projection(output.getvalue().encode("utf-8-sig"), tuple(warnings))
+
+
+def restored_csv(rows: Sequence[Mapping[str, Any]]) -> bytes:
+    """The records of skeleton rows for the CSV of the export: the cells ``_render_zephyr_csv_validated`` writes for a human case (no header, no byte order mark)."""
+    from tools.cases_import import canonical_management
+
+    records: list[list[Any]] = []
+    for row in rows:
+        head = _case_metadata({"title": row["title"], "objective": row["objective"], "preconditions": row["preconditions"], "priority": row["priority"], "management": canonical_management(row)})
+        records += [[_formula_safe(value) for value in [*(head if number == 0 else [""] * len(head)), step["action"], step["test_data"], "\n\n".join(step["expectations"]), "", ""]]
+                    for number, step in enumerate(row["steps"])]
+    output = io.StringIO(newline="")
+    csv.writer(output, delimiter=",", quotechar='"', lineterminator="\r\n").writerows(records)
+    return output.getvalue().encode("utf-8")

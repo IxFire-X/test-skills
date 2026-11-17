@@ -129,8 +129,8 @@ def build_import_csv(bundle_csv: bytes, document: Mapping[str, Any], template: T
         if not row[name]:
             output.append(row + [""] * len(extra))
             continue
-        case = next(cases)
-        automated = case["case_id"] in automated_case_ids and not case.get("automation_blockers")
+        case = next(cases, None)  # none: a case of the human the review rejected, which the file carries after the accepted ones
+        automated = case is not None and case["case_id"] in automated_case_ids and not case.get("automation_blockers")
         filled = list(row)
         for index, column in enumerate(ours):
             if column == AUTOMATED and column in template.values:
@@ -235,10 +235,11 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     closed, automated = _automation_facts(root)
     if not closed:
         raise ZephyrTemplateError("ZEPHYR_EXPORT_NOT_CLOSED")
+    from tools.orchestrate_test_case_revision import restored_tail
     from tools.publish_test_case_bundle import build_bundle
 
-    try:  # the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has
-        expected = build_bundle(document).csv_bytes
+    try:  # the CSV the rows are copied from is the CSV of the document the run published — the same check the JSON has; the cases of the human the review rejected follow, derived again from the journal
+        expected = build_bundle(document).csv_bytes + restored_tail(root, state["attempts"][-1]["attempt_id"])
     except Exception:  # noqa: BLE001 - a document that cannot build its bundle is not a document to export
         raise ZephyrTemplateError("ZEPHYR_EXPORT_CASES", str(bundle_csv)) from None
     if expected != cases_bytes:
