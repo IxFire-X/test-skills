@@ -107,8 +107,8 @@ def test_the_labels_are_checked_at_the_write_of_a_marker_not_at_its_read(tmp_pat
 def test_labels_are_forms_of_a_numbered_statement_and_nothing_else() -> None:
     from tools.build_context import document_labels
 
-    text = "D01. a\nU12) b\nFR3: c\n- FR-01 d\n  REQ_12. e\nТР-3: f\n1.2.3. g\n2.10 h\n"
-    assert document_labels(text) == ["D01", "U12", "FR3", "FR-01", "REQ_12", "ТР-3", "1.2.3", "2.10"]
+    text = "D01. a\nU12) b\nFR3: c\n- FR-01 d\n  REQ_12. e\nТР-3: f\n1.2.3. g\n2.10 h\nREQ-1001 i\nBR-3.1 j\nFR-12.4. k\n"
+    assert document_labels(text) == ["D01", "U12", "FR3", "FR-01", "REQ_12", "ТР-3", "1.2.3", "2.10", "REQ-1001", "BR-3.1", "FR-12.4"]
     assert document_labels("# 1.2 Раздел\n1. список\n17.11.2026 дата\nОбычный текст D01. в середине\n") == []
 
 
@@ -136,3 +136,47 @@ def test_the_output_for_openspec_is_byte_for_byte_what_it_was() -> None:
 
     out = build_context(Path("."), docs_snapshot=_snapshot(BASE, SPEC) + _snapshot(ADD, ADDED))
     assert hashlib.sha256(json.dumps(out, sort_keys=True, ensure_ascii=False).encode()).hexdigest() == "8d576f69a2cdbc5f050b39a9c332087a69ded7b60cad86e17babf10097fb0c6b"  # taken before tails13
+
+
+def test_fewer_requirements_than_labels_but_not_fewer_than_half_is_a_warning_in_the_submit_and_in_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.run_report import build_report, render_markdown
+
+    project = _project(tmp_path, NUMBERED)  # 12 numbers
+    scan = _scan(project, monkeypatch, [DOC])
+    code, out = _marker(project, scan, 9, capsys)
+    assert code == 0 and "номеров 12, требований в разметке 9" in out["result"]["requirement_labels"] and DOC in out["result"]["requirement_labels"], out
+    report, _warnings = build_report(project, scan["run_id"])
+    assert report["requirement_labels"] == {"documents": [{"path": DOC, "labels": 12}], "requirements": 9} and "REQUIREMENTS_FEWER_THAN_LABELS" in report["warnings"]
+    text = render_markdown(report)
+    assert "REQUIREMENTS_FEWER_THAN_LABELS" in text and f"{DOC}: номеров 12" in text and "требований в разметке: 9" in text and "Поле 1 обязательно" not in text
+
+
+def test_a_requirement_per_number_gives_neither_a_warning_nor_a_key_in_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.run_report import build_report, render_markdown
+
+    project = _project(tmp_path, NUMBERED)
+    scan = _scan(project, monkeypatch, [DOC])
+    code, out = _marker(project, scan, 12, capsys)
+    assert code == 0 and "requirement_labels" not in out["result"], out
+    report, _warnings = build_report(project, scan["run_id"])
+    assert "requirement_labels" not in report and "REQUIREMENTS_FEWER_THAN_LABELS" not in report["warnings"] and "REQUIREMENTS_FEWER_THAN_LABELS" not in render_markdown(report)
+
+
+def test_the_warning_is_in_the_submit_of_the_requirements_step_of_a_marker_in_parts_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import run_pipeline
+
+    monkeypatch.setattr(run_pipeline, "_SCAN_CONTEXT_BYTE_BUDGET", 4000)
+    project = _project(tmp_path, NUMBERED, big=True)
+    scan = _scan(project, monkeypatch, [DOC])
+    code, out = _marker(project, scan, 9, capsys, "context-marker:requirements")
+    assert code == 0 and "номеров 12, требований в разметке 9" in out["result"]["requirement_labels"], out
+
+
+def test_the_block_of_the_outcome_names_the_numbers_of_the_documents_and_the_requirements() -> None:
+    from tests.test_partial_report import _acceptance
+    from tools.run_report import _acceptance_lines
+
+    report = {"acceptance": _acceptance(), "review_canaries": None, "reviewer_isolation_state": "verified", "quarantine": [], "counts": {"automation": False},
+              "requirement_labels": {"documents": [{"path": DOC, "labels": 12}], "requirements": 9}}
+    assert f"> **Внимание: в документе {DOC} номеров 12, требований в разметке 9.** Сверьте, что ни одно требование не пропущено и не склеено." in _acceptance_lines(report)
+    assert not any("номеров" in line for line in _acceptance_lines({**report, "requirement_labels": None}))

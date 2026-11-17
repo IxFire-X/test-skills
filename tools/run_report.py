@@ -572,6 +572,7 @@ _WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повто�
                  "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией журнала",
                  "STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
                  "STEP_OUTPUT_LARGE": "ответ модели больше порога limits.step_output_warn_bytes — только замер, деление выключено",
+                 "REQUIREMENTS_FEWER_THAN_LABELS": "в документе номеров больше, чем требований в разметке — сверьте, что ни одно требование не пропущено и не склеено",
                  "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)",
                  "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
                                      "(подсказка ревьюеру)",
@@ -903,6 +904,12 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             requirements = len(artifact["artifacts"]["analytics_documentation"]["requirements"])
         except (KeyError, OSError, TypeError, ValueError):
             requirements = None
+    labels = None  # fewer requirements than the numbers of the documents (the warning of the submit of the marker): the paths and the numbers
+    if requirements is not None:
+        try:
+            labels = pilot.requirement_label_counts(root, marker["attempt_id"], requirements)
+        except (KeyError, OSError, TypeError, ValueError):
+            labels = None
     cases = None
     document, effective_unreadable = _effective_document(root, attempt_id)
     canon_basis = None
@@ -978,7 +985,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "phases": phases(events), "input_composition": composition, "refusals": refused, "canon": canon_numbers(document),
         "tmp": tmp_usage(root, project),
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
-                    + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
+                    + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else []) + (["REQUIREMENTS_FEWER_THAN_LABELS"] if labels else [])
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else [])
                     + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else [])
@@ -987,6 +994,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["refusals.mismatch"] if refused and refused["mismatch"] else [])
                     + (["CODEWORD_LOST"] if refused and refused.get("codeword_lost") else [])
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
+        **({"requirement_labels": labels} if labels else {}),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
         "automation_split": _split(root, attempt_id),
@@ -1210,6 +1218,10 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
                   "> Ревью могло пропустить и настоящие ошибки — просмотрите принятые кейсы внимательнее перед импортом.", ""]
+    if report.get("requirement_labels"):
+        found = report["requirement_labels"]
+        lines += [f"> **Внимание: в документе {', '.join(row['path'] for row in found['documents'])} номеров {sum(row['labels'] for row in found['documents'])}, требований в разметке {found['requirements']}.** "
+                  "Сверьте, что ни одно требование не пропущено и не склеено.", ""]
     who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
     if acc["outcome"] != "PARTIAL":
         return lines + ([f"Ревью: {who}, 2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])
@@ -1259,6 +1271,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"{totals['output_bytes']} | {totals['output_tokens_est']} |", "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
+        *([*(f"  - {row['path']}: номеров {row['labels']}" for row in report["requirement_labels"]["documents"]), f"  - требований в разметке: {report['requirement_labels']['requirements']}"]
+          if report.get("requirement_labels") else []),
         *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),
         *([f"  - кейсов, повторяющих тесты проекта: {len(report['existing_tests']['repeating'])} из {report['existing_tests']['cases']}"
            f" ({', '.join(report['existing_tests']['repeating'][:10])})"] if report.get("existing_tests") and report["existing_tests"]["repeating"] else []),

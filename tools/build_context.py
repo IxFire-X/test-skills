@@ -84,7 +84,7 @@ def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None =
     return found
 
 
-_LABEL = re.compile(r"^ {0,3}(?:[-*]\s+)?(?:([^\W\d_]{1,4}[-_]\d{1,3})[.):]?|([^\W\d_]{1,3}\d{1,3})[.):]|(\d{1,3}(?:\.\d{1,3}){1,3})\.?)(?=[ \t])", re.M)  # FR-01 REQ_12 ТР-3: · D01. U12) FR3: · 1.2.3. 2.10; not a heading, not «1.», not a date
+_LABEL = re.compile(r"^ {0,3}(?:[-*]\s+)?(?:([^\W\d_]{1,4}[-_]\d{1,5}(?:\.\d{1,3}){0,2})[.):]?|([^\W\d_]{1,3}\d{1,3})[.):]|(\d{1,3}(?:\.\d{1,3}){1,3})\.?)(?=[ \t])", re.M)  # FR-01 REQ-1001 BR-3.1 FR-12.4. ТР-3: · D01. U12) FR3: · 1.2.3. 2.10; not a heading, not «1.», not a date
 LABELS_MIN = 8
 
 
@@ -93,20 +93,33 @@ def document_labels(text: str) -> list[str]:
     return [match.group(1) or match.group(2) or match.group(3) for match in _LABEL.finditer(text)]
 
 
-def label_refusal(requirements: int, documents: dict[str, str], project: Path) -> str | None:
-    """Why an answer of ``requirements`` rows cannot stand for the plain documents (path → text; OpenSpec paths and a project with ``requirements.id_pattern`` are no case): they carry at
-    least LABELS_MIN labels and the answer has fewer than half as many requirements — the sections of the document were taken for the requirements.  Only paths, labels and numbers are said."""
+def document_label_counts(documents: dict[str, str], project: Path) -> dict[str, list[str]]:
+    """path → the distinct labels of each plain document (OpenSpec paths and a project with ``requirements.id_pattern`` are no case), ``{}`` where they are fewer than LABELS_MIN."""
     if _project_id_pattern(project) is not None:
-        return None
-    documents = {path: text for path, text in documents.items() if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/")}
-    found = {path: list(dict.fromkeys(document_labels(text))) for path, text in documents.items()}
+        return {}
+    found = {path: list(dict.fromkeys(document_labels(text))) for path, text in documents.items() if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/")}
+    found = {path: labels for path, labels in found.items() if labels}
+    return found if sum(len(labels) for labels in found.values()) >= LABELS_MIN else {}
+
+
+def label_refusal(requirements: int, found: dict[str, list[str]]) -> str | None:
+    """Why an answer of ``requirements`` rows cannot stand for documents with so many labels: fewer than half as many requirements — the sections of the document were taken for them.
+    Only paths, labels and numbers are said."""
     total = sum(len(labels) for labels in found.values())
-    if total < LABELS_MIN or requirements * 2 >= total:
+    if not found or requirements * 2 >= total:
         return None
-    where = ", ".join(f"{path}: {len(labels)} ({', '.join(labels[:4])}…)" for path, labels in sorted(found.items()) if labels)
+    where = ", ".join(f"{path}: {len(labels)} ({', '.join(labels[:4])}…)" for path, labels in sorted(found.items()))
     return (f"в документе меток {total} ({where[:300]}), в ответе требований {requirements} — меньше половины; fix: требование — каждое утверждение со своим номером "
             "или меткой, в порядке строк документа (роль разметки, шаг 2), заголовки разделов не требования; если эти метки — не номера требований (нумерованный "
             "список, приложение), проверку снимает человек: requirements.id_pattern в .skillsrc, затем новый scan")
+
+
+def label_warning(requirements: int, found: dict[str, list[str]]) -> str | None:
+    """The warning for fewer requirements than labels (not fewer than half: that is the refusal) — paths and numbers only."""
+    total = sum(len(labels) for labels in found.values())
+    if not found or requirements >= total:
+        return None
+    return f"ВНИМАНИЕ: в документе {', '.join(sorted(found))[:300]} номеров {total}, требований в разметке {requirements} — сверьте, что ни одно требование не пропущено и не склеено"
 
 
 def _project_id_pattern(project: Path) -> str | None:

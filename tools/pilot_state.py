@@ -1980,15 +1980,11 @@ def _named_docs(project: Path, root: Path) -> list[str]:
     return [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
 
 
-def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], receipts: Sequence[str], value: Mapping[str, Any]) -> None:
-    """tails13: the requirements of a plain document are its numbered statements — an answer of far fewer rows than the labels of the documents ``--docs`` names is refused
-    (``tools.build_context.label_refusal``).  Not for a project with ``requirements.id_pattern``, not for OpenSpec; the documents are read where the receipts hold them, by the digest."""
-    from tools.build_context import label_refusal
+def _label_found(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, list[str]]:
+    """The labels of the plain documents ``--docs`` names (``tools.build_context.document_label_counts``), read where the receipts hold them, by the digest."""
+    from tools.build_context import document_label_counts
     from tools.output_guard import OutputRefused, project_file
 
-    rows = (((value.get("artifacts") or {}).get("analytics_documentation") or {}).get("requirements"))
-    if not isinstance(rows, list):
-        return
     named, texts = set(_named_docs(project, root)), {}
     for digest in receipts:
         for item in read_context_selection(root, str(attempt["attempt_id"]), digest)["files"]:
@@ -2000,9 +1996,32 @@ def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any
                     continue
                 if "sha256:" + hashlib.sha256(raw).hexdigest() == item["content_digest"]:
                     texts[path] = raw.decode("utf-8", errors="replace")
-    why = label_refusal(len(rows), texts, project)
+    return document_label_counts(texts, project)
+
+
+def _check_requirement_labels(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], receipts: Sequence[str], value: Mapping[str, Any]) -> str | None:
+    """tails13: the requirements of a plain document are its numbered statements — an answer of fewer than half as many rows as the labels is refused, of fewer rows than labels
+    gives the warning (returned).  Not for a project with ``requirements.id_pattern``, not for OpenSpec."""
+    from tools.build_context import label_refusal, label_warning
+
+    rows = (((value.get("artifacts") or {}).get("analytics_documentation") or {}).get("requirements"))
+    if not isinstance(rows, list):
+        return None
+    found = _label_found(project, root, attempt, receipts)
+    why = label_refusal(len(rows), found)
     if why:
         raise ValueError(f"CONTEXT_MARKER_REQUIREMENT_LABELS: {why}; отдай исправленный ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")
+    return label_warning(len(rows), found)
+
+
+def requirement_label_counts(run_root: Path, attempt_id: str, requirements: int) -> dict[str, Any] | None:
+    """For the report: ``{"documents": [{"path", "labels"}], "requirements": n}`` where the marker has fewer requirements than its documents have labels (the warning of the submit), else None."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    found = _label_found(project, root, _attempt_of(state, attempt_id), _published_context_receipts(state, attempt_id, "context-marker:baseline"))
+    if sum(len(labels) for labels in found.values()) <= requirements:
+        return None
+    return {"documents": [{"path": path, "labels": len(labels)} for path, labels in sorted(found.items())], "requirements": requirements}
 
 
 def _validate_context_marker_sources(
@@ -2044,7 +2063,7 @@ def _validate_context_marker_sources(
 
 def _reconcile_requirements_openspec(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
-) -> None:
+) -> str | None:
     """The merged marker keeps the requirements of this answer and adds the part warnings, so its OpenSpec
     reconciliation is decided here, against every receipt of the attempt — before the write, while the stage keeps its retry.
     Write time only: a journal written before reads as before; the merge keeps its own check."""
@@ -2054,16 +2073,17 @@ def _reconcile_requirements_openspec(
 
     stage_instance_id = str(request["stage_instance_id"])
     if is_code_requirements(root, attempt, value):  # the requirements of an import are its cases, by the CSV bytes
-        return
+        return None
     receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
     snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
     diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
-    _check_requirement_labels(project, root, state, attempt, receipts, value)
+    note = _check_requirement_labels(project, root, state, attempt, receipts, value)  # the refusal first, the warning is returned
     if diagnostics:
         raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # a code
                          + json.dumps(diagnostics, ensure_ascii=False)
                          + "; fix: требования ответа — по OpenSpec из квитанций контекста; отдай исправленный ответ единственным "
                          "повтором стадии (--transport-attempts 2), ничего не записано")
+    return note
 
 
 def _validate_model_request_predecessors(
@@ -2776,10 +2796,11 @@ def _publish_model_stage_artifact(
                                      (getattr(error, "fix", None) + "; " if getattr(error, "fix", None) else "исправь фрагмент и ") + retry) from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
+    labels_note = None
     if stage_instance_id == "context-marker:baseline" and not _context_marker_parts(state, attempt_id)[1]:  # one context batch: the marker is one answer; at its write only, never at the read of a written one
-        _check_requirement_labels(project, root, state, attempt, _context_marker_receipt_digests(project, root, state, attempt_id, stage_instance_id, request["input_digests"]), value)
+        labels_note = _check_requirement_labels(project, root, state, attempt, _context_marker_receipt_digests(project, root, state, attempt_id, stage_instance_id, request["input_digests"]), value)
     if stage_instance_id == "context-marker:requirements":
-        _reconcile_requirements_openspec(project, root, state, attempt, request, value)
+        labels_note = _reconcile_requirements_openspec(project, root, state, attempt, request, value)
         from tools.cases_import import check_requirements_answer
 
         from tools.cases_scope import scope
@@ -2834,6 +2855,8 @@ def _publish_model_stage_artifact(
         published["filled"] = [*mechanics, *filled]
     if normalized:  # what the code put in order
         published["normalized"] = normalized
+    if labels_note:  # fewer requirements than numbers in the documents: the agent shows it to the person
+        published["requirement_labels"] = labels_note
     return published
 
 
