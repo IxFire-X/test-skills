@@ -53,27 +53,29 @@ def row_ranges(rows: Sequence[int]) -> str:
 
 
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
-                      autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None) -> str:
+                      autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None,
+                      unclear: Sequence[Mapping[str, Any]] = ()) -> str:
     """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
 
     ``notes``/``autotest_notes`` — the WARNING/INFO findings of the accepted case/autotest review, with text.
     ``imported`` — the import summary: the document requirements without a case of the CSV, the cases outside
-    the documents.
+    the documents.  ``unclear`` — ``scope_pause.unclear_rows``: the requirements the marker asks about, no pause.
     """
     gap_rows = list((imported or {}).get("gaps") or [])
     written = set((imported or {}).get("new") or [])  # the gaps the plan owns; the human left the others out on the pause
     outside = list((imported or {}).get("outside") or [])
     groups: dict[str, list[list[str]]] = {}
     loose: list[str] = []
+    asked = {row["warning"] for row in unclear if "warning" in row}  # the questions of the marker have their own section
     for warning in warnings:
         text = " ".join(str(warning).split())
         parts = [part.strip() for part in text.split(SEPARATOR)]
         if len(parts) == 4 and all(parts):
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
-        elif text:
+        elif text and text not in asked:
             loose.append(text)
     checks = list((imported or {}).get("verdict_texts") or [])  # the cases an update of cases rewrote, made obsolete or doubts
-    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks:
+    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks and not unclear:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
     if checks:  # no question: what the update did to the old cases, for the analyst to check
@@ -100,6 +102,12 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
         for source, missing, blocked, question in items:
             lines += [f"- Требование и источник: {source}", f"  - Не хватает: {missing}",
                       f"  - Блокирует: {blocked}", f"  - Вопрос: {question}"]
+        lines.append("")
+    if unclear:  # the document's own unclear places and the doubts of the marker: a question each, the run does not stop
+        lines += ["## Неясности в требованиях", ""]
+        for row in unclear:
+            lines += ([f"- {row['source_requirement_id']}: в тексте требования отмечена неясность («{row['mark']}»): {row['text']}", "  - Вопрос: какое поведение требуется?"]
+                      if "mark" in row else [f"- Требование и источник: {row['source']}", f"  - Что неясно: {row['unclear']}", f"  - Вопрос: {row['question']}"])
         lines.append("")
     if loose:
         lines += ["## Прочее", "", *(f"- {text}" for text in loose), ""]
@@ -850,6 +858,15 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
     return result
 
 
+def _unconfirmed(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict[str, Any]:
+    """``{"unconfirmed": {"count", "requirements"}}`` of the requirements the marker asks about (``scope_pause.unclear_rows``); nothing when none."""
+    from tools.scope_pause import unclear_rows
+
+    rows = unclear_rows(root, attempt_id, state) if attempt_id else []
+    ids = sorted({row["source_requirement_id"] for row in rows})
+    return {"unconfirmed": {"count": len(ids), "requirements": [item for item in map(_identifier, ids) if item]}} if ids else {}
+
+
 def _boundary_fresh(pilot: Any, root: Path, attempt_id: str, revision: int) -> bool | None:
     """``fresh_context`` of the boundary of the review of the automation r<revision>; ``None`` where the review has none."""
     try:
@@ -1013,6 +1030,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "import": _with_restored(_import_summary(root, events), acceptance),
         "automation_split": _split(root, attempt_id),
         "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
+        **_unconfirmed(root, attempt_id, state),  # the count and the numbers of the requirements asked about — no text
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "left": _left(root),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
@@ -1317,6 +1335,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             lines += [f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
                       *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]),
                       *([f"- {scope['mismatch']}"] if scope.get("mismatch") else []), ""]
+    if report.get("unconfirmed"):
+        unconfirmed = report["unconfirmed"]
+        lines += ["## Неясности в требованиях", "", f"- неподтверждённых условий: {unconfirmed['count']}; требования: {', '.join(unconfirmed['requirements'])}; "
+                  "вопросы — в questions-for-analyst.md, прогон не останавливался", ""]
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "
@@ -1380,13 +1402,25 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
-        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root), imported=imported).encode("utf-8"),
+        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root), imported=imported, unclear=_unclear_texts(root)).encode("utf-8"),
     }
     written = []
     for name, data in outputs.items():
         atomic_write_confined_bytes_at_root(project, root, root / name, data)
         written.append(str(root / name))
     return written
+
+
+def _unclear_texts(root: Path) -> list[dict[str, str]]:
+    """The questions about unclear requirements of the newest attempt with their text — for ``questions-for-analyst.md`` only, never for the report."""
+    from tools import pilot_state
+    from tools.scope_pause import unclear_rows
+
+    try:
+        state = pilot_state.derive_state(root)
+        return unclear_rows(root, str(state["attempts"][-1]["attempt_id"]), state)
+    except (IndexError, KeyError, OSError, TypeError, ValueError):
+        return []
 
 
 def _gap_texts(root: Path) -> list[Any]:

@@ -73,6 +73,8 @@ Write them in this order joined by ` — `, the requirement ID first
 groups them by that ID. Four fields are a gap: they become a question to the analyst and the pause of the scope.
 A disagreement of the code and a requirement is no gap: one free sentence with a single ` — `
 (`SREQ-0003: код отвечает 200 — требование ждёт 201`); it goes to «Прочее» of `questions-for-analyst.md`, no pause.
+A place the document itself marks unclear (TBD, «неподтверждённое условие», «контракт не задаёт…», «уточнить»), or a doubt of yours, is a question, no gap, no pause:
+three fields, `SREQ-0007 вопрос (path:line) — что неясно — вопрос аналитику?` (SREQ from this answer, ends with `?`). Keep the gap for a result nothing observes.
 A requirement of the answer: `{"source_requirement_id": "SREQ-0001", "display_order": 1, "text": "<текст>", "provenance": ["docs/req.md:12"], "digest": "sha256:<64 hex источника>"}`.
 Requirement-without-scenario warnings preserve the requirement. Unsupported schema,
 unmatched names or missing baseline require clarification; they never authorize invented

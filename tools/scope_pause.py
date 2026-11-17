@@ -68,25 +68,95 @@ def _owners(token: str, requirements: Sequence[Mapping[str, Any]]) -> list[str]:
     return [str(row["source_requirement_id"]) for row in requirements if word.search(str(row.get("text") or ""))]
 
 
-def gap_rows(marker: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The four-field gap warnings of the marker, each with the source requirements it names."""
+# The words that mark an unclear place in the text of a requirement (the marker's text is the document's, line by line).
+# FOUND_MARKS — met in our own documents (live/**/docs, openspec specs, counted 17.11); COMMON_MARKS — usual words never met there,
+# proven by a test document and by a run at work.  A bare «не задан» is no mark: it is an ordinary checkable statement.
+FOUND_MARKS = (r"неподтвержд[её]нн(?:ое|ые)\s+услови(?:е|я)",r"(?:документаци|контракт|руководств|спецификаци)\w*\s+не\s+(?:задаёт|задает|описывает|говорит|определяет|называет)",
+               r"\b(?:TBD|TBC|TODO)\b")
+COMMON_MARKS = (r"уточнить", r"требует\s+уточнени\w*", r"открыт\w+\s+вопрос\w*", r"под\s+вопросом")
+_MARK = re.compile("|".join(FOUND_MARKS + COMMON_MARKS), re.IGNORECASE)
+
+
+def mark_of(text: Any) -> str | None:
+    """The first mark of an unclear place in the text of a requirement, or None."""
+    found = _MARK.search(str(text or ""))
+    return " ".join(found.group(0).split()) if found else None
+
+
+def question_row(warning: Any, known: Sequence[str] | set[str]) -> dict[str, str] | None:
+    """The three-field question of the marker, ``SREQ-0007 вопрос (path:line) — что неясно — вопрос аналитику?``: the requirement is one of
+    ``known``, the word «вопрос» follows it, the question ends with «?».  Anything else is no question (it stays in «Прочее»)."""
+    text = " ".join(str(warning).split())
+    parts = [part.strip() for part in text.split(_SEPARATOR)]
+    if len(parts) != 3 or not all(parts) or not parts[2].endswith("?"):
+        return None
+    token, _, rest = parts[0].partition(" ")
+    if token not in known or not (rest == "вопрос" or rest.startswith("вопрос ")):
+        return None
+    return {"source_requirement_id": token, "source": f"{token} {rest[len('вопрос'):].strip()}".strip(), "unclear": parts[1], "question": parts[2], "warning": text}
+
+
+def unclear_of(marker: Mapping[str, Any], left: set[str] | frozenset[str] = frozenset()) -> list[dict[str, str]]:
+    """The requirements the marker asks about, in the order of the document, one block each: the questions the model wrote, else the mark in the
+    text of the requirement (code, even when the model wrote nothing; a requirement left out of the scope in ``left`` gets none of its own)."""
     requirements = requirements_of(marker)
+    known = {str(row["source_requirement_id"]) for row in requirements}
+    asked: dict[str, list[dict[str, str]]] = {}
+    for warning in marker.get("warnings") or []:
+        row = question_row(warning, known)
+        if row:
+            asked.setdefault(row["source_requirement_id"], []).append(row)
+    rows: list[dict[str, str]] = []
+    for requirement in requirements:
+        sid = str(requirement["source_requirement_id"])
+        mark = mark_of(requirement.get("text"))
+        if sid in asked:
+            rows.extend(asked[sid])
+        elif mark and sid not in left:
+            rows.append({"source_requirement_id": sid, "source": sid, "mark": mark, "text": " ".join(str(requirement["text"]).split())})
+    return rows
+
+
+def gap_rows(marker: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The four-field gap warnings of the marker that stop the run, each with the source requirements it names.  A gap that names only the
+    requirements the document marks unclear (or the marker asked about) is a question, no pause (``unclear_of``)."""
+    requirements = requirements_of(marker)
+    marked = {row["source_requirement_id"] for row in unclear_of(marker)}
     rows = []
     for warning in marker.get("warnings") or []:
         text = " ".join(str(warning).split())
         parts = [part.strip() for part in text.split(_SEPARATOR)]
         if len(parts) == 4 and all(parts):
             token = parts[0].split(" ", 1)[0]
-            rows.append({"requirement": token, "source_requirement_ids": _owners(token, requirements), "missing": parts[1],
+            owners = _owners(token, requirements)
+            if owners and set(owners) <= marked:
+                continue
+            rows.append({"requirement": token, "source_requirement_ids": owners, "missing": parts[1],
                          "blocks": parts[2], "question": parts[3], "warning": text})
     return rows
+
+
+def unclear_rows(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
+    """``unclear_of`` the marker of the attempt, without the requirements the human left out of the scope; none before the marker."""
+    from tools import pilot_state
+
+    root = Path(run_root).resolve()
+    state = state if state is not None else pilot_state.derive_state(root)
+    try:
+        marker = _marker(root, state, attempt_id)
+        published = published_scope(root, attempt_id, state)
+        decision = read_decision(root, attempt_id, state)
+    except (ScopeRefused, KeyError, OSError, TypeError, ValueError):
+        return []
+    left = {row["source_requirement_id"] for row in (published["out_of_scope"] if published is not None else out_of_scope(decision))}
+    return unclear_of(marker, left) if marker is not None else []
 
 
 def draft_questions(marker: Mapping[str, Any]) -> str:
     """``questions-for-analyst.md`` of the marker's warnings alone — the same text the report builds from all of the run's."""
     from tools.run_report import analyst_questions
 
-    return analyst_questions(marker.get("warnings") or [])
+    return analyst_questions(marker.get("warnings") or [], unclear=unclear_of(marker))
 
 
 def _bound(root: Path, attempt_id: str, raw: bytes, state: Mapping[str, Any] | None) -> bool:
