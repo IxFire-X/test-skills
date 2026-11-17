@@ -33,14 +33,14 @@ def _lines_of(text: str, chapter: int) -> list[int]:
     return [number for number, line in enumerate(text.splitlines(), start=1) if re.match(rf"{chapter}\.1\.\d+\. ", line)]
 
 
-def _marker_at(scan: dict, project: Path, lines: list[int], capsys: pytest.CaptureFixture[str]) -> tuple[int, dict]:
+def _marker_at(scan: dict, project: Path, lines: list[int], capsys: pytest.CaptureFixture[str], tail: str = "") -> tuple[int, dict]:
     import hashlib
 
     run_root = str(scan["run_root"])
     assert api.main(["prepare", "--run-root", run_root, "--stage", "context-marker:baseline"]) == 0
     slot = Path(json.loads(capsys.readouterr().out)["result"]["answer_slot"])
     digest = "sha256:" + hashlib.sha256((project / DOC).read_bytes()).hexdigest()
-    rows = [{"source_requirement_id": f"SREQ-{n:04d}", "display_order": n, "text": f"Требование {n}", "provenance": [f"{DOC}:{line}"], "digest": digest} for n, line in enumerate(lines, start=1)]
+    rows = [{"source_requirement_id": f"SREQ-{n:04d}", "display_order": n, "text": f"Требование {n}", "provenance": [f"{DOC}:{line}{tail}"], "digest": digest} for n, line in enumerate(lines, start=1)]
     slot.write_text(json.dumps({"schema_version": "5.0.0", "stage": "context-marker", "warnings": [],
                                 "artifacts": {"analytics_documentation": {"requirements": rows}, "source_code_and_diff": {"sources": ["(none) — no authorized source files"]}}}), encoding="utf-8")
     code = api.main(["submit", "--run-root", run_root, "--stage", "context-marker:baseline"])
@@ -57,6 +57,13 @@ def test_ready_names_the_runs_by_sections_for_a_document_of_many_numbers(tmp_pat
 
 def test_ready_prints_no_size_row_where_the_set_fits(tmp_path: Path) -> None:
     assert _size_row(_project(tmp_path, _doc(30)), [DOC]) is None
+
+
+def test_ready_of_a_foreign_skillsrc_stops_on_its_row_and_prints_no_size_row(tmp_path: Path) -> None:
+    project = _project(tmp_path, _doc(40))
+    (project / ".skillsrc").write_bytes(b"[1]\n")
+    rows = {row["id"]: row for row in check(project, [DOC], profile="cases-only-v1")["checks"]}
+    assert rows["skillsrc"]["level"] == "STOP" and "docs:size" not in rows
 
 
 def test_ready_prints_no_size_row_for_a_section_within_the_limit(tmp_path: Path) -> None:
@@ -202,6 +209,14 @@ def test_a_requirement_from_a_line_outside_the_named_section_is_refused(tmp_path
     project = _project(tmp_path, text)
     scan = _scan(project, monkeypatch, [f"{DOC}#1. Глава 1"])
     code, out = _marker_at(scan, project, _lines_of(text, 1)[:11] + _lines_of(text, 2)[:1], capsys)
+    assert code == 2 and "CONTEXT_MARKER_REQUIREMENT_OUTSIDE_SECTION" in json.dumps(out, ensure_ascii=False), out
+
+
+def test_a_provenance_with_a_note_after_the_line_is_judged_by_its_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    text = _doc(12, 12)
+    project = _project(tmp_path, text)
+    scan = _scan(project, monkeypatch, [f"{DOC}#1. Глава 1"])
+    code, out = _marker_at(scan, project, _lines_of(text, 1)[:11] + _lines_of(text, 2)[:1], capsys, tail=" — пункт 3.1")
     assert code == 2 and "CONTEXT_MARKER_REQUIREMENT_OUTSIDE_SECTION" in json.dumps(out, ensure_ascii=False), out
 
 
@@ -421,6 +436,22 @@ def test_the_output_of_the_command_holds_only_paths_headings_numbers_codes_and_i
     summary = json.loads(Path(result["summary"]).read_text(encoding="utf-8"))
     assert set(summary) == {"schema", "document", "csv_sha256", "cases", "title_repeats", "runs", "template"}
     assert all(set(row) <= {"run_id", "docs", "csv", "code", "cases", "title_repeats", "outcome", "generated", "accepted", "canaries"} for row in summary["runs"])
+
+
+def test_a_run_named_twice_is_assembled_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.assemble_sections import assemble
+
+    first, second = _closed_run(tmp_path, capsys), _closed_run(tmp_path, capsys)
+    once = assemble(tmp_path, [first.name, second.name])
+    twice = assemble(tmp_path, [first.name, second.name, first.name])
+    assert len(twice["runs"]) == 2 and twice["cases"] == once["cases"] and twice["output"] == once["output"]
+
+
+def test_a_path_of_an_old_run_that_does_not_resolve_in_the_project_covers_nothing(tmp_path: Path) -> None:
+    from tools.assemble_sections import _covers
+
+    fact = {"docs": ["bad\x00name.md#Раздел", "../elsewhere/other.md#Раздел"]}
+    assert _covers(tmp_path, fact, DOC, "", 1, 2) is False
 
 
 def test_a_run_list_without_write_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

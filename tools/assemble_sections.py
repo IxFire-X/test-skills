@@ -119,9 +119,12 @@ def _covers(project: Path, fact: Mapping[str, Any], rel: str, text: str, first: 
     from tools.run_pipeline import relative_to_project
 
     for doc in fact["docs"]:
-        path, heading = resolve_spec(project, doc)
-        if relative_to_project(project.resolve(), path) != rel:
-            continue
+        try:
+            path, heading = resolve_spec(project, doc)
+            if relative_to_project(project.resolve(), path) != rel:
+                continue
+        except (OSError, ValueError):
+            continue  # a path of the old run that no longer resolves in the project covers nothing
         if heading is None:
             return True
         try:
@@ -173,6 +176,7 @@ def assemble(project: Path, run_ids: list[str], *, doc: str | None = None) -> di
         if missing:
             raise AssembleRefused("ASSEMBLE_SECTIONS_MISSING", f"{len(missing)} из {len(where_found['sections'])}: " + "; ".join(str(title) for title in missing))
         run_ids = list(dict.fromkeys(row["run_id"] for row in where_found["sections"]))
+    run_ids = list(dict.fromkeys(run_ids))  # a run named twice is one run, in the place of its first mention
     facts = [_facts(project, run_id) for run_id in run_ids]
     if any(fact["code"] == "CSV_MISMATCH" for fact in facts):
         raise AssembleRefused("ASSEMBLE_CSV_MISMATCH", ", ".join(fact["run_id"] for fact in facts if fact["code"] == "CSV_MISMATCH"))

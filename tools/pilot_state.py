@@ -2034,7 +2034,7 @@ def _outside_sections(project: Path, root: Path, attempt: Mapping[str, Any], rec
     outside = []
     for row in rows:
         for reference in (row.get("provenance") or []) if isinstance(row, Mapping) else []:
-            found = re.fullmatch(r"(.+):(\d+)(?:[-–]\d+)?", str(reference))
+            found = re.match(r"(.+?):(\d+)", str(reference))  # provenance is a free string: the path and the first line stand, the tail (a range, a note) is ignored
             if found and found.group(1) in ranges and not any(first <= int(found.group(2)) <= last for first, last in ranges[found.group(1)]):
                 outside.append(str(row.get("source_requirement_id")))
                 break

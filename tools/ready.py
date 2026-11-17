@@ -362,7 +362,10 @@ def check_size(project: Path, docs: Sequence[str], automation: bool) -> list[dic
                 continue  # the docs row says it
             if heading := resolve_spec(root, raw)[1]:
                 named.setdefault(rel, []).append(heading)
-    found = large_document(root, documents, named, automation)
+    try:
+        found = large_document(root, documents, named, automation)
+    except (OSError, ValueError):  # a foreign .skillsrc (SkillsrcError is a ValueError): the skillsrc row says what is wrong
+        return []
     return [_row("docs:size", CASES, "WARN", say(found[1], found[2]))] if found else []
 
 
