@@ -22,7 +22,7 @@ STAGE = "tc-generator:rework-1"
 FINDING = "Нет проверки состояния."
 
 
-def _rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int, rounds: int = 1, profile: str = "local-pilot-v1") -> dict:
+def _rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], number: int, rounds: int = 1, profile: str = "local-pilot-v1", passes: bool = False) -> dict:
     """An import run whose review rejects case ``number`` (1-based; 3 is the new one); with a round of rework its generator gives it up, without one the set is published
     at once: the set is published."""
     from tests.test_review_canaries import _answer, _boundary_and_removed, _candidate, _finding, _open, _select
@@ -58,7 +58,16 @@ def _rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     if rounds:
         assert selected["status"] == "REWORK_PENDING"
         assert _call(capsys, "prepare", run["root"], STAGE)[0] == 0
-        assert _call(capsys, "submit", run["root"], STAGE, "--abort", "REWORK_UNUSABLE")[0] == 0
+        if passes:  # the generator hands the case back as it is and the second round accepts it: every case is back
+            from tests.test_rework_review import _answer as second, _open as open_second
+            from tests.test_stage_steps import _put
+
+            _put(run["root"], STAGE, {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1", "test_cases": [target]})
+            assert _call(capsys, "submit", run["root"], STAGE)[0] == 0 and open_second(run, capsys)[0] == 0
+            _put(run["root"], "tc-reviewer:rework-1", second(run))
+            assert _call(capsys, "submit", run["root"], "tc-reviewer:rework-1")[0] == 0
+        else:
+            assert _call(capsys, "submit", run["root"], STAGE, "--abort", "REWORK_UNUSABLE")[0] == 0
     else:
         assert selected["status"] == "EFFECTIVE_SELECTED"
     return {**run, "target": target["case_id"]}
@@ -164,3 +173,22 @@ def test_a_run_without_an_import_has_no_tail_and_its_bytes_are_the_old_ones() ->
     effective, partial = _partial(document, _real(document, 1))
     assert "restored" not in partial
     assert build_bundle(effective, PROFILE, partial=partial).csv_bytes == build_bundle(effective, PROFILE).csv_bytes
+
+
+def test_a_case_that_passed_the_rework_leaves_no_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    run = _rejected(tmp_path, monkeypatch, capsys, 1, passes=True)
+    assert [case["key"] for case in _cases(_published(run).read_bytes())].count("PC-T1") == 1 and len(_cases(_published(run).read_bytes())) == 3
+    assert not list((run["root"] / "published").glob("*REJECTED-CASES*"))
+
+
+def test_the_tail_carries_the_label_of_an_obsolete_case() -> None:
+    import csv
+    import io
+
+    from tools.cases_import import imported_value
+    from tools.test_case_projections import _HEADERS, restored_csv
+
+    links = [{"row": 2, "source_requirement_ids": [], "reason": "требование удалено", "verdict": "obsolete"}, {"row": 4, "source_requirement_ids": [], "reason": "нет"}]
+    [row, _other] = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), links=links, requirements=[])["cases"]
+    [first, *_steps] = list(csv.reader(io.StringIO(restored_csv([row]).decode("utf-8"), newline="")))
+    assert first[_HEADERS.index("Labels")] == "smoke, устарел" and first[_HEADERS.index("Key")] == "PC-T1"

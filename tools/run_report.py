@@ -775,12 +775,11 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
 
 def _with_restored(summary: dict[str, Any] | None, acceptance: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """The cases of the human the export keeps after the review rejected them are a group of their own, in no other (not in «без изменений»)."""
-    rows = {row["row"] for row in (acceptance or {}).get("restored") or []}
-    if not rows or not (summary or {}).get("verdicts"):
+    kept = {row["row"]: {"row": row["row"], "key": row["key"]} for row in (acceptance or {}).get("restored") or []}
+    if not kept or not (summary or {}).get("verdicts"):
         return summary
-    groups = summary["verdicts"]
-    return {**summary, "verdicts": {**{name: [row for row in items if row["row"] not in rows] for name, items in groups.items()},
-                                    "restored": sorted((row for items in groups.values() for row in items if row["row"] in rows), key=lambda row: row["row"])}}
+    return {**summary, "verdicts": {**{name: [row for row in items if row["row"] not in kept] for name, items in summary["verdicts"].items()},
+                                    "restored": [kept[row] for row in sorted(kept)]}}  # the group is what the acceptance says, whatever group the row had
 
 
 def _left(root: Path) -> str | None:
@@ -859,8 +858,9 @@ def _boundary_fresh(pilot: Any, root: Path, attempt_id: str, revision: int) -> b
         return None
 
 
-def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
-    """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
+def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None) -> tuple[dict[str, Any], list[Any]]:
+    """The report and the marker warnings of the run (the warnings feed only the analyst questions).  ``kept``: filled with the human's cases the export keeps
+    (by CSV row) with their title and the reviewer's words — the one computation of the outcome serves the report and the analyst's file."""
     from tools import pilot_state as pilot
     from tools.run_pipeline import _durable_status_facts
 
@@ -960,11 +960,13 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         try:
             from tools.orchestrate_test_case_revision import acceptance_summary
 
-            acceptance = acceptance_summary(root, attempt_id, answer)
+            acceptance = acceptance_summary(root, attempt_id, answer, True)
         except (KeyError, OSError, TypeError, ValueError):
             acceptance = None
         if acceptance and acceptance.get("restored"):  # the Key of a case of the CSV is a name, or nothing: the report copies no other text
-            acceptance = {**acceptance, "restored": [{**row, "key": _identifier(row["key"])} for row in acceptance["restored"]]}
+            if kept is not None:
+                kept.update({row["row"]: row for row in acceptance["restored"]})
+            acceptance = {**acceptance, "restored": [{"row": row["row"], "key": _identifier(row["key"]), "codes": row["codes"]} for row in acceptance["restored"]]}
         if answer is not None:
             codeword = review_canaries.codeword_state(root, attempt_id, answer)
     reviewed_from = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("stage") == "tc-reviewer:canonical" and call.get("by") == "reuse"), None)
@@ -1365,11 +1367,12 @@ def _write_report(project: Path, run_id: str) -> list[str]:
 
     project = Path(project).resolve()
     root = project / ".pilot-runs" / run_id
-    report, warnings = build_report(project, run_id)
+    kept: dict[int, Any] = {}
+    report, warnings = build_report(project, run_id, kept)
     summary = report.get("import")
     imported = {**summary, "gaps": _gap_texts(root)} if summary and "gaps" in summary else summary  # the text of a requirement goes to the analyst only
     if imported and (imported.get("verdicts") or (report.get("acceptance") or {}).get("restored")):
-        imported = {**imported, "verdict_texts": _verdict_texts(root)}  # so do the texts of the cases and of the verdicts
+        imported = {**imported, "verdict_texts": _verdict_texts(root, kept)}  # so do the texts of the cases and of the verdicts
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
@@ -1393,12 +1396,11 @@ def _gap_texts(root: Path) -> list[Any]:
         return []
 
 
-def _verdict_texts(root: Path) -> list[dict[str, Any]]:
+def _verdict_texts(root: Path, kept: Mapping[int, Any]) -> list[dict[str, Any]]:
     """The rewritten, obsolete and doubtful cases of the newest attempt, and the ones of the CSV the review rejected and the export keeps, with their text — for
     ``questions-for-analyst.md`` only, never for the report; «now» is the title the accepted set has for the Key (nothing without a Key or an accepted set)."""
-    from tools import pilot_state, review_canaries
+    from tools import pilot_state
     from tools.cases_import import verdict_groups
-    from tools.orchestrate_test_case_revision import acceptance_summary
 
     try:
         attempt_id = str(pilot_state.derive_state(root)["attempts"][-1]["attempt_id"])
@@ -1408,10 +1410,6 @@ def _verdict_texts(root: Path) -> list[dict[str, Any]]:
     now = {((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"): case["title"]
            for case in (_effective_document(root, attempt_id)[0] or {}).get("test_cases") or []}
     group = {row: name for name, rows in verdict_groups(imported).items() if name in ("rewritten", "obsolete", "manual") for row in rows}
-    try:
-        kept = {row["row"]: row for row in (acceptance_summary(root, attempt_id, review_canaries.recorded_answer(root, attempt_id), True) or {}).get("restored") or []}
-    except (KeyError, OSError, TypeError, ValueError):
-        kept = {}
     group.update({row: "restored" for row in kept})  # what the review rejected is shown by that, whatever the update made of the case
     return [{"group": group[case["row"]], "row": case["row"], "key": case["key"], "was": case["title"], "now": now.get(case["key"]) if case["key"] and group[case["row"]] == "rewritten" else None,
              "reason": " ".join(kept[case["row"]]["said"]) if case["row"] in kept else case.get("verdict_reason"), "removed": None if case["row"] in kept else case.get("removed")}
