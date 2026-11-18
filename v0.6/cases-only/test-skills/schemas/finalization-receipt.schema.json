@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/finalization-receipt.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "stage", "run_id", "attempt_id", "policy_profile", "pre_finalization_trace_digest", "valid", "errors", "checked_artifacts", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "stage": {"const": "finalization"},
+    "run_id": {"$ref": "#/$defs/id"}, "attempt_id": {"$ref": "#/$defs/id"}, "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "pre_finalization_trace_digest": {"$ref": "#/$defs/digest"}, "valid": {"type": "boolean"},
+    "errors": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "checked_artifacts": {"type": "object", "additionalProperties": false, "properties": {"canonical_digest": {"$ref": "#/$defs/digest"}, "effective_canonical_digest": {"$ref": "#/$defs/digest"}, "reviewer_session_digest": {"$ref": "#/$defs/digest"}, "generated_delta_digest": {"$ref": "#/$defs/digest"}, "execution_receipt_digest": {"$ref": "#/$defs/digest"}, "execution_trace_receipt_digest": {"$ref": "#/$defs/digest"}, "execution_trace_sha256": {"$ref": "#/$defs/digest"}, "trace_audit_receipt_digest": {"$ref": "#/$defs/digest"}, "framework_evidence_digest": {"$ref": "#/$defs/digest"}, "environment_receipt_digest": {"$ref": "#/$defs/digest"}, "disposition_receipt_digest": {"$ref": "#/$defs/digest"}, "resume_validation_digest": {"$ref": "#/$defs/digest"}, "post_pretrace_validation_digest": {"$ref": "#/$defs/digest"}}},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+  "allOf": [
+    {"if": {"properties": {"valid": {"const": true}}, "required": ["valid"]}, "then": {"properties": {"errors": {"maxItems": 0}}}, "else": {"properties": {"errors": {"minItems": 1}}}}
+  ]
+}

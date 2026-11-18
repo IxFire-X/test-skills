@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/candidate-fragment.schema.json",
+  "title": "Candidate Fragment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "batch_id", "namespace", "plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "owned_source_requirement_ids", "requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "status": {"enum": ["COMPLETE", "FAILED"]},
+    "batch_id": {"type": "string", "pattern": "^BATCH-[a-z0-9-]+$"}, "namespace": {"type": "string", "pattern": "^B[1-9][0-9]*$"},
+    "plan_digest": {"$ref": "#/$defs/digest"}, "header_digest": {"$ref": "#/$defs/digest"}, "context_receipt_digest": {"$ref": "#/$defs/digest"}, "context_receipt": {"$ref": "context-selection-receipt.schema.json"},
+    "owned_source_requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^SREQ-[A-Za-z0-9_.:-]+$"}},
+    "requirements": {"type": "array", "items": {"$ref": "canonical-test-document.schema.json#/$defs/requirement"}}, "source_to_canonical_mappings": {"type": "array", "items": {"$ref": "canonical-test-document.schema.json#/$defs/source_to_canonical_mapping"}},
+    "operation_capabilities": {"type": "array", "items": {"$ref": "canonical-test-document.schema.json#/$defs/capability"}}, "test_cases": {"type": "array", "items": {"$ref": "canonical-test-document.schema.json#/$defs/test_case"}}, "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}},
+    "failure": {"type": "object", "additionalProperties": false, "required": ["reason_code", "evidence_digest", "model_receipt"], "properties": {"reason_code": {"type": "string", "minLength": 1}, "evidence_digest": {"$ref": "#/$defs/digest"}, "model_receipt": {"$ref": "#/$defs/model_receipt"}}}, "digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "FAILED"}}, "required": ["status"]}, "then": {"required": ["failure"]}, "else": {"not": {"required": ["failure"]}}}],
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "diagnostic": {"type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": {"code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}}, "model_receipt": {"type": "object", "additionalProperties": false, "required": ["schema_version", "status", "diagnostics", "digest"], "properties": {"schema_version": {"const": "1.0.0"}, "status": {"const": "FAILED"}, "diagnostics": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/diagnostic"}}, "digest": {"$ref": "#/$defs/digest"}}}}
+}

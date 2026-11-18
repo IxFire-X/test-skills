@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/resume-validation-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "run_id", "attempt_id", "policy_profile", "baseline_digest", "execution_request_digest", "execution_receipt_digest", "pre_finalization_trace_digest", "status", "reason_code", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "kind": {"const": "resume-validation"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"const": "local-pilot-v1"},
+    "baseline_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "execution_request_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "execution_receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "pre_finalization_trace_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "status": {"const": "DRIFTED"},
+    "reason_code": {"enum": ["BASELINE_DRIFT", "BASELINE_INCOMPLETE", "SKILLSRC_DRIFT"]},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

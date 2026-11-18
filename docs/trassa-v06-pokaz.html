@@ -1,0 +1,1242 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="«Трасса» v0.6: зачем, цифры живых прогонов 17.11, чем лучше остальных, ограничения, сроки; ниже — устройство пакета">
+<title>«Трасса» v0.6 — показ руководству</title>
+<style>
+:root {
+  --bg: #f2f4f5; --surface: #fcfcfb; --ink: #15202b; --ink-2: #455361; --muted: #6b7884;
+  --line: #d6dce1; --soft: #e8ecef;
+  --model: #4a3aa7; --review: #d65a24; --project: #16956a; --code: #5b6670;
+  --pass: #1f7a3a; --warn: #a35a00;
+  --s-in: #1f7a3a; --s-ready: #1d5fa8; --s-wip: #a35a00;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --col: 780px; --wide: 1040px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+    --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+    --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+  --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+  --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { max-width: var(--col); margin-inline: auto; }
+.wide { max-width: var(--wide); margin-inline: auto; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(26px, 5vw, 42px); letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-weight: 650; font-size: clamp(21px, 3vw, 28px); }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { margin: 14px 0 0; padding: 12px 14px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; white-space: pre; }
+pre code { background: none; padding: 0; font-size: inherit; }
+a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+strong { font-weight: 600; }
+header.top { padding-block: 40px 24px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lead { font-size: 18px; color: var(--ink-2); max-width: 66ch; margin-top: 16px; }
+.toc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 26px; }
+.toc > div { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.toc .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 8px 0 0; padding-left: 22px; font-size: 14.5px; color: var(--ink-2); display: grid; gap: 3px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+nav.bar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+nav.bar ul { list-style: none; margin: 0 auto; padding: 0; max-width: var(--wide); display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+nav.bar a { display: block; padding: 10px 12px; font-size: 14px; white-space: nowrap; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; }
+nav.bar a:hover { color: var(--ink); border-bottom-color: var(--line); }
+nav.bar li.grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; padding: 12px 6px 10px 2px; white-space: nowrap; }
+section { padding-block: 48px 8px; scroll-margin-top: 48px; }
+.part { padding-block: 52px 0; }
+.part .pt { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.part h2 { font-size: clamp(25px, 4vw, 34px); margin-top: 10px; }
+.sec-head { display: grid; gap: 8px; margin-bottom: 20px; }
+.sec-head .n { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.prose { display: grid; gap: 14px; max-width: 68ch; }
+.note { font-size: 14.5px; color: var(--ink-2); }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; background: var(--soft); color: var(--ink); white-space: nowrap; }
+.chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--code)); }
+.chip.model { --c: var(--model); } .chip.review { --c: var(--review); } .chip.project { --c: var(--project); } .chip.code { --c: var(--code); }
+.chip.human { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.chip.human::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+/* Три состояния. Чтобы перенести блок из «в работе» в «готово»: сменить класс st-wip -> st-ready (или st-in) и текст плашки. */
+.st { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 5px; white-space: nowrap; box-shadow: inset 0 0 0 1.5px var(--c); color: var(--c); background: transparent; vertical-align: middle; }
+.st-in { --c: var(--s-in); } .st-ready { --c: var(--s-ready); } .st-wip { --c: var(--s-wip); }
+.stlegend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.stlegend > div { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 14px; font-size: 14px; color: var(--ink-2); min-width: 0; }
+.stlegend .st { margin-bottom: 6px; }
+@media (max-width: 760px) { .stlegend { grid-template-columns: minmax(0, 1fr); } }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 26px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.flow > div { padding: 14px 16px; min-width: 0; }
+.flow > div + div { border-left: 1px solid var(--line); }
+.flow .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.flow .v { font-family: var(--font-mono); font-size: 12.5px; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.45; }
+.flow .d { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+@media (max-width: 720px) { .flow { grid-template-columns: minmax(0, 1fr); } .flow > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+.who { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+.who > div { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.who p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.cap { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cap h3 { font-size: 16.5px; }
+.cap p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.cap .pf { font-size: 13.5px; color: var(--ink); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.cap .top { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+@media (max-width: 820px) { .caps, .toc { grid-template-columns: minmax(0, 1fr); } .who { grid-template-columns: minmax(0, 1fr); } }
+.roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.role { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.role p { font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 980px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .roles { grid-template-columns: minmax(0, 1fr); } }
+figure { margin: 24px 0 0; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 14px 10px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 680px; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; max-width: 72ch; }
+svg text { font-family: var(--font-body); }
+svg .mono { font-family: var(--font-mono); }
+.tbl { overflow-x: auto; margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; background: var(--soft); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 5px; white-space: nowrap; background: transparent; }
+.tag.ok { color: var(--pass); box-shadow: inset 0 0 0 1px var(--pass); }
+.tag.wn { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.tag.rv { color: var(--review); box-shadow: inset 0 0 0 1px var(--review); }
+.tag.mu { color: var(--muted); box-shadow: inset 0 0 0 1px var(--muted); }
+.steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--c, var(--code)); }
+.steps .h { font-weight: 600; }
+.steps .s { font-size: 14.5px; color: var(--ink-2); margin-top: 2px; }
+.steps .now { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+.c-model { --c: var(--model); } .c-review { --c: var(--review); } .c-project { --c: var(--project); } .c-code { --c: var(--code); } .c-human { --c: var(--ink-2); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.split3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.panel h3 { font-size: 16.5px; }
+.panel ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; color: var(--ink-2); }
+.panel li .st { margin-right: 4px; }
+@media (max-width: 900px) { .split, .split3 { grid-template-columns: minmax(0, 1fr); } }
+.callout { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--ink-2); font-size: 14.5px; color: var(--ink-2); max-width: 72ch; }
+.callout.warn { border-color: var(--warn); }
+.items { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.items > li { padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; }
+.col > pre, .items pre { max-width: 100%; }
+.items > li:last-child { border-bottom: 1px solid var(--line); }
+.items .h { font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.items .s { font-size: 14.5px; color: var(--ink-2); margin-top: 4px; }
+dl.gloss { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px 20px; margin: 22px 0 0; }
+dl.gloss dt { font-weight: 600; }
+dl.gloss dd { margin: 0; color: var(--ink-2); min-width: 0; }
+@media (max-width: 600px) { dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; } dl.gloss dd { margin-bottom: 10px; } }
+footer { padding-block: 44px 64px; color: var(--muted); font-size: 13.5px; }
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.bx.model { stroke: var(--model); stroke-width: 2; }
+.bx.review { stroke: var(--review); stroke-width: 2; }
+.bx.project { stroke: var(--project); stroke-width: 2; }
+.bx.code { stroke: var(--code); stroke-width: 2; }
+.bx.human { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.bx.opt { stroke-dasharray: 5 3; }
+.ln { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.ln.ret { stroke-dasharray: 5 4; }
+.bound { stroke: var(--ink-2); stroke-width: 1.2; stroke-dasharray: 2 4; }
+.tt { font-size: 14px; font-weight: 600; fill: var(--ink); }
+.ts { font-size: 12px; fill: var(--ink-2); }
+.tl { font-size: 12px; fill: var(--ink-2); }
+.tm { font-size: 12px; fill: var(--muted); }
+.th { font-size: 12px; fill: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+.grid { stroke: var(--line); stroke-width: 1; }
+.axis { font-size: 12px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-over { fill: var(--review); } .bar-ok { fill: var(--model); }
+.limit { stroke: var(--ink); stroke-width: 1.5; }
+.val { font-size: 12.5px; fill: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rlab { font-size: 13px; fill: var(--ink); }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.card .t { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.card h3 { font-size: 16.5px; }
+.card p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 760px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: no-preference) { nav.bar a { transition: color .15s, border-color .15s; } }
+/* ===== Блок для руководства (новое) ===== */
+:root {
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --miss: #898781; --hair: #c3c2b7;
+  --s-chk: #6250d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --c1: #3987e5; --c2: #d95926; --c3: #199e70; --miss: #898781; --hair: #383835; --s-chk: #9d92ee; }
+}
+:root[data-theme="dark"] { --c1: #3987e5; --c2: #d95926; --c3: #199e70; --miss: #898781; --hair: #383835; --s-chk: #9d92ee; }
+.st-chk { --c: var(--s-chk); }
+.mg-lead { font-size: 19px; color: var(--ink); max-width: 62ch; margin-top: 16px; line-height: 1.5; }
+.asof { margin-top: 14px; font-size: 13.5px; color: var(--ink-2); max-width: 78ch; }
+.brief-box { margin-top: 22px; border: 1px solid var(--line); border-left: 4px solid var(--model); background: var(--surface); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+.brief-box h2 { font-size: 18px; }
+.brief-box ul { margin: 0; padding-left: 20px; display: grid; gap: 7px; font-size: 15.5px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; display: grid; gap: 4px; align-content: start; }
+.tile .big { font-size: clamp(28px, 4vw, 38px); font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.tile .what { font-size: 14.5px; color: var(--ink); line-height: 1.35; }
+.tile .src { font-size: 12.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+@media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+.mg h2.q { font-size: clamp(22px, 3.2vw, 30px); }
+.mg .sub { font-size: 15px; color: var(--ink-2); max-width: 70ch; margin-top: 6px; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+@media (max-width: 820px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.hand { display: grid; gap: 8px; }
+.hand .row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; font-size: 14.5px; color: var(--ink-2); line-height: 1.45; }
+.hand .row b { color: var(--ink); font-weight: 600; }
+.hand .mk { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.cmp { display: grid; gap: 14px; margin-top: 18px; }
+.cmp .card { gap: 8px; }
+.cmp .vs { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.cmp ul { margin: 0; padding-left: 20px; display: grid; gap: 5px; font-size: 14.5px; color: var(--ink-2); }
+.cmp .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 700px) { .cmp .cols { grid-template-columns: minmax(0, 1fr); } }
+.cmp h4 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+.chartbox { margin-top: 22px; }
+.chartbox h3 { font-size: 17px; }
+.chartbox .cap-sub { font-size: 14px; color: var(--ink-2); max-width: 74ch; margin-top: 4px; }
+.fig.mg-fig svg { min-width: 600px; }
+.fig svg .cell { cursor: default; }
+.fig svg .cell:focus-visible { outline: none; }
+.fig svg .cell:focus-visible rect, .fig svg .hv:focus-visible rect { stroke: var(--ink); stroke-width: 2; }
+.c1 { fill: var(--c1); } .c2 { fill: var(--c2); } .c3 { fill: var(--c3); }
+.miss-cell { fill: var(--surface); stroke: var(--miss); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.ghost { fill: none; stroke: var(--miss); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.wtxt { fill: #fff; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dtxt { fill: #0b0b0b; font-size: 12.5px; font-weight: 700; }
+.hv:hover { opacity: 0.88; }
+.lgd { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
+.lgd span { display: inline-flex; align-items: center; gap: 6px; }
+.lgd i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.lgd i.c1 { background: var(--c1); } .lgd i.c2 { background: var(--c2); } .lgd i.c3 { background: var(--c3); }
+.lgd i.gh { border: 1.5px dashed var(--miss); background: transparent; }
+details.tv { margin-top: 10px; }
+details.tv summary { cursor: pointer; font-size: 13.5px; color: var(--ink-2); width: fit-content; }
+details.tv .tbl { margin-top: 8px; }
+.tip { position: fixed; z-index: 50; max-width: 300px; background: var(--ink); color: var(--bg); font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.tip b { font-weight: 600; }
+.tip[hidden] { display: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rt td { font-size: 14px; }
+.rt td.sm { font-size: 13px; color: var(--ink-2); min-width: 220px; }
+.rt tfoot td { font-weight: 600; background: var(--soft); border-bottom: 0; }
+.how { margin-top: 18px; }
+.tl-steps { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 0; }
+.tl-steps li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14.5px; color: var(--ink-2); }
+.tl-steps li:last-child { border-bottom: 1px solid var(--line); }
+.tl-steps .w { font-weight: 600; color: var(--ink); }
+@media (max-width: 600px) { .tl-steps li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.lim { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 0; }
+.lim > li { padding: 11px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; }
+.lim > li:last-child { border-bottom: 1px solid var(--line); }
+.lim .h { font-weight: 600; font-size: 14.5px; }
+.lim .s { font-size: 14.5px; color: var(--ink-2); }
+@media (max-width: 700px) { .lim > li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.stl4 { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 14px; font-size: 13.5px; color: var(--ink-2); }
+.stl4 span.t { display: inline-flex; gap: 6px; align-items: center; }
+.sep-part { margin-top: 56px; padding-top: 8px; border-top: 3px solid var(--ink); }
+@media print { nav.bar { display: none; } .tip { display: none; } body { background: #fff; } details.tv { display: none; } }
+
+/* дорожная карта */
+.road-done, .road-always { font-size: 14.5px; color: var(--ink-2); max-width: 90ch; margin-top: 14px; }
+.road-done b, .road-always b { color: var(--ink); font-weight: 600; }
+.road { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 22px; position: relative; padding-top: 22px; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: var(--line); }
+.rmv { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 12px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.rmv::before { content: ""; position: absolute; top: -21px; left: 14px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 2px var(--muted); }
+.rmv.now { border-color: var(--model); box-shadow: inset 0 0 0 1px var(--model); }
+.rmv.now::before { background: var(--model); box-shadow: none; }
+.rmv .vn { font-family: var(--font-mono); font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.rmv .vn b { font-size: 17px; color: var(--ink); font-weight: 700; }
+.rmv h3 { font-size: 15.5px; line-height: 1.25; }
+.rmv .when { font-size: 13px; color: var(--ink-2); line-height: 1.35; }
+.rmv ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 13.5px; color: var(--ink-2); line-height: 1.4; }
+.rmv .vnote { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+@media (max-width: 1000px) {
+  .road { grid-template-columns: minmax(0, 1fr); padding-top: 0; padding-left: 22px; gap: 14px; }
+  .road::before { left: 7px; right: auto; top: 0; bottom: 0; width: 2px; height: auto; }
+  .rmv::before { top: 16px; left: -22px; }
+}
+
+/* сильные стороны */
+.strs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.str { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; align-content: start; }
+.str .sn { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--c1); color: var(--ink); }
+.str .sh { display: flex; gap: 6px 10px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.str h3 { font-size: 16px; line-height: 1.3; }
+.str .what { font-size: 14.5px; color: var(--ink); margin-top: 4px; line-height: 1.45; }
+.str .proof { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; border-top: 1px solid var(--line); padding-top: 6px; }
+.str .proof .pl { font-weight: 600; color: var(--ink); }
+@media (max-width: 820px) { .strs { grid-template-columns: minmax(0, 1fr); } }
+
+.c4 { fill: var(--c4); } .c5 { fill: var(--c5); } .c6 { fill: var(--c6); }
+.lgd i.c4 { background: var(--c4); } .lgd i.c5 { background: var(--c5); } .lgd i.c6 { background: var(--c6); }
+:root { --c4: #eda100; --c5: #e87ba4; --c6: #008300; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --c4: #c98500; --c5: #d55181; --c6: #0ca30c; } }
+:root[data-theme="dark"] { --c4: #c98500; --c5: #d55181; --c6: #0ca30c; }
+
+/* таблица прогонов шире основной колонки: 10 колонок не должны слипаться */
+.tbl-wide { width: min(1400px, calc(100vw - 32px)); margin-left: 50%; transform: translateX(-50%); }
+.rt { min-width: 1100px; }
+.rt th { font-size: 11.5px; letter-spacing: 0.03em; padding: 9px 8px; vertical-align: bottom; }
+.rt td { padding: 9px 8px; }
+.rt th:first-child, .rt td:first-child { min-width: 150px; }
+.rt td.sm { min-width: 230px; }
+.rt th.num { white-space: normal; min-width: 84px; }
+.rt td.num .note { display: inline-block; white-space: normal; max-width: 180px; text-align: right; line-height: 1.35; }
+
+.road-intro { font-size: 14.5px; color: var(--ink); max-width: 90ch; margin-top: 14px; }
+.road-past { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.rmv.past { background: var(--soft); border-style: dashed; padding: 12px 12px 10px; }
+.rmv.past::before { display: none; }
+.rmv.past h3 { font-size: 14.5px; }
+.rmv.past ul { font-size: 13px; }
+.road-future-label, .road-past-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-top: 18px; }
+@media (max-width: 1000px) { .road-past { grid-template-columns: minmax(0, 1fr); } }
+
+#m-road .wide { max-width: 1320px; }
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="col">
+    <div class="eyebrow">Трасса · версия v0.6 · показ руководству · цифры — по замеру живых прогонов 17 ноября 2026</div>
+    <h1 style="margin-top:14px">«Трасса» v0.6: что берёт на себя, что показали прогоны, что ещё впереди</h1>
+    <p class="mg-lead">«Трасса» — пакет для ИИ-агента, который ведёт работу тестировщика от документа требований до тест-кейсов, выгрузки в Zephyr Scale и автотестов. Эта страница — на пять минут: зачем это нужно, какие есть цифры, чем отличается от альтернатив, чего пакет пока не умеет и когда он дойдёт до тестировщиков. Устройство пакета — ниже, после блока для руководства.</p>
+    <div class="brief-box" aria-label="Коротко">
+      <h2>Коротко</h2>
+      <ul>
+        <li><strong>Что делает.</strong> По требованиям готовит тест-кейсы со ссылками «требование — кейс», отдельным ревью и выгрузкой для Zephyr Scale; по желанию пишет автотесты. Сборку и запуск тестов выполняет человек.</li>
+        <li><strong>Что показали живые прогоны 17.11</strong> (пять стеков: Maven, многомодульный Maven, Gradle, Python, OpenSpec): все дошли до отчёта за <span data-v="minRange">11–42 минут</span>, человеку пакет почти не задавал вопросов; на проекте с 11 подложенными дефектами автотесты нашли <span data-v="rulerCaught">10</span> из 11 (ложных срабатываний 0 в первом замере и 1 в контрольном — ошибка самого теста).</li>
+        <li><strong>Чего нет в цифрах.</strong> Нет сравнения с ручной работой по времени. Внутри контура на модели компании работала прежняя версия; v0.6 там — следующий прогон.</li>
+        <li><strong>Когда у тестировщиков.</strong> Поставка тестировщикам — с версией v0.7, после короткого шага качества и проверки на модели компании. Порядок версий — на дорожной карте ниже.</li>
+      </ul>
+    </div>
+    <div class="tiles" id="tiles" aria-label="Главные цифры">
+      <div class="tile"><div class="big" data-v="rulerCaughtOf">10 из 11</div><div class="what">подложенных дефектов нашли автотесты; ложных срабатываний 0 в первом замере и 1 (ошибка самого теста) в контрольном</div><div class="src">линейка на учебном проекте, замер 17.11; про карантин — в ограничениях ниже</div></div>
+      <div class="tile"><div class="big" data-v="minRange">11–42 мин</div><div class="what">от чистой папки до отчёта прогона</div><div class="src">9 прогонов на 5 стеках, замер 17.11; в время входит работа ИИ-агента</div></div>
+      <div class="tile"><div class="big" data-v="humanRange">0–2</div><div class="what">решения человека на прогон (цель пакета — не больше пяти)</div><div class="src">по заметкам прогонов 17.11</div></div>
+      <div class="tile"><div class="big" data-v="canaryFull">9 из 12</div><div class="what">наборов, где ревью поймало все три контрольные ошибки</div><div class="src">в остальных трёх поймало 2, 1 и 2; в двух из них пакет сам предупредил, что ревью слабое</div></div>
+    </div>
+    <div class="stl4" aria-label="Плашки состояния">
+      <span class="t"><span class="st st-in">в v0.6</span> есть в ветке, проверено прогонами</span>
+      <span class="t"><span class="st st-chk">в v0.6, проверяется</span> есть в ветке, прогон нашёл замечания, правка идёт</span>
+      <span class="t"><span class="st st-wip">в работе до поставки</span> ещё пишется или в плане</span>
+    </div>
+  </div>
+</header>
+
+<nav class="bar wrap" aria-label="Разделы">
+  <ul>
+    <li class="grp">Руководству</li>
+    <li><a href="#m-why">Зачем</a></li>
+    <li><a href="#m-num">В цифрах</a></li>
+    <li><a href="#m-str">Сильные стороны</a></li>
+    <li><a href="#m-cmp">Чем лучше</a></li>
+    <li><a href="#m-bounds">Границы</a></li>
+    <li><a href="#m-lim">Ограничения</a></li>
+    <li><a href="#m-road">Дорожная карта</a></li>
+    <li><a href="#m-next">Что дальше</a></li>
+    <li class="grp">Устройство</li>
+    <li><a href="#what">Что это</a></li>
+    <li><a href="#can">Что умеет</a></li>
+    <li><a href="#states">Состояния</a></li>
+    <li><a href="#roles">Роли</a></li>
+    <li><a href="#route">Маршрут</a></li>
+    <li><a href="#bounds">Границы (подробно)</a></li>
+    <li><a href="#openspec">OpenSpec</a></li>
+    <li><a href="#runs">Прогоны 16.11</a></li>
+    <li><a href="#glossary">Словарь</a></li>
+  </ul>
+</nav>
+
+<main>
+<section id="m-why" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 1</div><h2 class="q">Зачем это нужно</h2></div>
+    <p class="sub">Тестировщик тратит заметную часть времени на работу, которую можно разделить на проверяемые шаги: прочитать требования, свести их в кейсы, не потерять ни одного, выгрузить в Zephyr, написать и запустить автотесты, разобрать падения. Пакет берёт на себя черновую часть этих шагов и оставляет человеку решения.</p>
+  </div>
+  <div class="wide">
+    <div class="two">
+      <div class="panel"><h3>Берёт на себя пакет</h3>
+        <div class="hand">
+          <div class="row"><span class="mk">1</span><span><b>Разметка требований.</b> Выделяет требования, находит пробелы (нет результата, канала, доступа) и места, где код расходится с документом. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">2</span><span><b>Кейсы с трассировкой.</b> Кейсы по пачкам требований; код проверяет, что у каждого требования есть кейс и что ответ модели сходится со схемами. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">3</span><span><b>Ревью отдельным ревьюером</b> в свежем контексте, с контрольными ошибками для проверки его внимательности. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">4</span><span><b>Выгрузка для Zephyr Scale</b> (CSV) у принятого набора. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">5</span><span><b>Автотесты</b> по принятым кейсам, статическое ревью их кода, напечатанная команда запуска; упавшие помечаются и попадают в отчёт. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">6</span><span><b>Отчёт и вопросы аналитику</b> по пробелам требований. <span class="st st-in">в v0.6</span></span></div>
+          <div class="row"><span class="mk">7</span><span><b>Обновление старых кейсов</b> из Zephyr под изменившиеся требования. <span class="st st-in">в v0.6</span></span></div>
+        </div>
+      </div>
+      <div class="panel"><h3>Остаётся человеку</h3>
+        <div class="hand">
+          <div class="row"><span class="mk">•</span><span><b>Решения по неясным требованиям:</b> пауза после разметки — исключить требование с причиной или продолжить как есть.</span></div>
+          <div class="row"><span class="mk">•</span><span><b>Просмотр файлов автотестов и запуск</b> напечатанной команды сборки: пакет сам ничего не запускает.</span></div>
+          <div class="row"><span class="mk">•</span><span><b>Разбор упавших тестов:</b> дефект приложения, неверное требование или ошибка самого теста. В замерах последнее встречается (см. график 3), поэтому глаз человека нужен.</span></div>
+          <div class="row"><span class="mk">•</span><span><b>Тестовый стенд, импорт в Zephyr, коммит</b> того, что решено оставить.</span></div>
+          <div class="row"><span class="mk">•</span><span><b>Ответы аналитика</b> на вопросы по пробелам.</span></div>
+        </div>
+        <p class="note" style="margin-top:6px">Сколько времени это экономит тестировщику, мы не мерили: сравнения с ручной работой на тех же проектах нет. Обещать «в N раз быстрее» нечем.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="m-num" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 2</div><h2 class="q">Что даёт — в цифрах</h2></div>
+    <p class="sub">Все числа — по замеру живых прогонов 17 ноября 2026 на пакете одного коммита (668982a5), по заметкам этих прогонов. Числа плиток, таблицы и графиков собираются из одного файла данных; после контрольных прогонов их обновляют в нём и пересобирают страницу.</p>
+    <div class="callout" style="margin-top:14px"><strong>Как мерили — важно для чтения цифр.</strong> Проекты — открытые учебные (Petclinic, RealWorld, marshmallow и другие), не проекты тестировщиков. Ответы разметки, кейсов и автотестов писала универсальная модель в сессии агента (скрипты только собирали JSON, содержание — модели), ревью вели отдельные сессии в свежем контексте; это <strong>не рабочая модель компании</strong>. Роль человека играла ассистирующая сессия. Время включает работу модели.</div>
+  </div>
+  <div class="wide">
+    <div class="tbl tbl-wide" style="margin-top:16px"><!--BUILD:runs-table--><table class="rt" id="runs-table"><thead><tr><th>Стек · проект</th><th>Режим</th><th class="num">Кейсов принято ревью</th><th class="num">Автотесты: прошло / упало</th><th class="num">Время, мин</th><th class="num">Токены на шаги модели, тыс.</th><th class="num">Токены на принятый кейс, тыс.</th><th class="num">Решений человека</th><th class="num">Контрольные ошибки пойманы</th><th>Что важно</th></tr></thead><tbody><tr><td><strong>Maven, один модуль</strong><br><span class="note">Petclinic (Java)</span></td><td>кейсы + автотесты</td><td class="num">74</td><td class="num">40 / 16 из 56</td><td class="num">24,4</td><td class="num">666<br><span class="note">вход 479 + ответ 187; шагов 6</span><br><span class="note">повтор в той же папке (разметка взята из прошлого прогона): 323 тыс.</span></td><td class="num">9</td><td class="num">2</td><td class="num">3 из 3</td><td class="sm">Ревью приняло набор сразу. Из 16 упавших методов 15 ловят подложенные дефекты, один падает ошибкой во вспомогательном методе.</td></tr><tr><td><strong>Maven, несколько модулей</strong><br><span class="note">Petclinic, сервис клиентов</span></td><td>кейсы + автотесты</td><td class="num">33</td><td class="num">22 / 11 из 33</td><td class="num">≈20</td><td class="num">322<br><span class="note">вход 209 + ответ 113; шагов 5</span></td><td class="num">9,8</td><td class="num">1</td><td class="num">3 из 3</td><td class="sm">Падения: 8 — один дефект (сдвиг даты на день), 2 — расхождения с требованием, 1 — ошибка теста.</td></tr><tr><td><strong>Gradle</strong><br><span class="note">RealWorld (Spring Boot)</span></td><td>кейсы + автотесты</td><td class="num">86</td><td class="num">0 / 78 из 78</td><td class="num">11,1</td><td class="num">727<br><span class="note">вход 545 + ответ 181; шагов 8</span><br><span class="note">первый заход, отклонённый ревью: ещё 501 тыс.</span></td><td class="num">8,5</td><td class="num">2</td><td class="num">3 из 3</td><td class="sm">Первый заход отклонён ревью (33 из 81), второй принят. Автотесты собрались на Gradle с первого раза и честно упали на расхождении: документ учебного стенда описывает API по пути /api, а приложение отвечает без него. Стенд не годится для оценки верности автотестов.</td></tr><tr><td><strong>Python</strong><br><span class="note">marshmallow (библиотека)</span></td><td>только кейсы</td><td class="num">58</td><td class="num">—</td><td class="num">13,7</td><td class="num">253<br><span class="note">вход 186 + ответ 67; шагов 6</span></td><td class="num">4,4</td><td class="num">2</td><td class="num">3 из 3</td><td class="sm">Без Java; 2 кейса приняты после доработки. Тексты пакета рассчитаны на Java, кейсы для библиотеки описывались вручную.</td></tr><tr><td><strong>Python, повторный замер</strong><br><span class="note">тот же проект, после правок</span></td><td>только кейсы</td><td class="num">129</td><td class="num">—</td><td class="num">≈13</td><td class="num">178<br><span class="note">вход 107 + ответ 70; шагов 3</span></td><td class="num">1,4</td><td class="num">0</td><td class="num">3 из 3</td><td class="sm">Разметка дала 35 требований вместо раздела целиком — кейсов стало больше.</td></tr><tr><td><strong>OpenSpec + Maven</strong><br><span class="note">Petclinic с OpenSpec</span></td><td>кейсы + автотесты</td><td class="num">41</td><td class="num">30 / 10 из 40</td><td class="num">24,4</td><td class="num">639<br><span class="note">вход 511 + ответ 128; шагов 10</span></td><td class="num">15,6</td><td class="num">0</td><td class="num">3 из 3</td><td class="sm">Маршрут от OpenSpec до автотестов без остановок; 8 падений — расхождения, 2 — ошибки тестов.</td></tr><tr><td><strong>REST-документ, один раздел</strong><br><span class="note">Petclinic REST</span></td><td>только кейсы</td><td class="num">91</td><td class="num">—</td><td class="num">≈12</td><td class="num">518<br><span class="note">вход 343 + ответ 175; шагов 6</span></td><td class="num">5,7</td><td class="num">0</td><td class="num">1 из 3</td><td class="sm">Ревью слабое: поймало 1 из 3 контрольных ошибок, пакет предупредил — набор надо перечитать.</td></tr><tr><td><strong>Обновление кейсов Zephyr</strong><br><span class="note">Petclinic + изменение OpenSpec</span></td><td>только кейсы</td><td class="num">64 из 65</td><td class="num">—</td><td class="num">14,2</td><td class="num">572<br><span class="note">вход 457 + ответ 116; шагов 7</span><br><span class="note">повтор в той же папке: 0, повтор без модели</span></td><td class="num">8,9</td><td class="num">0</td><td class="num">2 из 3</td><td class="sm">Вердикты по старым кейсам совпали с эталоном в 64 строках из 65; один кейс, отклонённый ревью, выпал из выгрузки (исправлено: см. контрольный прогон ниже).</td></tr><tr><td><strong>REST-документ целиком, одним прогоном (128 требований)</strong><br><span class="note">Petclinic REST</span></td><td>только кейсы</td><td class="num">0 (212 без ревью)</td><td class="num">—</td><td class="num">25,3</td><td class="num">1 547<br><span class="note">вход 1 044 + ответ 503; шагов 11</span></td><td class="num">— (ревью не состоялось)</td><td class="num">0</td><td class="num">—</td><td class="sm">Разметка 128 из 128, 212 кейсов; ревью не состоялось: вид набора 968 КБ при пределе шага 500 КБ. По разделам тот же документ прошёл — строка ниже.</td></tr><tr><td><strong>Python, контрольный прогон</strong><br><span class="note">marshmallow (библиотека)</span></td><td>только кейсы</td><td class="num">121</td><td class="num">—</td><td class="num">11,7</td><td class="num">184<br><span class="note">вход 109 + ответ 75; шагов 3</span></td><td class="num">1,5</td><td class="num">0</td><td class="num">3 из 3</td><td class="sm">35 требований, один заход, принят целиком.</td></tr><tr><td><strong>Обновление кейсов Zephyr, контрольный прогон</strong><br><span class="note">Petclinic + изменение OpenSpec</span></td><td>только кейсы</td><td class="num">66 из 67</td><td class="num">—</td><td class="num">12,2</td><td class="num">593<br><span class="note">вход 477 + ответ 116; шагов 8</span><br><span class="note">повтор в той же папке: 0, повтор без модели</span></td><td class="num">9</td><td class="num">0</td><td class="num">2 из 3</td><td class="sm">Кейс тестировщика, отклонённый ревью, теперь остаётся в выгрузке: в файле 67 кейсов (65 старых и 2 новых), раньше было 64 из 65. Ревью слабое (2 из 3 контрольных ошибок), пакет предупредил.</td></tr><tr><td><strong>REST-документ целиком, по разделам</strong><br><span class="note">Petclinic REST</span></td><td>только кейсы</td><td class="num">199 из 200</td><td class="num">—</td><td class="num">≈42</td><td class="num">2 074<br><span class="note">вход 1 609 + ответ 465; шагов 30</span><br><span class="note">сумма четырёх прогонов по разделам</span></td><td class="num">10,4</td><td class="num">0</td><td class="num">3 из 3</td><td class="sm">Пакет сам предложил 4 прогона по разделам (34, 36, 32 и 26 требований) и собрал один файл для Zephyr, повторов названий нет. 127 из 128 требований покрыты: единственный кейс одного требования ревью отклонило, сборка об этом молчит.</td></tr><tr><td><strong>Maven, контрольный прогон с автотестами</strong><br><span class="note">Petclinic с подложенными дефектами</span></td><td>кейсы + автотесты</td><td class="num">76</td><td class="num">42 / 15 из 57</td><td class="num">≈26</td><td class="num">757<br><span class="note">вход 574 + ответ 182; шагов 8</span><br><span class="note">повтор в той же папке (только кейсы): 324 тыс.</span></td><td class="num">10</td><td class="num">0</td><td class="num">3 из 3</td><td class="sm">3 кейса приняты после доработки. Из 15 упавших методов 14 ловят подложенные дефекты, один — врождённый дефект проекта; в одном из ловцов ещё и ошибка самого теста. Время без ожидания запуска человеком (≈27 мин).</td></tr></tbody><tfoot><tr><td colspan="2">Итого по замеру</td><td class="num">1038</td><td class="num">134 / 130 из 264</td><td class="num"></td><td class="num">9 029</td><td class="num"></td><td class="num"></td><td class="num"></td><td class="sm">кейсов в наборах, прошедших ревью; тестовых методов; токенов шагов модели (оценка пакета), тыс.</td></tr></tfoot></table><!--/BUILD:runs-table--></div>
+    <p class="note" style="margin-top:10px">Решения человека: в одних заметках запуск напечатанной команды сборки считается решением, в других нет. «≈» — время по часам машины, без «≈» — по отчёту пакета. Строки «контрольный прогон» — прогоны итоговой версии; весь документ в 128 требований показан дважды: одним прогоном (ревью не состоялось) и по разделам (прошёл). Токены — оценка пакета по байтам входа и ответа шагов модели (0,24 токена на байт); работа самого агента сюда не входит, настоящий расход больше, насколько — не мерили. Подробнее — под графиком 4.</p>
+
+    <figure class="chartbox mg-fig-wrap">
+      <h3>График 1. Подложенные дефекты: что нашли автотесты</h3>
+      <p class="cap-sub">Учебный проект с 11 намеренно подложенными ошибками («линейка»). Автотесты запускались на каждой копии проекта с одним дефектом, затем на всех сразу. Подсказка с описанием дефекта — при наведении на клетку.</p>
+      <div class="fig mg-fig"><!--BUILD:ch1--><svg id="ch1" viewBox="0 0 880 250" role="img" aria-label="Из 11 подложенных дефектов автотесты, как их написал генератор, нашли 10. После карантина, в том виде, в каком класс лежит в проекте, нашлось 1 из 11."><text class="tt" x="36" y="30">Код автотестов, как его написал генератор (до карантина)</text><text class="tt" x="844" y="30" text-anchor="end">10 из 11</text><g class="cell hv" role="img" aria-label="D01 телефон: найден"><title>D01 · ошибка в шаблоне проверки телефона
+Код как написан: найден</title><rect class="c1" x="36" y="44" width="68" height="56" rx="6"/><text x="70" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D01</text><text x="70" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D02 город: найден"><title>D02 · убрана обязательность поля «город»
+Код как написан: найден</title><rect class="c1" x="110" y="44" width="68" height="56" rx="6"/><text x="144" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D02</text><text x="144" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D03 порядок: найден"><title>D03 · обратный порядок сортировки списка
+Код как написан: найден</title><rect class="c1" x="184" y="44" width="68" height="56" rx="6"/><text x="218" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D03</text><text x="218" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D04 пробелы: найден"><title>D04 · не обрезаются пробелы по краям значения
+Код как написан: найден</title><rect class="c1" x="258" y="44" width="68" height="56" rx="6"/><text x="292" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D04</text><text x="292" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D05 поиск: найден"><title>D05 · поиск «начинается с» заменён на «содержит»
+Код как написан: найден</title><rect class="c1" x="332" y="44" width="68" height="56" rx="6"/><text x="366" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D05</text><text x="366" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D06 страницы: найден"><title>D06 · ошибка постраничного вывода
+Код как написан: найден</title><rect class="c1" x="406" y="44" width="68" height="56" rx="6"/><text x="440" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D06</text><text x="440" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D07 дубликат: не найден"><title>D07 · нет проверки дубликата питомца; на этой базе данных изменение ничего не меняет в поведении — поймать его нельзя в принципе
+Код как написан: не найден</title><rect class="miss-cell" x="480" y="44" width="68" height="56" rx="6"/><text x="514" y="66" text-anchor="middle" class="tm" style="font-weight:600">D07</text><text x="514" y="88" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D08 д. рожд.: найден"><title>D08 · нет проверки даты рождения в будущем
+Код как написан: найден</title><rect class="c1" x="554" y="44" width="68" height="56" rx="6"/><text x="588" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D08</text><text x="588" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D09 правка: найден"><title>D09 · при правке не сохраняется дата рождения
+Код как написан: найден</title><rect class="c1" x="628" y="44" width="68" height="56" rx="6"/><text x="662" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D09</text><text x="662" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D10 визит: найден"><title>D10 · визит на сегодняшнюю дату принимается
+Код как написан: найден</title><rect class="c1" x="702" y="44" width="68" height="56" rx="6"/><text x="736" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D10</text><text x="736" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D11 переход: найден"><title>D11 · нет перенаправления после создания
+Код как написан: найден</title><rect class="c1" x="776" y="44" width="68" height="56" rx="6"/><text x="810" y="66" text-anchor="middle" class="wtxt" style="font-weight:600">D11</text><text x="810" y="88" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><text class="tl" x="70" y="118" text-anchor="middle">телефон</text><text class="tl" x="144" y="118" text-anchor="middle">город</text><text class="tl" x="218" y="118" text-anchor="middle">порядок</text><text class="tl" x="292" y="118" text-anchor="middle">пробелы</text><text class="tl" x="366" y="118" text-anchor="middle">поиск</text><text class="tl" x="440" y="118" text-anchor="middle">страницы</text><text class="tl" x="514" y="118" text-anchor="middle">дубликат</text><text class="tl" x="588" y="118" text-anchor="middle">д. рожд.</text><text class="tl" x="662" y="118" text-anchor="middle">правка</text><text class="tl" x="736" y="118" text-anchor="middle">визит</text><text class="tl" x="810" y="118" text-anchor="middle">переход</text><text class="tt" x="36" y="162">Тот же класс в проекте после карантина (упавшие методы отключены)</text><text class="tt" x="844" y="162" text-anchor="end">1 из 11</text><g class="cell hv" role="img" aria-label="D01 телефон: не найден"><title>D01 · ошибка в шаблоне проверки телефона
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="36" y="176" width="68" height="56" rx="6"/><text x="70" y="198" text-anchor="middle" class="tm" style="font-weight:600">D01</text><text x="70" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D02 город: не найден"><title>D02 · убрана обязательность поля «город»
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="110" y="176" width="68" height="56" rx="6"/><text x="144" y="198" text-anchor="middle" class="tm" style="font-weight:600">D02</text><text x="144" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D03 порядок: не найден"><title>D03 · обратный порядок сортировки списка
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="184" y="176" width="68" height="56" rx="6"/><text x="218" y="198" text-anchor="middle" class="tm" style="font-weight:600">D03</text><text x="218" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D04 пробелы: не найден"><title>D04 · не обрезаются пробелы по краям значения
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="258" y="176" width="68" height="56" rx="6"/><text x="292" y="198" text-anchor="middle" class="tm" style="font-weight:600">D04</text><text x="292" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D05 поиск: найден"><title>D05 · поиск «начинается с» заменён на «содержит»
+Класс в проекте после карантина: найден</title><rect class="c1" x="332" y="176" width="68" height="56" rx="6"/><text x="366" y="198" text-anchor="middle" class="wtxt" style="font-weight:600">D05</text><text x="366" y="220" text-anchor="middle" class="wtxt" style="font-size:18px">✓</text></g><g class="cell hv" role="img" aria-label="D06 страницы: не найден"><title>D06 · ошибка постраничного вывода
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="406" y="176" width="68" height="56" rx="6"/><text x="440" y="198" text-anchor="middle" class="tm" style="font-weight:600">D06</text><text x="440" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D07 дубликат: не найден"><title>D07 · нет проверки дубликата питомца; на этой базе данных изменение ничего не меняет в поведении — поймать его нельзя в принципе
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="480" y="176" width="68" height="56" rx="6"/><text x="514" y="198" text-anchor="middle" class="tm" style="font-weight:600">D07</text><text x="514" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D08 д. рожд.: не найден"><title>D08 · нет проверки даты рождения в будущем
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="554" y="176" width="68" height="56" rx="6"/><text x="588" y="198" text-anchor="middle" class="tm" style="font-weight:600">D08</text><text x="588" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D09 правка: не найден"><title>D09 · при правке не сохраняется дата рождения
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="628" y="176" width="68" height="56" rx="6"/><text x="662" y="198" text-anchor="middle" class="tm" style="font-weight:600">D09</text><text x="662" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D10 визит: не найден"><title>D10 · визит на сегодняшнюю дату принимается
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="702" y="176" width="68" height="56" rx="6"/><text x="736" y="198" text-anchor="middle" class="tm" style="font-weight:600">D10</text><text x="736" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g><g class="cell hv" role="img" aria-label="D11 переход: не найден"><title>D11 · нет перенаправления после создания
+Класс в проекте после карантина: не найден</title><rect class="miss-cell" x="776" y="176" width="68" height="56" rx="6"/><text x="810" y="198" text-anchor="middle" class="tm" style="font-weight:600">D11</text><text x="810" y="220" text-anchor="middle" class="tm" style="font-size:18px">–</text></g></svg><!--/BUILD:ch1--></div>
+      <div class="lgd"><span><i class="c1"></i>найден (✓)</span><span><i class="gh"></i>не найден (–)</span></div>
+      <figcaption>Источник: замер линейки от 17.11, прогон на Maven. Первая строка — код автотестов, как его написал генератор и принял ревьюер; ложных срабатываний 0 (кроме одного врождённого дефекта проекта, он в линейку не входит). Замер повторён на контрольном прогоне итоговой версии с тем же результатом: 10 из 11 до карантина и 1 из 11 после; там ложное срабатывание одно — ошибка самого теста. Не найден D07: изменение, которое на этой базе данных ничего не меняет в поведении, — поймать его нельзя в принципе. <strong>Вторая строка — честная оговорка:</strong> после запуска «со всеми дефектами» пакет отключает упавшие тесты (карантин) и пишет о них в отчёте. Так работает v0.6: класс, который остаётся в проекте, на проекте с дефектами почти зелёный — из 11 ловит 1. В поставке тестировщикам упавший тест останется в проекте активным как находка — решение 17.11, правка в работе (см. ограничения).</figcaption>
+      <details class="tv"><summary>Таблица к графику 1</summary><div class="tbl"><!--BUILD:t-ch1--><table id="t-ch1"><thead><tr><th>Дефект</th><th>Что подложено</th><th>Код как написан</th><th>После карантина</th></tr></thead><tbody><tr><td>D01</td><td>ошибка в шаблоне проверки телефона</td><td>найден</td><td>не найден</td></tr><tr><td>D02</td><td>убрана обязательность поля «город»</td><td>найден</td><td>не найден</td></tr><tr><td>D03</td><td>обратный порядок сортировки списка</td><td>найден</td><td>не найден</td></tr><tr><td>D04</td><td>не обрезаются пробелы по краям значения</td><td>найден</td><td>не найден</td></tr><tr><td>D05</td><td>поиск «начинается с» заменён на «содержит»</td><td>найден</td><td>найден</td></tr><tr><td>D06</td><td>ошибка постраничного вывода</td><td>найден</td><td>не найден</td></tr><tr><td>D07</td><td>нет проверки дубликата питомца; на этой базе данных изменение ничего не меняет в поведении — поймать его нельзя в принципе</td><td>не найден</td><td>не найден</td></tr><tr><td>D08</td><td>нет проверки даты рождения в будущем</td><td>найден</td><td>не найден</td></tr><tr><td>D09</td><td>при правке не сохраняется дата рождения</td><td>найден</td><td>не найден</td></tr><tr><td>D10</td><td>визит на сегодняшнюю дату принимается</td><td>найден</td><td>не найден</td></tr><tr><td>D11</td><td>нет перенаправления после создания</td><td>найден</td><td>не найден</td></tr></tbody></table><!--/BUILD:t-ch1--></div></details>
+    </figure>
+
+    <figure class="chartbox mg-fig-wrap">
+      <h3>График 2. Кейсы и время прогона по проектам</h3>
+      <p class="cap-sub">Принято ревью кейсов и минут от чистой папки до отчёта. Две шкалы — две отдельные панели, не одна ось.</p>
+      <div class="fig mg-fig"><!--BUILD:ch2--><svg id="ch2" viewBox="0 0 880 528" role="img" aria-label="Число принятых ревью кейсов и время прогона в минутах по 13 прогонам."><text class="th" x="300" y="22">КЕЙСОВ ПРИНЯТО РЕВЬЮ</text><text class="th" x="660" y="22">МИНУТ ДО ОТЧЁТА</text><line class="grid" x1="300" y1="42" x2="300" y2="484"/><text class="axis" x="300" y="502" text-anchor="middle">0</text><line class="grid" x1="350" y1="42" x2="350" y2="484"/><text class="axis" x="350" y="502" text-anchor="middle">50</text><line class="grid" x1="400" y1="42" x2="400" y2="484"/><text class="axis" x="400" y="502" text-anchor="middle">100</text><line class="grid" x1="450" y1="42" x2="450" y2="484"/><text class="axis" x="450" y="502" text-anchor="middle">150</text><line class="grid" x1="500" y1="42" x2="500" y2="484"/><text class="axis" x="500" y="502" text-anchor="middle">200</text><line class="grid" x1="660" y1="42" x2="660" y2="484"/><text class="axis" x="660" y="502" text-anchor="middle">0</text><line class="grid" x1="698" y1="42" x2="698" y2="484"/><text class="axis" x="698" y="502" text-anchor="middle">10</text><line class="grid" x1="736" y1="42" x2="736" y2="484"/><text class="axis" x="736" y="502" text-anchor="middle">20</text><line class="grid" x1="774" y1="42" x2="774" y2="484"/><text class="axis" x="774" y="502" text-anchor="middle">30</text><line class="grid" x1="812" y1="42" x2="812" y2="484"/><text class="axis" x="812" y="502" text-anchor="middle">40</text><line class="grid" x1="850" y1="42" x2="850" y2="484"/><text class="axis" x="850" y="502" text-anchor="middle">50</text><g class="hv" role="img" aria-label="Maven, один модуль: 74 кейсов, 24,4 минут"><title>Maven, один модуль
+Petclinic (Java)
+Кейсов: 74 принято ревью
+Время: 24,4 мин</title><text class="rlab" x="286" y="63" text-anchor="end">Maven, один модуль</text><path class="c1" d="M300 50H370Q374 50 374 54V64Q374 68 370 68H300Z"/><text class="val" x="380" y="63">74</text><path class="c2" d="M660 50H748.72Q752.72 50 752.72 54V64Q752.72 68 748.72 68H660Z"/><text class="val" x="758.72" y="63">24,4</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей: 33 кейсов, ≈20 минут"><title>Maven, несколько модулей
+Petclinic, сервис клиентов
+Кейсов: 33 принято ревью
+Время: ≈20 мин</title><text class="rlab" x="286" y="97" text-anchor="end">Maven, несколько модулей</text><path class="c1" d="M300 84H329Q333 84 333 88V98Q333 102 329 102H300Z"/><text class="val" x="339" y="97">33</text><path class="c2" d="M660 84H732Q736 84 736 88V98Q736 102 732 102H660Z"/><text class="val" x="742" y="97">≈20</text></g><g class="hv" role="img" aria-label="Gradle: 86 кейсов, 11,1 минут"><title>Gradle
+RealWorld (Spring Boot)
+Кейсов: 86 принято ревью
+Время: 11,1 мин</title><text class="rlab" x="286" y="131" text-anchor="end">Gradle</text><path class="c1" d="M300 118H382Q386 118 386 122V132Q386 136 382 136H300Z"/><text class="val" x="392" y="131">86</text><path class="c2" d="M660 118H698.18Q702.18 118 702.18 122V132Q702.18 136 698.18 136H660Z"/><text class="val" x="708.18" y="131">11,1</text></g><g class="hv" role="img" aria-label="Python: 58 кейсов, 13,7 минут"><title>Python
+marshmallow (библиотека)
+Кейсов: 58 принято ревью
+Время: 13,7 мин</title><text class="rlab" x="286" y="165" text-anchor="end">Python</text><path class="c1" d="M300 152H354Q358 152 358 156V166Q358 170 354 170H300Z"/><text class="val" x="364" y="165">58</text><path class="c2" d="M660 152H708.06Q712.06 152 712.06 156V166Q712.06 170 708.06 170H660Z"/><text class="val" x="718.06" y="165">13,7</text></g><g class="hv" role="img" aria-label="Python, повторный замер: 129 кейсов, ≈13 минут"><title>Python, повторный замер
+тот же проект, после правок
+Кейсов: 129 принято ревью
+Время: ≈13 мин</title><text class="rlab" x="286" y="199" text-anchor="end">Python, повторный замер</text><path class="c1" d="M300 186H425Q429 186 429 190V200Q429 204 425 204H300Z"/><text class="val" x="435" y="199">129</text><path class="c2" d="M660 186H705.4Q709.4 186 709.4 190V200Q709.4 204 705.4 204H660Z"/><text class="val" x="715.4" y="199">≈13</text></g><g class="hv" role="img" aria-label="OpenSpec + Maven: 41 кейсов, 24,4 минут"><title>OpenSpec + Maven
+Petclinic с OpenSpec
+Кейсов: 41 принято ревью
+Время: 24,4 мин</title><text class="rlab" x="286" y="233" text-anchor="end">OpenSpec + Maven</text><path class="c1" d="M300 220H337Q341 220 341 224V234Q341 238 337 238H300Z"/><text class="val" x="347" y="233">41</text><path class="c2" d="M660 220H748.72Q752.72 220 752.72 224V234Q752.72 238 748.72 238H660Z"/><text class="val" x="758.72" y="233">24,4</text></g><g class="hv" role="img" aria-label="REST-документ, один раздел: 91 кейсов, ≈12 минут"><title>REST-документ, один раздел
+Petclinic REST
+Кейсов: 91 принято ревью
+Время: ≈12 мин</title><text class="rlab" x="286" y="267" text-anchor="end">REST-документ, один раздел</text><path class="c1" d="M300 254H387Q391 254 391 258V268Q391 272 387 272H300Z"/><text class="val" x="397" y="267">91</text><path class="c2" d="M660 254H701.6Q705.6 254 705.6 258V268Q705.6 272 701.6 272H660Z"/><text class="val" x="711.6" y="267">≈12</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr: 64 кейсов, 14,2 минут"><title>Обновление кейсов Zephyr
+Petclinic + изменение OpenSpec
+Кейсов: 64 из 65 принято ревью
+Время: 14,2 мин</title><text class="rlab" x="286" y="301" text-anchor="end">Обновление кейсов Zephyr</text><path class="c1" d="M300 288H360Q364 288 364 292V302Q364 306 360 306H300Z"/><text class="val" x="370" y="301">64 из 65</text><path class="c2" d="M660 288H709.96Q713.96 288 713.96 292V302Q713.96 306 709.96 306H660Z"/><text class="val" x="719.96" y="301">14,2</text></g><g class="hv" role="img" aria-label="REST-документ целиком, одним прогоном (128 требований): 212 кейсов, 25,3 минут"><title>REST-документ целиком, одним прогоном (128 требований)
+Petclinic REST
+Кейсов: 212, ревью не состоялось
+Время: 25,3 мин</title><text class="rlab" x="286" y="335" text-anchor="end">REST-документ целиком, одним прогоном (128 требований)</text><rect class="ghost" x="300" y="322" width="212" height="18" rx="4"/><text class="val" x="518" y="335">212 без ревью</text><path class="c2" d="M660 322H752.14Q756.14 322 756.14 326V336Q756.14 340 752.14 340H660Z"/><text class="val" x="762.14" y="335">25,3</text></g><g class="hv" role="img" aria-label="Python, контрольный прогон: 121 кейсов, 11,7 минут"><title>Python, контрольный прогон
+marshmallow (библиотека)
+Кейсов: 121 принято ревью
+Время: 11,7 мин</title><text class="rlab" x="286" y="369" text-anchor="end">Python, контрольный прогон</text><path class="c1" d="M300 356H417Q421 356 421 360V370Q421 374 417 374H300Z"/><text class="val" x="427" y="369">121</text><path class="c2" d="M660 356H700.46Q704.46 356 704.46 360V370Q704.46 374 700.46 374H660Z"/><text class="val" x="710.46" y="369">11,7</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, контрольный прогон: 66 кейсов, 12,2 минут"><title>Обновление кейсов Zephyr, контрольный прогон
+Petclinic + изменение OpenSpec
+Кейсов: 66 из 67 принято ревью
+Время: 12,2 мин</title><text class="rlab" x="286" y="403" text-anchor="end">Обновление кейсов Zephyr, контрольный прогон</text><path class="c1" d="M300 390H362Q366 390 366 394V404Q366 408 362 408H300Z"/><text class="val" x="372" y="403">66 из 67</text><path class="c2" d="M660 390H702.36Q706.36 390 706.36 394V404Q706.36 408 702.36 408H660Z"/><text class="val" x="712.36" y="403">12,2</text></g><g class="hv" role="img" aria-label="REST-документ целиком, по разделам: 199 кейсов, ≈42 минут"><title>REST-документ целиком, по разделам
+Petclinic REST
+Кейсов: 199 из 200 принято ревью
+Время: ≈42 мин</title><text class="rlab" x="286" y="437" text-anchor="end">REST-документ целиком, по разделам</text><path class="c1" d="M300 424H495Q499 424 499 428V438Q499 442 495 442H300Z"/><text class="val" x="505" y="437">199 из 200</text><path class="c2" d="M660 424H815.6Q819.6 424 819.6 428V438Q819.6 442 815.6 442H660Z"/><text class="val" x="825.6" y="437">≈42</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами: 76 кейсов, ≈26 минут"><title>Maven, контрольный прогон с автотестами
+Petclinic с подложенными дефектами
+Кейсов: 76 принято ревью
+Время: ≈26 мин</title><text class="rlab" x="286" y="471" text-anchor="end">Maven, контрольный прогон с автотестами</text><path class="c1" d="M300 458H372Q376 458 376 462V472Q376 476 372 476H300Z"/><text class="val" x="382" y="471">76</text><path class="c2" d="M660 458H754.8Q758.8 458 758.8 462V472Q758.8 476 754.8 476H660Z"/><text class="val" x="764.8" y="471">≈26</text></g></svg><!--/BUILD:ch2--></div>
+      <div class="lgd"><span><i class="c1"></i>кейсов принято ревью</span><span><i class="c2"></i>минут до отчёта</span><span><i class="gh"></i>набор не прошёл ревью</span></div>
+      <figcaption>Источник: заметки прогонов 17.11. Принято ревью — число кейсов в принятом наборе (по каждому прогону — как в таблице). Весь документ в 128 требований показан дважды. Одним прогоном: разметка 128 из 128 и 212 кейсов за 25 минут, но вид набора для ревью (968 КБ) не поместился в один шаг (предел 500 КБ), и набор остался без вердикта. По разделам: пакет сам предложил четыре прогона, собрал один файл для Zephyr с 199 кейсами за около 42 минут, без решений человека. Python в двух строках: во втором замере, после правок по первому, пакет разметил 35 требований вместо раздела целиком — кейсов стало больше.</figcaption>
+      <details class="tv"><summary>Таблица к графику 2</summary><div class="tbl"><!--BUILD:t-ch2--><table id="t-ch2"><thead><tr><th>Прогон</th><th>Кейсов</th><th>Минут</th></tr></thead><tbody><tr><td>Maven, один модуль</td><td>74</td><td>24,4</td></tr><tr><td>Maven, несколько модулей</td><td>33</td><td>≈20</td></tr><tr><td>Gradle</td><td>86</td><td>11,1</td></tr><tr><td>Python</td><td>58</td><td>13,7</td></tr><tr><td>Python, повторный замер</td><td>129</td><td>≈13</td></tr><tr><td>OpenSpec + Maven</td><td>41</td><td>24,4</td></tr><tr><td>REST-документ, один раздел</td><td>91</td><td>≈12</td></tr><tr><td>Обновление кейсов Zephyr</td><td>64 из 65</td><td>14,2</td></tr><tr><td>REST-документ целиком, одним прогоном (128 требований)</td><td>212 (без ревью)</td><td>25,3</td></tr><tr><td>Python, контрольный прогон</td><td>121</td><td>11,7</td></tr><tr><td>Обновление кейсов Zephyr, контрольный прогон</td><td>66 из 67</td><td>12,2</td></tr><tr><td>REST-документ целиком, по разделам</td><td>199 из 200</td><td>≈42</td></tr><tr><td>Maven, контрольный прогон с автотестами</td><td>76</td><td>≈26</td></tr></tbody></table><!--/BUILD:t-ch2--></div></details>
+    </figure>
+
+    <figure class="chartbox mg-fig-wrap">
+      <h3>График 3. Автотесты: что случилось с тестами, которые упали</h3>
+      <p class="cap-sub">Тестовые методы после запуска человеком: расхождение приложения с требованием, ошибка самого теста, прошло. Чем отличается «нашли дефект» от «тест сломан» — на глаз не видно, поэтому в отчёте пакет разбирает падения.</p>
+      <div class="fig mg-fig"><!--BUILD:ch3--><svg id="ch3" viewBox="0 0 880 312" role="img" aria-label="По 5 прогонам с автотестами: сколько методов упало из-за расхождения приложения с требованием, сколько из-за ошибки самого теста и сколько прошло."><text class="rlab" x="320" y="34" text-anchor="end" style="font-weight:600">Maven, один модуль</text><text class="tl" x="320" y="52" text-anchor="end">упало 16 из 56 (15 + 1 ошибка теста)</text><g class="hv" role="img" aria-label="Maven, один модуль, упало: приложение расходится с требованием: 15"><title>Maven, один модуль
+упало: приложение расходится с требованием: 15 из 56</title><rect class="c1" x="340" y="20" width="94.5" height="24" rx="3"/><text class="wtxt" x="387.25" y="36" text-anchor="middle">15</text></g><g class="hv" role="img" aria-label="Maven, один модуль, упало: ошибка самого теста: 1"><title>Maven, один модуль
+упало: ошибка самого теста: 1 из 56</title><rect class="c2" x="436.5" y="20" width="4.3" height="24" rx="3"/></g><g class="hv" role="img" aria-label="Maven, один модуль, прошло: 40"><title>Maven, один модуль
+прошло: 40 из 56</title><rect class="c3" x="442.8" y="20" width="250" height="24" rx="3"/><text class="wtxt" x="567.8" y="36" text-anchor="middle">40</text></g><text class="tl" x="438.5" y="60">▲ ошибка теста: 1</text><text class="rlab" x="320" y="90" text-anchor="end" style="font-weight:600">Maven, несколько модулей</text><text class="tl" x="320" y="108" text-anchor="end">упало 11 из 33 (10 + 1 ошибка теста)</text><g class="hv" role="img" aria-label="Maven, несколько модулей, упало: приложение расходится с требованием: 10"><title>Maven, несколько модулей
+упало: приложение расходится с требованием: 10 из 33</title><rect class="c1" x="340" y="76" width="63" height="24" rx="3"/><text class="wtxt" x="371.5" y="92" text-anchor="middle">10</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей, упало: ошибка самого теста: 1"><title>Maven, несколько модулей
+упало: ошибка самого теста: 1 из 33</title><rect class="c2" x="405" y="76" width="4.3" height="24" rx="3"/></g><g class="hv" role="img" aria-label="Maven, несколько модулей, прошло: 22"><title>Maven, несколько модулей
+прошло: 22 из 33</title><rect class="c3" x="411.3" y="76" width="136.6" height="24" rx="3"/><text class="wtxt" x="479.6" y="92" text-anchor="middle">22</text></g><text class="tl" x="407" y="116">▲ ошибка теста: 1</text><text class="rlab" x="320" y="146" text-anchor="end" style="font-weight:600">Gradle</text><text class="tl" x="320" y="164" text-anchor="end">упало 78 из 78: стенд расходится с документом</text><g class="hv" role="img" aria-label="Gradle, упало: приложение расходится с требованием: 78"><title>Gradle
+упало: приложение расходится с требованием: 78 из 78</title><rect class="c1" x="340" y="132" width="491.4" height="24" rx="3"/><text class="wtxt" x="585.7" y="148" text-anchor="middle">78</text></g><text class="rlab" x="320" y="202" text-anchor="end" style="font-weight:600">OpenSpec + Maven</text><text class="tl" x="320" y="220" text-anchor="end">упало 10 из 40 (8 + 2 ошибка теста)</text><g class="hv" role="img" aria-label="OpenSpec + Maven, упало: приложение расходится с требованием: 8"><title>OpenSpec + Maven
+упало: приложение расходится с требованием: 8 из 40</title><rect class="c1" x="340" y="188" width="50.4" height="24" rx="3"/><text class="wtxt" x="365.2" y="204" text-anchor="middle">8</text></g><g class="hv" role="img" aria-label="OpenSpec + Maven, упало: ошибка самого теста: 2"><title>OpenSpec + Maven
+упало: ошибка самого теста: 2 из 40</title><rect class="c2" x="392.4" y="188" width="10.6" height="24" rx="3"/></g><g class="hv" role="img" aria-label="OpenSpec + Maven, прошло: 30"><title>OpenSpec + Maven
+прошло: 30 из 40</title><rect class="c3" x="405" y="188" width="187" height="24" rx="3"/><text class="wtxt" x="498.5" y="204" text-anchor="middle">30</text></g><text class="tl" x="394.4" y="228">▲ ошибка теста: 2</text><text class="rlab" x="320" y="258" text-anchor="end" style="font-weight:600">Maven, контрольный прогон с автотестами</text><text class="tl" x="320" y="276" text-anchor="end">упало 15 из 57</text><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, упало: приложение расходится с требованием: 15"><title>Maven, контрольный прогон с автотестами
+упало: приложение расходится с требованием: 15 из 57</title><rect class="c1" x="340" y="244" width="94.5" height="24" rx="3"/><text class="wtxt" x="387.25" y="260" text-anchor="middle">15</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, прошло: 42"><title>Maven, контрольный прогон с автотестами
+прошло: 42 из 57</title><rect class="c3" x="436.5" y="244" width="262.6" height="24" rx="3"/><text class="wtxt" x="567.8" y="260" text-anchor="middle">42</text></g></svg><!--/BUILD:ch3--></div>
+      <div class="lgd"><span><i class="c1"></i>упало: приложение расходится с требованием</span><span><i class="c2"></i>упало: ошибка самого теста</span><span><i class="c3"></i>прошло</span></div>
+      <figcaption>Источник: заметки прогонов 17.11, разбор падений по отчётам сборки. Строка Gradle — не «автотесты на Gradle не работают»: тесты собрались с первого раза и честно упали на расхождении учебного стенда с его же документом (документ описывает API по пути <code>/api</code>, приложение отвечает без него), не подогнаны под приложение. Для оценки верности автотестов этот стенд не годится; в части методов к расхождению добавилась слабость самого теста — цепочка не останавливается после неудачной регистрации. На Maven с линейкой один из 16 упавших — тест, который падает не проверкой, а ошибкой во вспомогательном методе, хотя за ним стоит настоящий дефект. Ошибок самих тестов — 4 из 130 упавших (по разбору в заметках прогонов), и ещё в одном тесте ошибка соседствует с найденным дефектом, поэтому человек читает файлы тестов до запуска и разбирает падения.</figcaption>
+      <details class="tv"><summary>Таблица к графику 3</summary><div class="tbl"><!--BUILD:t-ch3--><table id="t-ch3"><thead><tr><th>Прогон</th><th>Упало: расхождение с требованием</th><th>Упало: ошибка теста</th><th>Прошло</th><th>Всего методов</th></tr></thead><tbody><tr><td>Maven, один модуль</td><td>15</td><td>1</td><td>40</td><td>56</td></tr><tr><td>Maven, несколько модулей</td><td>10</td><td>1</td><td>22</td><td>33</td></tr><tr><td>Gradle</td><td>78</td><td>0</td><td>0</td><td>78</td></tr><tr><td>OpenSpec + Maven</td><td>8</td><td>2</td><td>30</td><td>40</td></tr><tr><td>Maven, контрольный прогон с автотестами</td><td>15</td><td>0</td><td>42</td><td>57</td></tr></tbody></table><!--/BUILD:t-ch3--></div></details>
+    </figure>
+
+    <figure class="chartbox mg-fig-wrap">
+      <h3>График 4. Куда уходят токены по видам шагов</h3>
+      <p class="cap-sub">Доля токенов шагов модели в каждом прогоне: разметка требований, кейсы, ревью кейсов, доработка, автотесты, ревью автотестов. Справа — всего токенов на прогон (тысяч).</p>
+      <div class="fig mg-fig"><!--BUILD:ch4--><svg id="ch4" viewBox="0 0 880 474" role="img" aria-label="Доля токенов по видам шагов модели в 13 прогонах: разметка требований, кейсы, ревью кейсов, доработка, автотесты, ревью автотестов."><text class="rlab" x="286" y="33" text-anchor="end">Maven, один модуль</text><g class="hv" role="img" aria-label="Maven, один модуль, Разметка требований: 74 тыс. токенов, 11 %"><title>Maven, один модуль
+Разметка требований: 74 тыс. токенов (11 %)
+вход 68 + ответ 6</title><rect class="c1" x="300" y="20" width="42.4707" height="20" rx="3"/><text class="wtxt" x="321.235" y="34" text-anchor="middle">11%</text></g><g class="hv" role="img" aria-label="Maven, один модуль, Кейсы (пачки): 261 тыс. токенов, 39 %"><title>Maven, один модуль
+Кейсы (пачки): 261 тыс. токенов (39 %)
+вход 162 + ответ 99</title><rect class="c2" x="344.471" y="20" width="147.02" height="20" rx="3"/><text class="wtxt" x="417.981" y="34" text-anchor="middle">39%</text></g><g class="hv" role="img" aria-label="Maven, один модуль, Ревью кейсов: 61 тыс. токенов, 9 %"><title>Maven, один модуль
+Ревью кейсов: 61 тыс. токенов (9 %)
+вход 60 + ответ 1</title><rect class="c3" x="493.491" y="20" width="32.9579" height="20" rx="3"/><text class="wtxt" x="509.97" y="34" text-anchor="middle">9%</text></g><g class="hv" role="img" aria-label="Maven, один модуль, Автотесты: 148 тыс. токенов, 22 %"><title>Maven, один модуль
+Автотесты: 148 тыс. токенов (22 %)
+вход 83 + ответ 65</title><rect class="c5" x="528.449" y="20" width="82.3919" height="20" rx="3"/><text class="wtxt" x="569.645" y="34" text-anchor="middle">22%</text></g><g class="hv" role="img" aria-label="Maven, один модуль, Ревью автотестов: 121 тыс. токенов, 18 %"><title>Maven, один модуль
+Ревью автотестов: 121 тыс. токенов (18 %)
+вход 106 + ответ 15</title><rect class="c6" x="612.841" y="20" width="67.1591" height="20" rx="3"/><text class="wtxt" x="646.42" y="34" text-anchor="middle">18%</text></g><text class="val" x="690" y="34">666 тыс.</text><text class="rlab" x="286" y="67" text-anchor="end">Maven, несколько модулей</text><g class="hv" role="img" aria-label="Maven, несколько модулей, Разметка требований: 29 тыс. токенов, 9 %"><title>Maven, несколько модулей
+Разметка требований: 29 тыс. токенов (9 %)
+вход 22 + ответ 7</title><rect class="c1" x="300" y="54" width="34.6923" height="20" rx="3"/><text class="wtxt" x="317.346" y="68" text-anchor="middle">9%</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей, Кейсы (пачки): 92 тыс. токенов, 28 %"><title>Maven, несколько модулей
+Кейсы (пачки): 92 тыс. токенов (28 %)
+вход 34 + ответ 57</title><rect class="c2" x="336.692" y="54" width="106.246" height="20" rx="3"/><text class="wtxt" x="389.815" y="68" text-anchor="middle">28%</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей, Ревью кейсов: 42 тыс. токенов, 13 %"><title>Maven, несколько модулей
+Ревью кейсов: 42 тыс. токенов (13 %)
+вход 41 + ответ 2</title><rect class="c3" x="444.938" y="54" width="48.0384" height="20" rx="3"/><text class="wtxt" x="468.958" y="68" text-anchor="middle">13%</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей, Автотесты: 94 тыс. токенов, 29 %"><title>Maven, несколько модулей
+Автотесты: 94 тыс. токенов (29 %)
+вход 51 + ответ 44</title><rect class="c5" x="494.977" y="54" width="109.267" height="20" rx="3"/><text class="wtxt" x="549.61" y="68" text-anchor="middle">29%</text></g><g class="hv" role="img" aria-label="Maven, несколько модулей, Ревью автотестов: 64 тыс. токенов, 20 %"><title>Maven, несколько модулей
+Ревью автотестов: 64 тыс. токенов (20 %)
+вход 61 + ответ 3</title><rect class="c6" x="606.244" y="54" width="73.7562" height="20" rx="3"/><text class="wtxt" x="643.122" y="68" text-anchor="middle">20%</text></g><text class="val" x="690" y="68">322 тыс.</text><text class="rlab" x="286" y="101" text-anchor="end">Gradle</text><g class="hv" role="img" aria-label="Gradle, Разметка требований: 140 тыс. токенов, 19 %"><title>Gradle
+Разметка требований: 140 тыс. токенов (19 %)
+вход 114 + ответ 26</title><rect class="c1" x="300" y="88" width="73.4165" height="20" rx="3"/><text class="wtxt" x="336.708" y="102" text-anchor="middle">19%</text></g><g class="hv" role="img" aria-label="Gradle, Кейсы (пачки): 301 тыс. токенов, 41 %"><title>Gradle
+Кейсы (пачки): 301 тыс. токенов (41 %)
+вход 203 + ответ 98</title><rect class="c2" x="375.417" y="88" width="155.236" height="20" rx="3"/><text class="wtxt" x="453.034" y="102" text-anchor="middle">41%</text></g><g class="hv" role="img" aria-label="Gradle, Ревью кейсов: 70 тыс. токенов, 10 %"><title>Gradle
+Ревью кейсов: 70 тыс. токенов (10 %)
+вход 68 + ответ 2</title><rect class="c3" x="532.652" y="88" width="34.6168" height="20" rx="3"/><text class="wtxt" x="549.96" y="102" text-anchor="middle">10%</text></g><g class="hv" role="img" aria-label="Gradle, Автотесты: 124 тыс. токенов, 17 %"><title>Gradle
+Автотесты: 124 тыс. токенов (17 %)
+вход 71 + ответ 53</title><rect class="c5" x="569.269" y="88" width="62.8278" height="20" rx="3"/><text class="wtxt" x="600.683" y="102" text-anchor="middle">17%</text></g><g class="hv" role="img" aria-label="Gradle, Ревью автотестов: 92 тыс. токенов, 13 %"><title>Gradle
+Ревью автотестов: 92 тыс. токенов (13 %)
+вход 89 + ответ 3</title><rect class="c6" x="634.097" y="88" width="45.9034" height="20" rx="3"/><text class="wtxt" x="657.048" y="102" text-anchor="middle">13%</text></g><text class="val" x="690" y="102">727 тыс.</text><text class="rlab" x="286" y="135" text-anchor="end">Python</text><g class="hv" role="img" aria-label="Python, Разметка требований: 35 тыс. токенов, 14 %"><title>Python
+Разметка требований: 35 тыс. токенов (14 %)
+вход 23 + ответ 13</title><rect class="c1" x="300" y="122" width="52.9978" height="20" rx="3"/><text class="wtxt" x="326.499" y="136" text-anchor="middle">14%</text></g><g class="hv" role="img" aria-label="Python, Кейсы (пачки): 130 тыс. токенов, 52 %"><title>Python
+Кейсы (пачки): 130 тыс. токенов (52 %)
+вход 81 + ответ 49</title><rect class="c2" x="354.998" y="122" width="193.952" height="20" rx="3"/><text class="wtxt" x="451.974" y="136" text-anchor="middle">52%</text></g><g class="hv" role="img" aria-label="Python, Ревью кейсов: 55 тыс. токенов, 22 %"><title>Python
+Ревью кейсов: 55 тыс. токенов (22 %)
+вход 52 + ответ 2</title><rect class="c3" x="550.95" y="122" width="80.266" height="20" rx="3"/><text class="wtxt" x="591.083" y="136" text-anchor="middle">22%</text></g><g class="hv" role="img" aria-label="Python, Доработка кейсов: 32 тыс. токенов, 13 %"><title>Python
+Доработка кейсов: 32 тыс. токенов (13 %)
+вход 30 + ответ 3</title><rect class="c4" x="633.216" y="122" width="46.7838" height="20" rx="3"/><text class="dtxt" x="656.608" y="136" text-anchor="middle">13%</text></g><text class="val" x="690" y="136">253 тыс.</text><text class="rlab" x="286" y="169" text-anchor="end">Python, повторный замер</text><g class="hv" role="img" aria-label="Python, повторный замер, Разметка требований: 29 тыс. токенов, 16 %"><title>Python, повторный замер
+Разметка требований: 29 тыс. токенов (16 %)
+вход 23 + ответ 6</title><rect class="c1" x="300" y="156" width="61.917" height="20" rx="3"/><text class="wtxt" x="330.958" y="170" text-anchor="middle">16%</text></g><g class="hv" role="img" aria-label="Python, повторный замер, Кейсы (пачки): 96 тыс. токенов, 54 %"><title>Python, повторный замер
+Кейсы (пачки): 96 тыс. токенов (54 %)
+вход 33 + ответ 62</title><rect class="c2" x="363.917" y="156" width="202.545" height="20" rx="3"/><text class="wtxt" x="465.19" y="170" text-anchor="middle">54%</text></g><g class="hv" role="img" aria-label="Python, повторный замер, Ревью кейсов: 53 тыс. токенов, 30 %"><title>Python, повторный замер
+Ревью кейсов: 53 тыс. токенов (30 %)
+вход 51 + ответ 2</title><rect class="c3" x="568.462" y="156" width="111.538" height="20" rx="3"/><text class="wtxt" x="624.231" y="170" text-anchor="middle">30%</text></g><text class="val" x="690" y="170">178 тыс.</text><text class="rlab" x="286" y="203" text-anchor="end">OpenSpec + Maven</text><g class="hv" role="img" aria-label="OpenSpec + Maven, Разметка требований: 161 тыс. токенов, 25 %"><title>OpenSpec + Maven
+Разметка требований: 161 тыс. токенов (25 %)
+вход 126 + ответ 35</title><rect class="c1" x="300" y="190" width="95.4734" height="20" rx="3"/><text class="wtxt" x="347.737" y="204" text-anchor="middle">25%</text></g><g class="hv" role="img" aria-label="OpenSpec + Maven, Кейсы (пачки): 209 тыс. токенов, 33 %"><title>OpenSpec + Maven
+Кейсы (пачки): 209 тыс. токенов (33 %)
+вход 171 + ответ 38</title><rect class="c2" x="397.473" y="190" width="122.088" height="20" rx="3"/><text class="wtxt" x="458.518" y="204" text-anchor="middle">33%</text></g><g class="hv" role="img" aria-label="OpenSpec + Maven, Ревью кейсов: 35 тыс. токенов, 5 %"><title>OpenSpec + Maven
+Ревью кейсов: 35 тыс. токенов (5 %)
+вход 33 + ответ 2</title><rect class="c3" x="521.562" y="190" width="18.5439" height="20" rx="3"/></g><g class="hv" role="img" aria-label="OpenSpec + Maven, Автотесты: 135 тыс. токенов, 21 %"><title>OpenSpec + Maven
+Автотесты: 135 тыс. токенов (21 %)
+вход 89 + ответ 46</title><rect class="c5" x="542.106" y="190" width="78.4549" height="20" rx="3"/><text class="wtxt" x="581.333" y="204" text-anchor="middle">21%</text></g><g class="hv" role="img" aria-label="OpenSpec + Maven, Ревью автотестов: 100 тыс. токенов, 16 %"><title>OpenSpec + Maven
+Ревью автотестов: 100 тыс. токенов (16 %)
+вход 93 + ответ 7</title><rect class="c6" x="622.561" y="190" width="57.4394" height="20" rx="3"/><text class="wtxt" x="651.28" y="204" text-anchor="middle">16%</text></g><text class="val" x="690" y="204">639 тыс.</text><text class="rlab" x="286" y="237" text-anchor="end">REST-документ, один раздел</text><g class="hv" role="img" aria-label="REST-документ, один раздел, Разметка требований: 203 тыс. токенов, 39 %"><title>REST-документ, один раздел
+Разметка требований: 203 тыс. токенов (39 %)
+вход 180 + ответ 22</title><rect class="c1" x="300" y="224" width="148.544" height="20" rx="3"/><text class="wtxt" x="374.272" y="238" text-anchor="middle">39%</text></g><g class="hv" role="img" aria-label="REST-документ, один раздел, Кейсы (пачки): 230 тыс. токенов, 44 %"><title>REST-документ, один раздел
+Кейсы (пачки): 230 тыс. токенов (44 %)
+вход 79 + ответ 151</title><rect class="c2" x="450.544" y="224" width="166.839" height="20" rx="3"/><text class="wtxt" x="533.964" y="238" text-anchor="middle">44%</text></g><g class="hv" role="img" aria-label="REST-документ, один раздел, Ревью кейсов: 85 тыс. токенов, 16 %"><title>REST-документ, один раздел
+Ревью кейсов: 85 тыс. токенов (16 %)
+вход 83 + ответ 2</title><rect class="c3" x="619.383" y="224" width="60.6167" height="20" rx="3"/><text class="wtxt" x="649.692" y="238" text-anchor="middle">16%</text></g><text class="val" x="690" y="238">518 тыс.</text><text class="rlab" x="286" y="271" text-anchor="end">Обновление кейсов Zephyr</text><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, Разметка требований: 170 тыс. токенов, 30 %"><title>Обновление кейсов Zephyr
+Разметка требований: 170 тыс. токенов (30 %)
+вход 130 + ответ 39</title><rect class="c1" x="300" y="258" width="112.527" height="20" rx="3"/><text class="wtxt" x="356.263" y="272" text-anchor="middle">30%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, Кейсы (пачки): 282 тыс. токенов, 49 %"><title>Обновление кейсов Zephyr
+Кейсы (пачки): 282 тыс. токенов (49 %)
+вход 209 + ответ 73</title><rect class="c2" x="414.527" y="258" width="185.309" height="20" rx="3"/><text class="wtxt" x="507.181" y="272" text-anchor="middle">49%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, Ревью кейсов: 53 тыс. токенов, 9 %"><title>Обновление кейсов Zephyr
+Ревью кейсов: 53 тыс. токенов (9 %)
+вход 50 + ответ 3</title><rect class="c3" x="601.836" y="258" width="33.2412" height="20" rx="3"/><text class="wtxt" x="618.456" y="272" text-anchor="middle">9%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, Доработка кейсов: 68 тыс. токенов, 12 %"><title>Обновление кейсов Zephyr
+Доработка кейсов: 68 тыс. токенов (12 %)
+вход 68 + ответ 0</title><rect class="c4" x="637.077" y="258" width="42.9229" height="20" rx="3"/><text class="dtxt" x="658.539" y="272" text-anchor="middle">12%</text></g><text class="val" x="690" y="272">572 тыс.</text><text class="rlab" x="286" y="305" text-anchor="end">REST-документ целиком, одним прогоном (128 требований)</text><g class="hv" role="img" aria-label="REST-документ целиком, одним прогоном (128 требований), Разметка требований: 313 тыс. токенов, 20 %"><title>REST-документ целиком, одним прогоном (128 требований)
+Разметка требований: 313 тыс. токенов (20 %)
+вход 239 + ответ 74</title><rect class="c1" x="300" y="292" width="76.8165" height="20" rx="3"/><text class="wtxt" x="338.408" y="306" text-anchor="middle">20%</text></g><g class="hv" role="img" aria-label="REST-документ целиком, одним прогоном (128 требований), Кейсы (пачки): 997 тыс. токенов, 64 %"><title>REST-документ целиком, одним прогоном (128 требований)
+Кейсы (пачки): 997 тыс. токенов (64 %)
+вход 568 + ответ 429</title><rect class="c2" x="378.816" y="292" width="242.791" height="20" rx="3"/><text class="wtxt" x="500.212" y="306" text-anchor="middle">64%</text></g><g class="hv" role="img" aria-label="REST-документ целиком, одним прогоном (128 требований), Ревью кейсов: 238 тыс. токенов, 15 %"><title>REST-документ целиком, одним прогоном (128 требований)
+Ревью кейсов: 238 тыс. токенов (15 %)
+вход 238 + ответ 0</title><rect class="c3" x="623.608" y="292" width="56.3924" height="20" rx="3"/><text class="wtxt" x="651.804" y="306" text-anchor="middle">15%</text></g><text class="val" x="690" y="306">1 547 тыс.</text><text class="rlab" x="286" y="339" text-anchor="end">Python, контрольный прогон</text><g class="hv" role="img" aria-label="Python, контрольный прогон, Разметка требований: 30 тыс. токенов, 16 %"><title>Python, контрольный прогон
+Разметка требований: 30 тыс. токенов (16 %)
+вход 23 + ответ 7</title><rect class="c1" x="300" y="326" width="60.9272" height="20" rx="3"/><text class="wtxt" x="330.464" y="340" text-anchor="middle">16%</text></g><g class="hv" role="img" aria-label="Python, контрольный прогон, Кейсы (пачки): 100 тыс. токенов, 54 %"><title>Python, контрольный прогон
+Кейсы (пачки): 100 тыс. токенов (54 %)
+вход 34 + ответ 66</title><rect class="c2" x="362.927" y="326" width="203.84" height="20" rx="3"/><text class="wtxt" x="464.847" y="340" text-anchor="middle">54%</text></g><g class="hv" role="img" aria-label="Python, контрольный прогон, Ревью кейсов: 55 тыс. токенов, 30 %"><title>Python, контрольный прогон
+Ревью кейсов: 55 тыс. токенов (30 %)
+вход 53 + ответ 2</title><rect class="c3" x="568.767" y="326" width="111.233" height="20" rx="3"/><text class="wtxt" x="624.384" y="340" text-anchor="middle">30%</text></g><text class="val" x="690" y="340">184 тыс.</text><text class="rlab" x="286" y="373" text-anchor="end">Обновление кейсов Zephyr, контрольный прогон</text><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, контрольный прогон, Разметка требований: 167 тыс. токенов, 28 %"><title>Обновление кейсов Zephyr, контрольный прогон
+Разметка требований: 167 тыс. токенов (28 %)
+вход 131 + ответ 36</title><rect class="c1" x="300" y="360" width="107.089" height="20" rx="3"/><text class="wtxt" x="353.544" y="374" text-anchor="middle">28%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, контрольный прогон, Кейсы (пачки): 282 тыс. токенов, 48 %"><title>Обновление кейсов Zephyr, контрольный прогон
+Кейсы (пачки): 282 тыс. токенов (48 %)
+вход 210 + ответ 72</title><rect class="c2" x="409.089" y="360" width="178.594" height="20" rx="3"/><text class="wtxt" x="498.386" y="374" text-anchor="middle">48%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, контрольный прогон, Ревью кейсов: 64 тыс. токенов, 11 %"><title>Обновление кейсов Zephyr, контрольный прогон
+Ревью кейсов: 64 тыс. токенов (11 %)
+вход 63 + ответ 2</title><rect class="c3" x="589.683" y="360" width="39.3567" height="20" rx="3"/><text class="wtxt" x="609.361" y="374" text-anchor="middle">11%</text></g><g class="hv" role="img" aria-label="Обновление кейсов Zephyr, контрольный прогон, Доработка кейсов: 79 тыс. токенов, 13 %"><title>Обновление кейсов Zephyr, контрольный прогон
+Доработка кейсов: 79 тыс. токенов (13 %)
+вход 73 + ответ 6</title><rect class="c4" x="631.04" y="360" width="48.9604" height="20" rx="3"/><text class="dtxt" x="655.52" y="374" text-anchor="middle">13%</text></g><text class="val" x="690" y="374">593 тыс.</text><text class="rlab" x="286" y="407" text-anchor="end">REST-документ целиком, по разделам</text><g class="hv" role="img" aria-label="REST-документ целиком, по разделам, Разметка требований: 849 тыс. токенов, 41 %"><title>REST-документ целиком, по разделам
+Разметка требований: 849 тыс. токенов (41 %)
+вход 765 + ответ 84</title><rect class="c1" x="300" y="394" width="155.481" height="20" rx="3"/><text class="wtxt" x="377.741" y="408" text-anchor="middle">41%</text></g><g class="hv" role="img" aria-label="REST-документ целиком, по разделам, Кейсы (пачки): 666 тыс. токенов, 32 %"><title>REST-документ целиком, по разделам
+Кейсы (пачки): 666 тыс. токенов (32 %)
+вход 320 + ответ 346</title><rect class="c2" x="457.481" y="394" width="120.018" height="20" rx="3"/><text class="wtxt" x="517.49" y="408" text-anchor="middle">32%</text></g><g class="hv" role="img" aria-label="REST-документ целиком, по разделам, Ревью кейсов: 299 тыс. токенов, 14 %"><title>REST-документ целиком, по разделам
+Ревью кейсов: 299 тыс. токенов (14 %)
+вход 284 + ответ 15</title><rect class="c3" x="579.499" y="394" width="52.7932" height="20" rx="3"/><text class="wtxt" x="605.896" y="408" text-anchor="middle">14%</text></g><g class="hv" role="img" aria-label="REST-документ целиком, по разделам, Доработка кейсов: 260 тыс. токенов, 13 %"><title>REST-документ целиком, по разделам
+Доработка кейсов: 260 тыс. токенов (13 %)
+вход 241 + ответ 20</title><rect class="c4" x="634.293" y="394" width="45.7075" height="20" rx="3"/><text class="dtxt" x="657.146" y="408" text-anchor="middle">13%</text></g><text class="val" x="690" y="408">2 074 тыс.</text><text class="rlab" x="286" y="441" text-anchor="end">Maven, контрольный прогон с автотестами</text><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Разметка требований: 75 тыс. токенов, 10 %"><title>Maven, контрольный прогон с автотестами
+Разметка требований: 75 тыс. токенов (10 %)
+вход 68 + ответ 6</title><rect class="c1" x="300" y="428" width="37.5351" height="20" rx="3"/><text class="wtxt" x="318.768" y="442" text-anchor="middle">10%</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Кейсы (пачки): 263 тыс. токенов, 35 %"><title>Maven, контрольный прогон с автотестами
+Кейсы (пачки): 263 тыс. токенов (35 %)
+вход 164 + ответ 99</title><rect class="c2" x="339.535" y="428" width="130.234" height="20" rx="3"/><text class="wtxt" x="404.652" y="442" text-anchor="middle">35%</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Ревью кейсов: 77 тыс. токенов, 10 %"><title>Maven, контрольный прогон с автотестами
+Ревью кейсов: 77 тыс. токенов (10 %)
+вход 76 + ответ 2</title><rect class="c3" x="471.769" y="428" width="36.8956" height="20" rx="3"/><text class="wtxt" x="490.217" y="442" text-anchor="middle">10%</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Доработка кейсов: 86 тыс. токенов, 11 %"><title>Maven, контрольный прогон с автотестами
+Доработка кейсов: 86 тыс. токенов (11 %)
+вход 81 + ответ 6</title><rect class="c4" x="510.664" y="428" width="41.4085" height="20" rx="3"/><text class="dtxt" x="531.369" y="442" text-anchor="middle">11%</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Автотесты: 144 тыс. токенов, 19 %"><title>Maven, контрольный прогон с автотестами
+Автотесты: 144 тыс. токенов (19 %)
+вход 80 + ответ 64</title><rect class="c5" x="554.073" y="428" width="70.2382" height="20" rx="3"/><text class="wtxt" x="589.192" y="442" text-anchor="middle">19%</text></g><g class="hv" role="img" aria-label="Maven, контрольный прогон с автотестами, Ревью автотестов: 111 тыс. токенов, 15 %"><title>Maven, контрольный прогон с автотестами
+Ревью автотестов: 111 тыс. токенов (15 %)
+вход 106 + ответ 5</title><rect class="c6" x="626.311" y="428" width="53.6889" height="20" rx="3"/><text class="wtxt" x="653.156" y="442" text-anchor="middle">15%</text></g><text class="val" x="690" y="442">757 тыс.</text></svg><!--/BUILD:ch4--></div>
+      <div class="lgd"><span><i class="c1"></i>разметка требований</span><span><i class="c2"></i>кейсы (пачки)</span><span><i class="c3"></i>ревью кейсов</span><span><i class="c4"></i>доработка кейсов</span><span><i class="c5"></i>автотесты</span><span><i class="c6"></i>ревью автотестов</span></div>
+      <figcaption><strong>Оговорка.</strong> Это оценка пакета по размеру входа и ответа шагов модели: 0,24 токена на байт, мера окна рабочей модели; у других моделей токены считаются иначе. Собственная работа агента — чтение инструкций, команды, переписка — сюда не входит, поэтому настоящий расход сессии больше; насколько, мы не мерили. Источник — отчёты прогонов 17.11 (поле «итоги вызовов модели» и список вызовов по шагам). В прогоне на весь документ одним заходом ревью не состоялось, поэтому ревью-шагов там нет; прогон «по разделам» посчитан суммой четырёх прогонов.</figcaption>
+      <details class="tv"><summary>Таблица к графику 4</summary><div class="tbl"><!--BUILD:t-ch4--><table id="t-ch4"><thead><tr><th>Прогон</th><th class="num">Разметка требований, тыс.</th><th class="num">Кейсы (пачки), тыс.</th><th class="num">Ревью кейсов, тыс.</th><th class="num">Доработка кейсов, тыс.</th><th class="num">Автотесты, тыс.</th><th class="num">Ревью автотестов, тыс.</th><th class="num">Всего, тыс.</th></tr></thead><tbody><tr><td>Maven, один модуль</td><td class="num">74</td><td class="num">261</td><td class="num">61</td><td class="num">—</td><td class="num">148</td><td class="num">121</td><td class="num">666</td></tr><tr><td>Maven, несколько модулей</td><td class="num">29</td><td class="num">92</td><td class="num">42</td><td class="num">—</td><td class="num">94</td><td class="num">64</td><td class="num">322</td></tr><tr><td>Gradle</td><td class="num">140</td><td class="num">301</td><td class="num">70</td><td class="num">—</td><td class="num">124</td><td class="num">92</td><td class="num">727</td></tr><tr><td>Python</td><td class="num">35</td><td class="num">130</td><td class="num">55</td><td class="num">32</td><td class="num">—</td><td class="num">—</td><td class="num">253</td></tr><tr><td>Python, повторный замер</td><td class="num">29</td><td class="num">96</td><td class="num">53</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">178</td></tr><tr><td>OpenSpec + Maven</td><td class="num">161</td><td class="num">209</td><td class="num">35</td><td class="num">—</td><td class="num">135</td><td class="num">100</td><td class="num">639</td></tr><tr><td>REST-документ, один раздел</td><td class="num">203</td><td class="num">230</td><td class="num">85</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">518</td></tr><tr><td>Обновление кейсов Zephyr</td><td class="num">170</td><td class="num">282</td><td class="num">53</td><td class="num">68</td><td class="num">—</td><td class="num">—</td><td class="num">572</td></tr><tr><td>REST-документ целиком, одним прогоном (128 требований)</td><td class="num">313</td><td class="num">997</td><td class="num">238</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">1 547</td></tr><tr><td>Python, контрольный прогон</td><td class="num">30</td><td class="num">100</td><td class="num">55</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">184</td></tr><tr><td>Обновление кейсов Zephyr, контрольный прогон</td><td class="num">167</td><td class="num">282</td><td class="num">64</td><td class="num">79</td><td class="num">—</td><td class="num">—</td><td class="num">593</td></tr><tr><td>REST-документ целиком, по разделам</td><td class="num">849</td><td class="num">666</td><td class="num">299</td><td class="num">260</td><td class="num">—</td><td class="num">—</td><td class="num">2 074</td></tr><tr><td>Maven, контрольный прогон с автотестами</td><td class="num">75</td><td class="num">263</td><td class="num">77</td><td class="num">86</td><td class="num">144</td><td class="num">111</td><td class="num">757</td></tr></tbody></table><!--/BUILD:t-ch4--></div></details>
+    </figure>
+
+    <figure class="chartbox" id="m-stab">
+      <h3>Стабильность: одна версия, один проект, три свежие сессии</h3>
+      <p class="cap-sub">Один и тот же документ требований прогнали три раза подряд, каждый раз в новой сессии. Смотрели, насколько результат повторяется.</p>
+      <div class="tbl" style="margin-top:12px"><table id="t-stab">
+        <thead><tr><th>Что сравниваем</th><th class="num">Прогон 1</th><th class="num">Прогон 2</th><th class="num">Прогон 3</th><th class="num">Для сравнения: дневной прогон</th></tr></thead>
+        <tbody>
+          <tr><td>Кейсов в принятом наборе</td><td class="num">115</td><td class="num">114</td><td class="num">115</td><td class="num">129</td></tr>
+          <tr><td>Шагов проверки в кейсах</td><td class="num">138</td><td class="num">144</td><td class="num">137</td><td class="num">140</td></tr>
+          <tr><td>Требований в документе</td><td class="num">35</td><td class="num">35</td><td class="num">35</td><td class="num">35</td></tr>
+          <tr><td>Требований без кейса</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td>Контрольные ошибки пойманы</td><td class="num">3 из 3</td><td class="num">3 из 3</td><td class="num">3 из 3</td><td class="num">3 из 3</td></tr>
+          <tr><td>Вопросов человеку</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td>Время до отчёта, мин</td><td class="num">12</td><td class="num">11</td><td class="num">13</td><td class="num">≈13</td></tr>
+          <tr><td>Токены на шаги модели, тыс.</td><td class="num">198</td><td class="num">202</td><td class="num">209</td><td class="num">178</td></tr>
+        </tbody></table></div>
+      <p class="note" style="margin-top:10px"><strong>Что видно.</strong> В трёх прогонах получилось 114–115 кейсов (разница меньше 1 %), одни и те же 35 требований, все покрыты, все наборы приняты ревью, контрольные ошибки пойманы в каждом. У 20 из 35 требований число кейсов совпало во всех трёх прогонах, у 14 отличается на один, у одного — на несколько (5, 4 и 7). Время — 11–13 минут, токены на шаги модели — 198–209 тысяч.</p>
+      <figcaption><strong>Как читать разброс.</strong> Днём того же дня прогон той же версии на том же документе дал 129 кейсов, поэтому по четырём прогонам число кейсов — 114–129 (около 12 %). Но шагов проверки почти столько же (137–144 во всех четырёх): одни и те же проверки просто разложены по кейсам по-разному. По содержанию прогоны почти одинаковы: из 397 значений и примеров, которые называет сам документ, 96 % есть в кейсах всех трёх прогонов; по строгому счёту (только в данных и ожиданиях кейса, не в заголовке) — 87 %. Что осталось несравнённым: машинную часть кейсов (имена входов и выходов для автотестов) прогоны записывают по-своему. Столбец «для сравнения» — прогон «Python, повторный замер» из таблицы прогонов выше.</figcaption>
+    </figure>
+
+    <div class="split" style="margin-top:26px">
+      <div class="panel"><h3>Большой документ: 128 требований <span class="st st-in">в v0.6, проверено живым прогоном</span></h3>
+        <ul>
+          <li>Одним прогоном документ в 128 требований не проходит: набор из 212 кейсов остался без ревью, потому что не помещается в один шаг.</li>
+          <li>По разделам проходит: пакет сам предложил 4 прогона (34, 36, 32 и 26 требований), прогоны идут по очереди, одна команда собирает один файл для Zephyr. Итог: 199 кейсов, без повторов названий, контрольные ошибки пойманы 3 из 3 в каждом прогоне, около 42 минут, решений человека 0.</li>
+          <li>127 из 128 требований покрыты. Единственный кейс одного требования ревью отклонило, и оно осталось без кейса; сборка файла об этом пока не предупреждает.</li>
+        </ul>
+      </div>
+      <div class="panel"><h3>Обновление кейсов из Zephyr <span class="st st-in">в v0.6, исправлено и проверено живым прогоном</span></h3>
+        <ul>
+          <li>Из 65 старых кейсов вердикты «подходит / переписать / устарел / вне документов» совпали с эталоном в 64 строках из 65; кейсы, которые не менялись, в выгрузке байт в байт.</li>
+          <li>Дефект первого замера — кейс, который ревью отклонило, выпадал из выгрузки (64 из 65) — исправлен: в контрольном прогоне он остался в файле, всего 67 кейсов (65 старых и 2 новых), отчёт называет его по ключу.</li>
+          <li>Устаревший кейс остаётся в выгрузке с меткой «устарел», а не удаляется.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="m-str" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 3</div><h2 class="q">Сильные стороны</h2></div>
+    <p class="sub">Что у пакета хорошо само по себе, без сравнений. У каждого пункта — одна строка «что» и одна строка доказательства: число или факт из прогонов 17.11 (источники — заметки прогонов), либо из проверки самого пакета.</p>
+  </div>
+  <div class="wide">
+    <div class="strs">
+      <article class="str"><div class="sn">1</div><div class="sb"><div class="sh"><h3>Ничего не теряется между требованием и кейсом</h3><span class="st st-in">в v0.6</span></div><p class="what">Код проверяет, что у каждого требования есть кейс; число требований сверяется с номерами документа.</p><p class="proof"><span class="pl">Доказательство.</span> Прогон на Python 17.11: 35 требований из 35 номеров документа, 129 кейсов, у каждого из 118 условий есть кейс (пропусков нет). Сверка «номеров N, требований M» в итоге разметки — в готовых правках, ещё не влитых.</p></div></article>
+      <article class="str"><div class="sn">2</div><div class="sb"><div class="sh"><h3>Каждый ответ модели проверяет код</h3><span class="st st-in">в v0.6</span></div><p class="what">Схемы, ссылки, порядок, отпечатки проверяет код, модель пишет только содержание; неверный ответ возвращается с подсказкой.</p><p class="proof"><span class="pl">Доказательство.</span> Первая пачка кейсов на Maven получила 32 замечания к форме, у каждого — путь и подсказка; со второго захода принята. На Gradle — 20 замечаний, тоже с подсказками (замеры 17.11).</p></div></article>
+      <article class="str"><div class="sn">3</div><div class="sb"><div class="sh"><h3>Ревью можно измерить</h3><span class="st st-in">в v0.6</span></div><p class="what">Ревьюер — отдельная сессия в свежем контексте; его внимательность меряют подложенные контрольные ошибки.</p><p class="proof"><span class="pl">Доказательство.</span> В 9 из 12 наборов ревьюер поймал все 3 контрольные ошибки; в остальных трёх — 2, 1 и 2, и в двух из них пакет сам вывел предупреждение «ревью слабое».</p></div></article>
+      <article class="str"><div class="sn">4</div><div class="sb"><div class="sh"><h3>Один плохой кейс не отклоняет весь набор</h3><span class="st st-in">в v0.6</span></div><p class="what">Ревью оценивает каждый кейс отдельно: хорошие принимаются, плохие один раз возвращаются на доработку.</p><p class="proof"><span class="pl">Доказательство.</span> На Python 17.11 из 58 кейсов два вернулись на доработку, остальные приняты сразу; после повторного ревью принят весь набор.</p></div></article>
+      <article class="str"><div class="sn">5</div><div class="sb"><div class="sh"><h3>Тестировщику почти не приходится отвечать на вопросы пакета</h3><span class="st st-in">в v0.6</span></div><p class="what">Пакет сам готовит настройки и ведёт прогон; человек решает только по неясным требованиям и запускает сборку.</p><p class="proof"><span class="pl">Доказательство.</span> В прогонах 17.11 человеку пришлось принять от 0 до 2 решений за прогон; первый запрос к модели пакет делал через 17 секунд — 1,5 минуты после старта (вместе с чтением инструкции).</p></div></article>
+      <article class="str"><div class="sn">6</div><div class="sb"><div class="sh"><h3>Не портит кейсы, которые тестировщик уже написал</h3><span class="st st-in">в v0.6</span></div><p class="what">Когда требования меняются, пакет не переписывает кейсы, написанные вручную: подходящие остаются как были, устаревшие получают метку «устарел» и не удаляются.</p><p class="proof"><span class="pl">Доказательство.</span> Прогон 17.11: из 65 старых кейсов 60 в выгрузке байт в байт как в исходном файле; у двух устаревших метка «устарел», текст прежний; ключи Zephyr сохранены. Кейс, отклонённый ревью, раньше выпадал из выгрузки; теперь остаётся (контрольный прогон: 67 кейсов — 65 старых и 2 новых).</p></div></article>
+      <article class="str"><div class="sn">7</div><div class="sb"><div class="sh"><h3>Падение автотеста не скрывается и не «чинится»</h3><span class="st st-in">в v0.6</span></div><p class="what">Автотест берёт ожидаемый результат из требования, а не из того, что делает приложение; если они расходятся, тест падает, и это видно как найденное расхождение.</p><p class="proof"><span class="pl">Доказательство.</span> На проекте с подложенными дефектами 15 из 16 упавших тестов — именно те, что поймали дефект; на Gradle все 78 упали из-за расхождения учебного приложения с его документом (замеры 17.11). Ошибками самих тестов оказались 4 из 130 упавших.</p></div></article>
+      <article class="str"><div class="sn">8</div><div class="sb"><div class="sh"><h3>Безопасность заложена в устройство</h3><span class="st st-in">в v0.6</span></div><p class="what">Пакет не ходит в сеть, не запускает процессы и модель; сборку запускает человек; в отчёте, который выходит с работы, вместо текстов требований — номера строк, идентификаторы и числа.</p><p class="proof"><span class="pl">Доказательство.</span> Проверка по внутреннему протоколу: оба профиля поставки — «зелёный» без условий; последняя проверка — 17.11, на промежуточной версии.</p></div></article>
+      <article class="str"><div class="sn">9</div><div class="sb"><div class="sh"><h3>Собственный код проверяется тестами</h3><span class="st st-in">в v0.6</span></div><p class="what">Каждый выпуск проходит полный набор тестов пакета, обзор кода и живые прогоны.</p><p class="proof"><span class="pl">Доказательство.</span> Более 4300 тестов собственного кода (4330 прошли в полном наборе на версии 17.11); четыре теста, проверявшие старое поведение, переписываются вместе с правками.</p></div></article>
+      <article class="str"><div class="sn">10</div><div class="sb"><div class="sh"><h3>Несколько стеков и форматов</h3><span class="st st-in">в v0.6</span></div><p class="what">Maven, многомодульный Maven, Gradle, Python, OpenSpec; выгрузка кейсов в Zephyr и обратный импорт.</p><p class="proof"><span class="pl">Доказательство.</span> Все пять стеков прошли живые прогоны 17.11 до отчёта (график 2); обновление кейсов из выгрузки Zephyr проверено на 65 кейсах.</p></div></article>
+    </div>
+  </div>
+</section>
+
+<section id="m-cmp" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 4</div><h2 class="q">Чем лучше остальных</h2></div>
+    <p class="sub">Только сравнение, без названий чужих продуктов. Сильные стороны пакета — в предыдущем разделе; здесь — где мы сильнее и где нет.</p>
+  </div>
+  <div class="wide">
+    <div class="cmp">
+      <div class="card">
+        <div class="vs">Против ручного написания кейсов</div>
+        <p>Берёт на себя черновую работу: разметку, кейсы по всем требованиям, ссылки «требование — кейс», выгрузку и, по желанию, автотесты. В замерах 17.11 прогон от чистой папки до отчёта занял 11–25 минут (кейсы и автотесты на одном проекте — около 24 минут). Человек остаётся там, где нужно суждение: неясные требования, разбор падений, решение, что оставить.</p>
+        <p class="note"><strong>Чего не знаем.</strong> Во сколько раз это быстрее ручной работы, не мерили: у нас нет замера «тот же проект руками». Это нужно проверить на проектах тестировщиков.</p>
+      </div>
+      <div class="card">
+        <div class="vs">Против «просто попросить модель написать кейсы»</div>
+        <p>Просьба к модели даёт текст, а не проверяемый результат: нет сверки со схемами и трассировкой, нет отдельного ревью с измеримой внимательностью, нет журнала прогона. В пакете всё это есть (пункты 1–4 раздела «Сильные стороны»). Ожидаемый результат автотеста берётся из требования, а не из кода приложения.</p>
+        <p class="note"><strong>Оговорка.</strong> Упавший автотест сейчас отключается с пометкой причины и называется в отчёте, а не правится; в шаге качества он остаётся включённым как находка.</p>
+      </div>
+      <div class="card">
+        <div class="vs">Против внутреннего расширения коллег для той же среды</div>
+        <div class="cols">
+          <div><h4>Где мы сильнее</h4><ul>
+            <li><strong>Архитектура:</strong> состояние прогона и журнал, схемы ответов, проверка каждого шага кодом, а не только текстом инструкции.</li>
+            <li><strong>Точность проверок:</strong> упавшая проверка остаётся упавшей.</li>
+            <li><strong>Тесты на собственный код</strong> — у нас их более 4300; у расширения коллег, по чтению их кода, тестов на собственный код не нашли.</li>
+          </ul></div>
+          <div><h4>Где они сильнее</h4><ul>
+            <li><strong>Кэш знаний о проекте</strong> между запусками.</li>
+            <li><strong>Замер покрытия</strong> кода существующими тестами.</li>
+            <li>Нам частично навстречу: готовая разметка прошлого прогона берётся повторно (проверено 17.11), а карта существующих тестов проекта передаётся генератору как подсказка. Кэша и замера покрытия у нас нет.</li>
+          </ul></div>
+        </div>
+        <p class="note">Сравнение от 28 октября, сделано чтением кода, без запусков; сравнивалась более ранняя версия нашего пакета. Цифр прогонов на их стороне у нас нет.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="m-bounds" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 5</div><h2 class="q">Границы на машине</h2></div>
+    <p class="sub">Факты по инструкции пакета и коду; подробный список — в разделе «Границы» устройства ниже.</p>
+  </div>
+  <div class="wide">
+    <div class="split">
+      <div class="panel"><h3>Не делает</h3><ul>
+        <li>не ходит в сеть и не опрашивает стенд;</li>
+        <li>не запускает процессы: ни сборку, ни тесты, ни git;</li>
+        <li>не обращается к модели сам: ответы пишет агент, пакет их проверяет;</li>
+        <li>не меняет код продукта: в проект идут только новые файлы тестов.</li>
+      </ul></div>
+      <div class="panel"><h3>Пишет и читает</h3><ul>
+        <li>читает файлы проекта и документы требований внутри проекта, без каталогов сборки, зависимостей и файлов с паролями и ключами;</li>
+        <li>пишет только в свою папку прогона, в файл настроек пакета и (в режиме автотестов) в тестовый корень модуля;</li>
+        <li>команду сборки печатает, запускает её человек.</li>
+      </ul></div>
+    </div>
+    <div class="callout" style="margin-top:14px"><strong>Проверка безопасности.</strong> Пакет проверен по внутреннему протоколу проверки безопасности: оба профиля поставки — «только кейсы» и «кейсы с автотестами» — получили высшую оценку («зелёный») без условий, уверенность ревью высокая. Последняя проверка — 17.11, на промежуточной версии v0.6; перед поставкой тестировщикам будет повторная, на итоговой. Рекомендации ревью (не условия оценки) частично закрыты, остальные остаются в работе.</div>
+  </div>
+</section>
+
+<section id="m-lim" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 6</div><h2 class="q">Честно: ограничения</h2></div>
+    <p class="sub">Что пакет пока не умеет или делает хуже, чем хотелось бы. Это основа короткого шага качества перед поставкой.</p>
+  </div>
+  <div class="wide">
+    <ul class="lim">
+      <li><div class="h">Упавшие автотесты отключаются<br><span class="st st-wip">в работе до поставки</span></div><div class="s">Сейчас упавший тест пакет отключает (карантин) и описывает в отчёте. В замере на проекте с дефектами класс, оставшийся в проекте, ловит 1 дефект из 11 (до карантина — 10). Нужно, чтобы упавшие тесты оставались включёнными как находки.</div></li>
+      <li><div class="h">HTTP-кейсы и контракт API<br><span class="st st-wip">в работе до поставки</span></div><div class="s">Тексты пакета рассчитаны на Java и Spring. На Python кейсы для библиотеки пришлось описывать вручную — это около 8 минут из 14. Образца для HTTP-кейсов в инструкциях мало: форму выясняли по отказам проверки.</div></li>
+      <li><div class="h">Большой документ<br><span class="st st-in">проходит по разделам</span></div><div class="s">Документ в 128 требований одним заходом не проходит (вид для ревью больше предела шага); по разделам проходит. Если единственный кейс требования ревью отклонило, сборка файла для Zephyr об этом молчит, и требование остаётся без кейса.</div></li>
+      <li><div class="h">Слабое ревью<br><span class="st st-wip">в работе до поставки</span></div><div class="s">Ревьюер не всегда внимателен: на разделе документа поймал 1 из 3 контрольных ошибок. Пакет предупреждает, но надёжнее — больше контрольных ошибок на больших наборах.</div></li>
+      <li><div class="h">Вопросы аналитику<br><span class="st st-wip">в работе до поставки</span></div><div class="s">Вопросы аналитику пакет формирует только по очевидным дырам в требованиях, которые видны сразу (например, не сказано, какой результат должен получиться). Если неясность обнаруживается позже, при написании кейса, кейс просто помечается «проверить вручную» с пояснением, а отдельного вопроса аналитику не появляется. Сделать так, чтобы такие неясности тоже превращались в вопросы, — задача шага качества.</div></li>
+      <li><div class="h">Внутри контура компании работает прежняя версия</div><div class="s">На модели компании и рабочем проекте прежняя версия прошла путь от требований до принятого набора кейсов и отчёта (22 требования → 40 кейсов, ревью принято). Цифры выше — прогоны v0.6 на открытых проектах; прогон v0.6 внутри контура — следующий шаг.</div></li>
+      <li><div class="h">Не всегда с первого захода</div><div class="s">На Gradle первый заход ревью отклонил целиком (33 из 81 кейсов), принят второй — 86 из 86. Автотесты собрались с первого раза; их падения — на расхождении учебного стенда с его документом (требования описывают путь /api, приложение отвечает без него), поэтому этот стенд не годится для оценки верности автотестов.</div></li>
+    </ul>
+  </div>
+</section>
+
+<section id="m-road" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 7</div><h2 class="q">Дорожная карта: как мы будем развивать пакет</h2></div>
+    <p class="sub">Карта показывает порядок версий и их состав, без дат: каждую версию закрывают живые прогоны, и пока при всех условиях не подтверждено, что всё работает, мы дальше не идём. Карта — живой документ, её состав обновляется при каждом решении о составе версии.</p>
+  </div>
+  <div class="wide">
+    <!--BUILD:road-past--><p class="road-intro">Сейчас у тестировщиков версия v0.1.1 в режиме кейсов: кейсы по требованиям и выгрузка в Zephyr. Версии v0.2–v0.5 внутренние: их не отдавали, пока не были проверены, поэтому всё, что в них добавлено, войдёт в ближайшую поставку. Версия v0.6 доводит этот маршрут до разных стеков, форматов требований и больших документов.</p><div class="road-past-label">Пройдено</div><div class="road-past" id="road-past" aria-label="Пройденные версии"><article class="rmv past"><div class="vn"><b>v0.1</b></div><h3>Первая версия</h3><div class="when">у тестировщиков (v0.1.1)</div><ul><li>Кейсы по требованиям и выгрузка в Zephyr Scale</li><li>Первые автотесты на Java (Maven, Gradle): на проекте-линейке поймано 9 из 11 подложенных дефектов</li></ul></article><article class="rmv past"><div class="vn"><b>v0.2</b></div><h3>Меньше трения</h3><div class="when">внутренняя</div><ul><li>Проверка показывает все замечания сразу, у каждого — подсказка, как исправить, и готовая следующая команда</li><li>Пауза после разметки: человек решает по неясным требованиям</li><li>Кейсы для многомодульных проектов</li><li>Проект с подложенными дефектами для замеров</li></ul></article><article class="rmv past"><div class="vn"><b>v0.3</b></div><h3>Доверие к ревью</h3><div class="when">внутренняя</div><ul><li>Контрольные ошибки и кодовое слово измеряют внимательность ревью</li><li>Ревью в свежей сессии, без истории генерации</li><li>Своя проверка схем: пакету нужен только Python, без сторонних библиотек</li><li>Профиль поставки «только кейсы» с проверкой целостности</li></ul></article><article class="rmv past"><div class="vn"><b>v0.4</b></div><h3>Автотесты под контролем человека</h3><div class="when">внутренняя</div><ul><li>Сборку запускает человек: пакет кладёт тесты и печатает точную команду (раньше пакет запускал сборку сам)</li><li>Код проверяет, как посчитаны ожидаемые результаты автотестов</li><li>Переносимость сборки между машинами</li><li>Инструкция агента — короткая карта шагов</li><li>Проверка безопасности по внутреннему протоколу — впервые «зелёный» на обоих профилях</li></ul></article><article class="rmv past"><div class="vn"><b>v0.5</b></div><h3>Маршрут агента</h3><div class="when">внутренняя</div><ul><li>Агент ведёт прогон короткими командами; команда status называет состояние и следующий шаг</li><li>Приёмка по кейсу: плохие кейсы один раз возвращаются на доработку, остальные принимаются</li><li>Готовое из прошлого прогона берётся повторно</li><li>Повторная проверка безопасности — «зелёный» на обоих профилях без условий</li></ul></article></div><!--/BUILD:road-past-->
+    <div class="road-future-label" style="margin-top:26px">Дальше</div><!--BUILD:road--><div class="road" id="road" aria-label="Версии пакета"><article class="rmv now"><div class="vn"><b>v0.6</b><span class="st st-chk">сейчас</span></div><h3>Охват: стеки, форматы, обновление</h3><div class="when">сейчас, показ руководству</div><ul><li>Пять стеков подтверждены живыми прогонами 17.11: Maven, многомодульный Maven, Gradle, Python, OpenSpec</li><li>Обновление кейсов из Zephyr под изменившиеся требования: кейсы, написанные тестировщиком, сохраняются, устаревшие помечаются</li><li>Требования — по номерам документа; код проверяет «сколько номеров — столько требований»</li><li>Большой документ — по разделам одним запросом, одна выгрузка для Zephyr</li><li>Повтор готового в той же папке</li></ul><div class="vnote">Состояние отдельных пунктов — в блоках «в цифрах» и «ограничения» выше.</div></article><article class="rmv"><div class="vn"><b>v0.7</b></div><h3>Качество и новая поставка</h3><div class="when">следующая, с ней — новая поставка тестировщикам</div><ul><li>Упавший автотест остаётся в проекте как найденный дефект (цель на проекте-линейке: ловит 10 из 11 подложенных дефектов, а не 1)</li><li>HTTP-кейсы: механику ставит код, контракт API — во входе генератора (меньше отказов на слабой модели)</li><li>Генератор кейсов получает сначала файлы, которые модель-разметчик назвала нужными, потом остальные — при том же объёме входа (на большом REST-проекте он видел 11 нужных файлов из 27, с правкой — 26 из 27)</li><li>Если требование оказалось неясным, пакет задаёт аналитику вопрос и продолжает прогон, не останавливаясь</li><li>Пример тела ответа в ожидаемом результате строит код из проверок кейса — текст и проверки больше не расходятся</li><li>Понятные отказы, первая порция: самые частые отказы — одна фраза и одно действие для тестировщика</li><li>Честные приборы: контрольных ошибок для ревьюера — по размеру набора; мутационный замер автотестов</li><li>Точнее мерить качество ревью: когда делить большой набор на части — по замеренной внимательности ревьюера, а не на глаз; внимательность и стабильность результата — по серии прогонов, а не по одному; мутационный замер автотестов и для Python</li><li>Проверка на модели компании (прогон в рабочей среде), повторная проверка безопасности, репетиция поставки</li></ul></article><article class="rmv"><div class="vn"><b>v0.8</b></div><h3>Обратная связь и оптимизация</h3><ul><li>Разбор отзывов тестировщиков с их проектов — главный источник приоритетов версии</li><li>Оптимизация прогона: короче ответ генератора и вход шагов, повтор вспомогательного кода автотестов прошлых прогонов — меньше времени и токенов на прогон (по замеру профилировщика время прогона — это работа модели, поэтому сокращаем то, что она читает и пишет)</li><li>Память проекта: при повторном прогоне переделывается только то, чего коснулись изменённые файлы (сейчас — всё или ничего)</li><li>Обновление кейсов: неизменённые кейсы переносит код, без модели (дешевле и быстрее)</li><li>Понятные человеку отказы для остальных кодов ошибок (первая порция — в v0.7)</li><li>Отчёт группирует причины падений автотестов; общая выгрузка разделов по шаблону Zephyr проекта</li><li>Короче вход модели: вместо целых файлов проекта — карта модуля и нужные фрагменты; вместо всего документа при прогонах по разделам — его оглавление</li><li>Ревью больших наборов по частям; второй круг автотестов по ошибкам сборки (человек запускает, пакет разбирает вывод); эталонные проекты шире — больше проектов, настоящие дефекты, эталонные наборы кейсов</li><li>Ревьюер — модель другого семейства, если она есть в рабочей среде</li></ul></article><article class="rmv"><div class="vn"><b>v0.9</b></div><h3>Шире</h3><ul><li>Карта покрытия существующими тестами проекта: что уже проверено, где пробелы — подсказка генератору и строка отчёта</li><li>Запрос для Postman в выгрузке Zephyr рядом с данными шага</li><li>Образцы для библиотек (Python и др.) и стеки по запросу тестировщиков</li></ul></article><article class="rmv"><div class="vn"><b>v1.0</b></div><h3>Готово к командам</h3><ul><li>Критерии: работает на проектах нескольких команд на модели компании; метрики качества стабильны (доля принятых ревью кейсов, найденные дефекты на линейке, мутационный балл, время прогона)</li><li>Объективное сравнение с другими инструментами компании на общем наборе проектов и скрытых дефектов</li><li>Руководство и короткое обучение для тестировщиков; порядок выпуска версий</li></ul></article></div><!--/BUILD:road-->
+    <!--BUILD:road-always--><p class="road-always" id="road-always"><b>Постоянно, в каждой версии.</b> Проверка безопасности по внутреннему протоколу перед каждой поставкой; контрольные живые прогоны на эталонных проектах после каждой правки инструкций модели; полный набор тестов пакета перед каждым выпуском.</p><!--/BUILD:road-always-->
+  </div>
+</section>
+
+<section id="m-next" class="wrap mg">
+  <div class="col">
+    <div class="sec-head"><div class="n">Для руководства · 8</div><h2 class="q">Что дальше и когда</h2></div>
+    <p class="sub">Ближайшее — версия v0.7: качество и новая поставка тестировщикам (у них сейчас v0.1.1). Поставка им — с v0.7, после шага качества, проверки на модели компании и репетиции. Состав шагов и следующие версии — на <a href="#m-road">дорожной карте</a> выше. Поставка пойдёт, когда все поддерживаемые условия подтверждены живыми прогонами.</p>
+    <details class="tv" style="margin-top:14px"><summary>Откуда взяты числа (заметки прогонов 17 ноября)</summary>
+      <p class="note" style="margin-top:8px">Maven, один модуль (кейсы, автотесты, линейка дефектов); Maven, несколько модулей; Gradle; Python, первый и повторный замер; OpenSpec с автотестами; обновление кейсов под изменение OpenSpec; раздел REST-документа; весь REST-документ; число тестов пакета — журнал полного набора на коммите прогонов. Подробности — в рабочих заметках проекта; страница ссылается на них по смыслу, внутренние коды пакетов в блоке для руководства не используются.</p>
+    </details>
+  </div>
+</section>
+
+<div class="part wrap sep-part"><div class="col"><div class="pt">Ниже — устройство пакета</div><h2>Устройство «Трассы» v0.6</h2>
+  <p class="note" style="margin-top:12px">Для тех, кто запускает пакет и хочет понять, как он устроен. <strong>Состояние текста:</strong> устройство описано по коммиту ветки 0d43a168 от 16 ноября; живые прогоны 17 ноября шли на более новом коммите (668982a5), и в разделах про обновление кейсов, OpenSpec и живые прогоны сделаны пометки по их результатам. Остальные правки 16–17 ноября войдут в текст при фиксации v0.6.</p>
+  <div class="stlegend" aria-label="Три состояния изменений">
+    <div><span class="st st-in">в ветке v0.6</span><br>Есть в коде ветки и проверено по коду и документам.</div>
+    <div><span class="st st-ready">готово, войдёт в поставку</span><br>Закоммичено отдельно, ещё не влито в ветку. Войдёт в поставку, когда стопка будет влита.</div>
+    <div><span class="st st-wip">в работе до поставки</span><br>Ещё пишется или в плане. Может не войти в v0.6; блок переедет в «готово», когда будет готов.</div>
+  </div>
+  <div class="toc" aria-label="Содержание">
+    <div><div class="k">Часть I · Обзор</div><ol><li><a href="#what">Что это</a></li><li><a href="#can">Что умеет</a></li><li><a href="#states">Что в каком состоянии</a></li></ol></div>
+    <div><div class="k">Часть II · Устройство</div><ol start="4"><li><a href="#roles">Кто что делает</a></li><li><a href="#route">Маршрут прогона</a></li><li><a href="#cycle">Как идёт один шаг модели</a></li><li><a href="#modeb">Автотесты: запускает человек</a></li><li><a href="#result">Итог прогона и файлы</a></li><li><a href="#bounds">Границы: что пакет делает на машине</a></li><li><a href="#scan">Что видит модель</a></li><li><a href="#openspec">OpenSpec</a></li><li><a href="#runs">Живые прогоны</a></li><li><a href="#glossary">Словарь</a></li></ol></div>
+  </div>
+</div></div>
+
+<div class="part wrap"><div class="col"><div class="pt">Часть I</div><h2>Обзор: что это, что умеет, что в каком состоянии</h2></div></div>
+
+<section id="what" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">1</div><h2>Что это</h2></div>
+    <div class="prose">
+      <p>Пакет состоит из шести инструкций (оркестратор и пять ролей: разметка требований, генератор кейсов, ревьюер кейсов, генератор автотестов, ревьюер автотестов) и 65 модулей Python в <code>tools/</code>. Он кладётся в проект в папку <code>.tools/test-skills</code>. Нужен только Python 3.11–3.13: сторонние пакеты и виртуальное окружение не требуются.</p>
+      <p>На входе — документ требований в Markdown или спецификация OpenSpec. На выходе — тест-кейсы (JSON, HTML, Markdown), CSV для Zephyr Scale, отчёт ревью, отчёт прогона и файл вопросов аналитику. В режиме автотестов — ещё файлы тестов в тестовом корне модуля и напечатанная команда запуска.</p>
+      <p><strong>Первое: прогон ведёт агент, проверяет код.</strong> Агент читает <code>skills/orchestrate/SKILL.md</code> и вызывает команды пакета. Каждую стадию модели ведут два вызова — <code>prepare</code> и <code>submit</code>; код проверяет ответ по схеме, записывает его в журнал прогона и не пускает дальше, если что-то не сходится.</p>
+      <p><strong>Второе: ожидаемый результат берётся из требования, а не из кода.</strong> Упавший автотест — повод для вопроса аналитику или баг-репорта, а не для подгонки теста.</p>
+      <p><strong>Третье: пакет ничего не запускает.</strong> Ни сборку, ни тесты, ни git, ни сеть. Где в поставке есть автотесты, команду запуска печатает пакет, а выполняете её вы.</p>
+    </div>
+    <div class="flow" role="list" aria-label="Что на входе и что на выходе">
+      <div role="listitem"><div class="k">Вход</div><div class="v">документ .md · openspec/</div><div class="d">Требования; путь передаётся явно</div></div>
+      <div role="listitem"><div class="k">Кейсы</div><div class="v">published/….r1.json · .html · .md</div><div class="d">Один документ кейсов со ссылками на требования; CSV для Zephyr — у принятого набора</div></div>
+      <div role="listitem"><div class="k">Автотесты</div><div class="v">…Tests.java · test_*.py</div><div class="d">Только в режиме автотестов, только в тестовом корне модуля</div></div>
+      <div role="listitem"><div class="k">Итог</div><div class="v">.pilot-runs/&lt;run_id&gt;/</div><div class="d">Журнал, отчёты, итог попытки</div></div>
+    </div>
+    <div class="who">
+      <div><div class="label">Тестировщику</div><p>Кейсы по требованиям с ревью и трассировкой «требование — кейс»; пауза после разметки, где вы решаете, что делать с неполными требованиями.</p></div>
+      <div><div class="label">Аналитику</div><p><code>questions-for-analyst.md</code>: пробелы требований — чего не хватает, какие проверки заблокированы, какой вопрос задать.</p></div>
+      <div><div class="label">Команде</div><p>Кейсы в формате для импорта в Zephyr Scale и, в режиме автотестов, тесты в проекте; прерванный прогон продолжается по журналу.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="can" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">2</div><h2>Что умеет</h2></div>
+    <div class="prose"><p>Плашка у карточки — в каком состоянии возможность. Числа живых прогонов — в блоке для руководства вверху и в разделе 12, у каждого назван источник.</p></div>
+  </div>
+  <div class="wide">
+    <div class="caps">
+      <div class="cap"><div class="top"><h3>Размечает требования и спрашивает вас</h3><span class="st st-in">в ветке v0.6</span></div><p>Агент нормализует требования и выделяет пробелы. Если нет наблюдаемого результата, канала или доступа, прогон останавливается и показывает список (<code>SCOPE_PENDING</code>): вы либо исключаете требования с причиной, либо продолжаете как есть. Решение записывается в прогон.</p><p class="pf"><span class="st st-ready">готово, войдёт в поставку</span> В обычном документе требованием считается каждое пронумерованное утверждение; код сверяет число требований с числом номеров документа, и итог разметки и отчёт показывают «номеров N, требований M».</p></div>
+      <div class="cap"><div class="top"><h3>Пишет кейсы по пачкам</h3><span class="st st-in">в ветке v0.6</span></div><p>Требования делятся на пачки, на каждую — один вызов генератора. У кейса человеческая часть (цель, шаги, ожидание) и машинная (входы, вызов, проверки). Код собирает один документ и проверяет, что у каждого требования есть кейс.</p></div>
+      <div class="cap"><div class="top"><h3>Проводит ревью и одну доработку</h3><span class="st st-in">в ветке v0.6</span></div><p>Ревьюер даёт вердикт: набор принят, принят частично или отклонён. Отклонённые кейсы один раз возвращаются генератору, затем проходят ревью снова. В вид кейсов код вставляет контрольные ошибки — по ним отчёт показывает, насколько внимательно прошло ревью.</p></div>
+      <div class="cap"><div class="top"><h3>Пишет автотесты (режим Б)</h3><span class="st st-in">в ветке v0.6</span></div><p>Тестовые методы по принятым кейсам, затем статическое ревью кода тестов и не больше одной исправленной ревизии. Генератору называются пути, которые в проекте уже заняты; ответ, где новый тест лежит на занятом пути, <code>submit</code> отклоняет (<code>MATERIALIZATION_CONFLICT</code>). Тесты кладутся в тестовый корень модуля; команду запуска печатает пакет. Упавшие тесты уходят в карантин (<code>@Disabled</code> / <code>xfail</code>), прошедшие остаются.</p></div>
+      <div class="cap"><div class="top"><h3>Берёт готовое из прошлого прогона</h3><span class="st st-in">в ветке v0.6</span></div><p>Новый прогон по тем же требованиям берёт готовые разметку, план, кейсы, ревью и автотесты прошлого прогона, если проект с тех пор не менялся (<code>scan</code> называет прошлый прогон и команду). Файлы, записанные прошлым прогоном, считаются изменением проекта.</p><p class="pf"><span class="st st-wip">в работе до поставки</span> Повтор готового во втором прогоне в той же папке. Сейчас условие жёсткое — код проекта не менялся, и файлы прошлого прогона с каталогами сборки его ломают; смягчение — сравнение по составу файлов проекта.</p><p class="pf"><span class="st st-ready">готово, войдёт в поставку</span> Разметка берётся и после прогона, где ревью отклонило набор или доработка не завершена (раньше после такого прогона не бралось ничего).</p></div>
+      <div class="cap"><div class="top"><h3>Выгружает для Zephyr Scale</h3><span class="st st-in">в ветке v0.6</span></div><p>CSV для импорта — только у набора, принятого ревью. Отклонённый набор — файлы <code>*.REJECTED.*</code> с замечаниями в шапке, без CSV. По вашему шаблону выгрузки пакет заполнит пользовательские поля отдельным файлом <code>…zephyr-import.csv</code>.</p><p class="pf"><span class="st st-in">в ветке v0.6</span> Кейс тестировщика из импортированного CSV, который ревью отклонило при частичном принятии, остаётся в выгрузке как был, а отчёт называет его по ключу и строке. Если отклонён весь набор, CSV по-прежнему нет.</p></div>
+      <div class="cap"><div class="top"><h3>Продолжается после перерыва и обрыва</h3><span class="st st-in">в ветке v0.6</span></div><p>Состояние лежит в <code>.pilot-runs/&lt;run_id&gt;/</code>. После <code>/clear</code> команда <code>status</code> называет состояние и следующий шаг. Прогон восстанавливается после обрыва процесса; параллельные команды одного прогона не запускаются — вторая ждёт первую.</p></div>
+      <div class="cap"><div class="top"><h3>Обновляет кейсы под изменившиеся требования</h3><span class="st st-in">в ветке v0.6</span></div><p>Старые кейсы (выгрузка из Zephyr) получают вердикт «подходит / переписать / устарел». Подходящие остаются байт в байт; в сомнении кейс остаётся как есть и выносится в отчёт «проверить вручную». Работает по живому изменению OpenSpec, по названному архивному изменению и без OpenSpec. Ключ Zephyr у сохранённых кейсов остаётся, у новых пуст: импорт создаст новые кейсы, а не обновит старые. Живой прогон 17 ноября на учебном проекте: вердикты совпали с эталоном в 64 строках из 65, сохранённые кейсы в выгрузке байт в байт; дефект первого замера (кейс, отклонённый ревью, выпадал из выгрузки) исправлен и проверен контрольным прогоном: кейс остаётся в выгрузке.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="states" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">3</div><h2>Что в каком состоянии</h2></div>
+    <div class="prose"><p>Сводка по состоянию на 16 ноября, с пометками по живым прогонам 17 ноября. Источник — план до поставки и журнал состояния; при следующих стопках блоки переносятся между колонками.</p></div>
+  </div>
+  <div class="wide">
+    <div class="split split3">
+      <div class="panel"><h3><span class="st st-in">в ветке v0.6</span></h3><ul>
+        <li>OpenSpec: изменение выбирается файлами в <code>--docs</code>, остальные изменения и архив в модель не идут; сделано в v0.6, проверено живым прогоном (раздел 11)</li>
+        <li>большой документ — по разделам одним запросом, один файл для Zephyr (проверено на документе в 128 требований)</li>
+        <li>обновление существующих кейсов под изменившиеся требования; кейс, отклонённый ревью, остаётся в выгрузке (раздел 2)</li>
+        <li>запуск без установки: Python 3.11–3.13 и стандартная библиотека; проверка целостности <code>doctor</code></li>
+        <li>цикл <code>prepare</code> / <code>submit</code> для каждой стадии модели; <code>status</code> с полями <code>state</code>, <code>next</code>, <code>waiting_for</code></li>
+        <li>пауза после разметки, исключение требований с причиной</li>
+        <li>частичное принятие набора, одна доработка отклонённых кейсов, файлы <code>REJECTED</code> / <code>UNREVIEWED</code></li>
+        <li>контрольные ошибки в виде кейсов для ревьюера</li>
+        <li>режим автотестов: запуск человеком, <code>materialize</code> и <code>ingest</code></li>
+        <li>повтор готового из прошлого прогона при неизменном проекте</li>
+        <li>собственные тесты прошлых прогонов не идут модели</li>
+        <li>ревьюер автотестов читает вид кейсов в короткой записи, частями не больше 60 000 Б и 1800 строк, кейс не режется</li>
+        <li>отчёт прогона: фазы, состав входа, отказы команд, размер <code>tmp/</code></li>
+        <li>восстановление после обрыва процесса</li>
+        <li>генератору автотестов называются занятые пути проекта; <code>submit</code> отказывает на занятый путь</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-ready">готово, войдёт в поставку</span></h3><ul>
+        <li>разметка обычного документа по номерам требований; сверка числа требований с числом номеров документа; разметка берётся и после отклонённого ревью; кейс тестировщика, отклонённый ревью, остаётся в выгрузке</li>
+        <li>вид кейсов для ревьюера: начало вида очень большого набора делится на части <span class="note">(уточняется: точная граница)</span></li>
+        <li>предупреждение о непрочитанных прошлых прогонах называет их; если весь контекст пропущен из-за собственных тестов — подсказка, как вернуть нужный тест (<code>paths.include</code>) или сузить <code>--target</code></li>
+        <li>понятнее сообщения об отказах ответов ревьюера и доработки: названа позиция и кейс</li>
+        <li>автотесты: импорты фреймворка сверяются с файлом сборки модуля; упавшая строка параметризованного теста отправляет в карантин весь метод</li>
+        <li>тексты ролей по итогам двух живых прогонов 16 ноября: расхождение кода и требования — одна фраза в «Прочее», не пауза; общее требование привязывается к кейсу, а не к отдельному мета-кейсу</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-wip">в работе до поставки</span></h3><ul>
+        <li>повтор готового во втором прогоне в той же папке: сейчас условие «код проекта не менялся», смягчение — сравнение по составу файлов</li>
+        <li>файл с именем <code>nul</code> в папке проекта: жалоба тестировщика 16 ноября, исправление в очереди (уточняется)</li>
+        <li>новый вход ролей автотестов: файл сборки модуля и импорты тестов проекта</li>
+        
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<div class="part wrap"><div class="col"><div class="pt">Часть II</div><h2>Устройство</h2><p class="note" style="margin-top:12px">Для тех, кто запускает: роли, маршрут по шагам, шаг модели, режим автотестов, итог, границы, контекст модели, OpenSpec, живые прогоны и словарь.</p></div></div>
+
+<section id="roles" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">4</div><h2>Кто что делает</h2></div>
+    <div class="prose"><p>Пять участников; цвет участника используется во всех схемах. Команды пакета и записи в журнал делает агент по инструкции, но проверяет и записывает код пакета. Сборку проекта запускаете вы.</p></div>
+  </div>
+  <div class="wide">
+    <div class="roles">
+      <div class="role"><span class="chip human">Человек</span><p>Кладёт папку пакета в проект, формулирует запрос, отвечает на вопросы (модуль, пауза по пробелам, согласие на ревью в той же сессии), просматривает файлы тестов, запускает напечатанную команду сборки.</p></div>
+      <div class="role"><span class="chip model">Агент CLI</span><p>Агент в вашей программе с моделью: ведёт прогон по главной инструкции <code>orchestrate/SKILL.md</code>, вызывает команды пакета и сам пишет ответы разметки, генерации кейсов и автотестов.</p></div>
+      <div class="role"><span class="chip review">Ревьюер</span><p>Роли ревью кейсов и автотестов. По инструкции — отдельная сессия без истории генерации; если в вашем CLI её нет, ревью идёт в той же сессии по вашему согласию (пометка SELF).</p></div>
+      <div class="role"><span class="chip code">Код пакета</span><p>Программа на Python: проверяет каждый ответ модели, ведёт журнал прогона и публикует результат. Основные модули — <code>run_pipeline</code> и <code>api</code> (команды <code>prepare</code> и <code>submit</code>); они составляют опись файлов, сверяют ответы со схемами и записывают итоги.</p></div>
+      <div class="role"><span class="chip project">Сборка проекта</span><p><code>mvnw</code>, системный <code>mvn</code>, <code>gradlew</code> или pytest. Запускается только вашей рукой, напечатанной командой.</p></div>
+    </div>
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 910 380" role="img" aria-label="Схема участников. Человек ставит задачу агенту CLI. Агент вызывает команды пакета и получает JSON. Агент передаёт пакет ревью ревьюеру и получает ответ. Пакет пишет журнал и публикует кейсы. Человек запускает команду сборки проекта, которую печатает пакет, и приносит отчёты.">
+          <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <line class="bound" x1="430" y1="14" x2="430" y2="336"/>
+          <text class="tm" x="418" y="28" text-anchor="end">сессия CLI и её модель</text>
+          <text class="tm" x="442" y="28">код пакета и проект</text>
+          <rect class="bx human" x="16" y="128" width="120" height="58" rx="8"/><text class="tt" x="76" y="153" text-anchor="middle">Человек</text><text class="ts" x="76" y="172" text-anchor="middle">задача, ответы</text>
+          <rect class="bx model" x="196" y="96" width="196" height="118" rx="8"/><text class="tt" x="294" y="126" text-anchor="middle">Агент CLI</text><text class="ts" x="294" y="148" text-anchor="middle">идёт по orchestrate/SKILL.md</text><text class="ts" x="294" y="166" text-anchor="middle">играет роли модели</text><text class="ts" x="294" y="184" text-anchor="middle">вызывает prepare и submit</text>
+          <rect class="bx review" x="196" y="250" width="196" height="64" rx="8"/><text class="tt" x="294" y="276" text-anchor="middle">Ревьюер</text><text class="ts" x="294" y="296" text-anchor="middle">отдельная сессия, если CLI умеет</text>
+          <rect class="bx code" x="486" y="96" width="196" height="118" rx="8"/><text class="tt" x="584" y="126" text-anchor="middle">Инструменты пакета</text><text class="ts mono" x="584" y="148" text-anchor="middle">run_pipeline · api</text><text class="ts" x="584" y="166" text-anchor="middle">проверяют схемы и порядок</text><text class="ts" x="584" y="184" text-anchor="middle">записывают и публикуют</text>
+          <rect class="bx code" x="760" y="40" width="136" height="62" rx="8"/><text class="tt" x="828" y="66" text-anchor="middle">Журнал</text><text class="ts mono" x="828" y="86" text-anchor="middle">.pilot-runs/&lt;run&gt;</text>
+          <rect class="bx code" x="760" y="126" width="136" height="62" rx="8"/><text class="tt" x="828" y="152" text-anchor="middle">Кейсы</text><text class="ts mono" x="828" y="172" text-anchor="middle">published/</text>
+          <rect class="bx project" x="760" y="250" width="136" height="62" rx="8"/><text class="tt" x="828" y="276" text-anchor="middle">Сборка проекта</text><text class="ts mono" x="828" y="296" text-anchor="middle">mvn · gradle · pytest</text>
+          <line class="ln" x1="138" y1="148" x2="194" y2="148" marker-start="url(#ar1)" marker-end="url(#ar1)"/><text class="tl" x="166" y="140" text-anchor="middle">задача</text><text class="tl" x="166" y="166" text-anchor="middle">вопросы</text>
+          <line class="ln" x1="392" y1="126" x2="484" y2="126" marker-end="url(#ar1)"/><text class="tl" x="438" y="117" text-anchor="middle">команды</text>
+          <line class="ln ret" x1="484" y1="184" x2="394" y2="184" marker-end="url(#ar1)"/><text class="tl" x="438" y="202" text-anchor="middle">ответ JSON</text>
+          <line class="ln" x1="274" y1="216" x2="274" y2="248" marker-end="url(#ar1)"/><text class="tl" x="266" y="236" text-anchor="end">вид кейсов</text>
+          <line class="ln ret" x1="314" y1="248" x2="314" y2="216" marker-end="url(#ar1)"/><text class="tl" x="322" y="236">ответ</text>
+          <line class="ln" x1="682" y1="112" x2="758" y2="76" marker-end="url(#ar1)"/><text class="tl" x="716" y="88" text-anchor="middle">пишет</text>
+          <line class="ln" x1="682" y1="156" x2="758" y2="158" marker-end="url(#ar1)"/><text class="tl" x="718" y="148" text-anchor="middle">публикует</text>
+          <path class="ln ret" d="M76,188 L76,350 L828,350 L828,314" marker-end="url(#ar1)"/>
+          <text class="tl" x="450" y="342" text-anchor="middle">команда запуска из materialize — выполняет человек; отчёты он передаёт агенту (ingest)</text>
+        </svg>
+      </div>
+      <figcaption>Модель общается с кодом только через команды пакета. Решает, что вызвать, агент по инструкции; что можно записать, решает код. Пакет сборку не запускает: человек выполняет напечатанную команду и сообщает, где отчёты.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="route" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">5</div><h2>Маршрут прогона</h2></div>
+    <div class="prose"><p>Два профиля прогона. <code>cases-only-v1</code> — кейсы и их ревью; подходит для любой поставки. <code>local-pilot-v1</code> — плюс автотесты; для него нужна поставка с режимом автотестов (в папке пакета есть <code>HOW-TO-USE-MODE-B.md</code>), и он включается только явной просьбой в запросе. Шаги идут строго по порядку.</p></div>
+  </div>
+  <div class="wide">
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 1010 370" role="img" aria-label="Маршрут. Подготовка: подготовка папки, doctor, ready, scan, разметка, пауза по пробелам, план. Кейсы: генератор по пачкам, сборка набора, ревью кейсов, доработка и повторное ревью, итог для режима только кейсов. Автотесты: автотесты, ревью, исправление и повторное ревью, materialize, запуск человеком, ingest, закрытие и отчёт.">
+          <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <text class="th" x="8" y="22">ПОДГОТОВКА</text>
+          <rect class="bx human" x="8" y="32" width="130" height="58" rx="8"/><text class="tt" x="73" y="56" text-anchor="middle">Подготовка</text><text class="ts" x="73" y="76" text-anchor="middle">папка, запрос</text>
+          <rect class="bx code" x="152" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="217" y="56" text-anchor="middle">doctor</text><text class="ts" x="217" y="76" text-anchor="middle">целостность</text>
+          <rect class="bx code" x="296" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="361" y="56" text-anchor="middle">ready</text><text class="ts" x="361" y="76" text-anchor="middle">только чтение</text>
+          <rect class="bx code" x="440" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="505" y="56" text-anchor="middle">scan</text><text class="ts" x="505" y="76" text-anchor="middle">опись, baseline</text>
+          <rect class="bx model" x="584" y="32" width="130" height="58" rx="8"/><text class="tt" x="649" y="56" text-anchor="middle">Разметка</text><text class="ts" x="649" y="76" text-anchor="middle">требования, пробелы</text>
+          <rect class="bx human" x="728" y="32" width="130" height="58" rx="8"/><text class="tt" x="793" y="56" text-anchor="middle">Пауза</text><text class="ts" x="793" y="76" text-anchor="middle">исключить или идти</text>
+          <rect class="bx code" x="872" y="32" width="130" height="58" rx="8"/><text class="tt" x="937" y="56" text-anchor="middle">План</text><text class="ts" x="937" y="76" text-anchor="middle">пачки требований</text>
+          <line class="ln" x1="138" y1="61" x2="150" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="61" x2="294" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="61" x2="438" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="570" y1="61" x2="582" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="714" y1="61" x2="726" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="858" y1="61" x2="870" y2="61" marker-end="url(#ar2)"/>
+          <polyline class="ln" points="937,90 937,118 73,118 73,146" marker-end="url(#ar2)"/>
+          <text class="th" x="8" y="138">КЕЙСЫ</text>
+          <rect class="bx model" x="8" y="148" width="130" height="58" rx="8"/><text class="tt" x="73" y="172" text-anchor="middle">Генератор</text><text class="ts" x="73" y="192" text-anchor="middle">вызов на пачку</text>
+          <rect class="bx code" x="152" y="148" width="130" height="58" rx="8"/><text class="tt" x="217" y="172" text-anchor="middle">Набор и аудит</text><text class="ts" x="217" y="192" text-anchor="middle">JSON · HTML · MD</text>
+          <rect class="bx review" x="296" y="148" width="130" height="58" rx="8"/><text class="tt" x="361" y="172" text-anchor="middle">Ревью кейсов</text><text class="ts" x="361" y="192" text-anchor="middle">один ревьюер</text>
+          <rect class="bx review opt" x="440" y="148" width="130" height="58" rx="8"/><text class="tt" x="505" y="172" text-anchor="middle">Доработка</text><text class="ts" x="505" y="192" text-anchor="middle">и ревью, раз</text>
+          <rect class="bx code opt" x="584" y="148" width="130" height="58" rx="8"/><text class="tt" x="649" y="172" text-anchor="middle">Итог: кейсы</text><text class="ts mono" x="649" y="192" text-anchor="middle">cases-only-v1</text>
+          <line class="ln" x1="138" y1="177" x2="150" y2="177" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="177" x2="294" y2="177" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="177" x2="438" y2="177" marker-end="url(#ar2)"/><line class="ln ret" x1="570" y1="177" x2="582" y2="177" marker-end="url(#ar2)"/>
+          <polyline class="ln" points="505,206 505,234 73,234 73,262" marker-end="url(#ar2)"/>
+          <text class="tl" x="515" y="228">local-pilot-v1: автотесты</text>
+          <text class="th" x="8" y="254">АВТОТЕСТЫ И ЗАПУСК · local-pilot-v1</text>
+          <rect class="bx model" x="8" y="264" width="130" height="58" rx="8"/><text class="tt" x="73" y="288" text-anchor="middle">Автотесты</text><text class="ts" x="73" y="308" text-anchor="middle">по принятым кейсам</text>
+          <rect class="bx review" x="152" y="264" width="130" height="58" rx="8"/><text class="tt" x="217" y="288" text-anchor="middle">Ревью тестов</text><text class="ts" x="217" y="308" text-anchor="middle">статическое</text>
+          <rect class="bx model opt" x="296" y="264" width="130" height="58" rx="8"/><text class="tt" x="361" y="288" text-anchor="middle">Исправление</text><text class="ts" x="361" y="308" text-anchor="middle">и ревью, раз</text>
+          <rect class="bx code" x="440" y="264" width="130" height="58" rx="8"/><text class="tt mono" x="505" y="288" text-anchor="middle">materialize</text><text class="ts" x="505" y="308" text-anchor="middle">файлы и команда</text>
+          <rect class="bx human" x="584" y="264" width="130" height="58" rx="8"/><text class="tt" x="649" y="288" text-anchor="middle">Запуск</text><text class="ts" x="649" y="308" text-anchor="middle">выполняет человек</text>
+          <rect class="bx code" x="728" y="264" width="130" height="58" rx="8"/><text class="tt mono" x="793" y="288" text-anchor="middle">ingest</text><text class="ts" x="793" y="308" text-anchor="middle">приём отчётов</text>
+          <rect class="bx code opt" x="872" y="264" width="130" height="58" rx="8"/><text class="tt" x="937" y="288" text-anchor="middle">Итог и отчёт</text><text class="ts mono" x="937" y="308" text-anchor="middle">PASS · FAIL</text>
+          <line class="ln" x1="138" y1="293" x2="150" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="293" x2="294" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="293" x2="438" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="570" y1="293" x2="582" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="714" y1="293" x2="726" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="858" y1="293" x2="870" y2="293" marker-end="url(#ar2)"/>
+          <text class="tm" x="8" y="352">Пунктирная рамка — шаг, который идёт не всегда, или конечная точка. Прогон только кейсов закрывается командой finish после ревью.</text>
+        </svg>
+      </div>
+      <div class="legend"><span class="chip human">человек</span><span class="chip model">агент и роли модели</span><span class="chip review">ревьюер</span><span class="chip code">код пакета</span></div>
+    </figure>
+  </div>
+  <div class="col">
+    <ol class="steps">
+      <li class="c-human"><div class="num">1</div><div><div class="h">Подготовка</div><div class="s">Папка пакета в <code>.tools/test-skills</code>; три строки в <code>.gitignore</code> проекта (<code>.tools/</code>, <code>.pilot-runs/</code>, <code>.skillsrc*</code>); запрос агенту.</div></div></li>
+      <li class="c-code"><div class="num">2</div><div><div class="h"><code>doctor</code> и <code>ready</code></div><div class="s"><code>doctor</code> сверяет файлы пакета с <code>release/manifest.json</code> и версию Python; называет профиль поставки. <code>ready</code> только читает проект, показывает все проблемы сразу и к каждой — команду исправления.</div></div></li>
+      <li class="c-code"><div class="num">3</div><div><div class="h"><code>scan</code></div><div class="s">Создаёт прогон и попытку, строит опись (список файлов модуля, которые можно показать модели), фиксирует исходные данные прогона — baseline (требования, <code>.skillsrc</code>, входы, модуль), показывает <code>exclusion_summary</code> и, если есть, прошлый прогон с теми же входами (<code>reuse</code>). Один модуль на попытку.</div></div></li>
+      <li class="c-model"><div class="num">4</div><div><div class="h">Разметка</div><div class="s">Нормализованные требования с ID <code>SREQ-NNNN</code>, наблюдения по коду, пробелы. Большая спецификация размечается частями.</div></div></li>
+      <li class="c-human"><div class="num">5</div><div><div class="h">Пауза по пробелам</div><div class="s">Если в требованиях есть пробелы — не сказано, где наблюдать результат, каким он должен быть или как получить доступ, — прогон ждёт вас (состояние <code>scope_pause</code>): вы отвечаете «исключи … потому что …» или «продолжай как есть». Без ответа план отказывает <code>SCOPE_PENDING</code>.</div></div></li>
+      <li class="c-code"><div class="num">6</div><div><div class="h">План</div><div class="s">Код делит требования на пачки; от агента нужно только название предмета проверки.</div></div></li>
+      <li class="c-model"><div class="num">7</div><div><div class="h">Генератор и сборка набора</div><div class="s">Одна пачка — один вызов. После последней пачки <code>submit</code> собирает один документ кейсов с трассировкой «требование — кейс» и проверяет схему, смысл и происхождение. Публикация — в <code>published/</code>.</div></div></li>
+      <li class="c-review"><div class="num">8</div><div><div class="h">Ревью кейсов</div><div class="s">Вердикт: набор принят целиком; принят частично (отклонены отдельные кейсы; по умолчанию не больше 20 % набора, иначе отклоняется весь набор); отклонён целиком. При частичном принятии отклонённые кейсы один раз возвращаются генератору и снова проходят ревью — это включено по умолчанию, отключается в <code>.skillsrc</code> (<code>limits.rework_rounds</code> = 0).</div></div></li>
+      <li class="c-model"><div class="num">9</div><div><div class="h">Автотесты (режим Б)</div><div class="s">Тестовые методы по принятым кейсам, затем статическое ревью. Не принято с первого раза — одна исправленная ревизия и ещё одно ревью. Не принято и после неё — прогон закрывается с причиной <code>AUTOMATION_REJECTED</code>, автотестов нет.</div></div></li>
+      <li class="c-code"><div class="num">10</div><div><div class="h"><code>materialize</code></div><div class="s">Кладёт принятые тесты в тестовый корень модуля и печатает команду запуска (формы для cmd/sh и для PowerShell). Сам её не выполняет.</div></div></li>
+      <li class="c-human"><div class="num">11</div><div><div class="h">Запуск человеком и <code>ingest</code></div><div class="s">Вы просматриваете файлы, выполняете команду, сообщаете агенту, где отчёты. <code>ingest</code> сверяет отчёты с попыткой и закрывает её.</div></div></li>
+      <li class="c-code"><div class="num">12</div><div><div class="h">Закрытие и отчёт</div><div class="s"><code>finish</code> закрывает попытку (в режиме Б это делает <code>ingest</code>); <code>report</code> пишет <code>report.md</code>, <code>report.json</code> и <code>questions-for-analyst.md</code>.</div></div></li>
+    </ol>
+  </div>
+</section>
+
+<section id="cycle" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">6</div><h2>Как идёт один шаг модели</h2></div>
+    <div class="prose">
+      <p>Проще говоря: на каждом шаге пакет сначала выдаёт задание (<code>prepare</code>), модель кладёт ответ в файл, а пакет проверяет ответ (<code>submit</code>) и либо принимает его, либо возвращает с подсказкой. Подробнее: каждая стадия, где работает модель (разметка, пачки, ревью, автотесты), идёт одним циклом. <code>prepare</code> записывает запрос в журнал и печатает, что читать, куда положить ответ и какой бюджет у шага. Агент (или отдельный ревьюер) пишет ответ в файл-слот <code>incoming/&lt;стадия&gt;.json</code>. <code>submit</code> проверяет ответ и записывает квитанцию; <code>submit --dry-run</code> только проверяет и ничего не пишет.</p>
+      <p>Отказ — это JSON с кодом и подсказкой <code>fix</code>. На каждую стадию — один повтор (<code>--transport-attempts 2</code>). Какой шаг следующий, говорит <code>status</code>: поля <code>state</code>, <code>next</code>, <code>waiting_for</code>.</p>
+    </div>
+  </div>
+  <div class="wide">
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 1010 210" role="img" aria-label="Цикл стадии: prepare пишет запрос в журнал и печатает read, answer_slot и budget; роль пишет ответ в слот incoming; submit проверяет и записывает квитанцию; при отказе код и fix возвращают к исправлению ответа.">
+          <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <rect class="bx code" x="8" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="93" y="58" text-anchor="middle">prepare</text><text class="ts" x="93" y="80" text-anchor="middle">запрос — в журнал</text><text class="ts" x="93" y="96" text-anchor="middle">read · answer_slot · budget</text>
+          <rect class="bx model" x="218" y="30" width="170" height="86" rx="8"/><text class="tt" x="303" y="58" text-anchor="middle">Роль модели</text><text class="ts" x="303" y="80" text-anchor="middle">читает вход, пишет ответ</text><text class="ts mono" x="303" y="96" text-anchor="middle">incoming/&lt;стадия&gt;.json</text>
+          <rect class="bx code opt" x="428" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="513" y="58" text-anchor="middle">submit --dry-run</text><text class="ts" x="513" y="80" text-anchor="middle">только проверка,</text><text class="ts" x="513" y="96" text-anchor="middle">ничего не пишет</text>
+          <rect class="bx code" x="638" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="723" y="58" text-anchor="middle">submit</text><text class="ts" x="723" y="80" text-anchor="middle">схема, трассировка,</text><text class="ts" x="723" y="96" text-anchor="middle">происхождение</text>
+          <rect class="bx code" x="848" y="30" width="154" height="86" rx="8"/><text class="tt" x="925" y="58" text-anchor="middle">Квитанция</text><text class="ts" x="925" y="80" text-anchor="middle">запись в журнале,</text><text class="ts" x="925" y="96" text-anchor="middle">следующий шаг</text>
+          <line class="ln" x1="178" y1="73" x2="216" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="388" y1="73" x2="426" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="598" y1="73" x2="636" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="808" y1="73" x2="846" y2="73" marker-end="url(#ar3)"/>
+          <path class="ln ret" d="M723,118 L723,170 L303,170 L303,118" marker-end="url(#ar3)"/>
+          <text class="tl" x="513" y="164" text-anchor="middle">отказ: code и fix — исправить ответ, один повтор</text>
+        </svg>
+      </div>
+      <figcaption>Файлы <code>incoming/</code> и квитанции лежат в папке прогона. Агент их руками не правит: записывает ответ в слот, остальное делает код.</figcaption>
+    </figure>
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 780 330" role="img" aria-label="Размер входа каждого шага модели в живом прогоне 16 ноября, в килобайтах, против бюджета шага 500 КБ. Разметка 283, пачка один 347, пачка два 361, ревью кейсов 274, доработка 355, ревью доработки 111, автотесты первой ревизии 363, их ревью 421, автотесты второй ревизии 655, их ревью 422.">
+          <!-- масштаб: x = 270 + КБ * 0.6 ; 700 КБ = 690 -->
+          <line class="grid" x1="270" y1="30" x2="270" y2="290"/><line class="grid" x1="330" y1="30" x2="330" y2="290"/><line class="grid" x1="390" y1="30" x2="390" y2="290"/><line class="grid" x1="450" y1="30" x2="450" y2="290"/><line class="grid" x1="510" y1="30" x2="510" y2="290"/><line class="grid" x1="570" y1="30" x2="570" y2="290"/><line class="grid" x1="630" y1="30" x2="630" y2="290"/><line class="grid" x1="690" y1="30" x2="690" y2="290"/>
+          <text class="axis" x="270" y="310" text-anchor="middle">0</text><text class="axis" x="330" y="310" text-anchor="middle">100</text><text class="axis" x="390" y="310" text-anchor="middle">200</text><text class="axis" x="450" y="310" text-anchor="middle">300</text><text class="axis" x="510" y="310" text-anchor="middle">400</text><text class="axis" x="570" y="310" text-anchor="middle">500</text><text class="axis" x="630" y="310" text-anchor="middle">600</text><text class="axis" x="690" y="310" text-anchor="middle">700 КБ</text>
+          <text class="rlab" x="258" y="46" text-anchor="end">Разметка</text><rect class="bar-ok" x="270" y="36" width="170" height="16" rx="3"/><text class="val" x="446" y="49">283</text>
+          <text class="rlab" x="258" y="72" text-anchor="end">Генератор, пачка 1</text><rect class="bar-ok" x="270" y="62" width="208" height="16" rx="3"/><text class="val" x="484" y="75">347</text>
+          <text class="rlab" x="258" y="98" text-anchor="end">Генератор, пачка 2</text><rect class="bar-ok" x="270" y="88" width="217" height="16" rx="3"/><text class="val" x="493" y="101">361</text>
+          <text class="rlab" x="258" y="124" text-anchor="end">Ревью кейсов</text><rect class="bar-ok" x="270" y="114" width="164" height="16" rx="3"/><text class="val" x="440" y="127">274</text>
+          <text class="rlab" x="258" y="150" text-anchor="end">Доработка кейсов</text><rect class="bar-ok" x="270" y="140" width="213" height="16" rx="3"/><text class="val" x="489" y="153">355</text>
+          <text class="rlab" x="258" y="176" text-anchor="end">Ревью доработки</text><rect class="bar-ok" x="270" y="166" width="66" height="16" rx="3"/><text class="val" x="342" y="179">111</text>
+          <text class="rlab" x="258" y="202" text-anchor="end">Автотесты, ревизия 1</text><rect class="bar-ok" x="270" y="192" width="218" height="16" rx="3"/><text class="val" x="494" y="205">363</text>
+          <text class="rlab" x="258" y="228" text-anchor="end">Ревью автотестов 1</text><rect class="bar-ok" x="270" y="218" width="253" height="16" rx="3"/><text class="val" x="529" y="231">421</text>
+          <text class="rlab" x="258" y="254" text-anchor="end">Автотесты, ревизия 2</text><rect class="bar-over" x="270" y="244" width="393" height="16" rx="3"/><text class="val" x="669" y="257">655</text>
+          <text class="rlab" x="258" y="280" text-anchor="end">Ревью автотестов 2</text><rect class="bar-ok" x="270" y="270" width="253" height="16" rx="3"/><text class="val" x="529" y="283">422</text>
+          <line class="limit" x1="570" y1="24" x2="570" y2="292" stroke-dasharray="5 4"/><text class="tl" x="574" y="22">бюджет шага 500 КБ</text>
+        </svg>
+      </div>
+      <figcaption>Вход одного вызова модели (файлы и текст роли вместе) в прогоне на Petclinic 16 ноября, по замеру этого прогона. Превышение бюджета — не остановка: пакет выдаёт предупреждение <code>STEP_OVER_BUDGET</code>, шаг идёт дальше, вход не обрезается и ответ не делится.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="modeb" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">7</div><h2>Автотесты: запускает человек</h2></div>
+    <div class="prose">
+      <p>Режим автотестов — обычный прогон кейсов, после которого агент пишет тесты, а вы их просматриваете и запускаете. Он входит в поставку с профилем <code>mode-b</code>; в поставку <code>cases-only</code> он не входит, и <code>doctor</code> называет профиль вашей поставки.</p>
+      <p><code>materialize</code> кладёт принятые тесты в тестовый корень модуля и печатает команду запуска: первым токеном идёт абсолютный путь запускателя (обёртка модуля, системный Maven или интерпретатор модуля). Вы читаете файлы из <code>files_to_review</code>, проверяете, на какой стенд смотрят тесты, выполняете команду сами и сообщаете агенту, где лежат отчёты. После запуска агент вызывает <code>ingest</code> — команду, которая читает отчёты запуска тестов и закрывает попытку. Тесты между <code>materialize</code> и <code>ingest</code> не правятся: изменённый файл даёт <code>INGEST_TESTS_CHANGED</code>, вернуть тесты — <code>materialize --restore</code>.</p>
+      <p>Пакет не опрашивает стенд: адрес берётся из переменной окружения, имя которой стоит в <code>.skillsrc</code> модуля (<code>service_url_env</code>), стенд поднимаете вы. Если сборка проекта не готова, <code>ready</code> показывает «сборка не готова: …», а прогон идёт как только кейсы.</p>
+    </div>
+  </div>
+</section>
+
+<section id="result" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">8</div><h2>Итог прогона и файлы</h2></div>
+    <div class="prose"><p>Главное в прогоне только кейсов — вердикт ревью. <code>verification=NOT_APPLICABLE</code> и <code>accepted=false</code> там ожидаемы: запуска автотестов нет, ревью кейсы не отвергло. <code>accepted=true</code> бывает только в режиме автотестов и только если выполнены оба условия: все автотесты прошли при запуске человеком, и в наборе нет «ручных» кейсов. Ручной кейс — тот, который пакет не смог превратить в автотест: например, документ не определяет ожидаемый результат или его нельзя проверить кодом (скажем, текущую дату сервера). Такой кейс человек проходит сам, поэтому пока он есть, набор полностью не принят.</p></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Исход ревью кейсов</th><th>Что в <code>published/</code></th></tr></thead>
+        <tbody>
+          <tr><td>принят целиком или после доработки</td><td><code>.html</code>, <code>.md</code>, <code>.json</code> и <code>.zephyr-scale.csv</code></td></tr>
+          <tr><td>принят частично</td><td>годные кейсы в наборе; отклонённые отдельно, <code>*.REJECTED-CASES.*</code> — в Zephyr не импортировать</td></tr>
+          <tr><td>отклонён целиком</td><td><code>*.REJECTED.html</code>, <code>.md</code> с замечаниями в шапке, CSV нет</td></tr>
+          <tr><td>прогон закрыт без вердикта</td><td><code>*.UNREVIEWED.html</code>, <code>.md</code>, CSV нет</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Исход запуска (режим Б)</th><th>Что значит</th><th>Файлы тестов</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag ok">PASS</span></td><td>все автотесты прошли</td><td>остаются</td></tr>
+          <tr><td><span class="tag rv">FAIL</span></td><td>часть тестов упала</td><td>упавшие методы получают карантин (<code>@Disabled</code> / <code>xfail</code>, текст <code>test-skills quarantine:</code>), прошедшие остаются; не удалось сопоставить — очистка с <code>QUARANTINE_UNRESOLVED</code></td></tr>
+          <tr><td><span class="tag mu">NOT_RUNNABLE</span></td><td>сборка или окружение не дали запустить</td><td>неизменённые файлы пакета убираются</td></tr>
+          <tr><td><span class="tag wn">UNKNOWN</span></td><td>запуск был, но отчётов нет или результат потерян</td><td>остаются, убирать запрещено</td></tr>
+          <tr><td><span class="tag mu">NOT_APPLICABLE</span></td><td>запуска не было: прогон закрыт раньше, например ревью вернуло кейсы</td><td>тестов нет</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Частичная автоматизация: если часть кейсов автоматизировать нельзя (они остаются ручными), итог — <code>completion: PARTIAL</code>, причина <code>AUTOMATION_PARTIAL</code>, агент называет «автоматизировано N из M, вручную K». Вернуть удаление вместо карантина — <code>scan --disposition-policy cleanup</code>.</p>
+  </div>
+</section>
+
+<section id="bounds" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">9</div><h2>Границы: что пакет делает на машине</h2></div>
+    <div class="prose"><p>Факты по инструкции оркестратора (блок <code>permissions</code> в её шапке) и руководству режима Б.</p></div>
+  </div>
+  <div class="wide">
+    <div class="split">
+      <div class="panel"><h3>Читает</h3><ul>
+        <li>файлы проекта по описи: без каталогов VCS и зависимостей, результатов сборки, бинарников и файлов, где найден пароль или ключ</li>
+        <li>документы из <code>--docs</code>, <code>--reference</code>, <code>--cases</code> — только внутри проекта и без ссылок на пути; путь на сетевой папке или устройстве отклоняется до чтения (<code>INPUT_OUTSIDE_PROJECT</code>)</li>
+        <li>файлы модуля по описи, родительские файлы сборки (они замораживаются в baseline) и карту существующих тестов проекта</li>
+      </ul></div>
+      <div class="panel"><h3>Пишет</h3><ul>
+        <li><code>.pilot-runs/&lt;run_id&gt;/</code>, в том числе <code>published/</code> с готовыми кейсами</li>
+        <li><code>.skillsrc</code> при создании; повторный <code>init</code> сохраняет то, что вы вписали (лимиты, ревью, <code>paths.include</code> / <code>exclude</code>, имя проекта)</li>
+        <li>режим Б: файлы тестов в тестовом корне модуля и строки карантина в них</li>
+        <li><code>.skillsrc</code> переключается на системный <code>mvn</code> только с вашего подтверждения</li>
+      </ul></div>
+      <div class="panel"><h3>Не делает</h3><ul>
+        <li>не устанавливает программы и библиотеки (<code>pip</code> агент не запускает); не создаёт обёртку сборки (<code>mvnw</code>, <code>gradlew</code>): для этого пришлось бы скачивать сборщик из сети</li>
+        <li>не обращается к сети и не опрашивает стенд</li>
+        <li>не запускает сборку, тесты и git; не создаёт clone, worktree, commit, push и PR</li>
+        <li>не меняет код продукта; в проект идут только новые файлы тестов</li>
+        <li>по инструкции агент не выполняет указания, найденные в документах требований, и не правит спецификацию</li>
+      </ul></div>
+      <div class="panel"><h3>Делаете вы</h3><ul>
+        <li>кладёте папку пакета в проект и добавляете три строки в <code>.gitignore</code></li>
+        <li>запускаете напечатанную команду сборки (режим Б); смотрите файлы тестов до запуска</li>
+        <li>поднимаете тестовый стенд и задаёте переменную окружения</li>
+        <li>коммитите то, что решите оставить: пакет git не трогает</li>
+      </ul></div>
+    </div>
+    <p class="note" style="margin-top:14px">Печать команды: путь проекта, документа или модуля с символами, которые командная строка прочтёт по-своему (<code>$ % ! ^ " ' &amp; | &lt; &gt; ;</code> и др.), даёт остановку <code>COMMAND_NOT_PRINTABLE</code> до создания прогона. Операционные сбои: после обрыва процесса прогон восстанавливается; после краха системы или отключения питания журнал может остаться неполным — тогда <code>JOURNAL_CORRUPT</code> и новый прогон.</p>
+  </div>
+</section>
+
+<section id="scan" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">10</div><h2>Что видит модель</h2></div>
+    <div class="prose"><p>Скан отбирает файлы модуля, которые можно показать модели. Роли работают только с этой описью, поэтому выпавший файл модель не увидит. После <code>scan</code> агент показывает <code>exclusion_summary</code>: сколько и чего исключено, с примерами путей; лишнее исключение возвращается в <code>.skillsrc</code> через <code>paths.include</code>.</p></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Что исключается</th><th>Где</th></tr></thead>
+        <tbody>
+          <tr><td>VCS, кэши инструментов, <code>node_modules</code>, <code>.venv</code>, <code>site-packages</code>, каталоги IDE и агентов CLI</td><td>везде</td></tr>
+          <tr><td><code>build</code>, <code>target</code>, <code>dist</code>, <code>out</code>, <code>coverage</code>, <code>generated</code>, <code>generated-sources</code>, <code>test-results</code>, <code>vendor</code></td><td>только вне <code>src/</code></td></tr>
+          <tr><td><code>secrets</code>, <code>credentials</code></td><td>вне <code>src/</code> исключаются целиком; внутри <code>src/</code> исключаются только файлы, которые не являются исходным кодом, а исходники проверяются по содержимому</td></tr>
+          <tr><td>Файл, где найден пароль или ключ</td><td>выпадает целиком, всегда</td></tr>
+          <tr><td>Не код (<code>CONTEXT_NOT_CODE</code>), слишком большие файлы (<code>CONTEXT_TOO_LARGE</code>), шрифты и картинки (<code>CONTEXT_ASSET</code>)</td><td>идут в <code>context_skipped</code> с причиной; в живом прогоне 16 ноября так пропущено 19 файлов, 887 627 Б</td></tr>
+          <tr><td>Тесты, записанные пакетом в прошлых прогонах (<code>CONTEXT_OWN_TEST</code>)</td><td>модели не идут; <code>scan</code> называет их в <code>context_skipped</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Документ задачи всегда входит в контекст. <code>--docs файл.md#Раздел</code> берёт один раздел Markdown-файла. Документ может лежать вне выбранного модуля, но внутри проекта.</p>
+  </div>
+</section>
+
+<section id="openspec" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">11</div><h2>OpenSpec</h2></div>
+    <p><span class="st st-in">в v0.6, проверено живым прогоном</span></p>
+    <div class="prose" style="margin-top:12px">
+      <p>OpenSpec — основной формат требований в компании. Требования лежат в папке <code>openspec/</code> в корне проекта:</p>
+      <ul style="margin:0;padding-left:22px;display:grid;gap:6px">
+        <li><code>openspec/specs/&lt;область&gt;/spec.md</code> — <strong>как система работает сейчас</strong> (действующая спецификация, «база»);</li>
+        <li><code>openspec/changes/&lt;имя&gt;/</code> — <strong>папка-заявка «хотим поменять вот так»</strong>: в её <code>spec.md</code> — что добавляется, меняется, убирается (блоки ADDED, MODIFIED, REMOVED, RENAMED), рядом <code>proposal.md</code>, <code>design.md</code>, <code>tasks.md</code> — замысел и задачи. Пока заявку не приняли и не перенесли в архив (<code>openspec/changes/archive/</code>), это только предложение.</li>
+      </ul>
+      <p><strong>Правило: один прогон — одна заявка.</strong> Пример. В спецификации: «описание визита — до 255 символов». В проекте две незавершённые заявки: А — «сделать до 500», Б — «сделать до 1000». Если взять обе сразу, непонятно, какой кейс писать — на 500 или на 1000: это решится, только когда одну из заявок примут. Поэтому пакет берёт одну заявку — ту, что названа в <code>--docs</code>, — пишет кейсы под неё, а вторую не видит.</p>
+    </div>
+    <div class="split" style="margin-top:20px">
+      <div class="panel"><h3>Что можно</h3><ul>
+        <li><strong>В проекте сколько угодно заявок.</strong> Называете одну — прогон идёт по ней; остальные заявки и архив в модель не идут, <code>scan</code> перечисляет их одной строкой.</li>
+        <li><strong>В одной заявке много правок по разным областям</strong> — всё за один прогон. В <code>--docs</code> называется папка заявки и области, которые она меняет; забыли область — <code>scan</code> подскажет.</li>
+        <li><strong>Нужны кейсы по двум заявкам</strong> — два прогона подряд; агент проводит их в одном запросе.</li>
+        <li><code>proposal</code>, <code>design</code>, <code>tasks</code> заявки модель читает как контекст, требованиями они не становятся. Код сверяет ответ модели с составом заявки и спецификации: пропущенное или лишнее требование — отказ (<code>OPENSPEC_MISSING</code>, <code>OPENSPEC_EXTRA</code>).</li>
+      </ul></div>
+      <div class="panel"><h3>Когда пакет остановит</h3><ul>
+        <li>в одном прогоне названы две заявки;</li>
+        <li><code>--docs</code> не задан, а незавершённых заявок в проекте две и больше;</li>
+        <li>заявка меняет область, чей <code>spec.md</code> не назван.</li>
+        <li><strong>Это не падение прогона:</strong> <code>scan</code> останавливается до первого вызова модели — ничего не потрачено — и печатает, что указать (<code>OPENSPEC_SOURCE_CONFLICT</code> с подсказкой).</li>
+      </ul></div>
+    </div>
+    <p class="note" style="margin-top:12px">Проверено живым прогоном: на стенде две незавершённые заявки, в <code>--docs</code> названа одна — прогон дошёл до отчёта, вторая заявка в модель не попала. Прежний обходной путь (исключать лишние заявки в <code>.skillsrc</code>) больше не нужен.</p>
+    <p class="note" style="margin-top:12px">Команды-примеры (имена областей и заявки выдуманы; тот же набор <code>--docs</code> передаётся и в <code>scan</code>):</p>
+    <pre><code># вся спецификация
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 --docs openspec/specs
+
+# одна заявка: её папка и области, которые она меняет
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 \
+  --docs openspec/specs/owners --docs openspec/changes/add-search</code></pre>
+    <div class="callout warn"><strong>Ограничения.</strong> Для нестандартной схемы OpenSpec поддержка не заявлена. Одна попытка — один модуль: полная спецификация, которая не помещается в этот маршрут, остаётся блокером и не подменяется одним удобным модулем.</div>
+  </div>
+</section>
+
+<section id="runs" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">12</div><h2>Живые прогоны</h2></div>
+    <div class="prose"><p>Два прогона 16 ноября в режиме автотестов на Spring Petclinic (Windows, Java, Maven) пакетом на коммите ветки v06 (первый — на коммите 22cc0a69, второй — на 0d43a168; второй шёл в папке, где уже лежал законченный прогон). Числа — по заметкам этих прогонов. Прогоны 17 ноября на пяти стеках — в блоке для руководства вверху (таблица и графики). Одной цифры «качество» здесь нет: это замеры, а не оценка.</p></div>
+  </div>
+  <div class="wide">
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Что</th><th>Первый прогон</th><th>Второй прогон</th></tr></thead>
+        <tbody>
+          <tr><td>Кейсы</td><td>74, приняты все (один после доработки)</td><td>61, приняты все (4 после доработки)</td></tr>
+          <tr><td>Автотесты (запуск человеком)</td><td>73 теста, 18 упали, в карантине 16 методов</td><td>61 тест, 16 упали (15 Failures, 1 Error), 16 в карантине</td></tr>
+          <tr><td>Итог</td><td><code>accepted=false</code>, <code>verification=FAIL</code>, <code>coverage=MIXED</code>, <code>completion=COMPLETE</code></td><td>то же</td></tr>
+          <tr><td>Время прогона по отчёту</td><td>—</td><td>1776,6 с (около 30 минут), вызовов модели 10</td></tr>
+          <tr><td>Вопросов человеку</td><td>—</td><td>один: команда запуска тестов</td></tr>
+          <tr><td>Замер на копии с 11 подложенными дефектами</td><td>поймано 10 из 11, ложных 0</td><td>поймано 10 из 11, ложных 0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">Как читать строку «Итог»: <code>accepted=false</code> — набор принят не полностью (были упавшие тесты); <code>verification=FAIL</code> — при запуске часть тестов упала; <code>completion=COMPLETE</code> — прогон дошёл до конца.</p>
+    <p class="note" style="margin-top:12px">Не пойман один дефект: это изменение, которое на этой базе данных (H2) не меняет поведения, поэтому поймать его невозможно (сам замер называет такой дефект равнозначным мутантом). Причины падений 16 тестов во втором прогоне не разбирались; среди них ожидаемые расхождения приложения с требованиями. Вывод «лучше или хуже, чем у тестировщиков» из этих чисел не следует: у них другие проекты, и такой прогон на их проектах ещё впереди.</p>
+  </div>
+</section>
+
+<section id="glossary" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">13</div><h2>Словарь</h2></div>
+    <dl class="gloss">
+      <dt>Прогон (run)</dt><dd>Один запуск на проекте; папка <code>.pilot-runs/&lt;run_id&gt;/</code>; переживает перерывы.</dd>
+      <dt>Попытка (attempt)</dt><dd>Один заход внутри прогона: кейсы, ревью, при режиме Б — автотесты; закрывается итогом. Один модуль на попытку.</dd>
+      <dt>Baseline</dt><dd>Исходные данные попытки, зафиксированные на старте: требования, настройки <code>.skillsrc</code>, файлы модуля. Если файлы после <code>scan</code> изменились, <code>status</code> скажет об этом (дрейф) и подскажет команду.</dd>
+      <dt>Опись</dt><dd>Список файлов модуля, которые разрешено показывать модели.</dd>
+      <dt>Стадия</dt><dd>Шаг, где работает модель: разметка, пачка, ревью, автотесты. Идёт циклом <code>prepare</code> / <code>submit</code>.</dd>
+      <dt>Слот ответа</dt><dd>Файл <code>incoming/&lt;стадия&gt;.json</code>, в который модель кладёт ответ шага.</dd>
+      <dt>Квитанция</dt><dd>Запись в журнале о том, что шаг выполнен, и по каким входным данным (их отпечаткам — дайджестам).</dd>
+      <dt>Дайджест</dt><dd>Отпечаток содержимого файла (SHA-256): по нему видно, что вход не подменили и не изменили.</dd>
+      <dt>Набор кейсов</dt><dd>Один документ с кейсами и трассировкой к требованиям; из него — HTML, Markdown и CSV для Zephyr.</dd>
+      <dt>Ревизия</dt><dd>Версия набора: <code>r1</code> — первая, дальше публикуются ревизии после правок по ревью и после доработки отклонённых кейсов (в прогонах 16 ноября после доработки опубликована <code>r3</code>).</dd>
+      <dt>SREQ</dt><dd>Номер требования из документа после разметки, <code>SREQ-0001</code>.</dd>
+      <dt><code>.skillsrc</code></dt><dd>Настройки проекта: модули, сборка, пути, лимиты, ревью, шаблон выгрузки.</dd>
+      <dt>Профиль прогона</dt><dd><code>cases-only-v1</code> — кейсы и ревью; <code>local-pilot-v1</code> — плюс автотесты.</dd>
+      <dt>Профиль поставки</dt><dd><code>cases-only</code> — только кейсы; <code>mode-b</code> — ещё и режим автотестов. Называет <code>doctor</code>.</dd>
+      <dt>SELF</dt><dd>Ревью в той же сессии, что и генерация, с вашего согласия; результат не называется независимым.</dd>
+      <dt>Контрольная ошибка</dt><dd>Ошибка, которую код вставляет в вид кейсов для ревьюера; по числу замеченных отчёт показывает, насколько ревью надёжно. Сигнал качества, не защита.</dd>
+      <dt>Карантин</dt><dd>Упавший тест не удаляется, а отключается с причиной; прошедшие остаются.</dd>
+    </dl>
+  </div>
+</section>
+</main>
+
+<footer class="wrap"><div class="col">Источники: <code>README.md</code>, <code>HOW-TO-USE.md</code>, <code>HOW-TO-USE-MODE-B.md</code>, <code>skills/orchestrate/SKILL.md</code> и справочники <code>references/*.md</code> ветки v06 на коммите 0d43a168; код <code>tools/build_context.py</code> (OpenSpec); план до поставки и журнал состояния от 16 ноября 2026; заметки живых прогонов 16 ноября. Блок для руководства: заметки живых прогонов 17 ноября 2026 (пакет на коммите 668982a5), сравнение от 28 октября, журнал полного набора проверок пакета. Страница обновляется перед поставкой. Обновлено 2026-11-17.</div></footer>
+
+</body>
+</html>

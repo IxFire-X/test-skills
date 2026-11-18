@@ -1,0 +1,978 @@
+#!/usr/bin/env python3
+"""Safely compile discovery evidence into a portable .skillsrc manifest."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import os
+import re
+import sys
+from pathlib import Path, PureWindowsPath
+from typing import Any, Mapping
+
+if __package__:
+    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
+    from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
+    from .schema_validation import StrictJsonError, load_json_strict
+    from .stack_catalog import is_ignored_path
+    from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
+else:
+    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
+    from discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
+    from schema_validation import StrictJsonError, load_json_strict
+    from stack_catalog import is_ignored_path
+    from skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
+
+
+__all__ = ["OutputConfinementError"]
+
+
+class InitError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class NeedsInput(InitError):
+    def __init__(self, questions: list[dict[str, Any]]):
+        super().__init__("needs_input", "answers are required")
+        self.questions = questions
+
+
+def _set_field(module: dict[str, Any], field: str, value: object) -> None:
+    parts = field.split(".")
+    if len(parts) < 4 or parts[0] != "modules":
+        raise InitError("answer_unknown", "unknown question field")
+    target: dict[str, Any] = module
+    for part in parts[2:-1]:
+        target = target.setdefault(part, {})
+    target[parts[-1]] = value
+
+
+def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], project_dir: Path, notes: list[str] | None = None) -> dict[str, Any]:
+    questions = discovery.get("questions", [])
+    if not isinstance(questions, list):
+        raise InitError("discovery_invalid", "discovery questions are invalid")
+    unresolved: list[dict[str, Any]] = []
+    known: set[str] = set()
+    selected: list[tuple[str, object]] = []
+    for question in questions:
+        if not isinstance(question, Mapping) or not isinstance(question.get("id"), str) or not isinstance(question.get("field"), str):
+            raise InitError("discovery_invalid", "discovery question is invalid")
+        question_id = question["id"]
+        known.add(question_id)
+        raw_options = question.get("options")
+        if not isinstance(raw_options, list) or not raw_options:
+            raise InitError("discovery_invalid", "discovery question options are invalid")
+        options = {item.get("id"): item for item in raw_options if isinstance(item, Mapping) and isinstance(item.get("id"), str) and "value" in item}
+        if len(options) != len(raw_options):
+            raise InitError("discovery_invalid", "discovery question option is invalid")
+        answer = answers.get(question_id)
+        if answer is None:
+            unresolved.append(dict(question)); continue
+        if answer not in options:
+            raise InitError("answer_unknown", f"unknown option for {question_id}")
+        selected.append((question["field"], options[answer]["value"]))
+    deferred = {key for key in answers if key not in known}
+    if any(not key.startswith(("replace:", "remove:", "migrate-")) for key in deferred):
+        raise InitError("answer_unknown", "answer does not match a current discovery question")
+    if unresolved and deferred:
+        raise InitError("answer_unknown", "reconciliation answer supplied before discovery is resolved")
+    if unresolved:
+        raise NeedsInput(unresolved)
+    modules = copy.deepcopy(discovery.get("modules", []))
+    if not isinstance(modules, list) or not modules:
+        raise InitError("discovery_invalid", "discovery has no modules")
+    if any(not isinstance(module, dict) or not isinstance(module.get("id"), str) for module in modules):
+        raise InitError("discovery_invalid", "discovery module is invalid")
+    by_id = {module["id"]: module for module in modules}
+    if len(by_id) != len(modules):
+        raise InitError("discovery_invalid", "discovery module ids are invalid")
+    for field, value in selected:
+        parts = field.split(".")
+        if len(parts) < 4 or parts[1] not in by_id:
+            raise InitError("discovery_invalid", "question does not refer to a discovered module")
+        _set_field(by_id[parts[1]], field, value)
+    for module in modules:
+        if isinstance(module, dict):
+            module.pop("readiness", None)
+            missing = _close_discovered_test(module, project_dir)
+            if missing is not None and notes is not None:  # init says why the test block is not written
+                notes.append(f"{missing[0]}; fix: {missing[1]}")
+    return {"schema_version": "5.0.0", "version": "3.0", "project": {"name": discovery.get("project_name", "project")}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": modules}
+
+
+BUILD_TOOL_NOT_FOUND = "BUILD_TOOL_NOT_FOUND"
+
+
+def build_tool_missing(module: Mapping[str, Any], project_dir: Path) -> tuple[str, str] | None:
+    """``(reason, fix)`` when the package cannot find the build tool of a Java module — no Maven wrapper and no
+    ``mvn`` on PATH, or no Gradle wrapper (a system gradle is not supported); None otherwise.  One check for init and ready."""
+    stack = module.get("stack") if isinstance(module.get("stack"), Mapping) else {}
+    build_tool = stack.get("build_tool")
+    if stack.get("language") != "java" or build_tool not in {"maven", "gradle"}:
+        return None
+    wrapper = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}[build_tool][os.name == "nt"]
+    if (Path(project_dir).resolve() / str(module.get("root") or ".") / wrapper).is_file():
+        return None
+    if build_tool == "gradle":
+        return (f"{BUILD_TOOL_NOT_FOUND}: у модуля нет wrapper {wrapper}, системный gradle не поддерживается — блок test не записан",
+                "добавьте gradle wrapper (gradlew) в модуль и повторите init")
+    from tools.project_inventory import InventoryError, system_maven_path
+
+    try:
+        system_maven_path("mvn")
+    except (InventoryError, OSError):
+        return (f"{BUILD_TOOL_NOT_FOUND}: mvn не найден в PATH и wrapper {wrapper} в модуле нет — блок test не записан",
+                "добавьте mvn в PATH или wrapper mvnw в модуль и повторите init")
+    return None
+
+
+def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[str, str] | None:
+    """Emit only the frozen closed execution tuple, or omit execution config; a missing build tool is named."""
+    test = module.get("test")
+    stack = module.get("stack")
+    if not isinstance(test, Mapping) or not isinstance(stack, Mapping):
+        module.pop("test", None)
+        return build_tool_missing(module, project_dir)
+    framework = test.get("framework")
+    language = stack.get("language")
+    build_tool = stack.get("build_tool")
+    if language == "python" and framework == "pytest":
+        module["test"] = {
+            "framework": "pytest",
+            "adapter_id": "pytest:selected-symbols-v1",
+            "interpreter": ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python",
+            "build_profile": "default",
+            "adapter_parameters": {},
+        }
+        return None
+    wrapper_names = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}
+    names = wrapper_names.get(build_tool)
+    wrapper = names[os.name == "nt"] if names else None
+    root = project_dir.resolve()
+    target = root / str(module.get("root", ".")) / wrapper if wrapper else None
+    adapter_ids = {
+        "maven": "maven-wrapper:selected-symbols-v1",
+        "gradle": "gradle-wrapper:selected-symbols-v1",
+    }
+    if language == "java" and framework == "junit5" and build_tool in adapter_ids and target is not None and target.is_file() and _ok(root, target) and not _is_reparse(target) and (os.name == "nt" or os.access(target, os.X_OK)):
+        module["test"] = {
+            "framework": "junit5",
+            "adapter_id": adapter_ids[build_tool],
+            "wrapper": wrapper,
+            "build_profile": "default",
+            "adapter_parameters": {},
+        }
+        return None
+    if language == "java" and framework == "junit5" and build_tool == "maven":
+        from tools.project_inventory import InventoryError, system_maven_path
+
+        try:
+            system_maven_path("mvn")
+        except (InventoryError, OSError):
+            pass
+        else:  # the name, found on PATH where the tests run — the absolute path of this machine does not travel
+            module["test"] = {
+                "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
+                "executable": "mvn", "build_profile": "default", "adapter_parameters": {},
+            }
+            return None
+    module.pop("test", None)
+    return build_tool_missing(module, project_dir)
+
+
+def _keep_declared_test_keys(module: Any, declared: Mapping[str, Any], *, new_file: bool) -> None:
+    """``test.level`` and the form of ``test.executable`` are the person's.  A repeated init keeps what the file says (an older
+    absolute path of ``mvn`` still works and is no reason for a replacement); only a new file gets the level — ``in-process`` for a
+    module that has no ``paths.context`` — and a module with a context is left to the derivation and its warning."""
+    test = module.get("test") if isinstance(module, dict) else None
+    if not isinstance(test, dict):
+        return
+    declared_test = declared.get("test") if isinstance(declared.get("test"), Mapping) else {}
+    if declared_test.get("level"):
+        test["level"] = declared_test["level"]
+    elif new_file and not (module.get("paths") or {}).get("context"):
+        test["level"] = "in-process"
+    if declared_test.get("executable") and test.get("executable"):
+        test["executable"] = declared_test["executable"]
+
+
+_DISCOVERED = {"": {"schema_version", "version", "project", "discovery", "modules"}, "/project": {"name"},
+               "module": {"id", "root", "stack", "detected_from", "paths", "test"}, "paths": {"source", "tests", "resources", "context"}}
+
+
+def _keep_human_keys(proposed: dict[str, Any], existing: Mapping[str, Any], declared_modules: list[Any]) -> list[str]:
+    """What detection does not derive is the person's (limits, review, paths.exclude, the name …): it goes into the proposal as the file has it; returns the paths."""
+    kept: list[str] = []
+
+    def carry(target: dict[str, Any], source: Mapping[str, Any], derived: set[str], path: str) -> None:
+        for key, value in source.items():
+            if key not in derived and key not in target:
+                target[key] = copy.deepcopy(value)
+                kept.append(f"{path}/{key}")
+
+    project = existing["project"] if isinstance(existing.get("project"), Mapping) else {}
+    v3 = existing.get("version") == "3.0"  # a v2 file has other keys: only its service_url_env goes over, as it did
+    if v3 and project.get("name") and project["name"] != proposed["project"]["name"]:
+        proposed["project"]["name"] = project["name"]
+        kept.append("/project/name")
+    if v3:
+        carry(proposed, existing, _DISCOVERED[""], "")
+        carry(proposed["project"], project, _DISCOVERED["/project"], "/project")
+    for index, module in enumerate(proposed["modules"]):
+        declared = next((row for row in declared_modules if isinstance(row, Mapping) and row.get("id") == module.get("id")), {})
+        carry(module, declared, _DISCOVERED["module"] if v3 else set(declared) - {"service_url_env"}, f"/modules/{index}")
+        paths = module.get("paths") if isinstance(module.get("paths"), dict) else {}
+        carry(paths, declared.get("paths") if v3 and isinstance(declared.get("paths"), Mapping) else {}, _DISCOVERED["paths"], f"/modules/{index}/paths")
+        if paths: module["paths"] = paths
+    return kept
+
+
+def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
+    """Public reconciliation question: deliberately contains no manifest values."""
+    return {
+        "id": question_id,
+        "field": field,
+        "impact": "An existing manifest value would change",
+        "options": [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": []},
+            {"id": "use-detected", "value": "use-detected", "evidence": []},
+        ],
+        "operation": operation,
+    }
+
+
+def _merge_additive(existing: Any, proposed: Any, field: str, questions: list[dict[str, Any]], path: list[str]) -> Any:
+    if isinstance(existing, dict) and isinstance(proposed, dict):
+        result = copy.deepcopy(existing)
+        for key, value in proposed.items():
+            result[key] = _merge_additive(result[key], value, f"{field}.{key}", questions, path + [key]) if key in result else copy.deepcopy(value)
+        return result
+    if existing == proposed or field.endswith(".detected_from"):
+        return copy.deepcopy(existing if existing != proposed else proposed)
+    question = _question(f"replace:{field}", field, "replace")
+    question["_path"] = path
+    question["_existing"] = copy.deepcopy(existing)
+    question["_detected"] = copy.deepcopy(proposed)
+    questions.append(question)
+    return copy.deepcopy(existing)
+
+
+def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any], answers: Mapping[str, str]) -> dict[str, Any]:
+    if existing is None:
+        if answers:
+            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+        return {"status": "created", "document": proposed, "questions": []}
+    normalized = normalize_skillsrc(existing)
+    existing_modules = normalized["modules"]
+    proposed_modules = proposed["modules"]
+    if existing.get("version") != "3.0":
+        unsupported = _v2_unsupported_fields(existing)
+        if unsupported:
+            question = _question("migrate-v2-preservation", "version", "replace")
+            question["impact"] = "This v2 manifest contains fields without a lossless v3 representation"
+            question["options"] = [{"id": "keep-existing", "value": "keep-existing", "evidence": []}]
+            if set(answers) - {question["id"]}:
+                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+            if question["id"] in answers:
+                if answers[question["id"]] != "keep-existing":
+                    raise InitError("answer_unknown", "unknown preservation option")
+                return {"status": "unchanged", "document": existing, "questions": []}
+            return {"status": "conflict", "document": existing, "questions": [question]}
+        if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
+            if answers:
+                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+            return {"status": "unchanged", "document": existing, "questions": []}
+        migration = _question("migrate-v2-to-v3", "version", "replace")
+        if set(answers) - {migration["id"]}:
+            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+        answer = answers.get(migration["id"])
+        if answer is None:
+            return {"status": "conflict", "document": existing, "questions": [migration]}
+        if answer not in {"keep-existing", "use-detected"}:
+            raise InitError("answer_unknown", "unknown migration option")
+        if answer == "keep-existing":
+            return {"status": "unchanged", "document": existing, "questions": []}
+        migrated = copy.deepcopy(proposed)
+        migrated["project"]["name"] = existing["project"]["name"]
+        if "methodology" in existing:
+            migrated["project"]["methodology"] = copy.deepcopy(existing["methodology"])
+        for key in ("resolution", "contracts", "skills_registry"):
+            if key in existing:
+                migrated[key] = copy.deepcopy(existing[key])
+        return {"status": "updated", "document": migrated, "questions": []}
+    known = {module["id"]: module for module in existing_modules}
+    merged = copy.deepcopy(existing)
+    questions: list[dict[str, Any]] = []
+    output = []
+    for module in proposed_modules:
+        old = known.pop(module["id"], None)
+        output.append(copy.deepcopy(module) if old is None else _merge_additive(old, module, f"modules.{module['id']}", questions, ["modules", module["id"]]))
+    if known:
+        for module_id, module in known.items():
+            question = _question(f"remove:modules.{module_id}", f"modules.{module_id}", "remove")
+            question["_module_id"] = module_id
+            questions.append(question)
+            output.append(copy.deepcopy(module))
+    if questions:
+        if set(answers) - {question["id"] for question in questions}:
+            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+        for question in questions:
+            if question["id"] in answers and answers[question["id"]] not in {"keep-existing", "use-detected"}:
+                raise InitError("answer_unknown", f"unknown option for {question['id']}")
+        unanswered = [q for q in questions if q["id"] not in answers]
+        if unanswered:
+            return {"status": "conflict", "document": existing, "questions": [_explained_question(unanswered[0])]}
+        for question in questions:
+            if answers[question["id"]] == "use-detected":
+                if question["operation"] == "remove":
+                    output = [item for item in output if item["id"] != question["_module_id"]]
+                else:
+                    _set_document_path(output, question["_path"], question["_detected"])
+    elif answers:
+        raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+    merged["modules"] = output
+    return {"status": "unchanged" if merged == existing else "updated", "document": merged, "questions": []}
+
+
+def _public_question(question: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: copy.deepcopy(value) for key, value in question.items() if not key.startswith("_")}
+
+
+def _safe_summary(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if len(text) > 120:
+        text = text[:117] + "..."
+    return text
+
+
+def _explained_question(question: Mapping[str, Any]) -> dict[str, Any]:
+    public = _public_question(question)
+    existing = question.get("_existing")
+    detected = question.get("_detected")
+    if detected is not None:
+        public["options"] = [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep existing {question.get('field')}: {_safe_summary(existing)}"]},
+            {"id": "use-detected", "value": "use-detected", "evidence": [f"use detected {question.get('field')}: {_safe_summary(detected)}"]},
+        ]
+    elif question.get("operation") == "remove":
+        public["options"] = [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep module {question.get('_module_id')}"]},
+            {"id": "use-detected", "value": "use-detected", "evidence": [f"remove module {question.get('_module_id')}"]},
+        ]
+    return public
+
+
+def _set_document_path(modules: list[dict[str, Any]], path: list[str], value: Any) -> None:
+    module = next(item for item in modules if item["id"] == path[1])
+    target: dict[str, Any] = module
+    for part in path[2:-1]:
+        target = target[part]
+    target[path[-1]] = copy.deepcopy(value)
+
+
+def _v2_matches_detected(old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
+    """V2 has no module envelope; retain it when its core stack agrees."""
+    if old.get("id") != "root" or new.get("id") != "root" or old.get("root") != new.get("root"):
+        return False
+    for group in ("stack", "test", "paths", "feature_sources"):
+        old_group = old.get(group, {})
+        new_group = new.get(group, {})
+        if not isinstance(old_group, Mapping) or not isinstance(new_group, Mapping):
+            return False
+        if any(new_group.get(key) != value for key, value in old_group.items()):
+            return False
+    return True
+
+
+def _v2_unsupported_fields(document: Mapping[str, Any]) -> list[str]:
+    unsupported: list[str] = []
+    if "type" in document.get("project", {}):
+        unsupported.append("project.type")
+    for group, keys in (("paths", ("docs",)), ("test", ("api_client", "database")), ("sdd", ("asyncapi", "domain"))):
+        for key in keys:
+            if key in document.get(group, {}):
+                unsupported.append(f"{group}.{key}")
+    return unsupported
+
+
+def _payload(document: Mapping[str, Any]) -> bytes:
+    return (json.dumps(dict(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _structural_diff(existing: Any, proposed: Any, path: str = "") -> list[dict[str, str]]:
+    """Return only paths and operations; never serialise configuration values."""
+    if isinstance(existing, Mapping) and isinstance(proposed, Mapping):
+        changes: list[dict[str, str]] = []
+        for key in sorted(set(existing) | set(proposed), key=str):
+            child = f"{path}/{key}".replace("//", "/")
+            if key not in existing:
+                changes.append({"path": child, "operation": "add"})
+            elif key not in proposed:
+                changes.append({"path": child, "operation": "remove"})
+            else:
+                changes.extend(_structural_diff(existing[key], proposed[key], child))
+        return changes
+    if isinstance(existing, list) and isinstance(proposed, list):
+        changes = []
+        for index in range(max(len(existing), len(proposed))):
+            child = f"{path}/{index}"
+            if index >= len(existing):
+                changes.append({"path": child, "operation": "add"})
+            elif index >= len(proposed):
+                changes.append({"path": child, "operation": "remove"})
+            else:
+                changes.extend(_structural_diff(existing[index], proposed[index], child))
+        return changes
+    return [] if existing == proposed else [{"path": path or "/", "operation": "replace"}]
+
+
+def _proposal(existing: Mapping[str, Any], original: bytes, proposed: Mapping[str, Any]) -> dict[str, Any]:
+    proposed_bytes = _payload(proposed)
+    return {
+        "original_digest": _digest(original),
+        "proposed_digest": _digest(proposed_bytes),
+        "structural_diff": _structural_diff(existing, proposed),
+    }
+
+
+def _replacement_is_bound(approval: Mapping[str, Any] | None, proposal: Mapping[str, Any]) -> bool:
+    if not isinstance(approval, Mapping) or set(approval) != {"approval_id", "original_digest", "proposed_digest"}:
+        return False
+    approval_id = approval.get("approval_id")
+    return (
+        isinstance(approval_id, str)
+        and bool(re.fullmatch(r"[A-Za-z0-9._:-]+", approval_id))
+        and approval.get("original_digest") == proposal["original_digest"]
+        and approval.get("proposed_digest") == proposal["proposed_digest"]
+    )
+
+
+def _preserve_immutable_evidence(project_root: Path, directory: Path | None, original: bytes) -> None:
+    if directory is None:
+        raise InitError("replacement_unbound", "immutable evidence directory is required")
+    from tools.output_guard import plain_path
+
+    try:
+        plain_path(directory)  # the text first: a share, a device, NUL or .. is no directory inside the project
+    except ValueError as error:
+        raise InitError("evidence_write_error", "immutable evidence directory is not a plain local path: name a directory inside the project") from error
+    project = Path(project_root).resolve(strict=True)
+    candidate = Path(directory)
+    directory = candidate if candidate.is_absolute() else project / candidate
+    try:
+        relative = directory.absolute().relative_to(project)
+    except ValueError as error:
+        raise InitError("evidence_write_error", "immutable evidence directory escapes project: the directory must lie inside the project") from error
+    probe = project
+    for part in relative.parts:
+        probe /= part
+        if not probe.exists() or _is_reparse(probe):
+            raise InitError("evidence_write_error", "immutable evidence directory is missing or is a link: create a plain directory inside the project")
+    directory = directory.resolve(strict=True)
+    if not directory.is_dir():
+        raise InitError("evidence_write_error", "immutable evidence directory is not a directory: name a directory, not a file")
+    destination = directory / (hashlib.sha256(original).hexdigest() + ".skillsrc")
+    try:
+        create_confined_bytes_exclusive(project, directory, destination, original)
+        read_back = read_confined_bytes(project, directory, destination)
+    except (OSError, OutputConfinementError, ValueError) as error:
+        raise InitError("evidence_write_error", "immutable evidence write failed: the evidence file exists already or the directory is not writable") from error
+    if read_back != original:
+        raise InitError("evidence_write_error", "immutable evidence read-back failed: the file written differs from the original")
+
+
+def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None, *, before_replace: Any = None) -> bytes:
+    payload = _payload(document)
+    parse_skillsrc_bytes(payload)  # the check the temporary file had: valid before anything is written
+    fresh = discover_project(project_dir)
+    if fresh.get("fingerprint") != expected_fingerprint:
+        raise InitError("project_changed", "project manifests changed during initialization")
+    current = destination.read_bytes() if destination.exists() else None
+    if current != expected_destination:
+        raise InitError("destination_changed", ".skillsrc changed during initialization")
+    if before_replace is not None:
+        before_replace()
+    atomic_write_confined_bytes_in_project(project_dir, destination.name, payload)
+    read_back = destination.read_bytes()
+    load_skillsrc(destination)
+    return read_back
+
+
+def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str, exit_code: int | None = None, *, proposal: Mapping[str, Any] | None = None, read_back: bytes | None = None) -> dict[str, Any]:
+    operation = {"created": "create", "updated": "update"}.get(status)
+    receipt = {
+        "schema_version": "5.0.0",
+        "status": status,
+        "skillsrc_path": ".skillsrc",
+        "written": written,
+        "module_ids": [module["id"] for module in modules if isinstance(module, Mapping) and isinstance(module.get("id"), str)],
+        "questions": questions,
+        "changes": [] if operation is None else [{"operation": operation, "path": ".skillsrc"}],
+        "warnings": [],
+        "errors": errors,
+        "discovery_fingerprint": fingerprint,
+    }
+    receipt = _sanitize(receipt)
+    if proposal is not None:
+        receipt["proposal"] = copy.deepcopy(dict(proposal))
+    if read_back is not None:
+        receipt["read_back_digest"] = _digest(read_back)
+    if exit_code is not None:
+        receipt["_exit_code"] = exit_code
+    return receipt
+
+
+def _why_not_written(error: BaseException, receipt: dict[str, Any]) -> dict[str, Any]:
+    """The core refused to write ``.skillsrc``: the person is told why, beside the code — the refusal itself, and what lies in the place most often."""
+    if isinstance(error, OutputConfinementError):
+        receipt.update(_message=f".skillsrc не записан: ядро записи отказало ({error}); чаще всего на месте .skillsrc лежит ссылка или каталог — пакет не пишет поверх ссылок", _fix="замените .skillsrc обычным файлом и повторите init")
+    elif isinstance(error, OSError):  # a read-only file, or one another program holds open
+        receipt.update(_message=f".skillsrc не записан: система отказала ({type(error).__name__}: {error})", _fix="снимите у .skillsrc «только для чтения», закройте программу, которая держит файл, и повторите init")
+    return receipt
+
+
+def _sanitize(value: Any) -> Any:
+    if isinstance(value, str):
+        from tools.project_inventory import URL_USERINFO_TEXT
+
+        return URL_USERINFO_TEXT.sub(r"\1[redacted]@", value)
+    if isinstance(value, list):
+        return [_sanitize(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _sanitize(item) for key, item in value.items()}
+    return value
+
+
+def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in report.items() if not key.startswith("_")}
+
+
+def _input_exit_code(code: str) -> int:
+    return 2 if code in {"answer_unknown", "context_root_invalid", "discovery_invalid", "invalid_encoding", "invalid_json", "invalid_shape", "schema_invalid", "read_error"} else 1
+
+
+def _safe_fingerprint(value: Any) -> str:
+    candidate = str(value)
+    return candidate if re.fullmatch(r"[0-9a-f]{64}", candidate) else hashlib.sha256(b"").hexdigest()
+
+
+def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
+    if not destination.exists():
+        return []
+    try:
+        return normalize_skillsrc(load_skillsrc(destination))["modules"]
+    except (OSError, SkillsrcError, ValueError):
+        return []
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
+
+
+def _resolve_explicit_target(root: Path, value: str | None) -> Path | None:
+    if value is None:
+        return None
+    portable = value.replace("\\", "/")
+    raw = Path(portable)
+    windows = PureWindowsPath(value)
+    if (
+        not portable
+        or raw.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or any(part in {"", ".", ".."} or ":" in part for part in portable.split("/"))
+        or is_ignored_path(tuple(portable.split("/")))
+    ):
+        return None
+    candidate = root / raw
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    probe = candidate
+    while True:
+        if _is_reparse(probe):
+            return None
+        if probe == root:
+            break
+        probe = probe.parent
+    return resolved
+
+
+def _valid_explicit_target(root: Path, modules: list[dict[str, Any]], value: str | None) -> bool:
+    resolved = _resolve_explicit_target(root, value)
+    if resolved is None:
+        return False
+    for module in modules:
+        module_root = root / str(module.get("root") or ".")
+        paths = module.get("paths") if isinstance(module.get("paths"), Mapping) else {}
+        feature_sources = module.get("feature_sources") if isinstance(module.get("feature_sources"), Mapping) else {}
+        language = (module.get("stack") or {}).get("language") if isinstance(module.get("stack"), Mapping) else None
+        suffixes = SOURCE_SUFFIXES.get(language, frozenset())
+        sources = list(paths.get("source") or []) + list(feature_sources.get("source") or [])
+        for source in sources:
+            source_root = module_root / str(source)
+            try:
+                source_parts = source_root.relative_to(root).parts
+            except ValueError:
+                continue
+            if is_ignored_path(source_parts) or _is_reparse(source_root):
+                continue
+            try:
+                resolved.relative_to(source_root.resolve(strict=True))
+            except (OSError, ValueError):
+                continue
+            if resolved.is_file():
+                return resolved.suffix.lower() in suffixes
+            return resolved.is_dir() and _source_dir_has_code(root, resolved, suffixes)
+    return False
+
+
+def _existing_discovery_answers(existing: Mapping[str, Any] | None, discovery: Mapping[str, Any], answers: Mapping[str, str]) -> dict[str, str]:
+    effective = dict(answers)
+    if existing is None:
+        return effective
+    try:
+        modules = {module["id"]: module for module in normalize_skillsrc(existing)["modules"]}
+    except (SkillsrcError, TypeError, ValueError, KeyError):
+        return effective
+    for question in discovery.get("questions", []):
+        if not isinstance(question, Mapping) or question.get("id") in effective:
+            continue
+        parts = str(question.get("field", "")).split(".")
+        if len(parts) < 4 or parts[0] != "modules" or parts[1] not in modules:
+            continue
+        current: Any = modules[parts[1]]
+        for part in parts[2:]:
+            if not isinstance(current, Mapping):
+                break
+            current = current.get(part)
+        else:
+            for option in question.get("options", []):
+                if isinstance(option, Mapping) and current in {option.get("id"), option.get("value")}:
+                    effective[str(question["id"])] = str(option["id"])
+                    break
+    return effective
+
+
+def _authority_question() -> dict[str, Any]:
+    return {
+        "id": "skillsrc:replace",
+        "field": ".skillsrc",
+        "impact": "Execution-significant .skillsrc drift requires explicit confirmation",
+        "operation": "replace",
+        "options": [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": []},
+            {"id": "replace-proposed", "value": "replace-proposed", "evidence": []},
+        ],
+    }
+
+
+NOT_SELECTED_EVIDENCE = "default:not-selected-module"
+CONTEXT_IMPACT = ("Модуль только с тестами: исходники приложения лежат в соседнем каталоге проекта. Назовите его (paths.context): "
+                  "пакет только читает его для контекста модели, ничего там не пишет и не собирает")
+
+
+def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
+                        declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
+    """The ``paths.source`` question of a tests-only module becomes ``paths.context``; an answer (option IDs or
+    paths from the project root, comma-separated) closes both.  Returns (discovery, the other answers, {module: roots})."""
+    from tools.project_inventory import context_root_problem
+
+    modules = {str(module.get("id")): module for module in discovery.get("modules", []) if isinstance(module, Mapping)}
+    questions: list[Any] = []
+    rest = dict(answers)
+    context: dict[str, list[str]] = {}
+    for question in discovery.get("questions", []):
+        field = str(question.get("field", "")) if isinstance(question, Mapping) else ""
+        options = question.get("options") if isinstance(question, Mapping) else None
+        tests_only = field.endswith(".paths.source") and any(
+            str(item).endswith(":tests-only") for option in options or [] if isinstance(option, Mapping) for item in option.get("evidence") or [])
+        if not tests_only:
+            questions.append(question)
+            continue
+        module_id = field.split(".")[1]
+        if module_id in declared:
+            continue
+        module_root = root / str((modules.get(module_id) or {}).get("root") or ".")
+        question_id = f"module:{module_id}:paths.context"
+        if question_id in rest:
+            chosen = [item.strip() for item in rest.pop(question_id).split(",") if item.strip()]
+            problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))]
+            if not chosen or problems:
+                raise InitError("context_root_invalid", "; ".join(problems) or "paths.context: пустой ответ")
+            context[module_id] = chosen
+            continue
+        candidates = sorted(str(other.get("root")) for other_id, other in modules.items() if other_id != module_id
+                            and (other.get("paths") or {}).get("source") and context_root_problem(root, module_root, str(other.get("root"))) is None)
+        questions.append({"id": question_id, "field": f"modules.{module_id}.paths.context", "impact": CONTEXT_IMPACT,
+                          "options": [{"id": item, "value": item, "evidence": [f"{item}:sources"]} for item in candidates]})
+    return {**discovery, "questions": questions}, rest, context
+
+
+SOURCE_ROOT_FIX = ("ответ на вопрос о корне исходников — путь папки от корня модуля (несколько — через запятую), в ней должны лежать исходники; "
+                   "исходники прямо в корне модуля этим способом не задать — впишите paths.source в .skillsrc вручную")
+
+
+def _answered_sources(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
+                      declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
+    """The ``paths.source`` question of a module with no source folder is closed by an answer: folders of the module, comma-separated.
+    Each goes through ``_resolve_explicit_target`` (inside the project, no ``..``, no link) and holds source files.
+    Returns (discovery without the answered questions, the other answers, {module: folders})."""
+    modules = {str(module.get("id")): module for module in discovery.get("modules", []) if isinstance(module, Mapping)}
+    questions: list[Any] = []
+    rest = dict(answers)
+    chosen: dict[str, list[str]] = {}
+    for question in discovery.get("questions", []):
+        field = str(question.get("field", "")) if isinstance(question, Mapping) else ""
+        if not field.endswith(".paths.source") or str(question.get("id")) not in rest or field.split(".")[1] in declared:
+            questions.append(question)
+            continue
+        module_id = field.split(".")[1]
+        base = str((modules.get(module_id) or {}).get("root") or ".")
+        items = [item.strip().replace("\\", "/") for item in rest.pop(str(question["id"])).split(",") if item.strip()]
+        suffixes = SOURCE_SUFFIXES.get(((modules.get(module_id) or {}).get("stack") or {}).get("language"), frozenset().union(*SOURCE_SUFFIXES.values()))
+        folders = [_resolve_explicit_target(root, item if base == "." else f"{base}/{item}") for item in items]
+        if not items or any(folder is None or not folder.is_dir() or not _source_dir_has_code(root, folder, suffixes) for folder in folders):
+            raise InitError("source_root_invalid", f"{question['id']}: {SOURCE_ROOT_FIX}")
+        chosen[module_id] = items
+    return {**discovery, "questions": questions}, rest, chosen
+
+
+def answers_hint(project: Path, questions: list[Any]) -> str:
+    """What a stop that waits for answers prints: the file, its format and the command (the file lies inside the project)."""
+    from tools.run_pipeline import printed
+
+    first = next((item for item in questions if isinstance(item, Mapping) and item.get("options")), {"id": "<id вопроса>", "options": [{"id": "<id варианта>"}]})
+    example = "<папка исходников от корня модуля>" if str(first.get("field", "")).endswith(".paths.source") else first["options"][0]["id"]
+    return (f'файл ответов — JSON-объект {{"<id вопроса>": "<id варианта или путь>"}}, например {{"{first["id"]}": "{example}"}}; сохраните его внутри проекта '
+            f'(например .pilot-runs/init/answers.json) и повторите: {printed(sys.executable)} -m tools.init_skillsrc --project {printed(project)} --answers <файл> --write')
+
+
+def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | None) -> tuple[dict[str, str], list[str]]:
+    """``(answers, notes)`` for questions of modules the human did not select whose only option is the
+    host's supported runner — no decision is left there.  A question with several options stays a question."""
+    if selected_module is None:
+        return {}, []
+    from tools.module_ids import current_id
+
+    selected_module = current_id(discovery.get("modules", []), selected_module)  # --module may be the old hex id
+    answers: dict[str, str] = {}
+    notes: list[str] = []
+    for question in discovery.get("questions", []):
+        if not isinstance(question, Mapping):
+            continue
+        parts = str(question.get("field", "")).split(".")
+        options = question.get("options")
+        if len(parts) < 4 or parts[1] == selected_module or not isinstance(options, list) or len(options) != 1:
+            continue
+        option = options[0]
+        if not isinstance(option, Mapping) or list(option.get("evidence") or []) != ["host:supported-runner"]:
+            continue
+        answers[str(question["id"])] = str(option["id"])
+        notes.append(f"{question['field']}={option['value']}: {NOT_SELECTED_EVIDENCE}")
+    return answers, notes
+
+
+def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None = None, replacement_approval: Mapping[str, Any] | None = None, immutable_evidence_dir: Path | None = None, selected_module: str | None = None) -> dict[str, Any]:
+    notes: list[str] = []
+    receipt = _ensure_skillsrc(project_dir, answers, write, explicit_target=explicit_target, replacement_approval=replacement_approval,
+                               immutable_evidence_dir=immutable_evidence_dir, selected_module=selected_module, notes=notes)
+    if notes and receipt.get("status") in {"created", "updated", "preview", "unchanged"}:
+        receipt["warnings"] = list(receipt.get("warnings") or []) + notes
+    return receipt
+
+
+def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None, replacement_approval: Mapping[str, Any] | None, immutable_evidence_dir: Path | None, selected_module: str | None, notes: list[str]) -> dict[str, Any]:
+    root = project_dir.resolve(); destination = root / ".skillsrc"
+    try:
+        discovery = discover_project(root)
+    except (OSError, TypeError, ValueError, KeyError):
+        return _receipt("error", root, False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
+    if not isinstance(discovery, Mapping):
+        return _receipt("error", root, False, [], [], ["discovery_invalid"], hashlib.sha256(b"").hexdigest(), 2)
+    fingerprint = _safe_fingerprint(discovery.get("fingerprint"))
+    notes.extend(str(item) for item in discovery.get("warnings") or [])
+    raw_modules = discovery.get("modules", [])
+    modules = list(raw_modules) if isinstance(raw_modules, list) else []
+    if discovery.get("status") == "error":
+        raw_errors = discovery.get("errors", [])
+        errors = [str(error) for error in raw_errors] if isinstance(raw_errors, list) and raw_errors else ["discovery_invalid"]
+        return _receipt("error", root, False, modules, [], errors, fingerprint, 2)
+    if explicit_target is not None and _resolve_explicit_target(root, explicit_target) is None:
+        return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
+    try:
+        if destination.exists():
+            if not destination.is_file():
+                raise OSError(".skillsrc is not a regular file")
+            original = destination.read_bytes()
+        else:
+            original = None
+    except OSError:
+        return _receipt("error", root, False, modules, [], ["read_error"], fingerprint, 2)
+    try:
+        existing = load_skillsrc(destination) if original is not None else None
+        existing_modules = normalize_skillsrc(existing)["modules"] if existing is not None else []
+    except (SkillsrcError, OSError, TypeError, ValueError) as error:
+        code = getattr(error, "code", "read_error")
+        receipt = _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
+        if getattr(error, "fix", None):  # an older YAML .skillsrc: what to do goes beside the code (the receipt schema stays as it is)
+            receipt.update(_message=str(error), _fix=str(error.fix))
+        return receipt
+    working_discovery = copy.deepcopy(discovery)
+    if explicit_target is not None and not _valid_explicit_target(root, existing_modules + modules, explicit_target):
+        return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
+    declared_existing = {
+        str(module.get("id"))
+        for module in existing_modules
+        if list((module.get("paths") or {}).get("source") or [])
+        or list((module.get("paths") or {}).get("context") or [])  # a tests-only module reads its sources there
+        or list((module.get("feature_sources") or {}).get("source") or [])
+    }
+    try:
+        working_discovery, answers, context_paths = _tests_only_context(root, working_discovery, answers, declared_existing)
+        working_discovery, answers, source_paths = _answered_sources(root, working_discovery, answers, declared_existing)
+    except InitError as error:
+        receipt = _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+        return receipt | ({"_message": str(error), "_fix": SOURCE_ROOT_FIX} if error.code == "source_root_invalid" else {})
+    working_discovery["questions"] = [
+        question
+        for question in working_discovery.get("questions", [])
+        if not (
+            isinstance(question, Mapping)
+            and str(question.get("field", "")).endswith(".paths.source")
+            and str(question.get("field", "")).split(".")[1] in declared_existing
+        )
+    ]
+    source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)
+                        and str(question.get("field", "")).endswith((".paths.source", ".paths.context"))]
+    if source_questions:
+        questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)]
+        if not questions:
+            return _receipt("error", root, False, modules, [], ["discovery_invalid"], fingerprint, 2)
+        known = {question["id"] for question in questions if isinstance(question.get("id"), str)}
+        extra = [key for key in answers if key not in known and not str(key).startswith(("replace:", "remove:", "migrate-"))]
+        if extra:
+            return _receipt("error", root, False, modules, [], ["answer_unknown"], fingerprint, _input_exit_code("answer_unknown"))
+        return _receipt("needs_input", root, False, modules, questions, [], fingerprint)
+    defaults, default_notes = not_selected_defaults(working_discovery, selected_module)
+    notes.extend(note for key, note in zip(defaults, default_notes) if key not in answers)
+    effective_answers = _existing_discovery_answers(existing, working_discovery, {**defaults, **answers})
+    try:
+        proposed = compile_skillsrc(working_discovery, effective_answers, root, notes)
+        for module in proposed.get("modules") or []:  # the answered context roots of a tests-only module
+            if isinstance(module, dict) and module.get("id") in context_paths:
+                module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])
+            if isinstance(module, dict) and module.get("id") in source_paths:
+                module.setdefault("paths", {})["source"] = list(source_paths[module["id"]])
+            # discovery cannot see what the person declared; a repeated init keeps it instead of proposing its removal
+            declared = next((row for row in existing_modules if isinstance(module, dict) and row.get("id") == module.get("id")), {})
+            if (declared.get("paths") or {}).get("context") and module.get("id") not in context_paths:
+                module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
+            if (declared.get("paths") or {}).get("source") and not (module.get("paths") or {}).get("source"):
+                module.setdefault("paths", {})["source"] = list(declared["paths"]["source"])
+            _keep_declared_test_keys(module, declared, new_file=existing is None)
+    except NeedsInput as error:
+        return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
+    except InitError as error:
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+    if existing is not None:
+        kept = _keep_human_keys(proposed, existing, existing_modules)
+        proposal = _proposal(existing, original, proposed)
+        shown = {"warnings": [f"сохранены ключи человека (только пути): {', '.join(kept)}"], "_preserved": kept} if kept else {}
+        if not proposal["structural_diff"]:
+            return _receipt("unchanged", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
+        if not _replacement_is_bound(replacement_approval, proposal):
+            if replacement_approval is not None:
+                return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], ["replacement_unbound"], fingerprint, proposal=proposal, exit_code=2)
+            return _receipt("needs_input", root, False, normalize_skillsrc(existing)["modules"], [_authority_question()], [], fingerprint, proposal=proposal) | shown
+        if not write:
+            return _receipt("preview", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal) | shown
+        try:
+            read_back = atomic_write_skillsrc(
+                root,
+                destination,
+                proposed,
+                fingerprint,
+                original,
+                before_replace=lambda: _preserve_immutable_evidence(root, immutable_evidence_dir, original),
+            )
+        except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
+            return _why_not_written(error, _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal))
+        return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back) | shown
+    try:
+        discovery_ids = {question["id"] for question in working_discovery.get("questions", [])}
+        reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in effective_answers.items() if key not in discovery_ids})
+    except (InitError, SkillsrcError, TypeError, ValueError, KeyError) as error:
+        if not isinstance(error, InitError):
+            return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+    try:
+        actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
+    except (SkillsrcError, TypeError, ValueError, KeyError) as error:
+        return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
+    if reconciled["status"] == "conflict": return _receipt("conflict", root, False, actual_modules, reconciled["questions"], [], fingerprint)
+    if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
+    if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
+    try:
+        read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
+    except (OSError, ValueError) as error:  # OS errors and the package's refusals (InitError, OutputConfinementError)
+        return _why_not_written(error, _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1))
+    return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    from tools.json_cli import JsonArgumentParser  # the parser of the package: a path on a share is refused while it is read
+
+    parser = JsonArgumentParser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--replacement-approval"); parser.add_argument("--immutable-evidence-dir"); parser.add_argument("--output")
+    args = parser.parse_args(); root = Path(args.project)
+    output_target: ConfinedOutputTarget | None = None
+    try:
+        from tools.output_guard import input_file
+
+        answers = {} if not args.answers else load_json_strict(input_file(args.answers, root))  # inside --project, judged before it is opened
+        if not isinstance(answers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in answers.items()): raise ValueError("answers must be a string mapping")
+        approval = None if not args.replacement_approval else load_json_strict(input_file(args.replacement_approval, root))
+        if approval is not None and not isinstance(approval, dict): raise ValueError("replacement approval must be an object")
+        if not root.is_dir(): raise ValueError("--project does not exist")
+        if args.output:
+            output_target = acquire_confined_output(root, args.output)
+    except (OSError, StrictJsonError, ValueError) as error:
+        print(json.dumps({"status": "error", "errors": [_sanitize(str(error))]}, ensure_ascii=False)); return 2
+    try:
+        report = ensure_skillsrc(root, answers, args.write, replacement_approval=approval, immutable_evidence_dir=Path(args.immutable_evidence_dir) if args.immutable_evidence_dir else None)
+    except (OSError, TypeError, ValueError, KeyError):
+        report = _receipt("error", root.resolve(), False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
+    public_report = _public_report(report)
+    if report.get("_fix"):
+        public_report.update(message=report["_message"], fix=report["_fix"])
+    if output_target is not None:
+        try:
+            output_target.write_bytes(json.dumps(public_report, ensure_ascii=False, indent=2).encode("utf-8"))
+        except (OSError, ValueError) as error:
+            print(json.dumps(public_report, ensure_ascii=False, indent=2))
+            print(json.dumps({"receipt_error": _sanitize(str(error))}, ensure_ascii=False), file=sys.stderr)
+            return 1
+        finally:
+            output_target.close()
+    if public_report["status"] == "needs_input" and public_report.get("questions") and "fix" not in public_report:
+        public_report["fix"] = answers_hint(root, public_report["questions"])
+    print(json.dumps(public_report, ensure_ascii=False, indent=2))
+    return 0 if public_report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if public_report["status"] in {"needs_input", "conflict"} else int(report.get("_exit_code", 1))
+
+
+if __name__ == "__main__": raise SystemExit(main())

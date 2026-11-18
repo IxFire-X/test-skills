@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Что изменилось в «Трассе» с версии v0.1.1 до v0.6">
+<title>Что изменилось для тестировщика</title>
+<style>
+:root {
+  --bg: #f2f4f5; --surface: #fcfcfb; --ink: #15202b; --ink-2: #455361; --muted: #6b7884;
+  --line: #d6dce1; --soft: #e8ecef;
+  --model: #4a3aa7; --review: #d65a24; --project: #16956a; --code: #5b6670;
+  --pass: #1f7a3a; --warn: #a35a00;
+  --s-in: #1f7a3a; --s-ready: #1d5fa8; --s-wip: #a35a00;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --col: 780px; --wide: 1040px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+    --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+    --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+  --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+  --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { max-width: var(--col); margin-inline: auto; }
+.wide { max-width: var(--wide); margin-inline: auto; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(26px, 5vw, 42px); letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-weight: 650; font-size: clamp(21px, 3vw, 28px); }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { margin: 14px 0 0; padding: 12px 14px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; white-space: pre; }
+pre code { background: none; padding: 0; font-size: inherit; }
+a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+strong { font-weight: 600; }
+header.top { padding-block: 40px 24px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lead { font-size: 18px; color: var(--ink-2); max-width: 66ch; margin-top: 16px; }
+.toc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 26px; }
+.toc > div { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.toc .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 8px 0 0; padding-left: 22px; font-size: 14.5px; color: var(--ink-2); display: grid; gap: 3px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+nav.bar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+nav.bar ul { list-style: none; margin: 0 auto; padding: 0; max-width: var(--wide); display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+nav.bar a { display: block; padding: 10px 12px; font-size: 14px; white-space: nowrap; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; }
+nav.bar a:hover { color: var(--ink); border-bottom-color: var(--line); }
+nav.bar li.grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; padding: 12px 6px 10px 2px; white-space: nowrap; }
+section { padding-block: 48px 8px; scroll-margin-top: 48px; }
+.part { padding-block: 52px 0; }
+.part .pt { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.part h2 { font-size: clamp(25px, 4vw, 34px); margin-top: 10px; }
+.sec-head { display: grid; gap: 8px; margin-bottom: 20px; }
+.sec-head .n { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.prose { display: grid; gap: 14px; max-width: 68ch; }
+.note { font-size: 14.5px; color: var(--ink-2); }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; background: var(--soft); color: var(--ink); white-space: nowrap; }
+.chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--code)); }
+.chip.model { --c: var(--model); } .chip.review { --c: var(--review); } .chip.project { --c: var(--project); } .chip.code { --c: var(--code); }
+.chip.human { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.chip.human::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+/* Три состояния. Чтобы перенести блок из «в работе» в «готово»: сменить класс st-wip -> st-ready (или st-in) и текст плашки. */
+.st { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 5px; white-space: nowrap; box-shadow: inset 0 0 0 1.5px var(--c); color: var(--c); background: transparent; vertical-align: middle; }
+.st-in { --c: var(--s-in); } .st-ready { --c: var(--s-ready); } .st-wip { --c: var(--s-wip); }
+.stlegend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.stlegend > div { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 14px; font-size: 14px; color: var(--ink-2); min-width: 0; }
+.stlegend .st { margin-bottom: 6px; }
+@media (max-width: 760px) { .stlegend { grid-template-columns: minmax(0, 1fr); } }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 26px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.flow > div { padding: 14px 16px; min-width: 0; }
+.flow > div + div { border-left: 1px solid var(--line); }
+.flow .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.flow .v { font-family: var(--font-mono); font-size: 12.5px; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.45; }
+.flow .d { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+@media (max-width: 720px) { .flow { grid-template-columns: minmax(0, 1fr); } .flow > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+.who { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+.who > div { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.who p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.cap { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cap h3 { font-size: 16.5px; }
+.cap p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.cap .pf { font-size: 13.5px; color: var(--ink); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.cap .top { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+@media (max-width: 820px) { .caps, .toc { grid-template-columns: minmax(0, 1fr); } .who { grid-template-columns: minmax(0, 1fr); } }
+.roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.role { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.role p { font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 980px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .roles { grid-template-columns: minmax(0, 1fr); } }
+figure { margin: 24px 0 0; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 14px 10px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 680px; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; max-width: 72ch; }
+svg text { font-family: var(--font-body); }
+svg .mono { font-family: var(--font-mono); }
+.tbl { overflow-x: auto; margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; background: var(--soft); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 5px; white-space: nowrap; background: transparent; }
+.tag.ok { color: var(--pass); box-shadow: inset 0 0 0 1px var(--pass); }
+.tag.wn { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.tag.rv { color: var(--review); box-shadow: inset 0 0 0 1px var(--review); }
+.tag.mu { color: var(--muted); box-shadow: inset 0 0 0 1px var(--muted); }
+.steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--c, var(--code)); }
+.steps .h { font-weight: 600; }
+.steps .s { font-size: 14.5px; color: var(--ink-2); margin-top: 2px; }
+.steps .now { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+.c-model { --c: var(--model); } .c-review { --c: var(--review); } .c-project { --c: var(--project); } .c-code { --c: var(--code); } .c-human { --c: var(--ink-2); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.split3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.panel h3 { font-size: 16.5px; }
+.panel ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; color: var(--ink-2); }
+.panel li .st { margin-right: 4px; }
+@media (max-width: 900px) { .split, .split3 { grid-template-columns: minmax(0, 1fr); } }
+.callout { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--ink-2); font-size: 14.5px; color: var(--ink-2); max-width: 72ch; }
+.callout.warn { border-color: var(--warn); }
+.items { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.items > li { padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; }
+.col > pre, .items pre { max-width: 100%; }
+.items > li:last-child { border-bottom: 1px solid var(--line); }
+.items .h { font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.items .s { font-size: 14.5px; color: var(--ink-2); margin-top: 4px; }
+dl.gloss { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px 20px; margin: 22px 0 0; }
+dl.gloss dt { font-weight: 600; }
+dl.gloss dd { margin: 0; color: var(--ink-2); min-width: 0; }
+@media (max-width: 600px) { dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; } dl.gloss dd { margin-bottom: 10px; } }
+footer { padding-block: 44px 64px; color: var(--muted); font-size: 13.5px; }
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.bx.model { stroke: var(--model); stroke-width: 2; }
+.bx.review { stroke: var(--review); stroke-width: 2; }
+.bx.project { stroke: var(--project); stroke-width: 2; }
+.bx.code { stroke: var(--code); stroke-width: 2; }
+.bx.human { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.bx.opt { stroke-dasharray: 5 3; }
+.ln { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.ln.ret { stroke-dasharray: 5 4; }
+.bound { stroke: var(--ink-2); stroke-width: 1.2; stroke-dasharray: 2 4; }
+.tt { font-size: 14px; font-weight: 600; fill: var(--ink); }
+.ts { font-size: 12px; fill: var(--ink-2); }
+.tl { font-size: 12px; fill: var(--ink-2); }
+.tm { font-size: 12px; fill: var(--muted); }
+.th { font-size: 12px; fill: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+.grid { stroke: var(--line); stroke-width: 1; }
+.axis { font-size: 12px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-over { fill: var(--review); } .bar-ok { fill: var(--model); }
+.limit { stroke: var(--ink); stroke-width: 1.5; }
+.val { font-size: 12.5px; fill: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rlab { font-size: 13px; fill: var(--ink); }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.card .t { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.card h3 { font-size: 16.5px; }
+.card p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 760px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: no-preference) { nav.bar a { transition: color .15s, border-color .15s; } }
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="col">
+    <div class="eyebrow">Трасса · для тестировщиков · от v0.1.1 к v0.6 · состояние на 16 ноября 2026</div>
+    <h1 style="margin-top:14px">Что изменилось с прошлой версии</h1>
+    <p class="lead">Вы работали с v0.1.1. Страница отвечает на вопрос «что для меня теперь иначе»: что стало можно, что работает по-другому, что нужно делать иначе и что пока не готово. Сравнение — с версией v0.1.1 (тег от 2 ноября); «сейчас» — это ветка v0.6 на коммите 0d43a168. Страница обновляется перед поставкой.</p>
+    <div class="stlegend" aria-label="Три состояния изменений">
+      <div><span class="st st-in">уже в ветке v0.6</span><br>Есть в коде ветки и проверено по коду и документам.</div>
+      <div><span class="st st-ready">готово, войдёт в поставку</span><br>Закоммичено, ещё не влито в ветку; войдёт в поставку вместе со стопкой.</div>
+      <div><span class="st st-wip">в работе до поставки</span><br>Ещё пишется или в плане. Может не войти в v0.6.</div>
+    </div>
+  </div>
+</header>
+
+<nav class="bar wrap" aria-label="Разделы">
+  <ul>
+    <li><a href="#five">За пять минут</a></li>
+    <li class="grp">Подробности</li>
+    <li><a href="#new">Что стало можно</a></li>
+    <li><a href="#diff">Работает по-другому</a></li>
+    <li><a href="#todo">Что делать иначе</a></li>
+    <li><a href="#openspec">OpenSpec</a></li>
+    <li><a href="#states">Состояния</a></li>
+    <li><a href="#limits">Ограничения</a></li>
+    <li><a href="#stops">Остановки</a></li>
+  </ul>
+</nav>
+
+<main>
+<section id="five" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">За пять минут</div><h2>Главное для вас</h2></div>
+  </div>
+  <div class="wide">
+    <div class="cards">
+      <div class="card"><div class="t"><h3>1. Ставить больше ничего не нужно</h3><span class="st st-in">уже в ветке</span></div><p>Нужен только Python 3.11–3.13. Окружение <code>.venv</code> и <code>pip --require-hashes</code> не нужны. Целостность пакета проверяет <code>python -m tools.doctor --root .</code>.</p></div>
+      <div class="card"><div class="t"><h3>2. Автотесты запускаете вы</h3><span class="st st-in">уже в ветке</span></div><p>В v0.1.1 сборку запускал пакет. Теперь он печатает команду, вы смотрите файлы тестов и выполняете её сами, затем говорите агенту, где отчёты. Пакет не запускает ни сборку, ни git и не опрашивает стенд.</p></div>
+      <div class="card"><div class="t"><h3>3. После разметки вам задают вопрос</h3><span class="st st-in">уже в ветке</span></div><p>Если в требованиях нашлись пробелы, прогон останавливается (<code>SCOPE_PENDING</code>) и просит решить: исключить требования с причиной или продолжать как есть. Без ответа кейсы не пишутся.</p></div>
+      <div class="card"><div class="t"><h3>4. Ревью строже и честнее</h3><span class="st st-in">уже в ветке</span></div><p>Набор может быть принят целиком, частично или отклонён. Отклонённые кейсы один раз возвращаются генератору. CSV для Zephyr бывает только у принятого набора. Отчёт показывает, сколько контрольных ошибок ревьюер заметил.</p></div>
+      <div class="card"><div class="t"><h3>5. Повторный прогон берёт готовое</h3><span class="st st-in">уже в ветке</span> <span class="st st-wip">условие расширяется</span></div><p>Новый прогон по тем же требованиям берёт готовые кейсы, ревью и автотесты прошлого, если проект не менялся. Сейчас мешают файлы, которые записал прошлый прогон, и каталоги сборки; смягчение — в работе.</p></div>
+      <div class="card"><div class="t"><h3>6. Результаты — в подпапке <code>published/</code></h3><span class="st st-in">уже в ветке</span></div><p>Кейсы, ревью и CSV лежат в <code>.pilot-runs/&lt;run_id&gt;/published/</code>, а не в корне папки прогона. Отклонённый набор — файлы <code>*.REJECTED.*</code>, не импортировать.</p></div>
+      <div class="card"><div class="t"><h3>7. OpenSpec: выбор изменения</h3><span class="st st-in">в v0.6</span></div><p>Чтение <code>spec.md</code> было и в v0.1.1. В v0.6 изменение выбирается файлами в <code>--docs</code>, остальные изменения и архив в модель не идут; проверено живым прогоном. Подробнее — в разделе «OpenSpec».</p></div>
+      <div class="card"><div class="t"><h3>8. Что ещё в пути</h3><span class="st st-ready">готово</span> <span class="st st-wip">в работе</span></div><p>Готово, войдёт в поставку: понятнее сообщения об отказах, автотесты сверяют импорты с файлом сборки. В работе: <strong>обновление существующих кейсов</strong> (вердикт «подходит / переписать / устарел» по каждому старому кейсу), повтор в той же папке, файл <code>nul</code> в проекте. Список — в «Состояниях».</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="part wrap"><div class="col"><div class="pt">Подробности</div><h2>Что именно изменилось</h2></div></div>
+
+<section id="new" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">1</div><h2>Что стало можно</h2></div>
+    <ul class="items">
+      <li><div class="h">Исключить неполные требования и записать причину <span class="st st-in">уже в ветке</span></div><div class="s">Пауза после разметки показывает список пробелов. Ответ — «исключи SREQ-0003, потому что …» или «продолжай как есть». Причина попадает в отчёт, решение — в прогон (<code>scope-decision.json</code>). Другое решение позже — новый прогон. Черновик вопросов аналитику уже лежит в <code>questions-for-analyst.md</code>.</div></li>
+      <li><div class="h">Взять один раздел документа <span class="st st-in">уже в ветке</span></div><div class="s"><code>--docs docs/feature.md#Раздел</code> берёт из Markdown-файла только один раздел: заголовок и всё до следующего заголовка того же или более высокого уровня. Нет такого заголовка — остановка <code>TASK_DOC_SECTION_MISSING</code> со списком заголовков.</div></li>
+      <li><div class="h">Называть модуль путём его папки <span class="st st-in">уже в ветке</span></div><div class="s">ID модуля — путь от корня проекта: <code>api</code>, <code>services/core</code>; для корня — <code>root</code>. <code>ready</code> без <code>--module</code> перечисляет ID всех модулей. Старая запись вида <code>root--617069</code> ещё принимается с предупреждением <code>MODULE_ID_LEGACY</code>.</div></li>
+      <li><div class="h">Взять готовые кейсы прошлого прогона <span class="st st-in">уже в ветке</span></div><div class="s"><code>scan</code> называет прошлый прогон с теми же входами и команду <code>prepare … --reuse-from &lt;run_id&gt;</code> на каждую стадию (разметка, план, пачки, ревью, при режиме Б — автотесты). Принятое ревью кейсов берётся вместе с доработкой. Ревью автотестов делается заново. Почему не берётся — в <code>cases.reason</code> и <code>automation.reason</code>. В коде v0.1.1 повторно использовалась только разметка, и в руководстве это описано не было.</div></li>
+      <li><div class="h">Увидеть, насколько надёжно ревью <span class="st st-in">уже в ветке</span></div><div class="s">В вид кейсов код вставляет от нуля до трёх контрольных ошибок (по размеру набора); в сам набор они не попадают. <code>report.md</code> пишет, сколько из них ревьюер заметил. «Ревью слабое: пропущено N из M» — повод перечитать набор самому; «ревью ненадёжно» (<code>REVIEW_UNRELIABLE</code>, не замечена ни одна) значит, что вердикту доверять нельзя.</div></li>
+      <li><div class="h">Провести ревью в свежей сессии по готовой инструкции <span class="st st-in">уже в ветке</span></div><div class="s"><code>prepare</code> печатает пошаговую инструкцию: открыть новую сессию или выполнить <code>/clear</code>, написать «проведи ревью test-skills &lt;run_id&gt;» — ревьюер прочтёт вид кейсов из <code>review-views/</code> и положит ответ в <code>incoming/tc-reviewer-canonical.json</code>; затем в рабочей сессии выполнить <code>submit</code>.</div></li>
+      <li><div class="h">Больше данных в отчёте <span class="st st-in">уже в ветке</span></div><div class="s"><code>run_pipeline report</code> теперь пишет ещё фазы по времени, состав входа по видам, отказы команд (по командам, кодам и пачкам), числа канона и размер рабочей папки <code>tmp/</code> с командой её удаления — сам отчёт ничего не удаляет. Кода проекта, текстов требований и кейсов, ответов модели в нём по-прежнему нет.</div></li>
+      <li><div class="h">Прервать и продолжить без потерь <span class="st st-in">уже в ветке</span></div><div class="s">Прогон восстанавливается после обрыва процесса: следующая команда доводит или откатывает незаконченную запись. <code>status</code> после <code>/clear</code> называет <code>state</code> и <code>next</code>. Команды одного прогона не запускайте параллельно: вторая подождёт первую, а при долгом ожидании ответит <code>CONCURRENT_WRITER</code>.</div></li>
+      <li><div class="h">Не терять свои настройки <span class="st st-in">уже в ветке</span></div><div class="s">Повторный <code>init</code> и <code>ready</code> сохраняют то, что вы вписали в <code>.skillsrc</code>: лимиты, ревью, <code>paths.include</code> / <code>paths.exclude</code>, имя проекта.</div></li>
+    </ul>
+  </div>
+</section>
+
+<section id="diff" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">2</div><h2>Что работает по-другому</h2></div>
+    <div class="prose"><p>Слева — что было в v0.1.1 по её README, руководству и инструкции агента, справа — что в v0.6.</p></div>
+  </div>
+  <div class="wide">
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 910 250" role="img" aria-label="Запуск автотестов. В v0.1.1 пакет проверял стенд, сам запускал сборку проекта и принимал итог. В v0.6 пакет печатает команду, человек просматривает файлы и сам запускает её, затем агент принимает отчёты командой ingest.">
+          <defs><marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <text class="th" x="8" y="22">V0.1.1: ПАКЕТ ЗАПУСКАЕТ САМ</text>
+          <rect class="bx code" x="8" y="32" width="200" height="62" rx="8"/><text class="tt" x="108" y="58" text-anchor="middle">Пакет проверяет стенд</text><text class="ts" x="108" y="78" text-anchor="middle">перед записью тестов</text>
+          <rect class="bx project" x="260" y="32" width="200" height="62" rx="8"/><text class="tt" x="360" y="58" text-anchor="middle">Пакет запускает сборку</text><text class="ts" x="360" y="78" text-anchor="middle">выбранные тесты</text>
+          <rect class="bx code" x="512" y="32" width="200" height="62" rx="8"/><text class="tt" x="612" y="58" text-anchor="middle">Пакет принимает итог</text><text class="ts" x="612" y="78" text-anchor="middle">PASS · FAIL · …</text>
+          <line class="ln" x1="208" y1="63" x2="258" y2="63" marker-end="url(#ar5)"/><line class="ln" x1="460" y1="63" x2="510" y2="63" marker-end="url(#ar5)"/>
+          <line class="grid" x1="8" y1="120" x2="902" y2="120"/>
+          <text class="th" x="8" y="148">V0.6: ЗАПУСКАЕТЕ ВЫ</text>
+          <rect class="bx code" x="8" y="158" width="200" height="62" rx="8"/><text class="tt mono" x="108" y="184" text-anchor="middle">materialize</text><text class="ts" x="108" y="204" text-anchor="middle">файлы тестов и команда</text>
+          <rect class="bx human" x="260" y="158" width="200" height="62" rx="8"/><text class="tt" x="360" y="184" text-anchor="middle">Вы просматриваете файлы</text><text class="ts" x="360" y="204" text-anchor="middle">и запускаете команду</text>
+          <rect class="bx code" x="512" y="158" width="200" height="62" rx="8"/><text class="tt mono" x="612" y="184" text-anchor="middle">ingest</text><text class="ts" x="612" y="204" text-anchor="middle">приём ваших отчётов</text>
+          <line class="ln" x1="208" y1="189" x2="258" y2="189" marker-end="url(#ar5)"/><line class="ln" x1="460" y1="189" x2="510" y2="189" marker-end="url(#ar5)"/>
+          <text class="tm" x="740" y="68">стенд опрашивал пакет</text><text class="tm" x="740" y="194">стенд поднимаете вы</text>
+        </svg>
+      </div>
+      <figcaption>Самое заметное изменение для режима автотестов: человек теперь запускает сборку сам.</figcaption>
+    </figure>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Что</th><th>В v0.1.1</th><th>В v0.6</th><th>Состояние</th></tr></thead>
+        <tbody>
+          <tr><td>Установка</td><td>виртуальное окружение пакета и <code>pip install --require-hashes</code></td><td>ничего не ставится: Python 3.11–3.13 и стандартная библиотека; <code>requirements.txt</code> сведён к одной строке-пояснению</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Проверка пакета</td><td>в руководстве не описана; <code>ready</code> проверял готовность</td><td><code>python -m tools.doctor --root .</code> сверяет файлы с <code>release/manifest.json</code>, называет профиль поставки; <code>NOT_RUNNABLE</code> — обычно достаточно заново скопировать поставку</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Запуск тестов</td><td>сборку запускал пакет после проверки стенда</td><td>команду печатает <code>materialize</code>, выполняете вы; <code>ingest</code> принимает отчёты. Пакет стенд не опрашивает; остановки <code>SERVICE_URL_MISSING</code> и <code>SERVICE_UNREACHABLE</code> в таблице остановок руководства больше нет</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Где лежат результаты</td><td><code>&lt;документ&gt;.r&lt;ревизия&gt;.html</code> и остальные — прямо в <code>.pilot-runs/&lt;run_id&gt;/</code></td><td>в подпапке <code>published/</code></td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>CSV для Zephyr</td><td>файл перечислен среди результатов без условий</td><td>только у набора, принятого ревью. У отклонённого — <code>*.REJECTED.*</code>, у закрытого без ревью — <code>*.UNREVIEWED.*</code>; в обоих случаях CSV нет</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Что дальше говорит <code>status</code></td><td>поле <code>next_step</code></td><td>поля <code>state</code>, <code>next</code>, <code>waiting_for</code>; «<code>waiting_for: model</code>» — ответ модели, «<code>human</code>» — ждёт вас</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Вердикт ревью</td><td>по инструкции агента: принято / исправлено автоматически / доработка (в README и руководстве слов вердикта нет)</td><td>принят целиком / принят частично (отклонённые кейсы выделены отдельно) / отклонён целиком; частичный набор один раз дорабатывается</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Подача запроса агенту</td><td>Python — из <code>.tools/test-skills/.venv</code></td><td>просто «через Python 3.11–3.13»; для режима Б — новый текст запроса (см. «Что делать иначе»)</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Команды для PowerShell</td><td>—</td><td><code>materialize</code> печатает две формы: <code>command_text</code> для cmd и sh и <code>command_text_powershell</code> для PowerShell. Символы в путях, которые командная строка прочтёт по-своему, дают <code>COMMAND_NOT_PRINTABLE</code> до создания прогона</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Тесты прошлых прогонов</td><td>—</td><td>записанные пакетом в прошлых прогонах тесты не идут модели (<code>CONTEXT_OWN_TEST</code>); <code>scan</code> и <code>ready</code> называют их</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Автотесты: карантин параметризованных тестов</td><td>упавший метод получает карантин</td><td>упавшая строка параметризованного теста отправляет в карантин весь метод; импорты фреймворка сверяются с файлом сборки модуля</td><td><span class="st st-ready">готово, войдёт в поставку</span></td></tr>
+          <tr><td>Пути новых автотестов</td><td>в руководстве не описано</td><td>генератору называются пути, которые в проекте уже заняты; ответ с новым тестом на занятом пути <code>submit</code> отклоняет (<code>MATERIALIZATION_CONFLICT</code>) — до записи тестов, пока ответ можно дать снова</td><td><span class="st st-in">в ветке</span></td></tr>
+          <tr><td>Ошибки в ответах роли</td><td>—</td><td>отказ при доработке называет позицию и кейс; пустой ключ <code>evidence</code> в ответе ревьюера — «убери ключ»; расхождение кода и требования — одна фраза в «Прочее» файла вопросов, не пауза</td><td><span class="st st-ready">готово, войдёт в поставку</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="todo" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">3</div><h2>Что делать иначе</h2></div>
+    <ul class="items">
+      <li><div class="h">Не создавать <code>.venv</code> и не ставить зависимости</div><div class="s">Положите папку пакета в <code>.tools/test-skills</code> и проверьте её. Терминал — в папке пакета:</div><pre><code>python -m tools.doctor --root .</code></pre><div class="s">В ответе <code>"status": "PASS"</code> — можно идти дальше. Версия Python ниже 3.11 видна в поле <code>python</code>.</div></li>
+      <li><div class="h">Добавить три строки в <code>.gitignore</code> проекта</div><div class="s"><code>.tools/</code>, <code>.pilot-runs/</code>, <code>.skillsrc*</code>. Если пакет всё же попадает в git, положите в папку пакета файл <code>.gitattributes</code> с одной строкой <code>* -text</code>: иначе git на Windows заменит переносы строк, и <code>ready</code> остановится: проверка пакета сверяет файлы байт в байт.</div></li>
+      <li><div class="h">Для режима автотестов взять новый текст запроса</div><div class="s">Профиль — <code>local-pilot-v1</code>; сборку и тесты агент сам не запускает.</div><pre><code>Выполни .tools/test-skills/skills/orchestrate/SKILL.md.
+Проект: &lt;проект&gt;.
+Требования: docs/feature.md, путь от корня проекта.
+Профиль: local-pilot-v1 — полный прогон: кейсы, ревью, автотесты
+(ready и scan — с --profile local-pilot-v1).
+Я разрешаю положить автотесты в тестовый корень модуля. Сборку и тесты
+сам не запускай: покажи мне файлы на просмотр и команду запуска — её
+выполню я.
+Инструменты пакета запускай командами python -m tools.… через Python
+3.11–3.13; функции пакета не импортируй.
+
+В конце кратко объясни итог: принят ли набор (accepted), результат
+моего запуска, что в карантине. Дай полные пути к кейсам, отчёту ревью
+и папке запуска. Что не принято или не создано — скажи прямо.</code></pre><div class="s">Режим автотестов есть не во всякой поставке: если в папке пакета есть <code>HOW-TO-USE-MODE-B.md</code> — он в вашей поставке, начните с этого файла.</div></li>
+      <li><div class="h">Запустить автотесты самому и принести отчёты</div><div class="s">Перед запуском прочтите все файлы из <code>files_to_review</code>: код написала модель и ещё не запускала. Проверьте, что первый токен команды — абсолютный путь запускателя вашего модуля, а адрес стенда (переменная из <code>service_url_env</code>) указывает на тестовый, а не рабочий стенд. Выполните команду (<code>command_text</code> или <code>command_text_powershell</code>). Отчёты положите в каталог внутри модуля или в <code>&lt;run&gt;/incoming/</code> и скажите агенту, где они. Файлы тестов после <code>materialize</code> не правьте и не форматируйте: правка даст <code>INGEST_TESTS_CHANGED</code>. Если сборка не дошла до тестов, агент закроет прогон с причиной (<code>BUILD_FAILED</code>, <code>TESTS_NOT_STARTED</code> или <code>RESULT_UNAVAILABLE</code>).</div></li>
+      <li><div class="h">Ответить на паузу после разметки</div><div class="s">Когда агент остановился со списком пробелов, ответьте одним из двух: «исключи SREQ-… потому что …» или «продолжай как есть».</div></li>
+      <li><div class="h">Если хотите, чтобы повторный прогон взял готовое — убрать лишнее</div><div class="s">Файлы, которые прошлый прогон записал в проект, считаются изменением проекта; так же и каталоги сборки, появившиеся после запуска тестов (<code>build</code>, <code>target</code>). Какие именно мешают, называет <code>scan</code>: в строке причины «входы иные» стоит список путей. Уберите их перед новым прогоном. Смягчение условия — <span class="st st-wip">в работе</span>.</div></li>
+      <li><div class="h">Искать результаты в <code>published/</code></div><div class="s">Кейсы: <code>published/&lt;документ&gt;.r&lt;ревизия&gt;.html</code>, <code>.md</code>, <code>.json</code>; CSV для Zephyr: <code>.zephyr-scale.csv</code> (только у принятого набора). Остальное — как раньше: <code>questions-for-analyst.md</code>, отчёт ревью, <code>terminal-results/&lt;attempt_id&gt;.json</code>.</div></li>
+    </ul>
+  </div>
+</section>
+
+<section id="openspec" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">4</div><h2>OpenSpec: как подать спецификацию и изменение</h2></div>
+    <p><span class="st st-in">в v0.6, проверено живым прогоном</span></p>
+    <div class="prose" style="margin-top:12px">
+      <p>OpenSpec — основной формат требований в компании. Требования лежат в папке <code>openspec/</code> в корне проекта:</p>
+      <ul style="margin:0;padding-left:22px;display:grid;gap:6px">
+        <li><code>openspec/specs/&lt;область&gt;/spec.md</code> — <strong>как система работает сейчас</strong> (действующая спецификация, «база»);</li>
+        <li><code>openspec/changes/&lt;имя&gt;/</code> — <strong>папка-заявка «хотим поменять вот так»</strong>: в её <code>spec.md</code> — что добавляется, меняется, убирается (блоки ADDED, MODIFIED, REMOVED, RENAMED), рядом <code>proposal.md</code>, <code>design.md</code>, <code>tasks.md</code> — замысел и задачи. Пока заявку не приняли и не перенесли в архив (<code>openspec/changes/archive/</code>), это только предложение.</li>
+      </ul>
+      <p><strong>Правило: один прогон — одна заявка.</strong> Пример. В спецификации: «описание визита — до 255 символов». В проекте две незавершённые заявки: А — «сделать до 500», Б — «сделать до 1000». Если взять обе сразу, непонятно, какой кейс писать — на 500 или на 1000: это решится, только когда одну из заявок примут. Поэтому пакет берёт одну заявку — ту, что названа в <code>--docs</code>, — пишет кейсы под неё, а вторую не видит.</p>
+    </div>
+    <div class="split" style="margin-top:20px">
+      <div class="panel"><h3>Что можно</h3><ul>
+        <li><strong>В проекте сколько угодно заявок.</strong> Называете одну — прогон идёт по ней; остальные заявки и архив в модель не идут, <code>scan</code> перечисляет их одной строкой.</li>
+        <li><strong>В одной заявке много правок по разным областям</strong> — всё за один прогон. В <code>--docs</code> называется папка заявки и области, которые она меняет; забыли область — <code>scan</code> подскажет.</li>
+        <li><strong>Нужны кейсы по двум заявкам</strong> — два прогона подряд; агент проводит их в одном запросе.</li>
+        <li><code>proposal</code>, <code>design</code>, <code>tasks</code> заявки модель читает как контекст, требованиями они не становятся. Код сверяет ответ модели с составом заявки и спецификации: пропущенное или лишнее требование — отказ (<code>OPENSPEC_MISSING</code>, <code>OPENSPEC_EXTRA</code>).</li>
+      </ul></div>
+      <div class="panel"><h3>Когда пакет остановит</h3><ul>
+        <li>в одном прогоне названы две заявки;</li>
+        <li><code>--docs</code> не задан, а незавершённых заявок в проекте две и больше;</li>
+        <li>заявка меняет область, чей <code>spec.md</code> не назван.</li>
+        <li><strong>Это не падение прогона:</strong> <code>scan</code> останавливается до первого вызова модели — ничего не потрачено — и печатает, что указать (<code>OPENSPEC_SOURCE_CONFLICT</code> с подсказкой).</li>
+      </ul></div>
+    </div>
+    <p class="note" style="margin-top:12px">Проверено живым прогоном: на стенде две незавершённые заявки, в <code>--docs</code> названа одна — прогон дошёл до отчёта, вторая заявка в модель не попала. Прежний обходной путь (исключать лишние заявки в <code>.skillsrc</code>) больше не нужен.</p>
+    <p class="note" style="margin-top:12px">Команды-примеры (имена областей и заявки выдуманы; тот же набор <code>--docs</code> передаётся и в <code>scan</code>):</p>
+    <pre><code># вся спецификация
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 --docs openspec/specs
+
+# одна заявка: её папка и области, которые она меняет
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 \
+  --docs openspec/specs/owners --docs openspec/changes/add-search</code></pre>
+    <div class="callout warn"><strong>Ограничения.</strong> Для нестандартной схемы OpenSpec поддержка не заявлена. Одна попытка — один модуль: полная спецификация, которая не помещается в этот маршрут, остаётся блокером и не подменяется одним удобным модулем.</div>
+  </div>
+</section>
+
+<section id="states" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">5</div><h2>Состояния изменений на 16 ноября</h2></div>
+    <div class="prose"><p>Перед поставкой блоки переедут между колонками.</p></div>
+  </div>
+  <div class="wide">
+    <div class="split split3">
+      <div class="panel"><h3><span class="st st-in">уже в ветке v0.6</span></h3><ul>
+        <li>OpenSpec: изменение выбирается файлами в <code>--docs</code>, остальные изменения и архив в модель не идут; сделано в v0.6, проверено живым прогоном (раздел «OpenSpec»)</li>
+        <li>запуск без установки, <code>doctor</code></li>
+        <li>запуск автотестов человеком (<code>materialize</code>, <code>ingest</code>)</li>
+        <li>пауза по пробелам, исключение требований</li>
+        <li>частичное принятие, одна доработка, файлы <code>REJECTED</code> / <code>UNREVIEWED</code></li>
+        <li>контрольные ошибки в ревью</li>
+        <li>повтор готового из прошлого прогона при неизменном проекте</li>
+        <li>свои тесты прошлых прогонов не идут модели</li>
+        <li>раздел документа <code>#Раздел</code>, ID модуля путём</li>
+        <li>расширенный отчёт, восстановление после обрыва</li>
+        <li>генератору автотестов называются занятые пути проекта; <code>submit</code> отказывает на занятый путь</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-ready">готово, войдёт в поставку</span></h3><ul>
+        <li>начало вида кейсов для ревьюера очень большого набора делится на части <span class="note">(уточняется)</span></li>
+        <li>предупреждение о непрочитанных прошлых прогонах называет их; подсказка, если весь контекст пропущен из-за собственных тестов</li>
+        <li>понятнее сообщения об отказах ответов ревьюера и доработки</li>
+        <li>автотесты: импорты фреймворка сверяются с файлом сборки; карантин параметризованного теста — целым методом</li>
+        <li>тексты ролей по итогам двух живых прогонов 16 ноября</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-wip">в работе до поставки</span></h3><ul>
+        <li><strong>обновление существующих кейсов</strong> под изменившиеся требования: старые кейсы получают вердикт «подходит / переписать / устарел»; подходящие остаются байт в байт, в сомнении кейс остаётся и выносится в отчёт «проверить вручную»; работает по живому изменению OpenSpec, по названному архивному и без OpenSpec; ключ Zephyr у сохранённых кейсов остаётся, у новых пуст — импорт создаст новые кейсы, а не обновит старые</li>
+        <li>повтор готового во втором прогоне в той же папке: сейчас условие «код проекта не менялся», смягчение — сравнение по составу файлов проекта</li>
+        <li>файл с именем <code>nul</code> в папке проекта: жалоба тестировщика 16 ноября, исправление в очереди (уточняется)</li>
+        <li>новый вход ролей автотестов: файл сборки модуля и импорты тестов проекта</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<section id="limits" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">6</div><h2>Известные ограничения</h2></div>
+    <ul class="items">
+      <li><div class="h">Повтор готового — только при неизменном проекте</div><div class="s">Условие узкое: код проекта должен совпадать байт в байт. Файлы, записанные прошлым прогоном, и каталоги сборки сейчас его ломают. У вас выигрыш может оказаться реже, чем в наших прогонах.</div></li>
+      <li><div class="h">OpenSpec: одна заявка за прогон</div><div class="s">Один прогон идёт по одной заявке на изменение (папке в <code>openspec/changes/</code>), названной в <code>--docs</code>; если нужны две, делайте два прогона. Подробности и примеры — в разделе «OpenSpec».</div></li>
+      <li><div class="h">Ревью большого набора может быть неполным</div><div class="s">В живом прогоне 16 ноября ревьюеры автотестов не прочли часть файлов вида кейсов, разбитого на пять частей (59, 59, 57, 57 и 10 КБ; по заметке этого прогона). Смотрите в отчёте строку про контрольные ошибки и, когда они пропущены, перечитайте набор сами.</div></li>
+      <li><div class="h">Большой вход шага — предупреждение, не остановка</div><div class="s">Вход второго вызова автотестов в том же прогоне — 655 КБ при бюджете шага 500 КБ: пакет выдал <code>STEP_OVER_BUDGET</code> и пошёл дальше. Вход не обрезается, ответ не делится.</div></li>
+      <li><div class="h">Один модуль на попытку</div><div class="s">В многомодульном проекте выберите модуль через <code>--module</code>; документ требований может лежать вне модуля, но внутри проекта.</div></li>
+      <li><div class="h">Maven: только Surefire</div><div class="s">Если проект требует жизненного цикла Failsafe / integration-test, маршрут режима автотестов недостаточен — агент сохранит это как блокер.</div></li>
+      <li><div class="h">Крах системы</div><div class="s">После обрыва процесса прогон восстанавливается, а после краха операционной системы или отключения питания не обещается: журнал мог остаться неполным, тогда <code>JOURNAL_CORRUPT</code> и новый прогон.</div></li>
+      <li><div class="h">Ревью без отдельной сессии</div><div class="s">Если в вашем CLI нельзя открыть чистую сессию, ревью идёт в той же сессии по вашему согласию, результат помечается SELF и независимым не называется. Согласие даётся флагом <code>--accept-self-review</code> на шаге ревью или в <code>scan</code>, либо записью <code>review: {"self": true}</code> в <code>.skillsrc</code>.</div></li>
+    </ul>
+  </div>
+</section>
+
+<section id="stops" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">7</div><h2>Остановки и что делать</h2></div>
+    <div class="prose"><p>Каждая остановка — JSON с кодом и подсказкой <code>fix</code>; начинайте с неё. Ниже — остановки, которых нет в таблице руководства v0.1.1; часть из них названа в инструкции агента v0.1.1 (<code>TASK_DOC_OUTSIDE_CONTEXT</code>, <code>MODEL_OUTPUT_TRUNCATED</code>, <code>FINISH_FACT_UNDETERMINED</code>).</p></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Код</th><th>Что случилось</th><th>Что делать</th></tr></thead>
+        <tbody>
+          <tr><td><code>SCOPE_PENDING</code></td><td>после разметки остались пробелы, кейсы не пишутся</td><td>ответить: исключить требования с причиной или продолжать как есть</td></tr>
+          <tr><td><code>FRESH_CONTEXT_REQUIRED</code></td><td>ревью открыто, а свежий ли контекст у ревьюера — не сказано</td><td>отдельный ревьюер (<code>--fresh-context yes</code>) или ваше согласие на SELF</td></tr>
+          <tr><td><code>REVIEW_ONLY_CANARY_FIXES</code></td><td>правки ревью держатся на контрольных ошибках</td><td>ревьюер оставляет их находками <code>INFO</code>, затем <code>submit</code> ещё раз</td></tr>
+          <tr><td><code>COMMAND_NOT_PRINTABLE</code></td><td>в пути или заголовке раздела есть символ, который командная строка прочтёт по-своему</td><td>переименовать папку или файл и повторить <code>scan</code></td></tr>
+          <tr><td><code>INPUT_OUTSIDE_PROJECT</code></td><td>входной файл вне проекта, через ссылку, <code>..</code> или сетевой путь</td><td>агент кладёт свой файл в <code>&lt;run&gt;/tmp/</code> и подаёт его путь; документы требований держите внутри проекта</td></tr>
+          <tr><td><code>TASK_DOC_OUTSIDE_CONTEXT</code></td><td>документ из <code>--docs</code> опись не берёт (вне проекта, секрет, <code>node_modules</code>, <code>build</code>, бинарный файл)</td><td>положить документ внутрь проекта, вне исключённых папок, текстом без секретов</td></tr>
+          <tr><td><code>MODEL_OUTPUT_TRUNCATED</code></td><td>ответ модели оборван, JSON не закрыт</td><td>попросить ответ короче или по частям и сохранить заново; шаг не засчитан, пока файл не разбирается</td></tr>
+          <tr><td><code>MODULE_UNKNOWN</code></td><td><code>--module</code> не совпал с ID модуля</td><td>взять ID из остановки (путь папки от корня проекта или <code>root</code>)</td></tr>
+          <tr><td><code>FINISH_FACT_UNDETERMINED</code></td><td><code>finish</code> не может назвать итог: ревью ещё не закрыто</td><td>выполнить шаг из <code>fix</code></td></tr>
+          <tr><td><code>CONCURRENT_WRITER</code></td><td>две команды одного прогона запущены одновременно</td><td>не запускать параллельно; дождаться первой</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Если модель запуталась: попросите выполнить <code>status</code> и сделать то, что называют <code>state</code> и <code>next</code>; если <code>status</code> называет остановку — прочитайте её <code>fix</code>.</p>
+  </div>
+</section>
+</main>
+
+<footer class="wrap"><div class="col">Источники: <code>README.md</code> и <code>HOW-TO-USE.md</code> версии v0.1.1 (тег от 2 ноября 2026); <code>README.md</code>, <code>HOW-TO-USE.md</code>, <code>HOW-TO-USE-MODE-B.md</code>, <code>skills/orchestrate/SKILL.md</code> и справочники ветки v06 на коммите 0d43a168; план до поставки и журнал состояния от 16 ноября 2026; заметки живых прогонов 16 ноября. Страница обновляется перед поставкой. Обновлено 2026-11-16.</div></footer>
+
+</body>
+</html>
