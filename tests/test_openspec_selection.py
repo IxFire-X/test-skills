@@ -205,6 +205,22 @@ def test_a_link_inside_a_folder_is_not_followed(tmp_path: Path, monkeypatch: pyt
     assert _docs_of(_scan(project, monkeypatch, ["openspec/specs"])) == [BASE]
 
 
+@pytest.mark.parametrize("kind", ["junction", "symlink"])
+def test_a_missing_path_under_a_link_out_of_the_project_shows_no_names_of_the_outside(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    project = _project(tmp_path)
+    _write(tmp_path, "outside/foreign-name.md", SPEC)
+    link = project / "openspec" / "specs" / "linked"
+    if kind == "junction" and os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(tmp_path / "outside")], capture_output=True, check=True)
+    else:
+        try:
+            link.symlink_to(tmp_path / "outside", target_is_directory=True)
+        except OSError:
+            pytest.skip("no symbolic links here")
+    stop = _scan(project, monkeypatch, ["openspec/specs/linked/foreign-nam.md"], expect=2)
+    assert stop["reason"] == "SNAPSHOT_DOCS" and "outside the project" in stop["detail"] and "foreign-name" not in stop["detail"] + stop["fix"]  # refused before the names are looked at
+
+
 def test_a_folder_over_the_documents_limit_stops_the_scan_before_a_run_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project(tmp_path)
     for area in "abcde":
