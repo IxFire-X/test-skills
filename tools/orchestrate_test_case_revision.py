@@ -486,7 +486,7 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     if outcome["kind"] == "PARTIAL":
         state, final, partial = _partial_of(run_root, attempt_id, candidate, outcome)
         name = f"published/{candidate['document_id']}.r{partial['revision']}"
-        if state:  # the first review sent cases back for a rework: what became of it
+        if state:  # the first review sent cases back for a rework: what became of it (``over_share``: by the first review — it rejected more than the run's own limit; the warning of the report is by the cases left out after the rework)
             summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": len(final["accepted_after"]) if final else 0, "accepted_first": total - outcome["removed"], "over_share": outcome["removed"] * 100 > summary["share_set"] * total,
                                  **({"ignored": final["ignored"], "independent": rework_independent(run_root, attempt_id)} if final else {})}
         if final:

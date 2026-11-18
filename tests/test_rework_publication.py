@@ -97,3 +97,45 @@ def test_the_report_with_nothing_sent_back_keeps_the_three_rows_of_v6() -> None:
         text = _lines({**acc, "rework": None if state is None else acc["rework"]})
         assert "Отклонено и отправлено на доработку" not in text and "Принято после доработки" not in text and "| Не принято (вынесено отдельно) | 1 |" in text
         assert "1 кейс не дорабатывался" in text
+
+
+# ---- the warning of a set that is left with more out than the limit allows is by the cases left out AFTER the rework ------------------
+
+def _after_rework_lines(monkeypatch: pytest.MonkeyPatch, rejected_first: int, rejected_after: int) -> str:
+    """The «Итог» block of a 64-case set: the first review rejects ``rejected_first`` cases (the limit of the first round is 50, the run's own 20), the second round rejects ``rejected_after`` of them."""
+    from tools import orchestrate_test_case_revision as orchestrate
+    from tools import pilot_state, review_canaries
+
+    document = r1_document()
+    outcome = _outcome(document, _real(document, *range(1, rejected_first + 1)), share=50)
+    answer = {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1",
+              "test_cases": [{**copy.deepcopy(document["test_cases"][number - 1]), "title": f"Доработан {number}"} for number in range(1, rejected_first + 1)]}
+    again = [_finding("BLOCKING", [document["test_cases"][number - 1]["case_id"]]) for number in range(1, rejected_after + 1)]
+    final = rework_final(document, outcome, answer, _report(document, *again) | {"verdict": "ТРЕБУЕТ ДОРАБОТКИ" if again else "ПРИНЯТО"})
+    partial = partial_context(document, outcome, {"state": "reviewed", "final": final})
+    monkeypatch.setattr(pilot_state, "terminal_reviewer_evidence", lambda *_args: {"session_complete": True, "authoritative_verdict_count": 1, "authoritative_verdict": "ACCEPTED"})  # a partial set is accepted by the ledger
+    monkeypatch.setattr(pilot_state, "read_effective_canonical_if_present", lambda *_args: {"document": document})
+    monkeypatch.setattr(review_canaries, "verify", lambda *_args: ())
+    monkeypatch.setattr(orchestrate, "journal_assembly", lambda *_args: (document, None, None))
+    monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
+    monkeypatch.setattr(orchestrate, "configured_share", lambda *_args: 20)
+    monkeypatch.setattr(orchestrate, "rework_independent", lambda *_args: True)
+    monkeypatch.setattr(orchestrate, "_partial_of", lambda *_args: ("reviewed", final, partial))
+    summary = orchestrate.acceptance_summary("run", "attempt", {"artifacts": {"validation_report": _report(document, *_real(document, *range(1, rejected_first + 1)))}})
+    assert summary is not None
+    return _lines(summary)
+
+
+WARNING = "Не вошло больше допустимого"
+
+
+def test_no_warning_when_the_rework_took_back_every_case_the_review_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert WARNING not in _after_rework_lines(monkeypatch, 26, 0)  # 26 of 64 (40 %) went back, all of them passed
+
+
+def test_no_warning_when_the_cases_left_out_after_the_rework_are_within_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert WARNING not in _after_rework_lines(monkeypatch, 26, 12)  # 40 % rejected first, 12 of 64 (18,8 %) are out after the rework
+
+
+def test_the_warning_counts_the_cases_left_out_after_the_rework(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "Не вошло больше допустимого: 19 из 64 (предел 20 %)" in _after_rework_lines(monkeypatch, 26, 19)  # not 26, the rejected of the first round
