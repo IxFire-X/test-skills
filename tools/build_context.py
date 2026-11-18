@@ -214,6 +214,46 @@ def large_document(project: Path, documents: Mapping[str, str], named: Mapping[s
     return bool(over), head, "по разделам, одним запросом, прогоны по очереди (каждый — от scan до report; где мы и сборка — tools.assemble_sections): " + listed
 
 
+def bloated_marker(rows: int, found: Mapping[str, list[str]]) -> str | None:
+    """The words for a marker with 1.2 times the requirements the document has numbered statements (``found``: ``document_label_counts``) and more: paragraphs
+    without a number were taken for requirements, and the document is not too large; None where it is not so."""
+    numbers = sum(len(labels) for labels in found.values())
+    if not found or rows * 5 < numbers * 6:
+        return None
+    return f"разметка дала {rows} требований при {numbers} номерах документа (по номерам оценка вида ревью влезает): лишние ряды — со строк без номера (вводная часть, данные, условия работы)"
+
+
+def _ranges(numbers: list[int], shown: int = 12) -> str:
+    runs: list[list[int]] = []
+    for number in numbers:
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    texts = [str(first) if first == last else f"{first}–{last}" for first, last in runs]
+    return ", ".join(texts[:shown]) + (f" и ещё {len(texts) - shown}" if len(texts) > shown else "") if texts else "нет"
+
+
+def numbering_view(documents: Mapping[str, str], project: Path) -> str | None:
+    """What the step of the marker reads beside the documents, built by code: of each plain document with numbers (``document_label_counts``: LABELS_MIN, no OpenSpec,
+    no ``id_pattern``) the numbered statements and the lines without a number — context, not requirements (a statement runs from its label to the next label or heading)."""
+    found = document_label_counts(dict(documents), project)
+    if not found:
+        return None
+    rows = ["Номера документа, как их читает код: требование — пункт с номером; строки без номера — контекст, не требования.", ""]
+    for path in sorted(found):
+        text = documents[path]
+        lines = text.split("\n")
+        starts = sorted({text.count("\n", 0, match.start()) + 1 for match in _LABEL.finditer(text)})
+        heads = {number for number, line in enumerate(lines, start=1) if line.startswith("#")}
+        stops = sorted({*starts, *heads})
+        spans = [(start, next((stop for stop in stops if stop > start), len(lines) + 1) - 1) for start in starts]
+        outside = [number for number, line in enumerate(lines, start=1) if line.strip() and number not in heads and not any(first <= number <= last for first, last in spans)]
+        labels = found[path]
+        rows.append(f"- {path}: пунктов с номерами {len(labels)}: {labels[0]}…{labels[-1]} (строки {starts[0]}–{spans[-1][1]}); строки без номера: {_ranges(outside)}")
+    return "\n".join(rows) + "\n"
+
+
 def csv_import_size(cases: int) -> tuple[bool, str, str] | None:
     """An import of cases without documents: its requirements are the cases of the CSV (4.3 KB of the view a case on the live run, not the 8 KB of a numbered statement), so only the warning —
     the step budget stays the guard."""

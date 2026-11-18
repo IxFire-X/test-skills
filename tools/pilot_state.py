@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import execution_gate, run_lock
-from tools.fixes import delete_field_fix, human_for
+from tools.fixes import CLOSE_RUN_FIX, delete_field_fix, human_for
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
 
@@ -6154,15 +6154,23 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)
-    from tools.build_context import NOT_DIVISIBLE_FIX, csv_import_size, large_document, say
+    from tools.build_context import NOT_DIVISIBLE_FIX, bloated_marker, csv_import_size, large_document, say
 
     named = _named_sections(project, root)  # the plan knows the requirements of the marker, whatever the document is: their number is the estimate (``ready`` has the numbers of the document only)
     count = len(found["requirements"]) - len(found["out_of_scope"] or [])
+    texts, automation, openspec = _named_texts(project, root, attempt, receipts), attempt.get("policy_profile") == "local-pilot-v1", any(path.startswith("openspec/") for path in named)
     size = (csv_import_size(count) if not request.get("docs") and request.get("cases") else  # an import without documents: its requirements are the cases of the CSV, a warning only — the step budget is the guard
-            large_document(project, _named_texts(project, root, attempt, receipts), named, attempt.get("policy_profile") == "local-pilot-v1", count, any(path.startswith("openspec/") for path in named)))
+            large_document(project, texts, named, automation, count, openspec))
+    bloat = None
+    if size:  # more rows than the document has numbers, and its numbers fit: not a document too large, a marker that took paragraphs for requirements
+        found_labels = _label_found(project, root, attempt, receipts)
+        by_numbers = large_document(project, texts, named, automation, sum(len(labels) for labels in found_labels.values()), openspec)
+        bloat = None if by_numbers and by_numbers[0] else bloated_marker(count, found_labels)
     if size and size[0]:  # the review of this set cannot be held: before the generator writes a byte, the sections `ready` names — or, where nothing tells them apart, the honest way out
-        raise ValueError(f"PLAN_REVIEW_TOO_LARGE: {size[1]}; fix: {size[2] or NOT_DIVISIBLE_FIX}")
-    shown = {"plan": plan_view(item_plan), "header": {"digest": header_digest}, "notes": [*plan.notes, *([f"ВНИМАНИЕ: {say(size[1], size[2])}"] if size else [])]}
+        if bloat:  # no fix tail: the fix of this cause is in tools.fixes
+            raise ValueError(f"PLAN_REVIEW_TOO_LARGE: {bloat}")
+        raise ValueError(f"PLAN_REVIEW_TOO_LARGE: {size[1]}; fix: {size[2] or NOT_DIVISIBLE_FIX}; {CLOSE_RUN_FIX}")
+    shown = {"plan": plan_view(item_plan), "header": {"digest": header_digest}, "notes": [*plan.notes, *([f"ВНИМАНИЕ: {bloat or say(size[1], size[2])}"] if size else [])]}
     if dry_run:
         return shown
     if cases_path(root):  # the skeleton of an import with documents is published by the plan

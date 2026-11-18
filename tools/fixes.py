@@ -363,6 +363,8 @@ HUMAN: dict[str, str] = {
 }
 
 
+CLOSE_RUN_FIX = ("закрой прогон: `python -m tools.run_pipeline finish --project <проект> --run <id прогона> --abandon LEFT_BEFORE_REVIEW`, "
+                 "затем тот же `scan` (простой scan начнёт новый прогон)")  # after a refused plan: the one command the run can be left by
 _ONE_CHANGE = ("один прогон — одно изменение OpenSpec: спроси человека, какое проверять; назови в --docs папку одного openspec/changes/<имя>/ и spec.md его областей "
                "(остальные живые изменения и неназванный архив код в модель не отдаёт); остальные — отдельными прогонами; повтори scan, --new-run не нужен")
 _WRITTEN_WRONG = ("В файле изменения или спецификации требование записано неверно: повтор, лишний или пропущенный раздел. "
@@ -392,14 +394,19 @@ OPENSPEC_REASONS: tuple[tuple[str, str | None, str | None], ...] = (
      "Изменение правит требование, которого нет в спецификации: имя не совпало. Сверьте имя с автором изменения и скажите агенту, когда исправят."),
     ("repeats a requirement", "одно требование названо в дельте дважды: автор изменения убирает повтор (файл:строка из сообщения); после правки повтори scan", _WRITTEN_WRONG),
     ("duplicate scenario", "у требования два сценария с одним названием: автор переименовывает один из них (файл из сообщения); после правки повтори scan", _WRITTEN_WRONG),
+    ("разметка дала", "документ не делить: разметка этого прогона раздута, в этом прогоне её не исправить; " + CLOSE_RUN_FIX + "; в разметке нового прогона абзац без номера "
+                       "в нумерованном документе — контекст (роль, шаг 2; список номеров — в файле вида)",
+     "Разметка требований получилась раздутой: в ней больше требований, чем пронумерованных пунктов в документе. Документ делить не нужно. "
+     "Скажите агенту закрыть этот прогон и начать заново тем же запросом."),
     ("имена дельты не найдены", None,
      "Требования изменения не найдены в названных файлах спецификации, судить по ним нечего. Проверьте, то ли изменение выбрано, и скажите агенту, где эти требования лежат сейчас."),
 )
 
 
 def _reason(code: object, message: str) -> tuple[str, str | None, str | None] | None:
-    """The row of ``OPENSPEC_REASONS`` whose start the message of an OPENSPEC_SOURCE_CONFLICT has."""
-    return next((row for row in OPENSPEC_REASONS if message.startswith(row[0])), None) if code == "OPENSPEC_SOURCE_CONFLICT" else None
+    """The row of ``OPENSPEC_REASONS`` whose start the message of an OPENSPEC_SOURCE_CONFLICT or of a refused plan has (the message may begin with the code)."""
+    text = message.removeprefix(f"{code}: ")
+    return next((row for row in OPENSPEC_REASONS if text.startswith(row[0])), None) if code in ("OPENSPEC_SOURCE_CONFLICT", "PLAN_REVIEW_TOO_LARGE") else None
 
 
 def human_for(code: object, message: str = "") -> str | None:

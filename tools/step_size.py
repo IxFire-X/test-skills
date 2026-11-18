@@ -498,6 +498,15 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
                 keep = {project_path(project, name) for name in named}
                 targets = [target for target in targets if target in keep]
             files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
+            if position == 0 and stage in ("context-marker:requirements", "context-marker:baseline"):  # the step that reads the documents also reads the numbers of them, as the code counts them
+                from tools.build_context import numbering_view
+
+                numbers = numbering_view({target.relative_to(project).as_posix() if target.is_relative_to(project) else target.name: target.read_text(encoding="utf-8", errors="replace")
+                                          for target in targets}, project)
+                if numbers:
+                    view = Path(root) / "marker-views" / (digest.removeprefix("sha256:") + ".md")
+                    _write_view(project, root, view, numbers.encode("utf-8"), write_views)
+                    files.append({"digest": digest, "path": str(view), "bytes": len(numbers.encode("utf-8")), "basis": "номера"})
             if context and stage.startswith("tc-generator:"):
                 contexts.append(digest)
         elif len(paths := [path for path in journal.files.get(digest, []) if path.is_file()]) == 1:
