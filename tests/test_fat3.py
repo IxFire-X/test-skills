@@ -133,6 +133,31 @@ def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Pat
     assert report["recorded"] and [json.loads(row)["step"] for row in rows] == ["context-marker"]
 
 
+def test_prepare_of_a_step_over_the_budget_carries_the_phrase_for_the_tester_in_its_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_phase2_scan import _args, _project, _skillsrc
+    from tools import api, run_pipeline
+    from tools.fixes import human_for
+    from tools.init_skillsrc import _payload
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+
+    project, module = _project(tmp_path)
+    document = parse_skillsrc_bytes(_skillsrc())
+    document["limits"] = {"step_input_bytes": 1500}  # less than the role of the marker alone
+    (project / ".skillsrc").write_bytes(_payload(document))
+    (module / "docs").mkdir()
+    (module / "docs" / "feature.md").write_text("Требование.\n", encoding="utf-8")
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+    args = _args(project)
+    args.docs = ["services/api/docs/feature.md"]
+    args.profile = "cases-only-v1"
+    assert run_pipeline.cmd_scan(args) == 0
+    capsys.readouterr()
+    assert api.main(["prepare", "--run-root", payloads[-1]["run_root"], "--stage", "context-marker:baseline"]) == 0
+    budget = json.loads(capsys.readouterr().out)["result"]["budget"]
+    assert budget["fits"] is False and budget["human"] == human_for("STEP_OVER_BUDGET")
+
+
 def _scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     from tests.test_phase2_scan import _args, _project
     from tools import run_pipeline

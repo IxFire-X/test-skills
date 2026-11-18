@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
 from tools.existing_tests import own_tests
-from tools.fixes import fix_for
+from tools.fixes import fix_for, human_for
 from tools.json_cli import JsonArgumentParser, one_closure
 from tools.run_lock import JournalRefusal
 from tools.project_inventory import (
@@ -108,8 +108,9 @@ def _print(payload: dict[str, Any]) -> None:
 def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
     reason = payload.get("reason") or payload.get("code") or "ERROR"
+    human = human_for(payload.get("code") or reason)
     return {**payload, "code": payload.get("code") or reason, "message": payload.get("message") or payload.get("detail") or reason,
-            "fix": payload.get("fix"), "next": payload.get("next")}
+            "fix": payload.get("fix"), "next": payload.get("next"), **({"human": human} if human else {})}
 
 
 def _digest_bytes(data: bytes) -> str:

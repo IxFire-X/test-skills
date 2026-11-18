@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import execution_gate, run_lock
-from tools.fixes import delete_field_fix
+from tools.fixes import delete_field_fix, human_for
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
 
@@ -2899,6 +2899,8 @@ def _publish_model_stage_artifact(
         record_output(project, root, stage_instance_id, content_digest, measured)
     published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
                      warning=output_warning(project, measured, limits))
+    if human := human_for(published["warning"]):  # the warning in the words of the tester
+        published["human"] = human
     if mechanics or filled:  # what the code put into the answer — the mechanics by name and count, then the digest fields
         published["filled"] = [*mechanics, *filled]
     if normalized:  # what the code put in order

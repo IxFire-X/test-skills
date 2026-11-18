@@ -178,6 +178,18 @@ def check_run_root(project: Path) -> list[dict[str, Any]]:
     return [_row("run_root", CASES, "STOP", ".pilot-runs в проекте — ссылка (junction или симлинк): прогоны по ссылкам не пишутся", fix_for("RUN_ROOT_UNSAFE"))]
 
 
+def _question_text(questions: Any) -> str:
+    """The first question of the discovery the package cannot answer itself, in the words of the tester (the raw questions stay in ``details``/``fix``)."""
+    first = next((item for item in questions or [] if isinstance(item, Mapping)), {})
+    field = str(first.get("field", "?"))
+    if field.endswith(".paths.source"):
+        return f"пакет не нашёл, где лежит исходный код модуля {field.removeprefix('modules.').removesuffix('.paths.source')}. Скажите агенту папку исходников (от корня модуля)."
+    if not field.endswith(".test.framework"):
+        return f"пакет не смог сам определить настройку проекта ({field}). Скажите агенту, что указать."
+    options = ", ".join(str(item.get("id")) for item in first.get("options") or [] if isinstance(item, Mapping))
+    return f"пакет не смог сам выбрать, чем запускать тесты модуля {field.removeprefix('modules.').removesuffix('.test.framework')}. Скажите агенту вариант из списка: {options}."
+
+
 def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
     from tools.fixes import fix_for
@@ -205,7 +217,8 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
         return []  # no question about a module (the first of the list) before the module is named: the module row says so
     if not (Path(project) / ".skillsrc").is_file():
         return [_row("skillsrc", CASES, "OK", ".skillsrc нет — первый scan создаст его по проекту")] if status in {"preview", "created"} else \
-            [_row("skillsrc", CASES, "STOP", f".skillsrc не создаётся: {status} {receipt.get('errors') or receipt.get('questions')}",
+            [_row("skillsrc", CASES, "STOP", ".skillsrc не создаётся: " + (_question_text(receipt.get("questions")) if status == "needs_input"
+                                                                         else f"{status} {receipt.get('errors') or receipt.get('questions')}"),
                   answers_hint(Path(project), receipt.get("questions") or []) if status == "needs_input" else _init_command(project))]
     if status in {"unchanged", "preview"}:
         return [_row("skillsrc", CASES, "OK", ".skillsrc валиден и совпадает с проектом")]
@@ -630,7 +643,8 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         try:
             module_row, selected = check_module(project, module)
         except Exception as error:
-            module_row, selected = _row("module", CASES, "STOP", f".skillsrc не читается: {type(error).__name__}: {error}", _init_command(project)), None
+            said = "модуль назвать нельзя, пока нет ответа на вопрос строки skillsrc" if type(error).__name__ == "NeedsInput" else f".skillsrc не читается: {type(error).__name__}: {error}"
+            module_row, selected = _row("module", CASES, "STOP", said, _init_command(project)), None
         rows.append(module_row)
         if selected is not None:
             if execution_gate.execution_available():  # the level is a fact of mode B; the cases-only delivery has no autotests to run

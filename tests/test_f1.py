@@ -123,6 +123,17 @@ def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path
     assert call["output_basis"] == "compact", call  # a raw size under the stored artifact is not believed
 
 
+def test_a_large_answer_carries_the_phrase_for_the_tester_beside_the_warning(tmp_path: Path, monkeypatch) -> None:
+    from tools import step_size
+    from tools.fixes import human_for
+
+    monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
+    run = _generated_run(tmp_path, generated=False)
+    stage, fragment = _batch_request(run, 0)
+    _code, answered = answer_stage(run["run_root"], stage, fragment)
+    assert answered["result"]["warning"] == "STEP_OUTPUT_LARGE" and answered["result"]["human"] == human_for("STEP_OUTPUT_LARGE")
+
+
 # --- 8.4 / A1-1 -------------------------------------------------------------------------------------------------------
 
 def test_the_number_of_refusals_comes_from_the_journal(tmp_path: Path) -> None:

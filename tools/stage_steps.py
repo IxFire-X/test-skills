@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools.fixes import human_for
 from tools.project_inventory import read_inventory_receipt
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
 
@@ -362,11 +363,13 @@ def _accepted(root: Path, stage: str) -> Mapping[str, Any]:
 def _budget(root: Path, step: Mapping[str, Any], found: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The size of the step against the budget: a step of the table has its bytes, a batch of the generator the files of its published request."""
     if "bytes" in step:
-        return {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
-    found = found or step_size.stage_inputs(root, step["stage"], write_views=False)
-    report = step_size.measure(root.parents[1], [], step["stage"].split(":", 1)[0],  # the bytes are the rows' own: a view of the step that is not on the disk (status writes none) is no refusal
-                               extra_bytes=sum(row["bytes"] for row in (*found["files"], *found["bindings"])))
-    return {key: report[key] for key in ("bytes", "budget_bytes", "fits", "hint")}
+        budget = {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
+    else:
+        found = found or step_size.stage_inputs(root, step["stage"], write_views=False)
+        report = step_size.measure(root.parents[1], [], step["stage"].split(":", 1)[0],  # the bytes are the rows' own: a view of the step that is not on the disk (status writes none) is no refusal
+                                   extra_bytes=sum(row["bytes"] for row in (*found["files"], *found["bindings"])))
+        budget = {key: report[key] for key in ("bytes", "budget_bytes", "fits", "hint")}
+    return budget if budget["fits"] else {**budget, "human": human_for(step_size.OVER_BUDGET)}  # over the budget: the phrase for the tester beside the hint
 
 
 def _refuse_linked_inbox(root: Path) -> None:

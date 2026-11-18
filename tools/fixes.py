@@ -334,3 +334,33 @@ def fix_for(code: str | None) -> str | None:
 def delete_field_fix(name: str) -> str:
     """The fix of a field the code puts itself (a digest) that the answer gave with another value."""
     return _DELETE_FIELD.format(name=name)
+
+
+# What the tester reads when the agent shows him a refusal: one phrase of what happened, one action (q7).  ``fix`` stays the agent's way
+# out; the envelope carries this beside it as ``human``.  The one place for these words: no internal words, no commands, no flags.
+_NO_AUTOTESTS = "В этой поставке нет автотестов, только тест-кейсы. Скажите агенту начать прогон только для кейсов."
+_SELF_REVIEW = ("Ревью кейсов должен делать отдельный проверяющий (свежий субагент или новая сессия). Если его нет и вы согласны на проверку "
+                "в той же сессии, скажите агенту «принять ревью в той же сессии» — в отчёте это отметят.")
+HUMAN: dict[str, str] = {
+    "SCOPE_PENDING": "Часть требований нечем проверить снаружи: у них нет видимого результата. Скажите агенту: исключить их из кейсов (и почему) или продолжать как есть.",
+    "SCAN_RUN_IN_PROGRESS": "Для этих документов уже есть незаконченный прогон, новый не начат. Скажите агенту продолжить прежний — или начать новый, если прежний не нужен.",
+    "FINISH_FACT_UNDETERMINED": "Прогон нельзя закрыть сейчас: не все его шаги закончены. Скажите агенту продолжить прогон — следующий шаг ему назовёт пакет.",
+    "INGEST_REPORT_MISSING": "Отчёта о запуске тестов не нашлось. Запустите команду сборки, которую напечатал пакет, и скажите агенту, когда она закончится.",
+    "MODE_B_NOT_IN_PACKAGE": _NO_AUTOTESTS,
+    "PROFILE_NOT_IN_PACKAGE": _NO_AUTOTESTS,
+    "PLAN_REVIEW_TOO_LARGE": "Документ слишком большой: ревью всех его кейсов разом не поместится в память модели, этот прогон дальше не пойдёт. "
+                             "Скажите агенту вести документ частями — по разделам или файлам, прогоны по очереди.",
+    "FRESH_CONTEXT_REQUIRED": _SELF_REVIEW,
+    "INDEPENDENCE_UNVERIFIED": _SELF_REVIEW,
+    "MODEL_OUTPUT_TRUNCATED": "Ответ модели оборвался на середине. Делать ничего не нужно: агент повторит его один раз; если и повтор оборвётся, прогон придётся начать заново тем же запросом.",
+    "BATCH_SEMANTIC_CONFLICT": "Кейсы, которые написала модель, не прошли проверку формата. Делать ничего не нужно: агент исправит их по подсказке пакета.",
+    "MODEL_STAGE_ARTIFACT_INVALID": "Ответ модели не подошёл под нужный формат. Делать ничего не нужно: агент поправит его и подаст ещё раз.",
+    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "Проверяющий попросил файл, которого нет среди файлов проекта для этого прогона. Делать ничего не нужно: агент попросит его ответить без этого файла.",
+    "STEP_OVER_BUDGET": "Вход этого шага больше бюджета модели, но шаг идёт дальше. Делать ничего не нужно; в следующий раз ограничьте запрос одним модулем или областью.",
+    "STEP_OUTPUT_LARGE": "Ответ модели получился очень большим — это только замер. Делать ничего не нужно, прогон идёт дальше.",
+}
+
+
+def human_for(code: object) -> str | None:
+    """The tester's phrase of a refusal or a warning code, or None — the answer then carries no ``human``."""
+    return HUMAN.get(code) if isinstance(code, str) else None

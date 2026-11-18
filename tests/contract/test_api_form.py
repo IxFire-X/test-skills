@@ -21,7 +21,7 @@ NOT_DRIVEN: dict[str, str] = {}
 # What a successful answer may carry besides {status, command, result}; nothing else is an answer of tools.api.
 OPTIONAL_OK_KEYS = {"dry_run"}
 OUT_KEYS = {"out", "bytes", "sha256"}
-REFUSAL_KEYS = {"status", "command", "code", "message", "fix", "next"}  # error_envelope + the command; diagnostics when the refusal has a list
+REFUSAL_KEYS = {"status", "command", "code", "message", "fix", "next"}  # error_envelope + the command; diagnostics when the refusal has a list, human when the code has a phrase for the tester
 
 
 def test_the_commands_of_the_api_are_driven_answer_in_one_form_and_keep_the_keys_of_the_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,7 +70,7 @@ def _every_answer_is_exactly_status_command_and_result(observed: Observed) -> No
     for command, code, keys in observed.envelopes:
         names = set(keys)
         if code == 2:  # a refusal: the one envelope of error_envelope, plus diagnostics when the refusal carries a list
-            if not REFUSAL_KEYS <= names or names - REFUSAL_KEYS - {"diagnostics"}:
+            if not REFUSAL_KEYS <= names or names - REFUSAL_KEYS - {"diagnostics", "human"}:
                 problems.append(f"{command} (refusal): {keys}")
             continue
         if not {"status", "command"} <= names:
