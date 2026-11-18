@@ -1,0 +1,127 @@
+{
+ "view": "v400-03",
+ "bytes": 398193,
+ "cases": 74,
+ "canaries": [
+  {
+   "case_id": "TC-B1-005",
+   "step_id": "STEP-B1-005-01",
+   "expectation_id": "EXP-B1-005-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 400»",
+   "position": 0.116
+  },
+  {
+   "case_id": "TC-B3-023",
+   "step_id": "STEP-B3-023-05",
+   "expectation_id": "EXP-B3-023-05-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.43
+  },
+  {
+   "case_id": "TC-B4-001",
+   "step_id": "STEP-B4-001-03",
+   "expectation_id": "EXP-B4-001-03-1",
+   "cls": "boundary",
+   "what": "400→401 в ожидании",
+   "position": 0.45
+  },
+  {
+   "case_id": "TC-B1-017",
+   "step_id": "STEP-B1-017-03",
+   "expectation_id": "EXP-B1-017-03-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/0/name = \"radiology\"; body/1/name = \"surgery\"»",
+   "position": 0.164
+  },
+  {
+   "case_id": "TC-B5-038",
+   "step_id": "STEP-B5-038-04",
+   "expectation_id": "EXP-B5-038-04-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200»",
+   "position": 0.91
+  },
+  {
+   "case_id": "TC-B2-029",
+   "step_id": "STEP-B2-029-01",
+   "expectation_id": "EXP-B2-029-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/lastName = \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"»",
+   "position": 0.301
+  },
+  {
+   "case_id": "TC-B1-019",
+   "step_id": "STEP-B1-019-05",
+   "expectation_id": "EXP-B1-019-05-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.197
+  },
+  {
+   "case_id": "TC-B4-016",
+   "step_id": "STEP-B4-016-03",
+   "expectation_id": "EXP-B4-016-03-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.494
+  },
+  {
+   "case_id": "TC-B5-039",
+   "step_id": "STEP-B5-039-07",
+   "expectation_id": "EXP-B5-039-07-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.921
+  },
+  {
+   "case_id": "TC-B4-010",
+   "step_id": "STEP-B4-010-02",
+   "expectation_id": "EXP-B4-010-02-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.468
+  },
+  {
+   "case_id": "TC-B1-015",
+   "step_id": "STEP-B1-015-01",
+   "expectation_id": "EXP-B1-015-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200»",
+   "position": 0.161
+  },
+  {
+   "case_id": "TC-B5-018",
+   "step_id": "STEP-B5-018-01",
+   "expectation_id": "EXP-B5-018-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 400»",
+   "position": 0.865
+  },
+  {
+   "case_id": "TC-B4-024",
+   "step_id": "STEP-B4-024-02",
+   "expectation_id": "EXP-B4-024-02-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/1/name = \"dog\"; body/0/name = \"cat\"»",
+   "position": 0.574
+  },
+  {
+   "case_id": "TC-B3-006",
+   "step_id": "STEP-B3-006-01",
+   "expectation_id": "EXP-B3-006-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/content есть; body/page есть; body/size есть; body/»",
+   "position": 0.368
+  },
+  {
+   "case_id": "TC-B4-013",
+   "step_id": "STEP-B4-013-03",
+   "expectation_id": "EXP-B4-013-03-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/name = \"Rex\"»",
+   "position": 0.483
+  }
+ ]
+}
