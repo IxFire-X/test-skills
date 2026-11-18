@@ -54,14 +54,14 @@ def error_fields(error: BaseException, table: bool = True) -> dict[str, str]:
         message = f"{type(error).__name__}: {error.strerror or 'input/output error'}" + (f": {error.filename}" if error.filename else "")
     # a bare ValueError names no refusal — INPUT_INVALID, as run_pipeline.main says it, with the fix of the table
     code = getattr(error, "code", None) or error_code_prefix(message) or ("INPUT_INVALID" if type(error) is ValueError else type(error).__name__)
-    fix = getattr(error, "fix", None) or (message.split(_FIX_TAIL, 1)[1] if _FIX_TAIL in message else None) or (fix_for(str(code)) if table else None)
+    fix = getattr(error, "fix", None) or (message.split(_FIX_TAIL, 1)[1] if _FIX_TAIL in message else None) or (fix_for(str(code), message) if table else None)
     return {"code": str(code), "message": message, **({"fix": str(fix)} if fix else {})}
 
 
 def error_envelope(error: BaseException, next_step: str | None = None) -> dict[str, object]:
     """The one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null); ``human`` — the tester's phrase, when the code has one."""
     fields = error_fields(error)
-    human = human_for(fields["code"])
+    human = human_for(fields["code"], fields["message"])
     return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step, **({"human": human} if human else {})}
 
 

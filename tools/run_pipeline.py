@@ -38,7 +38,7 @@ class HostStop(RuntimeError):
     def __init__(self, code: str, message: str = "", fix: str | None = None):
         super().__init__(message or code)
         self.code = code
-        self.fix = fix or fix_for(code)  # the table has a way out for the codes without a fix at their raise site
+        self.fix = fix or fix_for(code, message)  # the table has a way out for the codes without a fix at their raise site (for the cause, when the message tells it)
 
 
 # the text a human pastes into cmd.exe, PowerShell or sh.  One form for the three: a plain token as it is; a token with a space, a bracket
@@ -108,7 +108,7 @@ def _print(payload: dict[str, Any]) -> None:
 def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
     reason = payload.get("reason") or payload.get("code") or "ERROR"
-    human = human_for(payload.get("code") or reason)
+    human = human_for(payload.get("code") or reason, str(payload.get("message") or payload.get("detail") or ""))
     return {**payload, "code": payload.get("code") or reason, "message": payload.get("message") or payload.get("detail") or reason,
             "fix": payload.get("fix"), "next": payload.get("next"), **({"human": human} if human else {})}
 
@@ -1742,8 +1742,8 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
-    from tools.build_context import (openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives, openspec_unnamed_archive_areas,
-                                     openspec_unnamed_areas, openspec_unselected)
+    from tools.build_context import (RequirementConflict, openspec_applied, openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives,
+                                     openspec_unnamed_archive_areas, openspec_unnamed_areas, openspec_unselected)
     from tools.scan_rules import include_mode
 
     if not docs:
@@ -1770,6 +1770,10 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     if unnamed := openspec_unnamed_areas(task_paths, list(by_path)):  # a change of an area whose spec.md is no requirements of the run
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "изменение OpenSpec меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
                        fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
+    try:  # what the delta says, composed with the specification: a real difference stops the scan here, not after the step of the model
+        applied = openspec_applied(entries)
+    except RequirementConflict as conflict:
+        raise HostStop(conflict.code, str(conflict)) from conflict
     if cases and (partial := openspec_partial_archives(task_paths, list(by_path))):  # an update of cases judges the whole archived change: no delta is left out silently
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "названы не все дельты архивного изменения: " + ", ".join(partial),
                        fix="назовите архивное изменение папкой: " + " ".join(f"--docs {printed('openspec/changes/archive/' + name)}" for name in partial))
@@ -1784,6 +1788,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     others |= {str(by_path[path]["opaque_id"]) for path in skipped}
     warnings = [f"{path} — OpenSpec контекст (proposal/design/tasks), не требования: строк требований из него нет" for path in task_paths if openspec_context_only(path)]
     warnings += [f"имена дельты не найдены среди нынешних требований, их кейсы не судятся: {', '.join(gone[:5])}"] * bool(gone)
+    warnings += [f"изменение {name}: уже вписано в спецификацию, требований: {count}; они берутся из изменения, как обычно" for name, count in sorted(applied.items())]
     if skipped:
         names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
         archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)

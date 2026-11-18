@@ -321,10 +321,12 @@ HELD_PATH_FIX = ("путь файла уже занят в проекте (он 
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"
 
 
-def fix_for(code: str | None) -> str | None:
-    """The fix of a refusal code: the table, else the generic one of a ``SCHEMA_*`` code, else None."""
+def fix_for(code: str | None, message: str = "") -> str | None:
+    """The fix of a refusal code: the one of its cause when the message tells it (``OPENSPEC_REASONS``), the table, else the generic one of a ``SCHEMA_*`` code, else None."""
     if not code:
         return None
+    if (reason := _reason(code, message)) and reason[1]:
+        return reason[1]
     found = FIXES.get(code)
     if found is None and code.startswith("SCHEMA_"):
         return _SCHEMA_GENERIC
@@ -361,6 +363,47 @@ HUMAN: dict[str, str] = {
 }
 
 
-def human_for(code: object) -> str | None:
-    """The tester's phrase of a refusal or a warning code, or None — the answer then carries no ``human``."""
+_ONE_CHANGE = ("один прогон — одно изменение OpenSpec: спроси человека, какое проверять; назови в --docs папку одного openspec/changes/<имя>/ и spec.md его областей "
+               "(остальные живые изменения и неназванный архив код в модель не отдаёт); остальные — отдельными прогонами; повтори scan, --new-run не нужен")
+_WRITTEN_WRONG = ("В файле изменения или спецификации требование записано неверно: повтор, лишний или пропущенный раздел. "
+                  "Агент назовёт файл и строку; попросите автора поправить и скажите агенту, когда готово.")
+_TWO_CHANGES = "В проверку попали сразу два изменения OpenSpec, а за один прогон берётся одно. Скажите агенту, какое из них проверять; остальные — отдельными прогонами."
+# OPENSPEC_SOURCE_CONFLICT has many causes (q8): by the start of the message, the fix of the cause (None: the raise site has its own) and
+# the tester's phrase (None: the agent closes it alone)
+OPENSPEC_REASONS: tuple[tuple[str, str | None, str | None], ...] = (
+    ("source digest does not match content", "файл изменился после scan: повтори scan --new-run", None),
+    ("unpaired rename", "в дельте RENAMED каждое переименование — две строки подряд: FROM: со старым заголовком и TO: с новым; исправляет автор изменения: "
+                        "назови человеку файл из сообщения, после правки повтори scan", _WRITTEN_WRONG),
+    ("duplicate or misplaced requirement", "в spec.md области требование названо дважды или лежит вне раздела `## Requirements`; исправляет автор спецификации: "
+                                           "назови человеку файл и строку из сообщения, после правки повтори scan", _WRITTEN_WRONG),
+    ("requirement has no delta operation", "в дельте требование лежит вне разделов `## ADDED Requirements`, `## MODIFIED Requirements`, `## REMOVED Requirements`; исправляет автор "
+                                           "изменения: назови человеку файл и строку из сообщения, после правки повтори scan", _WRITTEN_WRONG),
+    ("authorize one selected OpenSpec change", _ONE_CHANGE, _TWO_CHANGES),
+    ("в --docs названы файлы нескольких живых изменений", _ONE_CHANGE, _TWO_CHANGES),
+    ("в проекте несколько живых изменений", None, _TWO_CHANGES),
+    ("rename does not match baseline", "в spec.md области должно быть только одно из двух имён переименования, старое или новое (в сообщении оба): назови человеку, что нашёл "
+                                       "(нет ни одного или есть оба); после правки автором повтори scan",
+     "Переименование в изменении не сходится со спецификацией: в ней должно быть только старое имя или только новое. Сверьте имена с автором изменения и скажите агенту, когда исправят."),
+    ("ADDED has another text", "требование уже есть в spec.md с другим текстом, изменение и спецификация расходятся: покажи человеку оба текста (файл:строка из сообщения), "
+                               "спроси автора изменения, какой верный; прогон не продолжай, после правки повтори scan",
+     "Требование из раздела ADDED уже есть в спецификации, но с другим текстом: изменение и спецификация расходятся. Спросите автора, какой текст верный, и скажите агенту, когда исправят."),
+    ("MODIFIED is not in the baseline", "MODIFIED называет требование, которого нет в spec.md области: сверь имя с `### Requirement:` там (файл:строка из сообщения), "
+                                        "спроси автора изменения; после правки повтори scan",
+     "Изменение правит требование, которого нет в спецификации: имя не совпало. Сверьте имя с автором изменения и скажите агенту, когда исправят."),
+    ("repeats a requirement", "одно требование названо в дельте дважды: автор изменения убирает повтор (файл:строка из сообщения); после правки повтори scan", _WRITTEN_WRONG),
+    ("duplicate scenario", "у требования два сценария с одним названием: автор переименовывает один из них (файл из сообщения); после правки повтори scan", _WRITTEN_WRONG),
+    ("имена дельты не найдены", None,
+     "Требования изменения не найдены в названных файлах спецификации, судить по ним нечего. Проверьте, то ли изменение выбрано, и скажите агенту, где эти требования лежат сейчас."),
+)
+
+
+def _reason(code: object, message: str) -> tuple[str, str | None, str | None] | None:
+    """The row of ``OPENSPEC_REASONS`` whose start the message of an OPENSPEC_SOURCE_CONFLICT has."""
+    return next((row for row in OPENSPEC_REASONS if message.startswith(row[0])), None) if code == "OPENSPEC_SOURCE_CONFLICT" else None
+
+
+def human_for(code: object, message: str = "") -> str | None:
+    """The tester's phrase of a refusal or a warning code (of its cause, when the message tells it), or None — the answer then carries no ``human``."""
+    if (reason := _reason(code, message)) and reason[2]:
+        return reason[2]
     return HUMAN.get(code) if isinstance(code, str) else None

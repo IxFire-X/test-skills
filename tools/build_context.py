@@ -360,8 +360,15 @@ def openspec_unnamed_archive_areas(docs: list[str], paths: list[str]) -> list[st
     return sorted(path for path in areas if path in paths and path not in docs)
 
 
-def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Compose only standard spec documents explicitly present in authorized inputs."""
+def _same(first: str, second: str) -> bool:
+    """The same words: line ends, indents, spaces and breaks of lines do not tell texts apart."""
+    return first.split() == second.split()
+
+
+def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Compose only standard spec documents explicitly present in authorized inputs.  ``applied`` counts, by change, what its delta
+    says and the specification already has (ADDED or MODIFIED with the same text, REMOVED gone, RENAMED under the new name)."""
+    applied = Counter() if applied is None else applied
     baseline: dict[tuple[str, str], dict[str, Any]] = {}
     operations: list[tuple[str, tuple[str, str], dict[str, Any]]] = []
     renames: list[tuple[tuple[str, str], str, str, str]] = []
@@ -418,6 +425,9 @@ def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
         raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", "authorize one selected OpenSpec change, not multiple pending changes")
     for key, new_name, path, digest in renames:
         new_key = (key[0], new_name)
+        if key not in baseline and new_key in baseline:  # the specification already has it under the new name
+            applied[path.split("/")[2]] += 1
+            continue
         if key not in baseline or new_key in baseline:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"rename does not match baseline: {path} — {key[1]} -> {new_name}")
         row = baseline.pop(key)
@@ -427,14 +437,23 @@ def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
         baseline[new_key] = row
     seen: set[tuple[str, str]] = set()
     for operation, key, row in operations:
-        if key in seen or (operation == "ADDED" and key in baseline) or (operation != "ADDED" and key not in baseline):
-            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"{operation} does not match baseline: {row['path']}:{row['line']} — {key[1]}")
+        where = f"{row['path']}:{row['line']} — {key[1]}"
+        have = baseline.get(key)
+        if key in seen:
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"repeats a requirement of this change ({operation}): {where}")
+        if operation == "MODIFIED" and have is None:
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}")
+        if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}")
         seen.add(key)
+        as_said = have is None if operation == "REMOVED" else have is not None and _same(have["text"], row["text"])  # the specification has it as the change says
+        if as_said:
+            applied[row["path"].split("/")[2]] += 1
         if operation == "REMOVED":
-            del baseline[key]
+            baseline.pop(key, None)
         else:
-            if key in baseline:
-                row["rename_provenance"] = baseline[key]["rename_provenance"]
+            if have is not None:
+                row["rename_provenance"] = have["rename_provenance"]
             baseline[key] = row
     rows = sorted(baseline.values(), key=lambda row: (row["path"], row["line"], row["name"]))
     for row in rows:
@@ -443,6 +462,13 @@ def _openspec_rows(entries: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
         if len({name for name, _ in row["scenarios"]}) != len(row["scenarios"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"duplicate scenario: {row['path']} — {row['name']}")
     return rows, warnings
+
+
+def openspec_applied(entries: list[dict[str, str]]) -> dict[str, int]:
+    """By change, how many requirements its delta shows already written in the specification (whole files only); ``RequirementConflict`` when they do not compose."""
+    applied: Counter[str] = Counter()
+    _openspec_rows([row for row in entries if not row.get("section")], applied)
+    return dict(applied)
 
 
 def openspec_gone_names(entries: list[dict[str, str]]) -> tuple[list[str], int]:

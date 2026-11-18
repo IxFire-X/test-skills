@@ -8,20 +8,22 @@ from pathlib import Path
 
 import pytest
 
-from tools.fixes import HUMAN, human_for
+from tools.fixes import HUMAN, OPENSPEC_REASONS, human_for
 
 # words of the package's inside: the tester does not know them
 INTERNAL = ("батч", "пачк", "квитанц", "digest", "канон", "стади", "журнал", "слот", "p7", "sreq", "creq", "описи")
 
 
-@pytest.mark.parametrize("code", sorted(HUMAN))
-def test_a_phrase_for_the_tester_has_no_internal_word(code: str) -> None:
-    assert not [word for word in INTERNAL if word in HUMAN[code].lower()], HUMAN[code]
+TEXTS = sorted({*HUMAN.values(), *(human for _, _, human in OPENSPEC_REASONS if human)})  # of a code, and of a cause of OPENSPEC_SOURCE_CONFLICT
 
 
-@pytest.mark.parametrize("code", sorted(HUMAN))
-def test_a_phrase_for_the_tester_is_short_and_has_no_command_flag_or_code(code: str) -> None:
-    text = HUMAN[code]
+@pytest.mark.parametrize("text", TEXTS)
+def test_a_phrase_for_the_tester_has_no_internal_word(text: str) -> None:
+    assert not [word for word in INTERNAL if word in text.lower()], text
+
+
+@pytest.mark.parametrize("text", TEXTS)
+def test_a_phrase_for_the_tester_is_short_and_has_no_command_flag_or_code(text: str) -> None:
     assert len(text) <= 240 and not any(mark in text for mark in ("`", "--", "/")), text
     assert re.search(r"\b[A-Z]{2,}_[A-Z_]+\b", text) is None, text
 

@@ -22,14 +22,14 @@ def _write(project: Path, path: str, text: str) -> None:
     (project / path).write_bytes(text.encode("utf-8"))
 
 
-def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delta: str | None, docs: list[str], path: str = LIVE) -> tuple[Path, Path, str, list[dict]]:
+def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delta: str | None, docs: list[str], path: str = LIVE, spec: str = SPEC) -> tuple[Path, Path, str, list[dict]]:
     """A ``--cases`` + ``--docs`` run, the requirements step asked: ``(project, root, attempt, requirements)`` — the requirements are
     what the documents compose (the live delta is applied, an archived one is not)."""
     from tools.build_context import build_context
 
     project = _project(tmp_path)
-    _write(project, BASE, SPEC)
-    entries = [{"path": BASE, "content": SPEC}]
+    _write(project, BASE, spec)
+    entries = [{"path": BASE, "content": spec}]
     if delta is not None:
         _write(project, path, delta)
         entries.append({"path": path, "content": delta})
@@ -120,6 +120,13 @@ def test_an_obsolete_row_names_a_requirement_the_delta_removes(tmp_path: Path, m
 
 def test_an_obsolete_row_of_a_removed_requirement_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _project_dir, root, attempt_id, rows = _run(tmp_path, monkeypatch, MODIFY + REMOVE, LIVE_DOCS)
+    links = [{"row": 2, "source_requirement_ids": [_by_name(rows)["Join"]], "verdict": "fits"},
+             {"row": 3, "source_requirement_ids": [], "verdict": "obsolete", "reason": "требование удалено", "removed": {"capability": "catalog", "name": "Refuse"}}]
+    assert _publish(root, attempt_id, rows, links)["content_digest"]
+
+
+def test_an_obsolete_row_of_a_requirement_the_specification_has_already_dropped_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _project_dir, root, attempt_id, rows = _run(tmp_path, monkeypatch, REMOVE, LIVE_DOCS, spec=SPEC.split("### Requirement: Refuse")[0])
     links = [{"row": 2, "source_requirement_ids": [_by_name(rows)["Join"]], "verdict": "fits"},
              {"row": 3, "source_requirement_ids": [], "verdict": "obsolete", "reason": "требование удалено", "removed": {"capability": "catalog", "name": "Refuse"}}]
     assert _publish(root, attempt_id, rows, links)["content_digest"]

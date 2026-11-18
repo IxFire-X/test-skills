@@ -428,7 +428,10 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
             return _row("context:target", CASES, "STOP", f"{stop.code}: --target {target}: {stop}",
                         "укажите --target путём внутри модуля (от его корня), который существует")
         if stop.code == "OPENSPEC_SOURCE_CONFLICT":  # scan stops on it: the code and the exact fix, and no READY
-            return _row("context:openspec", CASES, "STOP", f"{stop.code}: {stop}", stop.fix)
+            from tools.fixes import human_for
+
+            human = human_for(stop.code, str(stop))  # the phrase of the cause first, the old text after it
+            return _row("context:openspec", CASES, "STOP", f"{human} ({stop.code}: {stop})" if human else f"{stop.code}: {stop}", stop.fix)
         # a task document problem is the task-documents check's row
         return _row("context:skipped", CASES, "WARN", f"контекст не посчитан: {stop.code}", stop.fix)
     summary = skipped_summary(skipped)
