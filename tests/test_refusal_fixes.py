@@ -122,8 +122,8 @@ def test_a_closed_attempt_names_the_scan_of_a_new_run(tmp_path: Path, monkeypatc
     assert "--new-run" in fix and ("run_pipeline scan" in fix or "scan с теми же" in fix), fix
 
 
-def test_the_body_missing_fix_keeps_an_existing_example_last_not_doubled() -> None:
+def test_the_body_missing_fix_names_what_the_code_could_not_lay_out_and_asks_for_one_block() -> None:
     from tools.fixes import fix_for
 
     fix = fix_for("SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING")
-    assert "уже есть" in fix and "второй блок не дописывай" in fix
+    assert "строит код" in fix and "корневой указатель" in fix and "ОДИН блок" in fix

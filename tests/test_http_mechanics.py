@@ -78,14 +78,70 @@ def test_an_array_of_the_assertions_becomes_a_json_array() -> None:
     assert _codes(document) == []
 
 
-def test_a_json_the_model_wrote_is_not_merged_with() -> None:
-    written = 'Ответ.\n\nHTTP 200 OK\n\nПример тела:\n{\n  "id": "<значение присутствующего поля>"\n}'
-    document, summary = _laid(_step("/owners", _body("/id"), _body("/lastName", "equals", "Davis"), text=written))
-    assert _text(document) == written and "http_body_template ×1" not in summary
-    assert _codes(document) == ["SEMANTIC_HUMAN_EXPECTATION_FIELD_MISSING"]
+def test_the_block_the_model_wrote_is_replaced_by_the_one_of_the_checks() -> None:
+    written = 'Ответ.\n\nHTTP 200 OK\n{\n  "id": "<идентификатор>",\n  "name": "Davis",\n  "city": "Madison"\n}'
+    document, summary = _laid(_step("/owners", _body("/name", "equals", "Davis"), text=written))
+    assert _text(document) == 'Ответ.\n\nHTTP 200 OK\n\nПример тела:\n{\n  "name": "Davis"\n}' and "http_body_replaced ×1" in summary
+    assert _codes(document) == []
 
 
-@pytest.mark.parametrize("pointers", [[""], ["/items/1"], ["/items/0", "/items"]])
+def test_an_expectation_with_no_check_of_the_body_has_no_block() -> None:
+    document, summary = _laid(_step("/owners", text='Владелец удалён.\n\nHTTP 200 OK\n{\n  "id": "<идентификатор>"\n}'))
+    assert _text(document) == "Владелец удалён.\n\nHTTP 200 OK" and "http_body_removed ×1" in summary
+
+
+def test_two_blocks_the_model_wrote_become_the_one_of_the_checks() -> None:
+    block = 'Пример тела:\n{\n  "id": "<значение присутствующего поля>"\n}'
+    document, _summary = _laid(_step("/owners", _body("/id"), text=f"Ответ.\n\nHTTP 200 OK\n\n{block}\n\n{block}"))
+    assert _text(document) == f"Ответ.\n\nHTTP 200 OK\n\n{block}" and _codes(document) == []
+
+
+def test_the_label_of_the_exact_body_goes_with_the_block_the_model_wrote() -> None:
+    written = 'Ответ.\n\nHTTP 200 OK\n\nОжидаемое тело:\n{\n  "id": "<идентификатор>"\n}'
+    document, _summary = _laid(_step("/owners", _body("/id"), text=written))
+    assert _text(document) == 'Ответ.\n\nHTTP 200 OK\n\nПример тела:\n{\n  "id": "<значение присутствующего поля>"\n}'
+
+
+def test_a_pointer_the_step_takes_into_an_output_stays_in_the_block() -> None:
+    taken = {"output_id": "ownerId", "source": {"kind": "http_body", "pointer": "/id"}, "semantic_type": {"kind": "json", "type": "string"}, "type_provenance": ["test"]}
+    document, _summary = _laid(_step("/owners", _body("/name", "equals", "Davis"), outputs=[taken], text='Ответ.\n\nHTTP 200 OK\n{"name": "Davis", "city": "Madison"}'))
+    assert _text(document).endswith('{\n  "name": "Davis",\n  "id": "<значение присутствующего поля>"\n}')
+
+
+def test_a_row_the_descendants_imply_is_not_shown() -> None:
+    from tools.batch_assembly import _body_rows, _http_body_template
+
+    length = {"operator": "length_equals", "actual": {"kind": "http_body", "pointer": "/items"}, "expected": {"kind": "literal", "value": 2}}
+    template = _http_body_template(_body_rows({}, [_body("/items", "exists"), length, _body("/items/0/name"), _body("/items/1/name")]))
+    assert template is not None and template.count("<значение присутствующего поля>") == 2
+
+
+def test_a_length_the_indexes_below_do_not_give_is_left_to_the_check() -> None:
+    from tools.batch_assembly import _body_rows, _http_body_template
+
+    length = {"operator": "length_equals", "actual": {"kind": "http_body", "pointer": "/items"}, "expected": {"kind": "literal", "value": 3}}
+    assert _http_body_template(_body_rows({}, [length, _body("/items/0/name"), _body("/items/1/name")])) is None
+
+
+def test_the_text_the_code_cannot_lay_out_stays_as_the_model_wrote_it() -> None:
+    written = 'Ответ.\n\nHTTP 200 OK\n[\n  "a"\n]'
+    document, summary = _laid(_step("/owners", _body("", "exists"), text=written))
+    assert _text(document) == written and not any("http_body" in name for name in summary)
+
+
+def test_a_bracket_line_that_is_no_json_leaves_the_text_alone() -> None:
+    written = 'Ответ.\n\nHTTP 200 OK\n{ "id": 1'
+    document, summary = _laid(_step("/owners", _body("/id"), text=written))
+    assert _text(document) == written and not any("http_body" in name for name in summary)
+
+
+def test_the_example_of_a_text_the_code_laid_out_comes_again_the_same() -> None:
+    first, _summary = _laid(_step("/owners", _body("/lastName", "equals", "Davis"), _body("/id")))
+    again, summary = _laid(first["test_cases"][0]["steps"][0])
+    assert _text(again) == _text(first) and not any("http_body" in name for name in summary)
+
+
+@pytest.mark.parametrize("pointers", [[""], ["/items/1"]])
 def test_a_shape_that_is_not_the_only_one_is_left_to_the_check(pointers: list[str]) -> None:
     document, summary = _laid(_step("/owners", *[_body(pointer) for pointer in pointers]))
     assert _text(document) == "Ответ.\n\nHTTP 200 OK" and "http_body_template ×1" not in summary
@@ -93,8 +149,9 @@ def test_a_shape_that_is_not_the_only_one_is_left_to_the_check(pointers: list[st
 
 
 def test_the_text_of_an_imported_case_stays_as_the_human_wrote_it() -> None:
-    document, summary = _laid(_step("/owners", _body("/id")), key="PC-T7")
-    assert _text(document) == "Ответ.\n\nHTTP 200 OK" and "http_body_template ×1" not in summary
+    written = 'Ответ.\n\nHTTP 200 OK\n{\n  "id": 1,\n  "city": "Madison"\n}'
+    document, summary = _laid(_step("/owners", _body("/id"), text=written), key="PC-T7")
+    assert _text(document) == written and not any("http_body" in name for name in summary)
 
 
 def test_a_second_json_block_in_an_http_expectation_is_refused() -> None:

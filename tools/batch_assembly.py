@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import json_type, line_opening_bracket, rfc6901_tokens, validate_canonical_document_all
+from tools.canonical_document import json_blocks, json_type, line_opening_bracket, rfc6901_tokens, validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -786,19 +786,36 @@ def _missing(item: Mapping[str, Any], key: str) -> bool:
 _BODY_PLACEHOLDER = "<значение присутствующего поля>"
 
 
-def _http_body_template(assertions: Any) -> str | None:
-    """The human JSON template of a response body, laid out from the assertions on it: ``equals`` a literal → the literal, any other
-    operator but ``not_exists`` → the placeholder.  None where the shape is not the only one — a root pointer, a gap in an array, a pointer
-    that is an ancestor of another, two values for one pointer — and where no assertion needs a field: the check refuses those as it does."""
+_BODY_EXAMPLE_LABEL = re.compile(r"(?:^|\n)[^\S\n]*(?:Пример тела|Ожидаемое тело):[^\S\n]*\n[^\S\n]*\Z")  # the two labels the role allowed: «Пример тела», «Ожидаемое тело»
+
+
+def _body_rows(step: Mapping[str, Any], assertions: Any) -> list[tuple[Any, Any, Any]]:
+    """What the example body of an HTTP expectation shows — ``(pointer, operator, expected)`` of each ``http_body`` assertion but ``not_exists`` and of each
+    pointer the step takes into an output; a row its descendants imply (``exists``; ``length_equals k`` of the indexes 0..k-1 below it) is not shown."""
+    rows = [(item["actual"].get("pointer"), item.get("operator"), item.get("expected")) for item in assertions if isinstance(item, dict)
+            and isinstance(item.get("actual"), dict) and item["actual"].get("kind") == "http_body" and item.get("operator") != "not_exists"] if isinstance(assertions, list) else []
+    taken = {row[0] for row in rows}
+    rows += [(output["source"].get("pointer"), "exists", None) for output in step.get("outputs") or []
+             if isinstance(output, dict) and isinstance(output.get("source"), dict) and output["source"].get("kind") == "http_body" and not {output["source"].get("pointer")} & taken]
+
+    def implied(pointer: Any, operator: Any, expected: Any) -> bool:
+        below = {row[0][len(pointer) + 1:].split("/")[0] for row in rows if isinstance(pointer, str) and isinstance(row[0], str) and row[0].startswith(pointer + "/")}
+        count = (expected or {}).get("value") if isinstance(expected, dict) else None
+        return bool(below) and (operator == "exists" or (operator == "length_equals" and all(token.isdigit() for token in below)
+                                                         and {int(token) for token in below} == set(range(len(below))) and count == len(below)))
+
+    return [row for row in rows if not implied(*row)]
+
+
+def _http_body_template(rows: Sequence[tuple[Any, Any, Any]]) -> str | None:
+    """The human JSON template of a response body, laid out from ``_body_rows``: ``equals`` a literal → the literal, any other operator → the
+    placeholder.  None where the shape is not the only one — a root pointer, a gap in an array, a pointer that is an ancestor of another, two values
+    for one pointer — and where no row needs a field: the text is then left as the model wrote it, and the check refuses it as it does."""
     tree: dict[str, Any] = {}  # a branch is a dict, a leaf is a one-tuple (a literal may be null)
-    for item in assertions if isinstance(assertions, list) else ():
-        actual = item.get("actual") if isinstance(item, dict) else None
-        if not isinstance(actual, dict) or actual.get("kind") != "http_body" or item.get("operator") == "not_exists":
-            continue
-        pointer, expected = actual.get("pointer"), item.get("expected")
+    for pointer, operator, expected in rows:
         if not isinstance(pointer, str) or not pointer.startswith("/"):
             return None
-        literal = item.get("operator") == "equals" and isinstance(expected, dict) and expected.get("kind") == "literal" and "value" in expected
+        literal = operator == "equals" and isinstance(expected, dict) and expected.get("kind") == "literal" and "value" in expected
         leaf, node, tokens = (expected["value"] if literal else _BODY_PLACEHOLDER,), tree, rfc6901_tokens(pointer)
         for token in tokens[:-1]:
             node = node.setdefault(token, {})
@@ -824,6 +841,20 @@ def _http_body_template(assertions: Any) -> str | None:
         return None
 
 
+def _with_body_example(text: str, rows: Sequence[tuple[Any, Any, Any]]) -> tuple[str, str]:
+    """``text`` with the example body of the checks as its last block, and the name of what was done.  The blocks the model wrote go with their label, the code's
+    block is put — and a text with no row to show has none (the decision about such a text is the one ``if not rows`` below).  Left as it is: a row the code
+    cannot lay out, a bracket line that is no JSON."""
+    cut = text
+    for start, end in reversed(list(json_blocks(text))):
+        label = _BODY_EXAMPLE_LABEL.search(cut, 0, start)
+        cut = cut[: label.start() if label else start] + cut[end:]
+    template = _http_body_template(rows)
+    if (not rows and cut == text) or line_opening_bracket.search(cut) or (rows and template is None):
+        return text, ""
+    return cut.rstrip() + (f"\n\nПример тела:\n{template}" if rows else ""), "http_body_template" if cut == text else "http_body_replaced" if rows else "http_body_removed"
+
+
 def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """What the model need not write — the mechanics of a fragment that the code lays out by rule.
 
@@ -831,8 +862,8 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
     ``STEP-<tail of case_id>-<NN>``, ``INPUT-…-<NN>-<k>``, ``EXP-…-<NN>-<k>``, ``ASSERT-…-<NN>-<k>-<j>``; ``output_id`` = the source name;
     ``target.sensitive`` (true only for a secret_handle), ``manual_only`` false with ``manual_reason`` null, ``automation_blockers`` [],
     ``diagnostics`` []; and the ``semantic_type`` the code can take without a guess: of a literal (its JSON type), of a step_output (the type of the
-    output), of a capability argument or result, of http_status (integer) and http_header (string); and the JSON template of the response body (``Пример тела:`` at the
-    end of the text of an HTTP expectation) where the text has no JSON container and the assertions fix one shape (``_http_body_template``).  A value the model wrote is never changed —
+    output), of a capability argument or result, of http_status (integer) and http_header (string); and the example body of the response (``Пример тела:`` at the
+    end of the text of an HTTP expectation) — the code's, from the ``http_body`` checks and the outputs of the step, in place of any the model wrote (``_with_body_example``).  A value the model wrote is never changed —
     a different one is the refusal the checks make (CANONICAL_DISPLAY_ORDER, SEMANTIC_DUPLICATE_ID, SEMANTIC_TYPE_MISMATCH).  Returns the copy and a
     summary ``["display_order ×N", …]`` (names and counts, not paths)."""
     if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
@@ -923,18 +954,18 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                 put(expectation, "display_order", e_position)
                 text = expectation.get("text")
                 if (isinstance(operation, dict) and operation.get("kind") == "http" and step.get("manual_only") is False and isinstance(text, str) and text.strip()
-                        and not (((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"))  # an imported case keeps its text
-                        and not line_opening_bracket.search(text)  # a JSON the model wrote is never merged with: the check names what is wrong in it
-                        and (template := _http_body_template(expectation.get("assertions"))) is not None):
-                    expectation["text"] = f"{text.rstrip()}\n\nПример тела:\n{template}"
-                    counts["http_body_template"] = counts.get("http_body_template", 0) + 1
+                        and not (((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"))):  # an imported case keeps its text
+                    new, done = _with_body_example(text, _body_rows(step, expectation.get("assertions")))
+                    if new != text:
+                        expectation["text"] = new
+                        counts[done] = counts.get(done, 0) + 1
                 for a_position, assertion in enumerate(expectation.get("assertions") or [], start=1):
                     if isinstance(assertion, dict):
                         if tail is not None:
                             put(assertion, "assertion_id", f"ASSERT-{tail}-{number:02d}-{e_position}-{a_position}")
                         put(assertion, "display_order", a_position)
     order = ["diagnostics", "display_order", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "manual_only", "manual_reason",
-             "automation_blockers", "sensitive", "semantic_type", "http_body_template"]
+             "automation_blockers", "sensitive", "semantic_type", "http_body_template", "http_body_replaced", "http_body_removed"]
     return value, [f"{name} ×{counts[name]}" for name in order if name in counts]
 
 

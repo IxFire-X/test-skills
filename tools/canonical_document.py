@@ -7,6 +7,7 @@ import json
 import re
 from http import HTTPStatus
 from dataclasses import dataclass
+from itertools import islice
 from types import MappingProxyType
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -125,9 +126,9 @@ def _trailing_json(text: str) -> Any:
     return _NO_JSON
 
 
-def _json_block_count(text: str, limit: int = 2) -> int:
-    """JSON containers that open a line and are not inside another one; counting stops at ``limit``."""
-    decoder, end, count = json.JSONDecoder(), 0, 0
+def _json_blocks(text: str):
+    """``(start, end)`` of each JSON container that opens a line and is not inside another one, one by one (a caller that needs two stops at two)."""
+    decoder, end = json.JSONDecoder(), 0
     for match in _LINE_OPENING_BRACKET.finditer(text):
         if match.start(1) < end:
             continue
@@ -136,10 +137,8 @@ def _json_block_count(text: str, limit: int = 2) -> int:
         except (json.JSONDecodeError, RecursionError):
             continue
         if isinstance(value, (dict, list)):
-            end, count = stop, count + 1
-            if count == limit:
-                break
-    return count
+            end = stop
+            yield match.start(1), stop
 
 
 def _json_value_at(value: Any, tokens: tuple[str, ...]) -> Any:
@@ -262,7 +261,7 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
                     "HTTP body assertions require one trailing human JSON response template",
                 ))
             continue
-        if _json_block_count(expectation["text"]) > 1:  # the check reads the last one; the one before it would be read by nobody and could say anything
+        if len(list(islice(_json_blocks(expectation["text"]), 2))) > 1:  # the check reads the last one; the one before it would be read by nobody and could say anything
             diagnostics.append(_diagnostic(
                 _pointer(*step_path, "expectations", expectation_index, "text"),
                 "SEMANTIC_HUMAN_EXPECTATION_BODY_DUPLICATE",
@@ -1024,5 +1023,6 @@ def document_sha256(document: dict[str, Any]) -> str:
 
 # Public name for batch_assembly: the same object under a name without an underscore; a rename of the private name is then a rename here.
 json_type = _json_type
+json_blocks = _json_blocks
 line_opening_bracket = _LINE_OPENING_BRACKET
 rfc6901_tokens = _rfc6901_tokens
