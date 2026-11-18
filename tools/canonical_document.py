@@ -675,10 +675,12 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
         input_path = (*step_path, "inputs", input_index)
         target, stored = binding["target"], binding["semantic_type"]
         resolved = _source_type(index, case_index, step_index, binding["source"], (*input_path, "source"), diagnostics)
-        if resolved is not None and not _storage_equal(resolved, stored):
+        location = target["location"]
+        argument = arguments.get(target["name"]) if operation_kind == "project_action" and location == "arg" else None
+        clash = argument is not None and not _compatible(resolved or stored, argument["semantic_type"])  # the source's type decides: one diagnostic for the input, not two that pull apart
+        if resolved is not None and not _storage_equal(resolved, stored) and not clash:
             diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TYPE_MISMATCH",
                                                f"input semantic_type is {_compact(stored)}, its source gives {_compact(resolved)}"))
-        location = target["location"]
         if operation_kind == "http":
             if location == "arg":
                 diagnostics.append(_diagnostic(_pointer(*input_path, "target", "location"), "SEMANTIC_OPERATION_TARGET_KIND", "HTTP operation cannot bind capability arguments"))
@@ -704,11 +706,11 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
             if location != "arg":
                 diagnostics.append(_diagnostic(_pointer(*input_path, "target", "location"), "SEMANTIC_OPERATION_TARGET_KIND", "project_action can bind only capability arguments"))
             elif capability is not None:
-                argument = arguments.get(target["name"])
                 if argument is None:
                     diagnostics.append(_diagnostic(_pointer(*input_path, "target", "name"), "SEMANTIC_UNDECLARED_CAPABILITY_ARGUMENT", "input target is not a declared capability argument"))
-                elif not _compatible(resolved or stored, argument["semantic_type"]):
-                    diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_CAPABILITY_TYPE_MISMATCH", "input type is incompatible with capability argument"))
+                elif clash:
+                    diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_CAPABILITY_TYPE_MISMATCH",
+                                                   f"input type is incompatible with capability argument: source gives {_compact(resolved or stored)}, argument {target['name']} takes {_compact(argument['semantic_type'])}"))
     if operation_kind == "http" and not _has_blocker_backed_http_input_omission(step, path_inputs):
         placeholders = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_.-]*)\}", operation["path"]))
         if placeholders != path_inputs:
@@ -737,7 +739,8 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
                 if result is None:
                     diagnostics.append(_diagnostic(_pointer(*output_path, "source", "name"), "SEMANTIC_UNDECLARED_CAPABILITY_RESULT", "output source is not a declared capability result"))
                 elif descriptor != result["semantic_type"]:
-                    diagnostics.append(_diagnostic(_pointer(*output_path, "semantic_type"), "SEMANTIC_CAPABILITY_TYPE_MISMATCH", "output type must exactly match capability result"))
+                    diagnostics.append(_diagnostic(_pointer(*output_path, "semantic_type"), "SEMANTIC_CAPABILITY_TYPE_MISMATCH",
+                                                   f"output type must exactly match capability result: output is {_compact(descriptor)}, result {source['name']} is {_compact(result['semantic_type'])}"))
     return capability
 
 
@@ -785,7 +788,8 @@ def _assertion_matrix(index: _DocumentIndex, case_index: int, step_index: int, s
             elif operator == "schema_matches":
                 invalid = actual_representation not in {"object", "array"} or expected is None or expected["kind"] != "schema_ref"
             if invalid:
-                diagnostics.append(_diagnostic(_pointer(*assertion_path), "SEMANTIC_OPERATOR_TYPE", "operator operands are incompatible"))
+                diagnostics.append(_diagnostic(_pointer(*assertion_path), "SEMANTIC_OPERATOR_TYPE", f"operator {operator} operands are incompatible: actual {_compact(actual_type)}, "
+                                               f"expected {_compact(expected_type) if expected_type else (expected or {}).get('kind', 'none')}"))
 
 
 def _secret_handles(document: dict[str, Any]) -> frozenset[str]:

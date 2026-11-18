@@ -98,7 +98,7 @@ execution and observation. Record the exact calls, order, state/transaction boun
 argument meaning and result extraction in its provenance; declare all typed arguments,
 results and step bindings. A composition label is a test contract, not a claim that
 an application method with that name exists. Reuse a capability across cases when its
-contract is the same; do not invent a new adapter or dependency to supply it.
+contract is the same; do not invent a new adapter or dependency to supply it. A `fixture`/`environment`/`secret_handle` input needs the argument's `semantic_type` and a `type_provenance`; a literal's type is its value's.
 
 Verify the required APIs and setup from authorized project code/tests or available
 dependency documentation/metadata the human gave; search for no more. Keep dependency evidence in the authorized technical context and reference it

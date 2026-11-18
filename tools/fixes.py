@@ -185,7 +185,9 @@ FIXES: dict[str, str] = {
                                     "листовые входы, вложенные указатели того же поля удали",
     "SEMANTIC_DUPLICATE_TARGET": "у каждой цели HTTP-входа (location + name или pointer) одна привязка: удали повтор",
     "SEMANTIC_DUPLICATE_ID": "идентификаторы уникальны во всём документе: переименуй повтор",
-    "SEMANTIC_CAPABILITY_TYPE_MISMATCH": "семантический тип входа/выхода должен совпадать с типом аргумента/результата capability",
+    "SEMANTIC_CAPABILITY_TYPE_MISMATCH": "тип входа задаёт ИСТОЧНИК, а не semantic_type: literal — json-тип значения (строка — json string, named из неё не сделать), step_output — объявленный тип выхода. "
+                                         "Аргумент named-типа (например json_text) питает только fixture/environment/secret_handle (semantic_type = тип аргумента, type_provenance — где он описан) "
+                                         "или step_output с выходом того же named-типа; иначе шаг ручной. Выход project_action: semantic_type = типу результата capability. Оба типа — в message",
     "SEMANTIC_DUPLICATE_CAPABILITY_ACTION": "одно действие (adapter + action) — одна capability: объедини описания",
     "SEMANTIC_DUPLICATE_CAPABILITY_ARGUMENT": "у каждого аргумента capability не больше одного входа шага: удали повтор",
     "SEMANTIC_FORWARD_STEP_OUTPUT": "`step_output` берёт выход шага строго выше по порядку шагов кейса — не своего шага и не нижнего: путь в диагностике называет вход или "
@@ -199,11 +201,15 @@ FIXES: dict[str, str] = {
     "SEMANTIC_OPERATION_OUTPUT_KIND": "вид source выхода не подходит операции шага: у http — http_status, http_header, http_body; "
                                       "у project_action — project_result",
     "SEMANTIC_OPERATION_TARGET_KIND": "location входа не подходит операции шага: path/query/header/body — для http, arg — для project_action",
-    "SEMANTIC_OPERATOR_TYPE": "оператор утверждения не подходит типу значения: сравнения больше/меньше — для чисел, matches — для строк",
+    "SEMANTIC_OPERATOR_TYPE": "оператор берётся по типу значения (у named-типа — по его representation): equals/not_equals — expected того же типа (named-значение и literal несовместимы: "
+                              "сравнивай contains/matches или expected-fixture того же named-типа); contains — значение string и literal string; matches — значение string, expected "
+                              "{kind: regex, dialect: portable-regex-v1, pattern}, не literal; больше/меньше — integer/number; length_equals — string/array/object и literal integer ≥ 0; "
+                              "schema_matches — object/array и schema_ref. JSON-текст (named, representation string) — contains или matches",
     "SEMANTIC_OUTPUT_TYPE": "semantic_type выхода не подходит его источнику",
     "SEMANTIC_TARGET_TYPE": "semantic_type входа не подходит его цели: path — string, integer, number или boolean (id из ответа остаётся integer, URL печатает код), "
                             "header — string, query — скаляр; тип выхода не меняй, чтобы подойти пути",
-    "SEMANTIC_TYPE_MISMATCH": "тип источника и тип цели различаются: приведи semantic_type к одному",
+    "SEMANTIC_TYPE_MISMATCH": "semantic_type входа равен типу его источника (оба в message): literal — json-тип значения, step_output — тип выхода; у fixture/environment/secret_handle — тип аргумента "
+                              "и type_provenance. Нужен другой тип — меняй источник, а не semantic_type",
     "SEMANTIC_PARAM_GROUP_MISMATCH": "кейс группы param_group отличается от первого кейса группы не только вариантом. Сравнивается всё, кроме `case_id`, `display_order`, `title`, `objective`, "
                                      "`design_refs`, `param_group`, у шагов — `step_id`, `action`, `test_data`, у входов и утверждений — `input_id`/`assertion_id` и литеральных значений: "
                                      "операции, capability, виды и места входов и утверждений, ссылки `step_output` (по номеру шага), `expectations`, `automation_blockers` и число шагов "
