@@ -417,7 +417,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()
     try:
-        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None, target, cases)
+        _kept, skipped, budget, templates = context_preview(inventory, root, module_root, list(docs) or None, target, cases)
     except ContextStop as stop:
         row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
         return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
@@ -438,6 +438,12 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     reasons = ", ".join(f"{code} {value['files']} ({value['bytes']} Б)" for code, value in summary["by_reason"].items())
     message = (f"модели не пойдут {summary['files']} файлов, {summary['bytes']} Б: {reasons}" if summary["files"]
                else "в контекст модели идёт всё отобранное")
+    if templates["paths"]:
+        shown = ", ".join(templates["paths"][:5]) + (f" и ещё {len(templates['paths']) - 5}" if len(templates["paths"]) > 5 else "")
+        message += f"; из кода --target подтянуты шаблоны: {len(templates['paths'])} файлов, {templates['bytes']} Б ({shown}) — код называет их по имени"
+    if (lost := templates["unfound"]) is not None:
+        return _row("context:skipped", CASES, "WARN", f"{message}; код называет шаблоны ({', '.join(lost['suffixes'])}), но файл не найден по имени: таких файлов вне --target: {lost['files']} ({lost['bytes']} Б)",
+                    "расширьте --target до общего родителя (например --target src/main): так шаблоны войдут целиком", summary)
     return _row("context:skipped", CASES, "OK", message + f"; пачка {budget} Б", None, summary)
 
 

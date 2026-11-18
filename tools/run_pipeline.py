@@ -27,6 +27,7 @@ from tools.project_inventory import (
     skillsrc_exclude,
     skillsrc_include,
     skipped_summary,
+    template_refs,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -906,10 +907,16 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
 
 
 def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: Path, selected_ids: list[str],
-                      task_ids: list[str], budget: int, own: Mapping[str, str]) -> tuple[list[str], list[dict[str, Any]]]:
-    """Assets, user excludes, large non-sources and the tests of earlier runs (``own``) stay out of the model context, always listed (scan and ready)."""
-    return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids,
-                          includes=skillsrc_include(project, module_root), own=own)
+                      task_ids: list[str], budget: int, own: Mapping[str, str]) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    """Assets, user excludes, large non-sources and the tests of earlier runs (``own``) stay out of the model context, always listed (scan and ready); then the templates ``--target`` cut off that the code names."""
+    rules = {"excludes": skillsrc_exclude(project, module_root), "task_ids": task_ids, "includes": skillsrc_include(project, module_root), "own": own}
+    kept, skipped = context_filter(inventory, project, selected_ids, byte_budget=budget, **rules)
+    found = template_refs(inventory, project, kept, set(selected_ids), budget)
+    if found["items"]:  # the templates come with the same rules as the code
+        kept, skipped = context_filter(inventory, project, [*selected_ids, *(item["opaque_id"] for item in found["items"])], byte_budget=budget, **rules)
+    came = [item for item in found["items"] if item["opaque_id"] in set(kept)]
+    return kept, sorted([*skipped, *found["over"]], key=lambda row: row["project_path"]), {
+        "ids": [item["opaque_id"] for item in came], "paths": [item["project_path"] for item in came], "bytes": sum(int(item["size"]) for item in came), "unfound": found["unfound"]}
 
 
 def _without_cases_csv(ids: list[str], inventory: Mapping[str, Any], *paths: str | None) -> list[str]:
@@ -919,15 +926,15 @@ def _without_cases_csv(ids: list[str], inventory: Mapping[str, Any], *paths: str
 
 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
-                    target: str | None = None, cases: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
-    """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
+                    target: str | None = None, cases: str | None = None) -> tuple[list[str], list[dict[str, Any]], int, dict[str, Any]]:
+    """What the scan would hand the model, without a run: ``(ids, skipped, batch budget, the templates the code names)``; only reads."""
     task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs, module_root=module_root, cases=bool(cases))
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
     selected = _without_cases_csv(selected, inventory, cases and relative_to_project(project.resolve(), cases))
     budget = _scan_context_budget(inventory, project)
-    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_tests(project, inventory)[0])
-    return kept, skipped, budget
+    kept, skipped, templates = _filtered_context(inventory, project, module_root, selected, task_ids, budget, own_tests(project, inventory)[0])
+    return kept, skipped, budget, templates
 
 
 def _write_section_views(project: Path, run_root: Path, docs: list[str] | None) -> list[dict[str, str]]:
@@ -1552,14 +1559,17 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
     own, unread = own_tests(project, frozen_inventory)
-    selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget, own)
+    selected_ids, skipped, templates = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget, own)
     context_skipped = skipped_summary(skipped)
+    if templates["paths"]:
+        context_summary["resource_files"] = {"files": len(templates["paths"]), "bytes": templates["bytes"], "paths": templates["paths"][:10]}
     batches = select_context_batches(
         frozen_inventory,
         project,
         selected_ids,
         byte_budget=budget,
         skipped=skipped,
+        front=templates["ids"],
     )
     if reference is not None:
         context_summary["reference_cases"] = len(reference[2])

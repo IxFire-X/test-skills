@@ -533,7 +533,8 @@ def pick_context(project: Path, receipts: Sequence[Mapping[str, Any]], taken: in
     cited = Counter(re.sub(r":\d+(?:-\d+)?$", "", words[0]) for words in (str(source).split(None, 1) for source in sources) if words)  # a source: «path:line — text»
     cited = Counter({path: count for path, count in cited.items() if path in sizes})
     docs = {found.group(1) if (found := re.match(r"(.+?):(\d+)", str(item))) else str(item) for row in requirements for item in row["provenance"]}  # «path:line — text»; no line: the whole text
-    group = {path: 0 if _is_api_contract(project, path) else 1 if path in docs else 2 if path in cited else 3 for path in sizes}
+    named = set(cited) | set(receipts[0].get("referenced") or ())  # the files the marker named and the templates the code of --target names
+    group = {path: 0 if _is_api_contract(project, path) else 1 if path in docs else 2 if path in named else 3 for path in sizes}
     if all(path in today for path in sizes if group[path] < 3):
         return None
     room, chosen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken]), []

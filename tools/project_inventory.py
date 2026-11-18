@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import stat
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -1324,7 +1325,7 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
 
 
 def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes,
-                     skipped: list[dict[str, Any]] | None = None, batch_count: int | None = None) -> dict[str, Any]:
+                     skipped: list[dict[str, Any]] | None = None, batch_count: int | None = None, referenced: list[str] | None = None) -> dict[str, Any]:
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0", "inventory_digest": inventory["digest"], "batch_index": batch_index,
         "files": [{key: item[key] for key in ("opaque_id", "project_path", "content_digest", "size")} for item in files],
@@ -1332,6 +1333,8 @@ def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list
     }
     if skipped:
         receipt["skipped"] = [dict(row) for row in skipped]
+    if referenced:  # the templates the code of ``--target`` names, put first (q13); the plan keeps them among the files it reads
+        receipt["referenced"] = list(referenced)
     if batch_count is not None:  # a scan cut between the batches is told by the count every receipt carries
         receipt["batch_count"] = batch_count
     receipt["digest"] = _digest(receipt)
@@ -1483,6 +1486,53 @@ def context_filter(
     return kept, sorted(skipped, key=lambda row: row["project_path"])
 
 
+_TEMPLATE_SUFFIXES = frozenset({".ftlh", ".ftl", ".html", ".htm", ".xhtml", ".jsp", ".jspx", ".mustache", ".hbs", ".vm", ".jte", ".ejs", ".pug", ".njk", ".j2",
+                                ".jinja", ".twig", ".tpl"})
+_STRING = re.compile(r"""(["'])((?:(?!\1)[^\\\n]|\\.){3,160})\1""")  # a string of one line, in any language: the code is not parsed
+
+
+def template_refs(inventory: Mapping[str, Any], project_root: Path, kept: Iterable[str], selected: set[str], byte_budget: int) -> dict[str, Any]:
+    """The templates outside the selection (``--target`` cut them off) that a string literal of the kept code names: the literal is the tail of the template's path, with or without
+    its suffix (``owners/detail`` — ``…/templates/owners/detail.html``), only compared to the inventory's paths.  ``items``: the most named first, within a quarter of a batch and 40 files;
+    ``over``: skipped rows of the rest; ``unfound``: the code puts a template name together (a literal ``".ftlh"``, ``"%s.ftlh"``, ``"{id}.html"``) and templates of that suffix lie outside the selection."""
+    index = _inventory_index(inventory)
+    templates = [item for item in index.values() if item["kind"] in {"fixture", "resource"} and Path(item["project_path"]).suffix.casefold() in _TEMPLATE_SUFFIXES]
+    found: dict[str, Any] = {"items": [], "over": [], "unfound": None}
+    if all(item["opaque_id"] in selected for item in templates):
+        return found
+    tails: dict[str, list[Mapping[str, Any]]] = {}
+    for item in templates:
+        parts = item["project_path"].split("/")
+        for start in range(len(parts)):
+            tail = "/".join(parts[start:])
+            for key in (tail, tail.rsplit(".", 1)[0]):
+                tails.setdefault(key, []).append(item)
+    refs: Counter[str] = Counter()
+    suffixes: set[str] = set()
+    for opaque in kept:
+        path = str(index[opaque]["project_path"])
+        if is_source(Path(path).name):
+            for match in _STRING.finditer(_read_context_file(Path(project_root).resolve(), path).decode("utf-8", "replace")):
+                literal = re.sub(r"^(?:classpath\*?:|file:)?/*", "", match.group(2))
+                refs.update(item["opaque_id"] for item in tails.get(literal, ()) if item["opaque_id"] not in selected)
+                _, dot, tail = literal.rpartition(".")
+                if dot and "." + tail.casefold() in _TEMPLATE_SUFFIXES and literal not in tails and (literal.startswith(".") or "%" in literal or "{" in literal):
+                    suffixes.add("." + tail.casefold())
+    room = byte_budget // 4
+    for opaque, count in sorted(refs.items(), key=lambda row: (-row[1], str(index[row[0]]["project_path"]))):
+        size = int(index[opaque]["size"])
+        if len(found["items"]) < 40 and size <= room:
+            found["items"].append(index[opaque])
+            room -= size
+        else:
+            found["over"].append({"project_path": index[opaque]["project_path"], "size": size, "reason": "CONTEXT_RESOURCE_OVER_LIMIT",
+                                  "rule": f"названы кодом; шаблонам отведена четверть пачки ({byte_budget // 4} Б) и 40 файлов"})
+    left = [item for item in templates if item["opaque_id"] not in selected and item["opaque_id"] not in refs and Path(item["project_path"]).suffix.casefold() in suffixes]
+    if left:
+        found["unfound"] = {"suffixes": sorted(suffixes), "files": len(left), "bytes": sum(int(item["size"]) for item in left)}
+    return found
+
+
 def skipped_summary(skipped: Iterable[Mapping[str, Any]], *, limit: int = 20) -> dict[str, Any]:
     rows = list(skipped)
     by_reason: dict[str, dict[str, int]] = {}
@@ -1496,9 +1546,9 @@ def skipped_summary(skipped: Iterable[Mapping[str, Any]], *, limit: int = 20) ->
 
 def select_context_batches(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
-    include_closed_manifests: bool = True, skipped: list[dict[str, Any]] | None = None,
+    include_closed_manifests: bool = True, skipped: list[dict[str, Any]] | None = None, front: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
-    """Read verified eligible files into bounded, non-truncated C-lite batches."""
+    """Read verified eligible files into bounded, non-truncated C-lite batches; the ``front`` files (the templates the code names) come first, the rest by path."""
     if type(byte_budget) is not int or byte_budget <= 0:
         raise ContextSelectionError("byte budget must be a positive integer")
     project_root = Path(project_root).resolve()
@@ -1523,7 +1573,8 @@ def select_context_batches(
             continue
         seen.add(opaque_id)
         selected.append(item)
-    selected.sort(key=lambda item: item["project_path"])
+    first = set(front)
+    selected.sort(key=lambda item: (item["opaque_id"] not in first, item["project_path"]))
     groups: list[tuple[list[dict[str, Any]], int, bytes]] = []
     current: list[dict[str, Any]] = []
     current_count = 0
@@ -1545,7 +1596,8 @@ def select_context_batches(
         groups.append((current, current_count, bytes(current_bytes)))
     return [
         {"files": files, "byte_count": count,
-         "receipt": _context_receipt(inventory, number, files, count, byte_set, skipped if number == 1 else None, len(groups))}
+         "receipt": _context_receipt(inventory, number, files, count, byte_set, skipped if number == 1 else None, len(groups),
+                                     [item["project_path"] for item in selected if item["opaque_id"] in first] if number == 1 else None)}
         for number, (files, count, byte_set) in enumerate(groups, start=1)
     ]
 

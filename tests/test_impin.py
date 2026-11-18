@@ -57,7 +57,7 @@ def test_ready_leaves_the_csv_of_cases_out_of_the_context_as_scan_does(tmp_path:
     project = _project(tmp_path)
     inventory = build_inventory(project, project)
     by_id = {str(row["opaque_id"]): row["project_path"] for row in inventory["files"]}
-    kept, skipped, _budget = context_preview(inventory, project, project, None, None, CSV_PATH)
+    kept, skipped, _budget, _templates = context_preview(inventory, project, project, None, None, CSV_PATH)
     assert CSV_PATH in by_id.values() and CSV_PATH not in [by_id[opaque] for opaque in kept] and CSV_PATH not in [row["project_path"] for row in skipped]
 
 
