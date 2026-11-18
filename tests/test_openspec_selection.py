@@ -176,6 +176,20 @@ def test_a_folder_the_code_does_not_open_stops_the_scan_with_a_fix(tmp_path: Pat
     assert stop["reason"] == "SNAPSHOT_DOCS" and stop["fix"] and not (project / ".pilot-runs").exists()
 
 
+def test_a_path_that_is_not_there_is_named_missing_with_the_nearest_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    stop = _scan(project, monkeypatch, ["openspec/specs/ownerz"], expect=2)
+    assert stop["reason"] == "SNAPSHOT_DOCS" and "does not exist" in stop["detail"]
+    assert "ближайшие: openspec/specs/owners" in stop["fix"] and "openspec/changes/<имя>" in stop["fix"] and "junction" not in stop["fix"]
+
+
+def test_a_link_given_as_a_file_keeps_the_fix_about_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    monkeypatch.setattr(run_pipeline, "_is_reparse", lambda path: path.name == "spec.md")
+    stop = _scan(project, monkeypatch, [BASE], expect=2)
+    assert stop["reason"] == "SNAPSHOT_DOCS" and "reparse point" in stop["detail"] and "junction" in stop["fix"]
+
+
 @pytest.mark.parametrize("kind", ["junction", "symlink"])
 def test_a_link_inside_a_folder_is_not_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     project = _project(tmp_path)

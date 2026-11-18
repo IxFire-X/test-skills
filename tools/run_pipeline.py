@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import difflib
 import hashlib
 import json
 import os
@@ -578,6 +579,20 @@ def _local_input(raw: str, flag: str) -> None:
                        fix=f"укажите {flag} путём внутри проекта, не UNC и не путём устройства")
 
 
+def _missing_path_fix(project: Path, missing: Path, flag: str) -> str:
+    """The way out for a path that is not there: the names of its nearest existing folder that are close to it (at most three)."""
+    root, parent = project.resolve(), missing.parent
+    while parent != root and not parent.is_dir():
+        parent = parent.parent
+    try:
+        names = sorted(entry.name for entry in os.scandir(parent))
+    except OSError:
+        names = []
+    near = [(parent / name).relative_to(root).as_posix() for name in difflib.get_close_matches(missing.name, names, n=3)]
+    return ("такого файла или папки в проекте нет: проверьте имя" + (f"; ближайшие: {', '.join(near)}" if near else "")
+            + ("; новая область OpenSpec ещё не существует — назовите только папку изменения openspec/changes/<имя>" if flag == "--docs" else ""))
+
+
 def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outside_fix: str | None = None) -> list[tuple[str, bytes]]:
     """The files a scan flag names (``--docs``, ``--reference``, ``--cases``): inside the project, no reparse point, each
     path once. A path outside the project is the refusal ``SNAPSHOT_DOCS`` with *outside_fix*."""
@@ -591,6 +606,8 @@ def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outsi
         except ValueError:
             raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is outside the project: {raw}",
                            fix=outside_fix or f"укажите {flag} путём внутри проекта") from None
+        if not os.path.lexists(confined):  # no such path: a typo, or an area a change only adds — not the link the table's fix is about
+            raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path does not exist: {raw}", fix=_missing_path_fix(project, confined, flag))
         if _is_reparse(confined) or not confined.is_file():
             raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is missing or a reparse point: {raw}")
         rel = confined.relative_to(project.resolve()).as_posix()
