@@ -195,6 +195,17 @@ def test_status_next_command_for_finish_and_report_names_run_pipeline_with_proje
         assert run_pipeline._next_command(project, root, {"verb": verb, "stage": None}) == f'"{sys.executable}" -m tools.run_pipeline {verb} --project "{project}" --run "r1"'
 
 
+def test_status_has_no_next_command_when_the_step_could_not_be_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, *_ = _run(tmp_path)
+
+    def refuse(*_args: object) -> dict:
+        raise ValueError("no plan")
+
+    monkeypatch.setattr(stage_steps, "stage_status", refuse)
+    status = _status(root)
+    assert status["next"]["stage"] == "context-marker" and "next_command" not in status  # the role is no stage: the api would refuse it
+
+
 def test_status_has_no_next_command_while_the_next_step_is_the_humans() -> None:
     assert run_pipeline._next_command(Path("/p"), Path("/p/.pilot-runs/r1"), {"verb": None, "stage": None}) is None
 

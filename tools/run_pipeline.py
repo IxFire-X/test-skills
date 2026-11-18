@@ -195,17 +195,20 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     result.update(next_action({**result, "scan_cut": cut, "left": left, "scope_pause": scope is not None,
                                  "scope_answer": Path((scope or {}).get("answer_slot", "")).is_file()}))
     result.update(scope or {})
+    bare = False  # the stage of next is the role of the table, no step id: prepare and submit refuse it, so no command is printed
     if result["state"] in ("marker", "generator", "review", "automation", "automation_review"):  # the id of the step (with the revision), the slot and the size: from the steps of the stage
         from tools.stage_steps import stage_status
 
+        table = result["next"]
         try:
             result.update(stage_status(Path(run_root), {"marker": "context-marker", "generator": "tc-generator", "review": "tc-reviewer", "automation": "tc-to-autotest",
                                                                   "automation_review": "autotest-reviewer"}[result["state"]]))
         except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
             pass
+        bare = result["next"] is table
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
         result.pop(gone, None)
-    if command := _next_command(project, Path(run_root), result["next"]):
+    if not bare and (command := _next_command(project, Path(run_root), result["next"])):
         result["next_command"] = command
     return result
 
