@@ -76,6 +76,33 @@ def test_a_real_difference_stops_the_scan_before_any_run_with_its_phrase(tmp_pat
     assert stop["attempt_id"] is None and stop["fix"] != fix_for(CONFLICT)  # no attempt: the model was not asked
 
 
+def _said(project: Path) -> str:
+    with pytest.raises(RequirementConflict) as stop:
+        _applied(project)
+    return str(stop.value)
+
+
+def _named(*names: str) -> str:
+    return "".join(f"### Requirement: {name}\nText.\n#### Scenario: Ok\n- WHEN a\n- THEN b\n" for name in names)
+
+
+NEAR = "ближайшие имена в spec.md области: "
+
+
+def test_a_modified_name_the_specification_lacks_names_the_three_nearest(tmp_path: Path) -> None:
+    spec = _named("Search owners", "Search owner list", "Search owner by name", "Search owner by city", "Visits")
+    near = _said(_project(tmp_path, spec, MODIFY + _named("Search owner"))).split(NEAR)[1].split(", ")
+    assert len(near) == 3 and "Visits" not in near and "Search owners" in near
+
+
+def test_a_rename_that_fits_nothing_names_the_nearest_old_name(tmp_path: Path) -> None:
+    assert NEAR + "Lookups" in _said(_project(tmp_path, _named("Lookups", "Create"), RENAME))
+
+
+def test_a_name_with_nothing_near_it_adds_no_names(tmp_path: Path) -> None:
+    assert NEAR not in _said(_project(tmp_path, _named("Create"), MODIFY + SEARCH))
+
+
 def test_the_scan_names_the_requirements_already_written_in_one_line_per_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     warnings = _scan(_project(tmp_path, CREATE + SEARCH, ADD + SEARCH), monkeypatch, DOCS)["warnings"]
     [line] = [warning for warning in warnings if "уже вписано" in warning]

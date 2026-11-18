@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import difflib
 import hashlib
 import json
 import re
@@ -365,6 +366,12 @@ def _same(first: str, second: str) -> bool:
     return first.split() == second.split()
 
 
+def _close(baseline: Mapping[tuple[str, str], Any], key: tuple[str, str]) -> str:
+    """``; ближайшие имена …``: up to three requirements of the area of ``key`` in the specification whose names are nearest to the one the delta gave."""
+    names = difflib.get_close_matches(key[1], [name for capability, name in baseline if capability == key[0] and name != key[1]], n=3, cutoff=0.4)
+    return f"; ближайшие имена в spec.md области: {', '.join(names)}" if names else ""
+
+
 def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
     """Compose only standard spec documents explicitly present in authorized inputs.  ``applied`` counts, by change, what its delta
     says and the specification already has (ADDED or MODIFIED with the same text, REMOVED gone, RENAMED under the new name)."""
@@ -429,7 +436,7 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
             applied[path.split("/")[2]] += 1
             continue
         if key not in baseline or new_key in baseline:
-            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"rename does not match baseline: {path} — {key[1]} -> {new_name}")
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"rename does not match baseline: {path} — {key[1]} -> {new_name}{_close(baseline, key)}")
         row = baseline.pop(key)
         row["name"] = new_name
         row["text"] = re.sub(r"^### Requirement:[^\n]+", lambda _: "### Requirement: " + new_name, row["text"], count=1)
@@ -442,7 +449,7 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if key in seen:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"repeats a requirement of this change ({operation}): {where}")
         if operation == "MODIFIED" and have is None:
-            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}")
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}{_close(baseline, key)}")
         if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}")
         seen.add(key)
