@@ -308,6 +308,7 @@ class _Journal:
         self.files: dict[str, list[Path]] = {}
         self.carried: dict[str, tuple[Path, str, int]] = {}
         self.expands: dict[str, tuple[list[Path], bool]] = {}
+        self.sha256: dict[Path, str] = {}  # the sha256 of the bytes of each file of the context receipts (their content_digest)
         self.documents: dict[str, Path | None] = {}
         self.bundled: dict[str, Path] = {}
         attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
@@ -327,6 +328,7 @@ class _Journal:
 
                 receipt = read_context_selection(root, attempt_id, digest)  # the strict reader, not the bytes of a file at that name
                 self.expands[digest] = ([project_path(project, item["project_path"]) for item in receipt["files"]], True)
+                self.sha256.update({project_path(project, item["project_path"]): item["content_digest"] for item in receipt["files"]})
             elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
                 self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
             elif event["event_type"] == "CANDIDATE_PUBLISHED":
@@ -497,7 +499,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             if context and stage.startswith("tc-generator:") and (named := journal.plan(state).get("context_files")):  # the generator and its rework read the files the plan names
                 keep = {project_path(project, name) for name in named}
                 targets = [target for target in targets if target in keep]
-            files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
+            files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size, **({"sha256": journal.sha256[target]} if target in journal.sha256 else {})}
+                         for target in targets)  # digest: the input of the request the file stands for; sha256: the file itself (the source digest of a requirement is this one)
             if position == 0 and stage in ("context-marker:requirements", "context-marker:baseline"):  # the step that reads the documents also reads the numbers of them, as the code counts them
                 from tools.build_context import numbering_view
 
