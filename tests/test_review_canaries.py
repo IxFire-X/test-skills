@@ -424,6 +424,12 @@ def test_the_report_names_the_model_the_reviewer_was_given_as_an_identifier_or_n
     assert label not in json.dumps(report, ensure_ascii=False) or shown == label
 
 
+def test_the_role_asks_for_the_model_label_at_the_step_of_the_review() -> None:
+    line = next(row for row in (Path(__file__).resolve().parents[1] / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+                if "prepare --stage tc-reviewer:canonical" in row)
+    assert "--model-id" in line  # without it review_model of the report stays empty in a live run
+
+
 def test_a_copy_of_the_response_code_in_the_body_is_not_removed_as_a_control_error() -> None:
     from tools.review_canaries import _options
 

@@ -65,8 +65,8 @@ permissions:
 
 ## 4. Ревью
 
-1. `prepare --stage tc-reviewer:canonical --invocation-id <метка ревьюера> --fresh-context yes|no` печатает `answer_slot`, `reviewer_view`, `for_human`. `yes` — метка обязательна
-   и не равна метке генератора; `no` — после согласия человека на SELF (§1).
+1. `prepare --stage tc-reviewer:canonical --model-id <модель ревьюера> --invocation-id <метка ревьюера> --fresh-context yes|no` печатает `answer_slot`, `reviewer_view`, `for_human`. `yes` — метка обязательна
+   и не равна метке генератора; `no` — после согласия человека на SELF (§1). `--model-id` — как у генератора, метка для отчёта; повтор `prepare` — с той же.
 2. `tc-reviewer` в fresh invocation читает `reviewer_view` и пишет в `answer_slot`; файлы проекта сверх пакета — ключ `evidence: ["путь", …]` верхнего уровня (ключ вне схемы ответа: код вынимает его до проверки).
    Карту канареек не читай и ревьюеру не показывай; роль, канарейки, бюджет — [review.md](references/review.md).
 3. `submit --stage tc-reviewer:canonical` кладёт набор в `<run>/published`. Ревью не довести до вердикта — `submit --abort REVIEW_CONTEXT_LIMIT` или `REVIEW_UNUSABLE`, затем `finish`.
