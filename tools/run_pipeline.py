@@ -204,7 +204,19 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
             pass
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
         result.pop(gone, None)
+    if command := _next_command(project, Path(run_root), result["next"]):
+        result["next_command"] = command
     return result
+
+
+def _next_command(project: Path, run_root: Path, step: Mapping[str, Any]) -> str | None:
+    """The command of ``next`` to copy as it is: prepare and submit live in ``tools.api``, finish and report in this module."""
+    verb, stage = step.get("verb"), step.get("stage")
+    if verb in ("prepare", "submit") and stage:
+        return f"{printed(sys.executable)} -m tools.api {verb} --run-root {printed(run_root)} --stage {stage}"
+    if verb in ("finish", "report"):
+        return f"{printed(sys.executable)} -m tools.run_pipeline {verb} --project {printed(project)} --run {printed(run_root.name)}"
+    return None
 
 
 def _scope_mismatch(run_root: Path, attempt_id: str) -> str | None:

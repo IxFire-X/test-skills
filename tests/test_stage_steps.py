@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -178,6 +179,24 @@ def test_status_names_each_step_with_its_stage_slot_and_size(tmp_path: Path, cap
     _put(root, REQUIREMENTS, _marker(["src/part0.py — x"]))
     _call(capsys, "submit", root, REQUIREMENTS)
     assert _status(root)["next"] == {"verb": "prepare", "stage": PART}
+
+
+def test_status_next_command_for_prepare_and_submit_names_the_api_module(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, *_ = _run(tmp_path)
+    python = f'"{sys.executable}"'
+    assert _status(root)["next_command"] == f'{python} -m tools.api prepare --run-root "{root}" --stage {REQUIREMENTS}'
+    _call(capsys, "prepare", root, REQUIREMENTS)
+    assert _status(root)["next_command"] == f'{python} -m tools.api submit --run-root "{root}" --stage {REQUIREMENTS}'
+
+
+def test_status_next_command_for_finish_and_report_names_run_pipeline_with_project_and_run() -> None:
+    project, root = Path("/p"), Path("/p/.pilot-runs/r1")
+    for verb in ("finish", "report"):
+        assert run_pipeline._next_command(project, root, {"verb": verb, "stage": None}) == f'"{sys.executable}" -m tools.run_pipeline {verb} --project "{project}" --run "r1"'
+
+
+def test_status_has_no_next_command_while_the_next_step_is_the_humans() -> None:
+    assert run_pipeline._next_command(Path("/p"), Path("/p/.pilot-runs/r1"), {"verb": None, "stage": None}) is None
 
 
 def test_a_stage_the_table_does_not_know_is_refused_with_the_way(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -33,7 +33,7 @@ CHECKING = {"printed", "command_token", "printed_or"}
 IDENTIFIERS = {"attempt_id": "hex id of the attempt", "stage": "name from the closed list of stages", "stage_instance_id": "stage name",
                "expected": "stage name chosen by the chain of the automation", "kind": "name from the closed list of kinds",
                "instance": "stage name", "digest": "sha256 digest from the journal", "root.name": "run directory: 32 hex, checked by existing_run",
-               "path.name": "run directory: 32 hex"}
+               "path.name": "run directory: 32 hex", "verb": "next verb of the stage table: prepare, submit, finish or report"}
 # (file, expression) -> why this value is not a command argument or is checked on the line before
 SPECIFIC = {
     ("module_ids.py", "given"): "MODULE_ID_LEGACY is raised only when the value is the old hex form of the id (legacy_warning)",

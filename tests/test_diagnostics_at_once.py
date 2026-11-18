@@ -63,6 +63,36 @@ def test_one_validate_fragment_shows_every_diagnostic_each_with_a_fix() -> None:
     assert refused.value.code in BATCH_CODES and str(len(rows)) in str(refused.value)  # the envelope names how many there are
 
 
+def _empty_expectation(fragment: dict, *blockers: tuple[str, str]) -> None:
+    """An http step that is no manual one, its one expectation with no assertion, and the blockers (code, field_path) it carries."""
+    from tests.test_automation_revision_budget import automated_document
+
+    step = fragment["test_cases"][0]["steps"][0]
+    step["manual_only"], step["manual_reason"], step["operation"] = False, None, automated_document()["test_cases"][0]["steps"][0]["operation"]
+    step["test_data"], step["expectations"][0]["assertions"] = "Тело запроса отсутствует.", []
+    step["automation_blockers"] = [{"blocker_id": f"BLOCK-{fragment['namespace']}-{number}", "code": code, "field_path": path, "reason": "Нет данных.", "provenance": ["x"]}
+                                   for number, (code, path) in enumerate(blockers, start=1)]
+    fragment.pop("digest", None)
+
+
+def test_an_empty_expectation_in_a_blocked_step_needs_the_blocker_that_names_it() -> None:
+    from tools.batch_assembly import BatchAssemblyError, validate_fragment
+
+    fragment, plan, header, context = _synthetic()
+    _empty_expectation(fragment, ("UNRESOLVED_INPUT_BINDING", "/inputs"))
+    with pytest.raises(BatchAssemblyError) as refused:
+        validate_fragment(fragment, plan, header, context)
+    assert [row["code"] for row in refused.value.diagnostics] == ["SEMANTIC_MISSING_ASSERTION_BLOCKER"]
+
+
+def test_an_empty_expectation_with_its_own_blocker_passes() -> None:
+    from tools.batch_assembly import validate_fragment
+
+    fragment, plan, header, context = _synthetic()
+    _empty_expectation(fragment, ("UNRESOLVED_ASSERTION", "/expectations/0/assertions"))
+    validate_fragment(fragment, plan, header, context)
+
+
 def test_the_bindings_stay_fatal_and_first() -> None:
     from tools.batch_assembly import BatchAssemblyError, validate_fragment
 

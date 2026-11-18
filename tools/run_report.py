@@ -32,6 +32,7 @@ _NOTE_VERDICTS = frozenset({"ПРИНЯТО", "AUTO_FIX_APPLIED"})
 _NOTE_SEVERITIES = ("WARNING", "INFO")
 _SAFE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,39}$")
 _ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
+_PART_NOTE = re.compile(r"часть \d+ — код для .+? не найден")  # the note of a marker part whose batch has no code of a requirement: no question
 
 
 # --- questions for the analyst ----------------------------------------------------------------
@@ -72,7 +73,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
         parts = [part.strip() for part in text.split(SEPARATOR)]
         if len(parts) == 4 and all(parts):
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
-        elif text and text not in asked:
+        elif text and text not in asked and not _PART_NOTE.match(text):
             loose.append(text)
     checks = list((imported or {}).get("verdict_texts") or [])  # the cases an update of cases rewrote, made obsolete or doubts
     if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks and not unclear:

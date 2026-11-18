@@ -35,6 +35,19 @@ def test_questions_group_four_part_gaps_by_requirement_and_keep_the_rest() -> No
     assert "## Прочее" in text and LOOSE in text.split("## Прочее", 1)[1]
 
 
+def test_a_part_note_about_missing_code_is_no_question_for_the_analyst() -> None:
+    from tools.run_report import analyst_questions
+
+    assert analyst_questions(["часть 2 — код для SREQ-0001 не найден: экраны банкиров рендерятся ScreenFactory из пачки 1"]) == "вопросов нет\n"
+
+
+def test_a_disagreement_of_code_and_requirement_still_goes_to_the_rest() -> None:
+    from tools.run_report import analyst_questions
+
+    note = "SREQ-0003: код отвечает 200 — требование ждёт 201"
+    assert note in analyst_questions([note]).split("## Прочее", 1)[1]
+
+
 def test_no_gaps_gives_a_single_line() -> None:
     from tools.run_report import analyst_questions
 
