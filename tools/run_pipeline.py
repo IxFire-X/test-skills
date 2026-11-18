@@ -1810,7 +1810,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "изменение OpenSpec меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
                        fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
     try:  # what the delta says, composed with the specification: a real difference stops the scan here, not after the step of the model
-        applied = openspec_applied(entries)
+        applied, removed = openspec_applied(entries)
     except RequirementConflict as conflict:
         raise HostStop(conflict.code, str(conflict)) from conflict
     if cases and (partial := openspec_partial_archives(task_paths, list(by_path))):  # an update of cases judges the whole archived change: no delta is left out silently
@@ -1828,6 +1828,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     warnings = [f"{path} — OpenSpec контекст (proposal/design/tasks), не требования: строк требований из него нет" for path in task_paths if openspec_context_only(path)]
     warnings += [f"имена дельты не найдены среди нынешних требований, их кейсы не судятся: {', '.join(gone[:5])}"] * bool(gone)
     warnings += [f"изменение {name}: уже вписано в спецификацию, требований: {count}; они берутся из изменения, как обычно" for name, count in sorted(applied.items())]
+    warnings += removed  # a REMOVED whose name the specification lacks: gone already, or a name that does not match
     if skipped:
         names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
         archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)

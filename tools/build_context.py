@@ -454,8 +454,9 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}")
         seen.add(key)
-        as_said = have is None if operation == "REMOVED" else have is not None and _same(have["text"], row["text"])  # the specification has it as the change says
-        if as_said:
+        if operation == "REMOVED" and have is None:  # nothing to remove: gone already, or the name does not match — the specification cannot tell, so the line says both
+            warnings.append(f"{row['path']}:{row['line']} — REMOVED: требования {key[1]} в spec.md области нет, уже удалено или имя не совпало{_close(baseline, key)}")
+        elif operation != "REMOVED" and have is not None and _same(have["text"], row["text"]):  # the specification has it as the change says
             applied[row["path"].split("/")[2]] += 1
         if operation == "REMOVED":
             baseline.pop(key, None)
@@ -472,11 +473,12 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
     return rows, warnings
 
 
-def openspec_applied(entries: list[dict[str, str]]) -> dict[str, int]:
-    """By change, how many requirements its delta shows already written in the specification (whole files only); ``RequirementConflict`` when they do not compose."""
+def openspec_applied(entries: list[dict[str, str]]) -> tuple[dict[str, int], list[str]]:
+    """By change, how many requirements its delta shows already written in the specification, and the lines of the REMOVED whose name the specification lacks
+    (whole files only); ``RequirementConflict`` when they do not compose."""
     applied: Counter[str] = Counter()
-    _openspec_rows([row for row in entries if not row.get("section")], applied)
-    return dict(applied)
+    warnings = _openspec_rows([row for row in entries if not row.get("section")], applied)[1]
+    return dict(applied), [line for line in warnings if " — REMOVED: " in line]
 
 
 def openspec_gone_names(entries: list[dict[str, str]]) -> tuple[list[str], int]:

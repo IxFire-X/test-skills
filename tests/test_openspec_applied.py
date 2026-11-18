@@ -28,7 +28,7 @@ def _project(tmp_path: Path, spec: str, delta: str) -> Path:
 
 
 def _applied(project: Path) -> dict[str, int]:
-    return openspec_applied(_entries(project, [BASE, DELTA]))
+    return openspec_applied(_entries(project, [BASE, DELTA]))[0]
 
 
 def test_an_added_requirement_the_specification_already_has_is_taken_from_the_change(tmp_path: Path) -> None:
@@ -47,8 +47,8 @@ def test_a_modified_requirement_that_already_has_the_new_text_is_counted(tmp_pat
     assert _applied(_project(tmp_path, CREATE + SEARCH, MODIFY + SEARCH)) == {"add-search": 1}
 
 
-def test_a_removed_requirement_the_specification_no_longer_has_is_counted(tmp_path: Path) -> None:
-    assert _applied(_project(tmp_path, CREATE, REMOVE)) == {"add-search": 1}
+def test_a_removed_name_the_specification_lacks_is_not_counted_as_written(tmp_path: Path) -> None:
+    assert _applied(_project(tmp_path, CREATE, REMOVE)) == {}
 
 
 def test_a_renamed_requirement_the_specification_already_has_under_the_new_name_is_counted(tmp_path: Path) -> None:
@@ -101,6 +101,18 @@ def test_a_rename_that_fits_nothing_names_the_nearest_old_name(tmp_path: Path) -
 
 def test_a_name_with_nothing_near_it_adds_no_names(tmp_path: Path) -> None:
     assert NEAR not in _said(_project(tmp_path, _named("Create"), MODIFY + SEARCH))
+
+
+def test_a_removed_name_the_specification_lacks_gets_a_line_with_the_place_and_the_nearest_names(tmp_path: Path) -> None:
+    project = _project(tmp_path, _named("Search owners"), REMOVE)  # REMOVE names Search: gone already, or a name that does not match
+    [line] = openspec_applied(_entries(project, [BASE, DELTA]))[1]
+    assert line.startswith(f"{DELTA}:2 — REMOVED: требования Search в spec.md области нет") and NEAR + "Search owners" in line
+
+
+def test_the_line_of_a_removed_name_is_one_warning_of_the_marker(tmp_path: Path) -> None:
+    project = _project(tmp_path, _named("Search owners"), REMOVE)
+    warnings = build_context(project, docs_snapshot=_entries(project, [BASE, DELTA]))["warnings"]
+    assert len([warning for warning in warnings if " — REMOVED: " in warning]) == 1
 
 
 def test_the_scan_names_the_requirements_already_written_in_one_line_per_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
