@@ -1,12 +1,13 @@
 """P7: canaries in the reviewer's view — seeded by code, bound to the journal, counted at ``submit`` of the review.
 
-- ``seed`` is a pure function of the candidate: 0..3 control errors, none in a parameter group, "assertion removed" first; the
+- ``seed`` is a pure function of the candidate: ⌈√n⌉ control errors (3..15), none in a parameter group, "assertion removed" first; the
   candidate, its bundles and its journal events stay as they are, only the reviewer's view shows them;
 - the map ``<sha>.canaries.json`` is read through the receipt ``review-canaries`` (a journal event pair): a map, a view or a
   receipt that does not match is ``REVIEW_CANARY_MISMATCH``, never «0 hits»; a run without the receipt is NOT_SEEDED;
 - a finding (any severity) or an edit of a canary text is a hit; an edit whose ``old`` is the mutated text never reaches the canon;
 - a verdict that stands on canaries alone is refused before the answer is written;
-- the soft threshold: 0 of n — REVIEW_UNRELIABLE and accepted=false in report and status, 1..n-1 — weak, all — fine.
+- the soft threshold: under a third caught — REVIEW_UNRELIABLE and accepted=false in report and status, more than (n−1)//3 missed — weak,
+  fewer — mostly caught, all — fine (up to three errors this is "0 — unreliable, 1..n-1 — weak, all — fine").
 
 The flow tests seed fixed canaries (``_fake_seed``): the generator fixture of these tests has no assertions to mutate."""
 from __future__ import annotations
@@ -114,7 +115,7 @@ def test_seed_is_deterministic_leaves_the_candidate_and_puts_the_removed_asserti
     mutated, canaries = seed(document)
     assert json.dumps(document, sort_keys=True) == before  # the candidate itself is not touched
     assert seed(copy.deepcopy(document)) == (mutated, canaries)
-    assert 2 <= len(canaries) <= 3 and len({row["case_id"] for row in canaries}) == len(canaries)
+    assert len(canaries) == 8 and len({row["case_id"] for row in canaries}) == len(canaries)  # 64 cases: ⌈√64⌉
     assert canaries[0]["class"] == "assertion_removed" and canaries[0]["mutated"] == "" and canaries[0]["original"]
     assert [row["canary_id"] for row in canaries] == [f"CAN-{index}" for index in range(1, len(canaries) + 1)]
     assert mutated != document
@@ -158,6 +159,47 @@ def test_a_small_candidate_gets_fewer_and_a_single_case_none() -> None:
     two = copy.deepcopy(document)
     two["test_cases"] = two["test_cases"][:2]
     assert len(seed(two)[1]) == 1
+
+
+@pytest.mark.parametrize(("cases", "wanted"), [(0, 0), (1, 0), (2, 1), (4, 3), (9, 3), (10, 4), (64, 8), (212, 15), (5000, 15)])
+def test_the_number_of_canaries_grows_with_the_set_from_three_to_fifteen(cases: int, wanted: int) -> None:
+    from tools.review_canaries import canary_count
+
+    assert canary_count(cases) == wanted
+
+
+def _clone(document: dict, times: int) -> dict:
+    """The cases of the document *times* over, every case, step, expectation and assertion ID made new."""
+    import re
+
+    ids = re.compile(r"((?:TC|STEP|EXP|ASSERT)-[A-Za-z0-9_.:-]*[A-Za-z0-9_])")
+    big = copy.deepcopy(document)
+    big["test_cases"] = [case for part in range(times) for case in json.loads(ids.sub(rf"\1.c{part}", json.dumps(document["test_cases"], ensure_ascii=False)))]
+    return big
+
+
+def test_a_set_of_212_cases_gets_fifteen_canaries_mostly_omissions_and_the_map_is_valid() -> None:
+    from tools.canonical_document import document_sha256
+    from tools.review_canaries import map_bytes, seed
+    from tools.schema_validation import schema_diagnostics
+
+    document = _clone(_example(), 4)
+    document["test_cases"] = document["test_cases"][:212]
+    _mutated, canaries = seed(document)
+    assert len(canaries) == 15 and len({row["case_id"] for row in canaries}) == 15
+    assert [row["canary_id"] for row in canaries] == [f"CAN-{n}" for n in range(1, 16)]
+    assert sum(row["class"] in {"assertion_removed", "state_check_removed"} for row in canaries) >= 8  # the errors a reviewer misses are the majority
+    root = Path(__file__).resolve().parents[1]
+    assert schema_diagnostics(json.loads(map_bytes(document_sha256(document), canaries)), root / "schemas" / "review-canaries.schema.json", root) == []
+
+
+def test_the_canaries_do_not_make_the_view_bigger_by_a_tenth() -> None:
+    from tools.review_canaries import seed
+    from tools.review_view import render
+
+    document = _example()
+    mutated, canaries = seed(document)
+    assert len(canaries) == 8 and len(render(mutated, basis=document)) <= 1.10 * len(render(document))
 
 
 def test_a_case_of_a_parameter_group_is_never_mutated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,6 +379,103 @@ def test_the_soft_threshold_of_three(hits: int, status: str, note: str) -> None:
         assert "классы" in result["note"] and "сигнал качества ревью, не защита" in result["note"]
     assert outcome([], answer)["status"] == "NONE"
     assert outcome(None, answer)["status"] == "NOT_SEEDED"
+
+
+@pytest.mark.parametrize(("hits", "status"), [(15, "ALL_CAUGHT"), (12, "MOSTLY_CAUGHT"), (11, "MOSTLY_CAUGHT"), (10, "WEAK"), (5, "WEAK"), (4, "UNRELIABLE"), (0, "UNRELIABLE")])
+def test_the_threshold_of_fifteen_is_a_share_not_one_miss(hits: int, status: str) -> None:
+    from tools.review_canaries import CLASSES, outcome
+
+    canaries = [{"canary_id": f"CAN-{n}", "class": CLASSES[n % 4], "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
+                 "field": "assertions", "original": "a", "mutated": "", "markers": []} for n in range(1, 16)]
+    answer = {"artifacts": {"validation_report": {"findings": [_finding("INFO", [f"EXP-{n}"]) for n in range(1, hits + 1)]}}}
+    result = outcome(canaries, answer)
+    assert result["status"] == status and (result["warning"] is not None) == (status in {"UNRELIABLE", "WEAK"})
+
+
+def test_the_outcome_counts_the_caught_by_kind_of_error() -> None:
+    from tools.review_canaries import outcome
+
+    canaries = [{"canary_id": f"CAN-{n}", "class": cls, "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
+                 "field": "assertions", "original": "a", "mutated": "", "markers": []} for n, cls in ((1, "boundary"), (2, "state_check_removed"), (3, "state_check_removed"), (4, "status"))]
+    answer = {"artifacts": {"validation_report": {"findings": [_finding("INFO", ["EXP-1"]), _finding("INFO", ["EXP-2"]), _finding("INFO", ["EXP-4"])]}}}
+    assert outcome(canaries, answer)["by_class"] == {"boundary": {"seeded": 1, "caught": 1}, "status": {"seeded": 1, "caught": 1}, "state_check_removed": {"seeded": 2, "caught": 1}}
+
+
+def test_the_report_shows_the_catch_by_kind_and_the_model_of_the_reviewer() -> None:
+    from tools.run_report import _canary_lines
+
+    canaries = {"status": "MOSTLY_CAUGHT", "seeded": 15, "caught": 12, "missed_classes": ["state_check_removed"], "note": "n",
+                "by_class": {"boundary": {"seeded": 5, "caught": 5}, "state_check_removed": {"seeded": 5, "caught": 2}}}
+    text = "\n".join(_canary_lines({"review_canaries": canaries, "review_model": "haiku-5-5"}))
+    assert "- по виду «сдвинута граница»: поймано 5 из 5 (100 %)" in text and "- по виду «убран пункт проверок»: поймано 2 из 5 (40 %)" in text and "haiku-5-5" in text
+
+
+@pytest.mark.parametrize(("label", "shown"), [("haiku-5-5", "haiku-5-5"), ("vendor/haiku-5-5", None), ("h" * 100, None)])  # prepare lets a label of 256 signs with a slash in; the report takes the narrower identifier only
+def test_the_report_names_the_model_the_reviewer_was_given_as_an_identifier_or_not_at_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, shown: str | None) -> None:
+    from tools import review_canaries, stage_steps
+    from tools.run_report import build_report
+
+    run = _generated_run(tmp_path)
+    monkeypatch.setattr(review_canaries, "seed", _fake_seed)
+    stage_steps.prepare(run["run_root"], "tc-reviewer:canonical", model_id=label, invocation_id="reviewer-subagent-1", fresh_context=True)
+    _select(run, _answer(run))
+    report, _w = build_report(run["project"], run["run_root"].name)
+    assert report["review_model"] == shown and set(report["review_canaries"]["by_class"]) == {"boundary", "assertion_removed"}
+    assert label not in json.dumps(report, ensure_ascii=False) or shown == label
+
+
+def test_a_copy_of_the_response_code_in_the_body_is_not_removed_as_a_control_error() -> None:
+    from tools.review_canaries import _options
+
+    def assertion(kind: str, value: int, **actual: str) -> dict:
+        return {"assertion_id": f"ASSERT-{kind}-{actual.get('pointer', '')}", "operator": "equals", "actual": {"kind": kind, **actual}, "expected": {"kind": "literal", "value": value}}
+
+    code, copy_of_code, other = assertion("http_status", 404), assertion("http_body", 404, pointer="/status"), assertion("http_body", 7, pointer="/count")
+    exp = {"expectation_id": "EXP-1", "text": "404", "assertions": [code, copy_of_code, other]}
+    case = {"case_id": "TC-1", "steps": [{"step_id": "STEP-1", "expectations": [exp]}]}
+    options = _options("state_check_removed", case, "sha256:" + "0" * 64)
+    assert [row["assertion_id"] for row, _apply in options] == [other["assertion_id"]]
+    exp["assertions"] = [code, copy_of_code]  # nothing but the code and its copy: no error that a reviewer can see
+    assert _options("state_check_removed", case, "sha256:" + "0" * 64) == []
+
+
+def test_fifteen_canaries_are_bound_by_the_receipt_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import review_canaries
+
+    def many(document):
+        work, rows = _fake_seed(document)
+        return work, [{**rows[n % 2], "canary_id": f"CAN-{n + 1}"} for n in range(15)]
+
+    run = _generated_run(tmp_path)
+    monkeypatch.setattr(review_canaries, "seed", many)
+    _open(run, monkeypatch, seed=False)
+    assert [row["canary_id"] for row in review_canaries.verify(*_flags(run))] == [f"CAN-{n}" for n in range(1, 16)]
+
+
+def test_a_vague_blocking_finding_on_a_canary_case_rejects_the_case_at_three_and_at_eight_canaries() -> None:
+    from tools.review_canaries import seed
+    from tools.revision_selection import review_outcome
+
+    document = _example()
+    _mutated, canaries = seed(document)
+    case_id = canaries[0]["case_id"]
+    vague = {"findings": [{"severity": "BLOCKING", "code": "REVIEW_NOTE", "message": "Ошибка в кейсе.", "evidence": [], "related_ids": [case_id]}]}
+    for rows in (canaries[:3], canaries):
+        done = review_outcome(document, vague, rows)
+        assert done["kind"] == "PARTIAL" and done["rejected"] == [case_id]
+    strict = {"findings": [{**vague["findings"][0], "related_ids": [canaries[0]["expectation_id"]]}]}
+    assert review_outcome(document, strict, canaries)["kind"] == "ACCEPTED_WHOLE"  # the finding that names the expectation of the canary rejects nothing
+
+
+def test_vague_blocking_findings_on_every_canary_case_are_held_by_the_share_limit() -> None:
+    from tools.review_canaries import seed
+    from tools.revision_selection import review_outcome
+
+    document = _example()
+    _mutated, canaries = seed(document)
+    wide = {"findings": [{"severity": "BLOCKING", "code": "REVIEW_NOTE", "message": "Ошибка.", "evidence": [], "related_ids": [row["case_id"]]} for row in canaries]}
+    done = review_outcome(document, wide, canaries, share=10)
+    assert done["kind"] == "REWORK" and done["reason"] == "OVER_SHARE"
 
 
 # --------------------------------------------------------------------------------------

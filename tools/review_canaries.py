@@ -22,13 +22,20 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 CLASSES = ("assertion_removed", "boundary", "status", "state_check_removed")
+# the order the seeding takes the classes in: two of three are omissions (a removed line or a removed item of the checks) — the errors a
+# reviewer misses; a changed code or a shifted number is caught every time (R&D-01), so these are put less often
+_ROUND = ("assertion_removed", "boundary", "state_check_removed", "assertion_removed", "status", "state_check_removed")
+CLASS_NAMES = {"assertion_removed": "убрана строка проверок", "boundary": "сдвинута граница", "status": "изменён статус", "state_check_removed": "убран пункт проверок"}
 MAP_VERSION = "1.0.0"
-MAX_CANARIES = 3
+# every number that sets how many errors are put and how many misses are tolerated is here: ⌈√n⌉ errors, from MIN to MAX (never all the cases);
+# a review is UNRELIABLE when fewer than 1/THIRD of them are caught and WEAK when more than (N−1)//THIRD are missed
+MIN_CANARIES, MAX_CANARIES, THIRD = 3, 15, 3
 REVIEW_STAGE = "tc-reviewer:canonical"
 RECEIPT_KIND = "review-canaries"
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -80,6 +87,11 @@ def _int_literal(assertion: Mapping[str, Any]) -> int | None:
     return None
 
 
+def _copy_of_code(assertion: Mapping[str, Any]) -> bool:
+    actual = assertion.get("actual") or {}
+    return actual.get("kind") == "http_body" and actual.get("pointer") == "/status"
+
+
 def _token(value: int) -> "re.Pattern[str]":
     return re.compile(rf"(?<![\d.,]){value}(?![\d])")
 
@@ -120,7 +132,10 @@ def _options(cls: str, case: dict[str, Any], digest: str) -> list[tuple[dict[str
                     exp["assertions"] = []
                 found.append((row, apply))
             elif cls == "state_check_removed" and len(assertions) >= 2:
-                removable = [item for item in assertions if (item.get("actual") or {}).get("kind") != "http_status"]
+                shown = {_int_literal(item) for item in assertions if (item.get("actual") or {}).get("kind") == "http_status"}
+                # the code of the response is checked by a line of its own: its copy in the body (`/status`) is no error a reviewer can see (R&D-01)
+                removable = [item for item in assertions if (item.get("actual") or {}).get("kind") != "http_status"
+                             and not (_copy_of_code(item) and _int_literal(item) in shown)]
                 if removable:
                     gone = removable[_rank(digest, case["case_id"], exp["expectation_id"]) % len(removable)]
                     kept = [item for item in assertions if item is not gone]
@@ -172,10 +187,15 @@ def _options(cls: str, case: dict[str, Any], digest: str) -> list[tuple[dict[str
     return found
 
 
+def canary_count(eligible: int) -> int:
+    """How many control errors a candidate of *eligible* cases gets: ⌈√n⌉, at least 3 and at most 15, never all the cases (n−1)."""
+    return max(0, min(MAX_CANARIES, max(MIN_CANARIES, math.isqrt(max(eligible, 1) - 1) + 1), eligible - 1))
+
+
 def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """``(document for the view, canaries)``.  The document of the view is a copy with 0..3 cases mutated, none of them in a
-    parameter group; the argument is not changed.  With fewer than two such cases nothing is seeded (one case of one would be
-    a view that is all control)."""
+    """``(document for the view, canaries)``.  The document of the view is a copy with ``canary_count`` cases mutated (one error a
+    case), none of them in a parameter group; the argument is not changed.  With fewer than two such cases nothing is seeded (one
+    case of one would be a view that is all control)."""
     from tools.canonical_document import document_sha256, param_groups
     from tools.test_case_projections import SLOT
 
@@ -186,13 +206,13 @@ def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         grouped = {case["case_id"] for group in param_groups(dict(document)) for case in group["cases"]}
     eligible = [case for case in work["test_cases"] if case["case_id"] not in grouped]
     order = sorted(eligible, key=lambda case: _rank(digest, case["case_id"]))
-    wanted = min(MAX_CANARIES, max(0, len(eligible) - 1))
+    wanted = canary_count(len(eligible))
     used: set[str] = set()
     rows: list[dict[str, Any]] = []
     progressed = True
     while len(rows) < wanted and progressed:
         progressed = False
-        for cls in CLASSES:
+        for cls in _ROUND:
             if len(rows) >= wanted:
                 break
             for case in order:
@@ -428,15 +448,21 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     hits = hit_ids(canaries, answer)
     missed = [row for row in canaries if row["canary_id"] not in hits]
     classes = sorted({row["class"] for row in missed})
-    if not hits:
+    allowed = (seeded - 1) // THIRD  # misses that are no sign of a weak review: none up to 3 errors, a third of the rest
+    if THIRD * len(hits) < seeded:  # fewer than a third caught (none of 3, as before)
         status, warning = "UNRELIABLE", "REVIEW_UNRELIABLE"
-        note = f"ревью ненадёжно (REVIEW_UNRELIABLE): ни одна из {seeded} контрольных ошибок не поймана, классы {', '.join(classes)}"
-    elif missed:
+        got = "ни одна из" if not hits else f"поймано {len(hits)} из"
+        note = f"ревью ненадёжно (REVIEW_UNRELIABLE): {got} {seeded} контрольных ошибок {'не поймана' if not hits else 'меньше трети'}, классы {', '.join(classes)}"
+    elif len(missed) > allowed:
         status, warning = "WEAK", "REVIEW_WEAK"
         note = f"ревью слабое: пропущено {len(missed)} из {seeded}, классы {', '.join(classes)}"
+    elif missed:
+        status, warning, note = "MOSTLY_CAUGHT", None, f"поймано {len(hits)} из {seeded} контрольных ошибок (допустимо пропустить до {allowed}), классы пропущенных: {', '.join(classes)}"
     else:
         status, warning, note = "ALL_CAUGHT", None, f"поймано {seeded} из {seeded} контрольных ошибок"
-    return {"status": status, "seeded": seeded, "caught": len(hits), "missed_classes": classes, "hits": hits, "warning": warning,
+    by_class = {cls: {"seeded": sum(row["class"] == cls for row in canaries), "caught": sum(row["class"] == cls and row["canary_id"] in hits for row in canaries)}
+                for cls in CLASSES if any(row["class"] == cls for row in canaries)}
+    return {"status": status, "seeded": seeded, "caught": len(hits), "missed_classes": classes, "by_class": by_class, "hits": hits, "warning": warning,
             "note": note + "; " + NOTE}
 
 

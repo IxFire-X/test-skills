@@ -278,8 +278,10 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     inputs: list[str] = []
     by_code = False
     reuse = None
+    call["model_id"] = None
     try:
         request = pilot.read_model_request(root, str(call["attempt_id"]), str(call["stage"]), str(call["request_digest"]))
+        call["model_id"] = _identifier(request.get("model_id"))  # the label the agent gave with --model-id: an identifier or none; free text never goes into the report
         inputs = list(request.get("input_digests") or [])
         # a controller step (the merge of the marker parts) is code, not a model call.
         by_code = str(request.get("model_id") or "").startswith("controller:")
@@ -1055,6 +1057,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         # the run of the tests was a human's — the package did not reproduce it
         "execution_source": ({**execution["execution_source"], "note": HUMAN_RESULT_NOTE} if execution.get("execution_source") else None),
         "acceptance": acceptance, "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
+        "review_model": next((call["model_id"] for call in calls if call.get("stage") == "tc-reviewer:canonical" and call.get("by") == "model" and call.get("model_id")), None),
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
         "execution_stats": execution.get("stats"),
@@ -1197,6 +1200,13 @@ def _canary_lines(report: Mapping[str, Any]) -> list[str]:
         lines.append(f"- {canaries['status']}: посеяно {_dash(canaries.get('seeded'))}, поймано {_dash(canaries.get('caught'))}"
                      + (f"; пропущены классы: {', '.join(canaries['missed_classes'])}" if canaries.get("missed_classes") else ""))
         lines.append(f"- {canaries['note']}")
+        if canaries.get("by_class"):  # omissions are the errors a reviewer misses; a changed code or number is caught every time: one total hides it
+            from tools.review_canaries import CLASS_NAMES
+
+            lines.extend(f"- по виду «{CLASS_NAMES[cls]}»: поймано {row['caught']} из {row['seeded']} ({round(100 * row['caught'] / row['seeded'])} %)"
+                         for cls, row in canaries["by_class"].items())
+    if report.get("review_model"):
+        lines.append(f"- модель ревьюера (по названию из запроса): {report['review_model']}")
     if codeword:
         lines.append(f"- кодовое слово: {codeword['state']} — {codeword['note']}")
     return lines + [""]

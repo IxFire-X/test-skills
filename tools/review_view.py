@@ -671,7 +671,7 @@ def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any
 def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any]) -> dict[str, Any]:
     """The reviewer's view of the assembled candidate with canaries, its map and the receipt that binds both to the journal.
 
-    The view is rendered from a copy of the candidate with 0..3 control errors (``tools.review_canaries.seed``); the candidate, its
+    The view is rendered from a copy of the candidate with up to 15 control errors (``tools.review_canaries.seed``); the candidate, its
     bundles and its journal events stay as they are.  The map and the view are written next to each other in
     ``<run>/review-views/``, the receipt ``review-canaries`` (and its event pair) carries their digests and the candidate's.  A run
     that already has the receipt and files that match it is left as it is — the same call again changes nothing."""

@@ -3775,13 +3775,15 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid reference-cases receipt")
     elif kind == "review-canaries":  # the digests of the canary map and of the reviewer's view, bound to the assembled candidate
+        from tools.review_canaries import MAX_CANARIES
+
         digests = ("candidate_digest", "view_digest", "canary_map_digest")
         if (
             set(receipt) != common | {*digests, "canary_count"}
             or not identity_matches
             or any(not _DIGEST.fullmatch(str(receipt.get(name, ""))) for name in digests)
             or type(receipt.get("canary_count")) is not int
-            or not 0 <= receipt["canary_count"] <= 3
+            or not 0 <= receipt["canary_count"] <= MAX_CANARIES
             or not any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt["attempt_id"]
                        and event.get("stage_instance_id") == "assembly" and event.get("artifact_digest") == receipt["candidate_digest"]
                        for event in state["events"])
