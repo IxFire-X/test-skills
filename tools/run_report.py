@@ -1271,6 +1271,8 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if canaries.get("status") in {"WEAK", "UNRELIABLE"}:
         lines += [f"> **Внимание: ревьюер пропустил {canaries['seeded'] - canaries['caught']} из {canaries['seeded']} контрольных ошибок**, которые код подложил для проверки его внимательности.",
                   "> Ревью могло пропустить и настоящие ошибки — просмотрите принятые кейсы внимательнее перед импортом.", ""]
+    if acc["outcome"] == "PARTIAL" and removed * 100 > acc.get("share_set", acc["share"]) * total:  # the rework left more out than the limit allows
+        lines += [f"> Не вошло больше допустимого: {removed} из {total} (предел {acc.get('share_set', acc['share'])} %) — принятые кейсы просмотрите внимательнее перед импортом.", ""]
     lines += _label_lines(report)
     who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
     if acc["outcome"] != "PARTIAL":

@@ -397,7 +397,7 @@ def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[st
     return record
 
 
-def reject_share(run_root: Path, attempt_id: str) -> int:
+def configured_share(run_root: Path, attempt_id: str) -> int:
     """``.skillsrc`` ``limits.review_reject_share`` (percent, 0..50) of the limits the run froze at scan; 20 when none."""
     from tools.pilot_state import derive_state, run_root_of
     from tools.step_size import run_limits, whole_limit
@@ -405,6 +405,12 @@ def reject_share(run_root: Path, attempt_id: str) -> int:
     project, root = run_root_of(Path(run_root))
     value = whole_limit(run_limits(project, root, derive_state(root), attempt_id)[0].get("review_reject_share"))
     return DEFAULT_REJECT_SHARE if value is None else min(max(value, 0), 50)
+
+
+def reject_share(run_root: Path, attempt_id: str) -> int:
+    """The share of the set the first review takes out before it sends the whole set back: half while the rework is on (what is over ``configured_share`` goes back
+    once, as the rest of the rejected cases do), else ``configured_share``; the limit stays the one the report warns by after the rework."""
+    return 50 if rework_rounds(run_root, attempt_id) == 1 else configured_share(run_root, attempt_id)
 
 
 def answer_outcome(run_root: Path, attempt_id: str, report: Mapping[str, Any]) -> dict[str, Any]:
@@ -475,13 +481,13 @@ def acceptance_summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any
     outcome = review_outcome(candidate, _plain(report), verify(run_root, attempt_id) or (), share)
     if (ledger["authoritative_verdict"] == "ACCEPTED") != (outcome["kind"] != "REWORK"):
         return None  # the limit changed since the select: the report names no outcome the ledger does not
-    summary.update(outcome=outcome["kind"], reason=outcome["reason"], share=share, removed=outcome["removed"], rejected_by_findings=len(outcome["rejected"]),
+    summary.update(outcome=outcome["kind"], reason=outcome["reason"], share=share, share_set=configured_share(run_root, attempt_id), removed=outcome["removed"], rejected_by_findings=len(outcome["rejected"]),
                    rejected_with_group=len(outcome["with_group"]), accepted=0 if outcome["kind"] == "REWORK" else total - outcome["removed"])
     if outcome["kind"] == "PARTIAL":
         state, final, partial = _partial_of(run_root, attempt_id, candidate, outcome)
         name = f"published/{candidate['document_id']}.r{partial['revision']}"
         if state:  # the first review sent cases back for a rework: what became of it
-            summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": len(final["accepted_after"]) if final else 0, "accepted_first": total - outcome["removed"],
+            summary["rework"] = {"state": state, "sent": len(outcome["rejected"]), "accepted": len(final["accepted_after"]) if final else 0, "accepted_first": total - outcome["removed"], "over_share": outcome["removed"] * 100 > summary["share_set"] * total,
                                  **({"ignored": final["ignored"], "independent": rework_independent(run_root, attempt_id)} if final else {})}
         if final:
             left = len(final["rejected"]) + len(final["with_group"])

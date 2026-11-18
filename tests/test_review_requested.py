@@ -177,9 +177,11 @@ def test_prepare_and_submit_complete_the_session_and_the_effective_canonical_is_
     assert effective["document_digest"].startswith("sha256:"), effective
 
 
-def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path: Path) -> None:
+def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_review_two_commands import _ledger
+    from tools import orchestrate_test_case_revision as orchestrate
 
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # with the rework on, one case of two sent back goes to the rework
     run = _opened_reviewed(tmp_path, "ТРЕБУЕТ ДОРАБОТКИ")
     assert _ledger(run)["events"][1]["verdict"] == "REJECTED"
     from tools import pilot_state

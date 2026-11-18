@@ -12,6 +12,14 @@ from tests.test_review_requested import _generated_run
 from tests.test_review_two_commands import _bundles, _cycle, _open, _select_verdict, _verdict
 
 
+@pytest.fixture(autouse=True)
+def _no_rework(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The set a review rejects whole is what these tests look at; with the rework on, one case of two sent back goes to the rework (test_rework_stage)."""
+    from tools import orchestrate_test_case_revision as orchestrate
+
+    monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
+
+
 def _files(run: dict, pattern: str) -> list[Path]:
     return sorted(Path(_bundles(run)).glob(pattern))
 

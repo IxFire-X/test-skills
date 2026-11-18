@@ -530,7 +530,7 @@ def test_a_trial_run_does_not_tell_what_the_canaries_and_the_word_caught(tmp_pat
     one, _two = _ids(run)
     answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [one["steps"][0]["expectations"][0]["expectation_id"]], "Нет проверки.")])
     trial = _select(run, answer, dry_run=True)
-    assert {"review_canaries", "codeword", "review_warnings", "independence"}.isdisjoint(trial) and trial["status"] == "REWORK"
+    assert {"review_canaries", "codeword", "review_warnings", "independence"}.isdisjoint(trial) and trial["status"] == "REWORK_PENDING"
     assert {"review_canaries", "codeword"} <= set(_select(run, answer))  # the count and the word are for the real call
 
 
@@ -772,7 +772,7 @@ def test_a_real_blocking_finding_in_the_step_of_a_canary_about_something_else_ma
     step = one["steps"][0]["step_id"]
     answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [step], "Шаг не проверяет требование REQ-9 вовсе.", code="REQ_GAP")])
     done = _select(run, answer)  # not refused: the finding does not name the value of the canary
-    assert done["status"] == "REWORK"
+    assert done["status"] == "REWORK_PENDING"  # one case of the two goes back: 50 %, within the half the rework takes
 
 
 def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_canaries_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

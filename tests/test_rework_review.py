@@ -99,6 +99,19 @@ def test_a_reworked_case_not_accepted_stays_out_with_the_findings_of_both_rounds
     assert (acceptance["outcome"], acceptance["rework"]["state"], acceptance["rework"]["accepted"]) == ("PARTIAL", "reviewed", 0) and "Снова нет проверки" not in json.dumps(acceptance, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("verdict, over", [("ТРЕБУЕТ ДОРАБОТКИ", True), ("ПРИНЯТО", False)])
+def test_the_report_says_a_rework_began_over_the_limit_and_what_the_limit_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], verdict: str, over: bool) -> None:
+    from tools.run_report import build_report
+
+    run = _ready(tmp_path, monkeypatch, capsys)  # one case of the two went back: 50 % against the limit of 20 the run has
+    root, one = run["run_root"], _ids(run)[0]
+    _open(run, capsys)
+    _put(root, REVIEW, _answer(run, verdict, *([_finding("BLOCKING", [one["case_id"]], "Снова нет проверки.")] if verdict != "ПРИНЯТО" else [])))
+    assert _call(capsys, "submit", root, REVIEW)[0] == 0
+    acceptance = build_report(run["project"], root.name)[0]["acceptance"]
+    assert (acceptance["rework"]["over_share"], acceptance["share_set"]) == (True, 20) and (acceptance["removed"] > 0) == over
+
+
 def test_a_blocking_finding_without_a_case_accepts_none_and_one_on_a_case_of_the_first_round_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     run = _ready(tmp_path, monkeypatch, capsys)
     root, two = run["run_root"], _ids(run)[1]

@@ -213,7 +213,7 @@ def test_dry_run_changes_nothing_byte_for_byte(tmp_path: Path, verdict: str) -> 
     code, dry = _select_verdict(run, answer, "--dry-run")
     assert code == 0 and dry["dry_run"] is True and dry["status"] == "ok", dry
     assert _tree(run["run_root"]) == before[0] and _tree(run["project"]) == before[1]  # the journal, the ledger, the bundles, tmp: all
-    expected = {"ПРИНЯТО": "EFFECTIVE_SELECTED", "ТРЕБУЕТ ДОРАБОТКИ": "REWORK", "AUTO_FIX_APPLIED": "EFFECTIVE_SELECTED"}[verdict]
+    expected = {"ПРИНЯТО": "EFFECTIVE_SELECTED", "ТРЕБУЕТ ДОРАБОТКИ": "REWORK_PENDING", "AUTO_FIX_APPLIED": "EFFECTIVE_SELECTED"}[verdict]
     assert dry["result"]["status"] == expected, dry
     would = dry["result"]["would_publish"]
     assert would["reviewer_ledger"]["status"] == "COMPLETED"

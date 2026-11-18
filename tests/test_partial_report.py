@@ -50,6 +50,12 @@ def test_the_other_outcomes_are_a_line_each() -> None:
     assert "**ТРЕБУЕТ ДОРАБОТКИ:** отклонено 14 из 66 кейсов — больше допустимого (20 %)." in over and "Файлы для работы" not in over
 
 
+def test_a_partial_set_over_the_limit_after_the_rework_carries_the_warning() -> None:
+    warning = "Не вошло больше допустимого: 14 из 66 (предел 20 %) — принятые кейсы просмотрите внимательнее перед импортом."
+    assert warning in _lines(_acceptance(removed=14, accepted=52, share=50, share_set=20))
+    assert "Не вошло больше допустимого" not in _lines(_acceptance(removed=13, accepted=53, share=50, share_set=20))
+
+
 def test_a_review_in_the_same_session_is_named_so_and_a_run_without_an_answer_has_no_block() -> None:
     assert "Ревью: в той же сессии (SELF), 1 круг: весь набор." in _lines(_acceptance(), isolation="independence_unverified")
     assert _lines(None) == ""

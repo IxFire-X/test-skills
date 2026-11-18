@@ -210,6 +210,49 @@ def test_the_rounds_are_read_from_the_limits_the_run_froze(tmp_path: Path, monke
         assert rework_rounds(*args) == wanted
 
 
+def _frozen_limits(monkeypatch: pytest.MonkeyPatch, **limits) -> None:
+    from tools import step_size
+
+    monkeypatch.setattr(step_size, "run_limits", lambda *_args: (limits, None))
+
+
+@pytest.mark.parametrize("limits, first, set_", [({"review_reject_share": 20, "rework_rounds": 1}, 50, 20), ({"review_reject_share": 20, "rework_rounds": 0}, 20, 20),
+                                                 ({"rework_rounds": 1}, 50, 20), ({"review_reject_share": 35, "rework_rounds": 0}, 35, 35)])
+def test_the_first_review_takes_out_up_to_half_the_set_while_the_rework_is_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limits: dict, first: int, set_: int) -> None:
+    from tools.orchestrate_test_case_revision import configured_share, reject_share
+
+    run = _generated_run(tmp_path)
+    _frozen_limits(monkeypatch, **limits)
+    args = (run["run_root"], run["attempt_id"])
+    assert (reject_share(*args), configured_share(*args)) == (first, set_)
+
+
+@pytest.mark.parametrize("rounds, status", [(1, "REWORK_PENDING"), (0, "REWORK")])
+def test_more_cases_rejected_than_the_limit_go_to_the_rework_unless_it_is_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rounds: int, status: str) -> None:
+    _frozen_limits(monkeypatch, review_reject_share=20, rework_rounds=rounds)  # one case of the two: 50 %, over the limit of 20
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, _two = _ids(run)
+    findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")]
+    assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == status
+
+
+def test_a_run_closed_over_the_limit_before_the_rework_began_names_no_outcome_the_ledger_does_not_have(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.orchestrate_test_case_revision import acceptance_summary
+    from tools.review_canaries import recorded_answer
+
+    _frozen_limits(monkeypatch, review_reject_share=20, rework_rounds=0)
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, _two = _ids(run)
+    findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")]
+    assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == "REWORK"
+    args = (run["run_root"], run["attempt_id"])
+    assert acceptance_summary(*args, recorded_answer(*args))["outcome"] == "REWORK"
+    _frozen_limits(monkeypatch, review_reject_share=20, rework_rounds=1)  # a limit that was not the run's: the journal says REWORK, the new count says PARTIAL
+    assert acceptance_summary(*args, recorded_answer(*args)) is None
+
+
 # ---- the close: the first review sent cases back and nobody reviewed the rework ---------------------------------------------------
 
 def _closed(run: dict, capsys: pytest.CaptureFixture[str]) -> tuple[dict, str]:

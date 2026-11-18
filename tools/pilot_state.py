@@ -2674,7 +2674,9 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
                          "сессии; fix: проведи ревью в новой сессии (/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её "
                          "ответ как есть; ничего не записано. Ревью в той же сессии допустимо, только если человек согласен: prepare с --fresh-context no --accept-self-review")
     try:
-        review_decision(candidate, value, imported=_run_imported(root, attempt_id), canaries=canaries)
+        from tools.orchestrate_test_case_revision import reject_share
+
+        review_decision(candidate, value, imported=_run_imported(root, attempt_id), canaries=canaries, share=reject_share(root, attempt_id))
     except OrchestrationError as error:
         rows = "; ".join(f"{row.get('path') or '/'} {row.get('code')}" for row in error.diagnostics[:8])
         raise ValueError(f"REVIEW_DECISION_INVALID: {rows}; fix: это ошибка ответа ревьюера — исправь решение и отдай его "
