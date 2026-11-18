@@ -107,7 +107,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     if unclear:  # the document's own unclear places and the doubts of the marker: a question each, the run does not stop
         lines += ["## Неясности в требованиях", ""]
         for row in unclear:
-            lines += ([f"- {row['source_requirement_id']}: в тексте требования отмечена неясность («{row['mark']}»): {row['text']}", "  - Вопрос: какое поведение требуется?"]
+            lines += ([f"- {row['source_requirement_id']}: в тексте требования отмечена неясность («{row['mark']}»): {row['text']}", "  - Вопрос: какое поведение требуется?" + (" Кейс на это требование не написан." if row.get("no_case") else "")]
                       if "mark" in row else [f"- Требование и источник: {row['source']}", f"  - Что неясно: {row['unclear']}", f"  - Вопрос: {row['question']}"])
         lines.append("")
     if loose:
@@ -867,7 +867,9 @@ def _unconfirmed(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -
 
     rows = unclear_rows(root, attempt_id, state) if attempt_id else []
     ids = sorted({row["source_requirement_id"] for row in rows})
-    return {"unconfirmed": {"count": len(ids), "requirements": [item for item in map(_identifier, ids) if item]}} if ids else {}
+    cut = sorted({row["source_requirement_id"] for row in rows if row.get("no_case")})  # the requirements left without a case: no expected result
+    return {"unconfirmed": {"count": len(ids), "requirements": [item for item in map(_identifier, ids) if item],
+                            **({"without_case": [item for item in map(_identifier, cut) if item]} if cut else {})}} if ids else {}
 
 
 def _boundary_fresh(pilot: Any, root: Path, attempt_id: str, revision: int) -> bool | None:
@@ -1353,8 +1355,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                       *([f"- {scope['mismatch']}"] if scope.get("mismatch") else []), ""]
     if report.get("unconfirmed"):
         unconfirmed = report["unconfirmed"]
-        lines += ["## Неясности в требованиях", "", f"- неподтверждённых условий: {unconfirmed['count']}; требования: {', '.join(unconfirmed['requirements'])}; "
-                  "вопросы — в questions-for-analyst.md, прогон не останавливался", ""]
+        from tools.publish_test_case_bundle import plural
+        cut = unconfirmed.get("without_case")
+        lines += ["## Неясности в требованиях", "", (f"- без кейсов: {len(cut)} {plural(len(cut), 'требование', 'требования', 'требований')} ({', '.join(cut)}) — ожидаемый результат не задан, "
+                  "в документе помечено неясным; вопросы аналитику — questions-for-analyst.md; прогон не останавливался" if cut else
+                  f"- неподтверждённых условий: {unconfirmed['count']}; требования: {', '.join(unconfirmed['requirements'])}; "
+                  "вопросы — в questions-for-analyst.md, прогон не останавливался"), ""]
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "

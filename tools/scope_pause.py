@@ -75,12 +75,26 @@ FOUND_MARKS = (r"неподтвержд[её]нн(?:ое|ые)\s+услови(?:
                r"\b(?:TBD|TBC|TODO)\b")
 COMMON_MARKS = (r"уточнить", r"требует\s+уточнени\w*", r"открыт\w+\s+вопрос\w*", r"под\s+вопросом")
 _MARK = re.compile("|".join(FOUND_MARKS + COMMON_MARKS), re.IGNORECASE)
+_CUT = re.compile("|".join((r"требует\s+уточнени\w*", r"открыт\w+\s+вопрос\w*", r"под\s+вопросом", r"\b(?:TBD|TBC)\b",
+                            r"(?:нужно|надо|необходимо|следует|требуется)\s+уточнить", r"уточнить\s+у\s")), re.IGNORECASE)  # the marks of a requirement whose expected result is not set (the others mark a detail of a set behaviour)
+UNCLEAR_REASON = "ожидаемый результат не задан (в документе помечено неясным)"
 
 
 def mark_of(text: Any) -> str | None:
     """The first mark of an unclear place in the text of a requirement, or None."""
     found = _MARK.search(str(text or ""))
     return " ".join(found.group(0).split()) if found else None
+
+
+def cut_rows(requirements: Sequence[Mapping[str, Any]], left: set[str], imported: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
+    """The requirements that get no case: marked as unset (``_CUT``), not left out by the human, not traced by a case of the human's CSV — and only
+    while one requirement is left to plan.  ``out_of_scope`` rows of the plan with the reason ``UNCLEAR_REASON``."""
+    from tools.cases_import import case_sources
+
+    traced = {source for case in (imported or {}).get("cases") or [] for source in case_sources(case)}
+    rows = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": UNCLEAR_REASON} for row in requirements
+            if str(row["source_requirement_id"]) not in left | traced and _CUT.search(str(row.get("text") or ""))]
+    return rows if len(rows) + len(left) < len(requirements) else []
 
 
 def question_row(warning: Any, known: Sequence[str] | set[str]) -> dict[str, str] | None:
@@ -149,7 +163,8 @@ def unclear_rows(run_root: Path, attempt_id: str, state: Mapping[str, Any] | Non
     except (ScopeRefused, KeyError, OSError, TypeError, ValueError):
         return []
     left = {row["source_requirement_id"] for row in (published["out_of_scope"] if published is not None else out_of_scope(decision))}
-    return unclear_of(marker, left) if marker is not None else []
+    cut = set(published["unclear_cut"]) if published is not None else set()  # no case is written for these
+    return [dict(row, no_case=True) if row["source_requirement_id"] in cut else row for row in unclear_of(marker, left)] if marker is not None else []
 
 
 def draft_questions(marker: Mapping[str, Any]) -> str:
@@ -386,9 +401,11 @@ def check_plan(run_root: Path, attempt_id: str, plan: Mapping[str, Any], state: 
             raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план теряет требования разметки без записи в out_of_scope: {sorted(wanted - covered) or 'нет'}, "
                                f"лишние: {sorted(covered - wanted) or 'нет'}; fix: повтори `submit --stage plan` — план строит код из всех требований разметки")
     expected = sorted(row["source_requirement_id"] for row in out_of_scope(scope["decision"]))
-    listed = plan.get("out_of_scope") if isinstance(plan, Mapping) else None
-    given = sorted(str(row.get("source_requirement_id")) for row in listed or [] if isinstance(row, Mapping))
-    if given != expected:
+    listed = [row for row in (plan.get("out_of_scope") if isinstance(plan, Mapping) else None) or [] if isinstance(row, Mapping)]
+    given = sorted(str(row.get("source_requirement_id")) for row in listed if row.get("reason") != UNCLEAR_REASON)
+    cut = {str(row.get("source_requirement_id")) for row in listed if row.get("reason") == UNCLEAR_REASON}  # the code's own: only requirements the text marks as unset
+    marked = {str(row["source_requirement_id"]) for row in requirements_of(marker) if _CUT.search(str(row.get("text") or ""))} if marker is not None else cut
+    if given != expected or not cut <= marked:
         raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план называет вне охвата {given or 'ничего'}, решение человека — {expected or 'без исключений'}; "
                            "fix: повтори `submit --stage plan` — план строит код из записанного решения человека")
 
@@ -417,7 +434,7 @@ def published_scope(run_root: Path, attempt_id: str, state: Mapping[str, Any] | 
     if plan is None:
         return None
     in_plan = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": str(row["reason"])}
-               for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping)]
+               for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping) and row.get("reason") != UNCLEAR_REASON]  # the human's; the code's are ``unclear_cut``
     try:
         decision, invalid = read_decision(root, attempt_id, state, bound_only=False), False
     except ScopeRefused:
@@ -432,7 +449,8 @@ def published_scope(run_root: Path, attempt_id: str, state: Mapping[str, Any] | 
         note = (f"SCOPE_DECISION_MISMATCH: {DECISION_NAME} {said}, а опубликованный план — "
                 f"{', '.join(row['source_requirement_id'] for row in in_plan) or 'ничего'}; охват взят из плана; "
                 f"fix: {fix_for('SCOPE_DECISION_MISMATCH')}")
-    return {"out_of_scope": in_plan, "decision": decision, "invalid": invalid, "mismatch": mismatch, "note": note, "unbound": unbound}
+    unclear_cut = [str(row["source_requirement_id"]) for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping) and row.get("reason") == UNCLEAR_REASON]
+    return {"out_of_scope": in_plan, "unclear_cut": unclear_cut, "decision": decision, "invalid": invalid, "mismatch": mismatch, "note": note, "unbound": unbound}
 
 
 def marker_requirements_in_scope(marker_requirements: Any, run_root: Path, attempt_id: str) -> Any:

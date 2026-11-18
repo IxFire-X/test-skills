@@ -6093,15 +6093,17 @@ def header_document_id(docs: Sequence[str], module: str) -> str:
 def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
     """What the plan is built from — the journal's: the requirements of the answered marker (and the file of that answer, measured for the batch
     window), the context receipts, the exclusions the human recorded."""
-    from tools.scope_pause import out_of_scope, scope_state
+    from tools.cases_import import run_skeleton
+    from tools.scope_pause import cut_rows, out_of_scope, scope_state
 
     receipts = context_receipts(root, attempt_id, state)  # first: a changed file of the context makes the answer of the marker unreadable too
     answer = next(event for event in reversed(state["events"]) if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                   and event.get("stage_instance_id") == "context-marker:baseline")
     read = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", str(answer["artifact_digest"]))
-    return {"requirements": read["artifact"]["artifacts"]["analytics_documentation"]["requirements"], "answer": root / read["path"], "receipts": receipts,
-            "sources": read["artifact"]["artifacts"]["source_code_and_diff"].get("sources") or [],
-            "out_of_scope": out_of_scope(scope_state(root, attempt_id, state)["decision"]) or None}
+    requirements, human = read["artifact"]["artifacts"]["analytics_documentation"]["requirements"], out_of_scope(scope_state(root, attempt_id, state)["decision"])
+    left = human + cut_rows(requirements, {row["source_requirement_id"] for row in human}, run_skeleton(root, _attempt_of(state, attempt_id)))  # a requirement with no expected result gets no case
+    return {"requirements": requirements, "answer": root / read["path"], "receipts": receipts,
+            "sources": read["artifact"]["artifacts"]["source_code_and_diff"].get("sources") or [], "out_of_scope": left or None}
 
 
 def plan_view(plan: Mapping[str, Any]) -> dict[str, Any]:
