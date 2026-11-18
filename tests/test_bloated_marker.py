@@ -12,6 +12,7 @@ from tests.test_requirement_labels import DOC, _marker, _project
 from tests.test_sections import _doc, _plan
 from tools import run_pipeline, step_size
 from tools.build_context import numbering_view
+from tools.pilot_state import left_attempt
 
 
 def _refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], numbers: int, rows: int) -> tuple[dict, dict]:
@@ -32,7 +33,7 @@ def test_a_marker_with_far_more_rows_than_numbers_refuses_the_plan_and_names_the
 def test_the_run_after_that_refusal_is_closed_by_the_command_the_fix_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     scan, _out = _refused(tmp_path, monkeypatch, capsys, 35, 62)
     assert run_pipeline.main(["finish", "--project", str(tmp_path / "project"), "--run", scan["run_id"], "--abandon", "LEFT_BEFORE_REVIEW"]) == 0
-    assert json.loads(capsys.readouterr().out)["left"]["reason"] == "LEFT_BEFORE_REVIEW"
+    assert left_attempt(Path(scan["run_root"]))  # the run is left: a plain scan of the request starts a new one
 
 
 def test_a_document_that_is_really_too_large_keeps_its_text_and_gets_the_closing_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
