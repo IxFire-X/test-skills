@@ -1,0 +1,95 @@
+{
+ "view": "v200-05",
+ "bytes": 205730,
+ "cases": 54,
+ "canaries": [
+  {
+   "case_id": "TC-B5-026",
+   "step_id": "STEP-B5-026-01",
+   "expectation_id": "EXP-B5-026-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/name = \"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB»",
+   "position": 0.866
+  },
+  {
+   "case_id": "TC-B5-020",
+   "step_id": "STEP-B5-020-03",
+   "expectation_id": "EXP-B5-020-03-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 404»",
+   "position": 0.839
+  },
+  {
+   "case_id": "TC-B1-016",
+   "step_id": "STEP-B1-016-01",
+   "expectation_id": "EXP-B1-016-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 201; body/id есть»",
+   "position": 0.149
+  },
+  {
+   "case_id": "TC-B6-004",
+   "step_id": "STEP-B6-004-01",
+   "expectation_id": "EXP-B6-004-01-1",
+   "cls": "status",
+   "what": "HTTP 400→200",
+   "position": 0.914
+  },
+  {
+   "case_id": "TC-B5-013",
+   "step_id": "STEP-B5-013-01",
+   "expectation_id": "EXP-B5-013-01-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.791
+  },
+  {
+   "case_id": "TC-B5-010",
+   "step_id": "STEP-B5-010-04",
+   "expectation_id": "EXP-B5-010-04-1",
+   "cls": "boundary",
+   "what": "400→401 в ожидании",
+   "position": 0.741
+  },
+  {
+   "case_id": "TC-B4-018",
+   "step_id": "STEP-B4-018-02",
+   "expectation_id": "EXP-B4-018-02-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/1/name = \"dog\"; body/0/name = \"cat\"»",
+   "position": 0.528
+  },
+  {
+   "case_id": "TC-B5-018",
+   "step_id": "STEP-B5-018-03",
+   "expectation_id": "EXP-B5-018-03-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 400»",
+   "position": 0.817
+  },
+  {
+   "case_id": "TC-B6-016",
+   "step_id": "STEP-B6-016-01",
+   "expectation_id": "EXP-B6-016-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 400; body/status = 400; body/schemaValidationErrors/0/message»",
+   "position": 0.952
+  },
+  {
+   "case_id": "TC-B5-007",
+   "step_id": "STEP-B5-007-01",
+   "expectation_id": "EXP-B5-007-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 400»",
+   "position": 0.721
+  },
+  {
+   "case_id": "TC-B1-019",
+   "step_id": "STEP-B1-019-04",
+   "expectation_id": "EXP-B1-019-04-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.177
+  }
+ ]
+}

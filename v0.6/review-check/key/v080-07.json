@@ -1,0 +1,47 @@
+{
+ "view": "v080-07",
+ "bytes": 86124,
+ "cases": 26,
+ "canaries": [
+  {
+   "case_id": "TC-B4-042",
+   "step_id": "STEP-B4-042-02",
+   "expectation_id": "EXP-B4-042-02-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.837
+  },
+  {
+   "case_id": "TC-B4-036",
+   "step_id": "STEP-B4-036-02",
+   "expectation_id": "EXP-B4-036-02-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200; body/1/name = \"dog\"; body/0/name = \"cat\"»",
+   "position": 0.74
+  },
+  {
+   "case_id": "TC-B3-022",
+   "step_id": "STEP-B3-022-03",
+   "expectation_id": "EXP-B3-022-03-1",
+   "cls": "boundary",
+   "what": "404→405 в ожидании",
+   "position": 0.491
+  },
+  {
+   "case_id": "TC-B5-023",
+   "step_id": "STEP-B5-023-01",
+   "expectation_id": "EXP-B5-023-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/0/id есть»",
+   "position": 0.943
+  },
+  {
+   "case_id": "TC-B2-051",
+   "step_id": "STEP-B2-051-01",
+   "expectation_id": "EXP-B2-051-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status ≠ 400»",
+   "position": 0.477
+  }
+ ]
+}

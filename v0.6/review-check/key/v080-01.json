@@ -1,0 +1,48 @@
+{
+ "view": "v080-01",
+ "bytes": 95384,
+ "cases": 25,
+ "canaries": [
+  {
+   "case_id": "TC-B2-031",
+   "step_id": "STEP-B2-031-01",
+   "expectation_id": "EXP-B2-031-01-1",
+   "cls": "status",
+   "what": "HTTP 201→200",
+   "position": 0.462
+  },
+  {
+   "case_id": "TC-B2-051",
+   "step_id": "STEP-B2-051-01",
+   "expectation_id": "EXP-B2-051-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status ≠ 400»",
+   "position": 0.574
+  },
+  {
+   "case_id": "TC-B3-018",
+   "step_id": "STEP-B3-018-04",
+   "expectation_id": "EXP-B3-018-04-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/id есть»",
+   "position": 0.587
+  },
+  {
+   "case_id": "TC-B2-008",
+   "step_id": "STEP-B2-008-02",
+   "expectation_id": "EXP-B2-008-02-1",
+   "cls": "boundary",
+   "what": "400→401 в ожидании",
+   "position": 0.354
+  },
+  {
+   "case_id": "TC-B2-043",
+   "step_id": "STEP-B2-043-02",
+   "expectation_id": "EXP-B2-043-02-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.499
+  }
+ ],
+ "note": "пилот: вид с 37 лишними строками CV_DATA_MISMATCH чужих кейсов"
+}

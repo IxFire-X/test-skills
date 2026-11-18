@@ -1,0 +1,72 @@
+{
+ "view": "v200-01",
+ "bytes": 212876,
+ "cases": 41,
+ "canaries": [
+  {
+   "case_id": "TC-B3-023",
+   "step_id": "STEP-B3-023-02",
+   "expectation_id": "EXP-B3-023-02-1",
+   "cls": "status",
+   "what": "HTTP 200→404",
+   "position": 0.428
+  },
+  {
+   "case_id": "TC-B5-028",
+   "step_id": "STEP-B5-028-04",
+   "expectation_id": "EXP-B5-028-04-1",
+   "cls": "status",
+   "what": "HTTP 400→200",
+   "position": 0.81
+  },
+  {
+   "case_id": "TC-B5-039",
+   "step_id": "STEP-B5-039-07",
+   "expectation_id": "EXP-B5-039-07-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 200»",
+   "position": 0.896
+  },
+  {
+   "case_id": "TC-B6-021",
+   "step_id": "STEP-B6-021-02",
+   "expectation_id": "EXP-B6-021-02-1",
+   "cls": "status",
+   "what": "HTTP 401→200",
+   "position": 0.99
+  },
+  {
+   "case_id": "TC-B5-002",
+   "step_id": "STEP-B5-002-01",
+   "expectation_id": "EXP-B5-002-01-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/content есть»",
+   "position": 0.704
+  },
+  {
+   "case_id": "TC-B1-024",
+   "step_id": "STEP-B1-024-04",
+   "expectation_id": "EXP-B1-024-04-1",
+   "cls": "boundary",
+   "what": "404→405 в ожидании",
+   "position": 0.277
+  },
+  {
+   "case_id": "TC-B1-005",
+   "step_id": "STEP-B1-005-01",
+   "expectation_id": "EXP-B1-005-01-1",
+   "cls": "assertion_removed",
+   "what": "удалена строка «Проверки: status = 400; body/status = 400; body/type есть; body/title есть; body»",
+   "position": 0.137
+  },
+  {
+   "case_id": "TC-B5-030",
+   "step_id": "STEP-B5-030-03",
+   "expectation_id": "EXP-B5-030-03-1",
+   "cls": "state_check_removed",
+   "what": "убрана проверка «body/status = 404»",
+   "position": 0.837
+  }
+ ],
+ "note": "пилот: вид с 37 лишними строками CV_DATA_MISMATCH чужих кейсов"
+}
