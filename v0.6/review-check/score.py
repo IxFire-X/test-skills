@@ -89,9 +89,15 @@ def main():
     for c, h, hc in hits:
         mark = '+' if h else ('~' if hc else '-')
         print(f'  {mark} {c["case_id"]} {c["step_id"]} [{c["cls"]}]')
+    canary_cases = {norm(c['case_id']) for c in canaries}
+    blocked = {norm(f.get('case_id')) for f in findings if norm(f.get('severity')) == 'BLOCKING'} - canary_cases - {''}
+    share = round(100 * len(blocked) / key['cases']) if key['cases'] else 0
+    print(f'Кейсов с BLOCKING, кроме кейсов с контрольными ошибками: {len(blocked)} из {key["cases"]} ({share} %)'
+          ' — столько пакет отклонил бы по существу')
     by_cls = ', '.join(f'{cls} {sum(h for c, h, _ in hits if c["cls"] == cls)}/{sum(1 for c, _, _ in hits if c["cls"] == cls)}'
                        for cls in CLASSES if any(c['cls'] == cls for c, _, _ in hits))
-    print(f'\nСтрока для отчёта: {view} | поймано {k}/{len(canaries)} | {by_cls} | находок {len(findings)}')
+    print(f'\nСтрока для отчёта: {view} | поймано {k}/{len(canaries)} | {by_cls} | находок {len(findings)}'
+          f' | BLOCKING вне контрольных {len(blocked)}/{key["cases"]}')
     return 0
 
 
