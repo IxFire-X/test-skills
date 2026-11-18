@@ -459,3 +459,25 @@ def test_a_run_list_without_write_is_refused(tmp_path: Path, capsys: pytest.Capt
 
     assert main(["--project", str(tmp_path), "--run", "0" * 32]) == 2
     assert json.loads(capsys.readouterr().out)["code"] == "ASSEMBLE_ARGUMENTS"
+
+
+def test_the_assembly_names_the_requirement_left_without_a_case_by_its_id_and_never_by_its_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import pilot_state, revision_selection
+    from tools.assemble_sections import assemble
+
+    run = _closed_run(tmp_path, capsys)
+    document = pilot_state.read_effective_canonical(run, pilot_state.derive_state(run)["attempts"][-1]["attempt_id"])["document"]
+    source = document["source_requirements"][0]
+    left = next(row["canonical_requirement_ids"] for row in document["source_to_canonical_mappings"] if row["source_requirement_id"] == source["source_requirement_id"])
+    monkeypatch.setattr(revision_selection, "coverage_gaps", lambda _document: left)  # the requirement's cases were all rejected by the review
+    result = assemble(tmp_path, [run.name])
+    summary = Path(result["summary"]).read_text(encoding="utf-8")
+    assert result["without_case"].startswith("без кейса: ") and f"({source['source_requirement_id']}, прогон 1 — нет принятого кейса)" in result["without_case"]
+    assert json.loads(summary)["runs"][0]["uncovered"][0]["requirement"] == source["source_requirement_id"] and source["text"] not in summary + result["without_case"]
+
+
+def test_a_set_with_a_case_for_every_requirement_has_no_without_case_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.assemble_sections import assemble
+
+    result = assemble(tmp_path, [_closed_run(tmp_path, capsys).name])
+    assert "without_case" not in result and "uncovered" not in Path(result["summary"]).read_text(encoding="utf-8")

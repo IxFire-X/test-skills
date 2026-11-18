@@ -92,7 +92,18 @@ def _facts(project: Path, run_id: str) -> dict[str, Any]:
         valid = False
     if not valid:
         return {**fact, "code": "CSV_MISMATCH"}
-    return {**fact, "csv": data, "titles": [" ".join(str(case["title"]).split()).casefold() for case in document["test_cases"]], **_numbers(root)}
+    return {**fact, "csv": data, "titles": [" ".join(str(case["title"]).split()).casefold() for case in document["test_cases"]], **_numbers(root), **_uncovered(document)}
+
+
+def _uncovered(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The requirements of the accepted set with no case (the rule of «Пробелы покрытия»), each by its id and its number in the document («4.3.4»), never its text."""
+    from tools.revision_selection import coverage_gaps
+
+    gone, texts = set(coverage_gaps(dict(document))), {row["source_requirement_id"]: str(row["text"]) for row in document["source_requirements"]}
+    gaps = [{"requirement": sid, "number": number.group(1) if (number := re.match(r"\s*(\d+(?:\.\d+)*)", texts.get(sid, ""))) else None}
+            for row in document["source_to_canonical_mappings"] if (sid := row["source_requirement_id"]) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}", sid)
+            and row["canonical_requirement_ids"] and gone.issuperset(row["canonical_requirement_ids"])]
+    return {"uncovered": gaps} if gaps else {}
 
 
 def _leaves(project: Path, doc: str) -> tuple[str, list[tuple[str | None, int, int, int]]]:
@@ -197,7 +208,7 @@ def assemble(project: Path, run_ids: list[str], *, doc: str | None = None) -> di
         repeats = sum(title in seen for title in fact["titles"])
         seen.update(fact["titles"])
         runs.append({"run_id": fact["run_id"], "docs": fact["docs"], "csv": "none" if fact["csv"] is None else "included", "code": fact["code"], "cases": len(fact["titles"]),
-                     "title_repeats": repeats, **{key: fact[key] for key in ("outcome", "generated", "accepted", "canaries") if key in fact}})
+                     "title_repeats": repeats, **{key: fact[key] for key in ("outcome", "generated", "accepted", "canaries", "uncovered") if key in fact}})
     from tools.skillsrc_manifest import load_skillsrc
 
     manifest = project / ".skillsrc"
@@ -213,8 +224,9 @@ def assemble(project: Path, run_ids: list[str], *, doc: str | None = None) -> di
                 raise AssembleRefused("ASSEMBLE_CONFLICT", str(target))
             continue
         atomic_write_confined_bytes_at_root(project, root, target, payload)
+    lost = [(f"п. {gap['number']} " if gap["number"] else "") + f"({gap['requirement']}, прогон {number} — нет принятого кейса)" for number, row in enumerate(runs, 1) for gap in row.get("uncovered", [])]
     return {"status": "ok", "output": str(root / "assembled" / f"{stem}.zephyr-scale.csv"), "summary": str(root / "assembled" / f"{stem}.summary.json"), **{key: summary[key] for key in ("cases", "title_repeats")},
-            "runs": [{key: row[key] for key in ("run_id", "csv", "code")} for row in runs]}
+            "runs": [{key: row[key] for key in ("run_id", "csv", "code")} for row in runs], **({"without_case": "без кейса: " + "; ".join(lost)} if lost else {})}
 
 
 def main(argv: list[str] | None = None) -> int:
