@@ -89,6 +89,11 @@ def _named(*names: str) -> str:
 NEAR = "ближайшие имена в spec.md области: "
 
 
+def test_an_added_text_that_differs_names_the_place_in_the_specification_too(tmp_path: Path) -> None:
+    said = _said(_project(tmp_path, _named("Search"), ADD + OTHER))
+    assert said.startswith("ADDED has another text in the baseline: ") and f"{DELTA}:2" in said and f"; в spec.md: {BASE}:2" in said
+
+
 def test_a_modified_name_the_specification_lacks_names_the_three_nearest(tmp_path: Path) -> None:
     spec = _named("Search owners", "Search owner list", "Search owner by name", "Search owner by city", "Visits")
     near = _said(_project(tmp_path, spec, MODIFY + _named("Search owner"))).split(NEAR)[1].split(", ")

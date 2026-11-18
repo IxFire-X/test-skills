@@ -492,7 +492,7 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if operation == "MODIFIED" and have is None:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}{_close(baseline, key)}")
         if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
-            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}")
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}; в spec.md: {have['path']}:{have['line']}")
         seen.add(key)
         if operation == "REMOVED" and have is None:  # nothing to remove: gone already, or the name does not match — the specification cannot tell, so the line says both
             warnings.append(f"{row['path']}:{row['line']} — REMOVED: требования {key[1]} в spec.md области нет, уже удалено или имя не совпало{_close(baseline, key)}")
