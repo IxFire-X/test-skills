@@ -5999,6 +5999,9 @@ def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], st
             f"GENERATOR_INPUT_CONTEXT: the plan reads the context receipts {', '.join(contexts)}; position {index + 1} must be "
             f"{prefix[index]} (batch_index {ordered[index]['batch_index']}) — the plan takes the receipts of the attempt in batch_index "
             f"order from the first, none skipped: {', '.join(prefix)}")
+    held = {row["project_path"] for receipt in ordered[:len(contexts)] for row in receipt["files"]}  # the files the plan names are files of the receipts it reads
+    if item.get("context_files") and (lost := [path for path in item["context_files"] if path not in held]):
+        raise ValueError(f"GENERATOR_INPUT_CONTEXT: context_files names files that no context receipt of the plan holds: {', '.join(lost[:3])}")
 
 
 def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: Mapping[str, Any]) -> dict[str, Any]:
@@ -6058,6 +6061,7 @@ def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[s
                   and event.get("stage_instance_id") == "context-marker:baseline")
     read = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", str(answer["artifact_digest"]))
     return {"requirements": read["artifact"]["artifacts"]["analytics_documentation"]["requirements"], "answer": root / read["path"], "receipts": receipts,
+            "sources": read["artifact"]["artifacts"]["source_code_and_diff"].get("sources") or [],
             "out_of_scope": out_of_scope(scope_state(root, attempt_id, state)["decision"]) or None}
 
 
@@ -6105,7 +6109,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     header_digest = _generator_input_digest(header)
     receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
     plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
-                                    project, [found["answer"]], found["receipts"], run_skeleton(root, attempt), found["out_of_scope"])
+                                    project, [found["answer"]], found["receipts"], run_skeleton(root, attempt), found["out_of_scope"], found["sources"])
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)
@@ -6181,8 +6185,10 @@ def _expected_model_inputs(
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id} is asked for only after the first review sent cases back for a rework ({error}); fix: `status` names the next step") from error
         from tools.canonical_document import document_sha256
 
+        plan = _generator_input(project, root, state, attempt_id, "plan")
+        contexts = list(dict.fromkeys([*basis["contexts"], *(_plan_contexts(plan) if plan.get("context_files") else [])]))  # the files the plan names lie in all its receipts
         return [(basis["answer_digest"], "ответ tc-reviewer:canonical журнала"), (document_sha256(basis["candidate"]), "кандидат r1 журнала"),
-                *((digest, "context_receipt_digest пачки с отклонённым кейсом") for digest in basis["contexts"])]
+                *((digest, "context_receipt_digest пачки с отклонённым кейсом") for digest in contexts)]
     if stage_instance_id == _REWORK_REVIEW_STAGE:  # the answer of the generator of the rework and r3 with its cases: from the journal
         from tools.orchestrate_test_case_revision import rework_round_data
 

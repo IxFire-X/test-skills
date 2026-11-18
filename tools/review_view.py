@@ -257,6 +257,7 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
 def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
     """The map of existing project tests for the context the generator's plan was built from (the one of
     the list of reading of ``prepare``); empty when the project has none."""
+    from tools.batch_assembly import generator_receipts
     from tools.existing_tests import for_context
     from tools.pilot_state import read_context_selection
 
@@ -266,9 +267,8 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
     plan, receipt = found
     if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
         return for_context(Path(root).parent.parent, receipt, Path(root))
-    # the one map of all the context receipts the generator read
-    return for_context(Path(root).parent.parent, [dict(read_context_selection(Path(root), attempt_id, str(digest)))
-                                                 for digest in plan["context_receipt_digests"]], Path(root))
+    return for_context(Path(root).parent.parent, generator_receipts([read_context_selection(Path(root), attempt_id, str(digest))
+                                                                    for digest in plan["context_receipt_digests"]], plan.get("context_files")), Path(root))
 
 
 def run_context_note(root: Path, attempt_id: str) -> str | None:
@@ -287,7 +287,9 @@ def run_context_note(root: Path, attempt_id: str) -> str | None:
     receipts = sorted((read_context_selection(Path(root), attempt_id, digest) for digest in selected), key=lambda item: int(item["batch_index"]))
     seen = set(context_digests(found[0]))
     taken = [receipt for receipt in receipts if receipt["digest"] in seen]
-    return context_note([*taken, *(receipt for receipt in receipts if receipt["digest"] not in seen)], len(taken))
+    if not found[0].get("context_files"):  # a plan that names its files has its own line (``missed_note``), none here
+        return context_note([*taken, *(receipt for receipt in receipts if receipt["digest"] not in seen)], len(taken))
+    return None
 
 
 def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None, Mapping[str, Any]] | None:

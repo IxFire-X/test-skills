@@ -87,7 +87,7 @@ def test_plan_batches_needs_every_context_receipt_of_the_grouping(three) -> None
         plan_batches_for_project(_requirements(), _grouping(receipts), project, [], receipts[:2])
 
 
-def _generator_journal(three, listed: list[dict]):
+def _generator_journal(three, listed: list[dict], **plan_fields):
     from tests.test_marker_parts import _marker
 
     _project, root, attempt_id, baseline, receipts = three
@@ -99,7 +99,7 @@ def _generator_journal(three, listed: list[dict]):
             "batches": [{"batch_id": "BATCH-fixture", "context_receipt_digest": listed[0]["digest"], "header_digest": header["digest"]}]}
     if len(listed) > 1:
         plan["context_receipt_digests"] = [receipt["digest"] for receipt in listed]
-    published = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
+    published = pilot_state.publish_generator_input(root, attempt_id, "plan", {**plan, **plan_fields})
     return root, attempt_id, marker["content_digest"], published["digest"], header["digest"]
 
 

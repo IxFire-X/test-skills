@@ -494,6 +494,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": PLAN_VIEW})
         elif digest in journal.expands:
             targets, context = journal.expands[digest]
+            if context and stage.startswith("tc-generator:") and (named := journal.plan(state).get("context_files")):  # the generator and its rework read the files the plan names
+                keep = {project_path(project, name) for name in named}
+                targets = [target for target in targets if target in keep]
             files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
             if context and stage.startswith("tc-generator:"):
                 contexts.append(digest)
@@ -541,12 +544,13 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
         # all the context receipts of the batch, named by the first
         from tools.existing_tests import context_view, ensure_view, map_path
 
+        named = journal.plan(state).get("context_files") or None  # the map is of the files the generator reads
         try:  # the map is a hint: a context the code cannot read back leaves it out, the step stays measured (as the report did)
             if write_views:
-                existing = ensure_view(root, contexts)
+                existing = ensure_view(root, contexts, named)
                 size = existing.stat().st_size if existing is not None else 0
             else:
-                size = len(context_view(root, contexts, attempt_id))
+                size = len(context_view(root, contexts, attempt_id, named))
                 existing = map_path(root, contexts[0]) if size else None
         except (KeyError, OSError, TypeError, ValueError):
             existing = None

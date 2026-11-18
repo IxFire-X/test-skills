@@ -366,7 +366,7 @@ def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping
     return build_map(project, inventory, [str(row["project_path"]) for receipt in receipts for row in receipt.get("files") or []])
 
 
-def context_view(run_root: Path, context_digests: str | list[str], attempt_id: str | None = None) -> bytes:
+def context_view(run_root: Path, context_digests: str | list[str], attempt_id: str | None = None, named: list[str] | None = None) -> bytes:
     """The map bytes of the context of one generator batch, built from the frozen inputs; the digests that are no context
     selection of the attempt are skipped, empty when none is or the project has no hits. The one source of these
     bytes for the list of reading of prepare and the run report; one map for all the context receipts the batch reads."""
@@ -379,16 +379,17 @@ def context_view(run_root: Path, context_digests: str | list[str], attempt_id: s
                 and _context_selection_target(root, attempt_id, str(digest)).is_file()]
     if not selected:
         return b""
-    return view_bytes(for_context(root.parent.parent, [dict(read_context_selection(root, attempt_id, digest)) for digest in selected]))
+    from tools.batch_assembly import generator_receipts
+    return view_bytes(for_context(root.parent.parent, generator_receipts([read_context_selection(root, attempt_id, digest) for digest in selected], named)))
 
 
-def ensure_view(run_root: Path, context_digests: str | list[str]) -> Path | None:
+def ensure_view(run_root: Path, context_digests: str | list[str], named: list[str] | None = None) -> Path | None:
     """Write (or rewrite, when the bytes differ) the map file of one batch context — named by its first context receipt;
     None when the project has no hits."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     root = Path(run_root).resolve()
-    data = context_view(root, context_digests)
+    data = context_view(root, context_digests, None, named)
     first = context_digests if isinstance(context_digests, str) else context_digests[0]
     target = map_path(root, first)
     if not data:

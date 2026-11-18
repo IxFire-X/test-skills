@@ -6,7 +6,7 @@ import bisect
 import hashlib
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -377,7 +377,7 @@ def in_scope_requirements(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, 
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
                  documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None,
-                 out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
+                 out_of_scope: Sequence[Mapping[str, Any]] | None = None, context_files: Sequence[str] | None = None) -> BatchPlan:
     """Create one complete partition: one batch unless the expected answer does not fit the window.
 
     A grouping with more than one context receipt (``context_receipt_digests``, the first one is
@@ -410,6 +410,8 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
     body: dict[str, Any] = {"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}
     if len(contexts) > 1:  # one context batch: the plan bytes stay those of a single-context plan
         body["context_receipt_digests"] = contexts
+    if context_files:  # the plan bytes stay those of a plan that reads every file of its receipts
+        body["context_files"] = list(context_files)
     if out_of_scope:  # without an exclusion the plan bytes stay those of a plan with no out_of_scope
         body["out_of_scope"] = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": " ".join(str(row["reason"]).split())}
                                 for row in sorted(out_of_scope, key=lambda row: order[row["source_requirement_id"]])]
@@ -425,7 +427,7 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
                              input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
                              imported: Mapping[str, Any] | None = None,
-                             out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
+                             out_of_scope: Sequence[Mapping[str, Any]] | None = None, sources: Sequence[str] = ()) -> BatchPlan:
     """The plan of ``submit --stage plan``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipts, the map of existing project tests, the skeleton of an
     import and the tc-generator role), the documents of the receipts.
@@ -459,12 +461,13 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     value = imported.get("imported", imported) if imported is not None else None
     window, pattern = step_window(project), _grouping_pattern(project)
 
-    def plan_with(taken: list[dict[str, Any]]) -> BatchPlan:
+    def plan_for(taken: list[dict[str, Any]], named: list[str] | None = None) -> BatchPlan:
+        taken = generator_receipts(receipts, named) if named else taken  # named files: every receipt of the attempt, only those files
         files: list[Path] = []
         documents: dict[str, str] = {}
         for receipt in taken:
-            context_files, texts = _context_documents(project, receipt)
-            files.extend(context_files)
+            paths, texts = _context_documents(project, receipt)
+            files.extend(paths)
             documents.update(texts)
         maps = len(view_bytes(for_context(project, taken)))  # one map of all the receipts the batch reads
         step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps)["bytes"]
@@ -472,7 +475,19 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
         if len(taken) > 1:
             evidence["context_receipt_digests"] = [str(receipt["digest"]) for receipt in taken]
         return plan_batches(source_requirements, evidence, window_bytes=window, input_bytes=step_input, id_pattern=pattern,
-                            documents=documents, imported=value, out_of_scope=out_of_scope)
+                            documents=documents, imported=value, out_of_scope=out_of_scope, context_files=named)
+
+    def plan_with(taken: list[dict[str, Any]]) -> BatchPlan:
+        plan = plan_for(taken)
+        picked = pick_context(project, receipts, len(taken), source_requirements, sources)
+        if picked is None:
+            return plan
+        named, missed, total = picked
+        marked = plan_for(taken, named)
+        if len(marked["batches"]) > len(plan["batches"]):  # never more batches (model calls) than the whole receipts
+            return plan
+        marked.notes.extend([missed_note(missed, total)] if missed else [])  # every file the marker named is read: no line
+        return marked
 
     plan, taken = plan_with(receipts[:1]), 1
     while taken < len(receipts):
@@ -481,7 +496,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
         if len(wider["batches"]) > len(plan["batches"]) or any(NO_ROOM in note for note in wider.notes):
             break
         plan, taken = wider, taken + 1
-    if len(receipts) > 1:
+    if len(receipts) > 1 and "context_files" not in plan:
         plan.notes.append(context_note(receipts, taken))
     if value is not None:
         plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
@@ -491,6 +506,53 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
                       + (f" (вне охвата {len(plan['out_of_scope'])})" if plan.get("out_of_scope") else "")
                       + f", ориентировочно кейсов {counted}×2–3 ({counted * 2}–{counted * 3})")
     return plan
+
+
+_API_CONTRACT = re.compile(rb"(?m)^(?:[ \t{]*\"(?:openapi|swagger)\"|(?:openapi|swagger))[ \t]*:[ \t]*[\"']?[0-9]")  # YAML — the key at the line start; JSON — quoted, maybe indented
+
+
+def _is_api_contract(project: Path, project_path: str) -> bool:
+    from tools.output_guard import project_file
+
+    if not project_path.lower().endswith((".yml", ".yaml", ".json")):
+        return False
+    try:
+        with project_file(project, project_path).open("rb") as handle:
+            return _API_CONTRACT.search(handle.read(4096)) is not None
+    except (OSError, ValueError):
+        return False
+
+
+def pick_context(project: Path, receipts: Sequence[Mapping[str, Any]], taken: int, requirements: Sequence[Mapping[str, Any]],
+                 sources: Sequence[str]) -> tuple[list[str], list[str], int] | None:
+    """``(files, the files the marker named that did not fit, how many it named)`` the generator reads instead of every file of the first ``taken`` receipts: the same
+    bytes, the API contract first, then the documents the requirements cite, the files the marker's sources name (the most cited first), the rest by
+    path; a file that does not fit is skipped.  None where every wanted file is read already (a small project, a marker that named nothing)."""
+    sizes = {row["project_path"]: int(row["size"]) for receipt in receipts for row in receipt["files"]}
+    today = {row["project_path"] for receipt in receipts[:taken] for row in receipt["files"]}
+    cited = Counter(re.sub(r":\d+(?:-\d+)?$", "", words[0]) for words in (str(source).split(None, 1) for source in sources) if words)  # a source: «path:line — text»
+    cited = Counter({path: count for path, count in cited.items() if path in sizes})
+    docs = {found.group(1) if (found := re.match(r"(.+?):(\d+)", str(item))) else str(item) for row in requirements for item in row["provenance"]}  # «path:line — text»; no line: the whole text
+    group = {path: 0 if _is_api_contract(project, path) else 1 if path in docs else 2 if path in cited else 3 for path in sizes}
+    if all(path in today for path in sizes if group[path] < 3):
+        return None
+    room, chosen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken]), []
+    for path in sorted(sizes, key=lambda path: (group[path], -cited[path], path)):
+        if sizes[path] <= room:
+            chosen.append(path)
+            room -= sizes[path]
+    return None if set(chosen) == today else (chosen, [path for path in cited if path not in chosen], len(cited))
+
+
+def generator_receipts(receipts: Sequence[Mapping[str, Any]], named: Sequence[str] | None) -> list[dict[str, Any]]:
+    """The receipts as the generator reads them: only the ``context_files`` of its plan, all the files where the plan names none."""
+    return [dict(item) if named is None else {**item, "files": [row for row in item["files"] if row["project_path"] in named]} for item in receipts]
+
+
+def missed_note(missed: Sequence[str], total: int) -> str:
+    """The line of the plan where the files the marker named did not all fit (the plan names its ``context_files``)."""
+    return (f"контекст: генератору не хватило места для {len(missed)} из {total} файлов, нужных по разметке: {', '.join(missed[:5])}"
+            f"{f' и ещё {len(missed) - 5}' if len(missed) > 5 else ''}; по ним у генератора только пометки разметки")
 
 
 def context_note(receipts: list[Mapping[str, Any]], taken: int) -> str:
