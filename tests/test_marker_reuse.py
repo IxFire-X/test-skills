@@ -272,12 +272,13 @@ def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts
     assert all("--reuse-from " + source_id in row["command"] for row in reuse["stages"])
 
 
-def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("by", ["controller:cases-import", "controller:openspec-marker"])
+def test_a_source_whose_requirements_were_made_by_code_starts_with_that_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by: str) -> None:
     from tools import pilot_state
 
     run_root, attempt_id, inputs = _fresh(tmp_path)
     module = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)["module"]
-    _parts_source(tmp_path, monkeypatch, inputs, module, "controller:cases-import")
+    _parts_source(tmp_path, monkeypatch, inputs, module, by)
     monkeypatch.setattr(pilot_state, "_marker_base", lambda source: inputs)
     reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
     first, *rest = reuse["stages"]

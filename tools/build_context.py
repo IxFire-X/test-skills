@@ -284,6 +284,7 @@ class RequirementConflict(ValueError):
 
 
 _OPENSPEC_PATH = re.compile(r"^openspec/(?:(specs)/(.+)|changes/([^/]+)/specs/(.+))/spec\.md$")
+OPENSPEC_PATH = _OPENSPEC_PATH  # a spec or a delta of OpenSpec (public: the other modules of the package do not take the private name)
 _OPENSPEC_HEADING = re.compile(r"^(##\s+[^\n]+|### Requirement:\s*[^\n]+|#### Scenario:\s*[^\n]+)$", re.M)
 
 

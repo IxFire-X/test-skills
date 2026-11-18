@@ -2107,6 +2107,41 @@ def _validate_context_marker_sources(
             raise ValueError("CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
 
 
+OPENSPEC_MODEL_ID = "controller:openspec-marker"
+
+
+def openspec_marker_by_code(run_root: Path) -> bool:
+    """The requirements of the marker are the composition of OpenSpec files alone: ``--docs`` names files under ``openspec/`` (one of them a spec or a delta),
+    and no ``--cases`` (an update of cases needs the links the model gives) — code answers ``context-marker:requirements``."""
+    from tools.build_context import OPENSPEC_PATH
+    from tools.cases_import import cases_path
+
+    project, root = _run_root(run_root)
+    named = _named_docs(project, root) if cases_path(root) is None else []
+    return bool(named) and all(path.startswith("openspec/") for path in named) and any(OPENSPEC_PATH.fullmatch(path) for path in named)
+
+
+def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+    """Answer ``context-marker:requirements`` of such a run by code: the rows ``build_context`` composes from the receipts, no model call; again on an answered step changes nothing."""
+    from tools.build_context import build_context
+    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+
+    project, root = _run_root(run_root)
+    state, stage = derive_state(root), "context-marker:requirements"
+    answered = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == stage]
+    if answered:
+        return read_model_stage_artifact(root, attempt_id, stage, str(answered[-1]["artifact_digest"]))
+    attempt = _attempt_of(state, attempt_id)
+    baseline = frozen_baseline(root, attempt)
+    head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
+    built = build_context(project, docs_snapshot=_context_marker_snapshots(project, root, state, attempt, stage, head, _published_context_receipts(state, attempt_id, stage)))
+    artifact = {"schema_version": built["schema_version"], "stage": "context-marker", "warnings": built["warnings"],
+                "artifacts": {"analytics_documentation": built["artifacts"]["analytics_documentation"], "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}}
+    check_model_stage_artifact(stage, artifact)  # before the request is written: a refusal leaves no orphan request behind
+    publish_code_step_request(run_root, attempt_id, stage, model_id=OPENSPEC_MODEL_ID, invocation_id=f"openspec-{attempt_id[:12]}", input_digests=head)
+    return publish_model_stage_artifact(run_root, attempt_id, stage, artifact)
+
+
 def _reconcile_requirements_openspec(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> None:
@@ -5909,7 +5944,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
         try:  # a source whose answer file lies where no shell takes the path is not offered: the commands would not be run as they are
             rows = []
             made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
-            if made_by.get("context-marker:requirements") == "controller:cases-import":  # an import makes it by code
+            if made_by.get("context-marker:requirements") in ("controller:cases-import", OPENSPEC_MODEL_ID):  # an import, or OpenSpec files alone, make it by code
                 rows.append({"stage": "context-marker:requirements", "by": "code",
                              "command": f"python -m tools.api prepare --run-root {printed(root)} --stage context-marker:requirements"})
             for stage in model_stages:  # the reuse answers each stage from the source run itself; the merge of the parts follows by code

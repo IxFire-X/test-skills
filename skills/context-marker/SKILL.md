@@ -24,7 +24,8 @@ not rescan the project, create a run/attempt, or widen feature/module scope.
 A module whose context does not fit one call is marked in parts (`status` names the step, `tools.api prepare` publishes it):
 
 - `context-marker:requirements` — the documents of the run only, no code. Produce the complete normalized requirement
-  set as below, with the one source `шаг требований — код не анализировался`.
+  set as below, with the one source `шаг требований — код не анализировался`. OpenSpec files alone (no `--cases`): code answers this step
+  (`prepare` says so, no slot) — the rest of it is for a plain document, a mix with one, and `--cases`.
   Import with documents (FaT-IMP3, `scan --cases` with `--docs`): the step also reads the CSV of ready cases. Add
   `analytics_documentation.case_links` — one row per case of the CSV (`row` = the number of its record in the CSV, the header being 1, the first case 2): the
   `source_requirement_ids` of the documents that case checks, or `[]` with a `reason` when it checks none. The cases are
@@ -36,9 +37,8 @@ A module whose context does not fit one call is marked in parts (`status` names 
   change (selected, or archived and named in `--docs`): judge only the rows linked to a requirement its delta ADDS, MODIFIES or
   RENAMES, and every unlinked row when it REMOVES one; no `verdict` elsewhere. An archived delta gives names, never
   requirements. In doubt: `fits` with the doubt in `reason`.
-- `context-marker:batch-NNN` — the requirements answer and the files of one context batch. Copy the requirements
-  unchanged (a changed requirement rejects the part: `CONTEXT_MARKER_REQUIREMENTS_CHANGED`) and add only the code
-  observations of this batch in `sources` and `warnings`. A requirement whose code is not in this batch is the warning
+- `context-marker:batch-NNN` — the requirements answer and the files of one context batch. Write only the code
+  observations of this batch in `sources` and `warnings`: code puts the requirements of the requirements step into the part. A requirement whose code is not in this batch is the warning
   `часть N — код для <требование> не найден`, not a requirement gap; the task document met in a batch is not rewritten.
 - the merge into `context-marker:baseline` is done by code (`merge`), not by a model call.
 
@@ -63,8 +63,6 @@ Use `python -m tools.build_context --project <abs> --docs <path>` on those autho
 REMOVED and RENAMED into the final requirement set, retaining unchanged baseline behavior
 and complete scenario bodies. Keep its source identity/digest provenance when splitting
 normalized rows. Proposal/design/tasks provide context, not behavioral requirements.
-Publication (`submit`) reconciles the actual model output at
-publication and readback against the exact authorized context receipts itself (OpenSpec diagnostics).
 Archived documents may remain historical context; they are never reapplied as pending
 changes. A custom schema needs
 its actual contract established first; this check does not claim arbitrary-schema support.

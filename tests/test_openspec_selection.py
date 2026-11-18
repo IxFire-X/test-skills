@@ -34,6 +34,15 @@ def _project(tmp_path: Path) -> Path:
     return project
 
 
+NOTE = "docs/note.md"  # a plain document with no requirement in it, named beside the OpenSpec files
+
+
+def _model_scan(project: Path, monkeypatch: pytest.MonkeyPatch, docs: list[str]) -> dict:
+    """A scan whose marker the model answers: a run of OpenSpec files alone is answered by code (q11), a mixed one is not — the check of its rows is what the tests below are about."""
+    _write(project, NOTE, "A note about the owners page.\n")
+    return _scan(project, monkeypatch, [*docs, NOTE])
+
+
 def _scan(project: Path, monkeypatch: pytest.MonkeyPatch, docs: list[str], expect: int = 0, new_run: bool = True) -> dict:
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
@@ -61,14 +70,14 @@ def _answer(project: Path, scan: dict, rows_of: list[str], capsys: pytest.Captur
 
 def test_the_whole_specification_is_accepted_beside_live_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
-    scan = _scan(project, monkeypatch, [BASE])
+    scan = _model_scan(project, monkeypatch, [BASE])
     code, out = _answer(project, scan, [BASE], capsys)
     assert code == 0, out
 
 
 def test_a_selected_change_is_accepted_beside_another_live_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
-    scan = _scan(project, monkeypatch, [BASE, ADD])
+    scan = _model_scan(project, monkeypatch, [BASE, ADD])
     code, out = _answer(project, scan, [BASE, ADD], capsys)
     assert code == 0, out
 
@@ -126,14 +135,14 @@ def test_without_docs_two_live_changes_stop_the_scan_and_the_next_scan_goes_on(t
 
 def test_a_row_of_an_unselected_change_is_still_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
-    scan = _scan(project, monkeypatch, [BASE])
+    scan = _model_scan(project, monkeypatch, [BASE])
     code, out = _answer(project, scan, [BASE, ADD], capsys)
     assert code == 2 and "OPENSPEC_EXTRA" in out["message"], out
 
 
 def test_a_lost_requirement_of_the_baseline_is_still_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
-    scan = _scan(project, monkeypatch, [BASE, ADD])
+    scan = _model_scan(project, monkeypatch, [BASE, ADD])
     code, out = _answer(project, scan, [ADD], capsys)  # the answer composes the delta without the baseline: Create and Fax are lost
     assert code == 2 and "OPENSPEC_MISSING" in out["message"], out
 
@@ -232,14 +241,14 @@ def test_a_folder_over_the_documents_limit_stops_the_scan_before_a_run_exists(tm
 def test_the_areas_not_named_are_context_and_leave_the_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
     _write(project, VISITS, SPEC)
-    code, out = _answer(project, _scan(project, monkeypatch, [BASE]), [BASE], capsys)
+    code, out = _answer(project, _model_scan(project, monkeypatch, [BASE]), [BASE], capsys)
     assert code == 0, out
 
 
 def test_a_row_of_an_area_not_named_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     project = _project(tmp_path)
     _write(project, VISITS, SPEC)
-    code, out = _answer(project, _scan(project, monkeypatch, [BASE]), [BASE, VISITS], capsys)
+    code, out = _answer(project, _model_scan(project, monkeypatch, [BASE]), [BASE, VISITS], capsys)
     assert code == 2 and "OPENSPEC_EXTRA" in out["message"], out
 
 

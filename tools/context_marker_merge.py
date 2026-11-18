@@ -50,6 +50,16 @@ def requirements_of(artifact: Mapping[str, Any]) -> Any:
     return artifact["artifacts"]["analytics_documentation"]["requirements"]
 
 
+def with_requirements(part: Any, answer: Mapping[str, Any]) -> Any:
+    """``part`` with the requirements of the requirements answer in place of its own (or of none): code copies them, the model writes the code
+    observations only.  What is no shape of a part stays as it is, for the check of the schema to refuse."""
+    artifacts = part.get("artifacts") if isinstance(part, Mapping) else None
+    documentation = artifacts.get("analytics_documentation", {}) if isinstance(artifacts, Mapping) else None
+    if not isinstance(documentation, Mapping):
+        return part
+    return {**part, "artifacts": {**artifacts, "analytics_documentation": {**documentation, "requirements": copy.deepcopy(requirements_of(answer))}}}
+
+
 def merge_marker_artifacts(requirements: Mapping[str, Any], parts: Sequence[Mapping[str, Any]],
                            derived: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """One marker artifact from the requirements answer and the part answers, in part order.

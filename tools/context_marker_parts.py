@@ -60,7 +60,8 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                 "hint": None if total <= budget else over_hint, "done": stage in responses}
 
     imported = cases_path(root) is not None  # the requirements of an import are answered by code, always a part
-    if len(receipts) <= 1 and not imported:
+    openspec = pilot_state.openspec_marker_by_code(root)  # so are those of OpenSpec files alone: the model never copies them
+    if len(receipts) <= 1 and not imported and not openspec:
         parts = [step("context-marker:baseline", [*head, *(receipt["digest"] for receipt in receipts)],
                       {"batch": sum(int(receipt["byte_count"]) for receipt in receipts), "requirements": documents, "role": role},
                       "вход разметки больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")]
@@ -71,7 +72,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                               if answer else documents)
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
-        if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (with --docs the model)
+        if openspec or imported and not docs_run(root):  # code, not a model call: no prompt, no budget (an import with --docs: the model)
             parts[0].update(fits=True, hint=None, by_code=True)
         for receipt in receipts:
             part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part

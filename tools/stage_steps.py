@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools.context_marker_merge import with_requirements
 from tools.fixes import human_for
 from tools.project_inventory import read_inventory_receipt
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
@@ -463,8 +464,9 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
         raise ValueError("INVALID_ARGUMENT: --fresh-context и --invocation-id не идут с --reuse-from — сессия и независимость ревью берутся из источника; fix: prepare --stage "
                          f"{stage} --reuse-from <run_id>" + (" --accept-self-review (только если источник проверен в той же сессии и человек согласен)" if "open" in step else ""))
     pilot_state.context_receipts(root, attempt_id, state)  # a changed file of the context is CONTEXT_DRIFTED with its way out, before any request or consent is written (the readers below fail after them)
-    if "by_code" in step:  # the requirements of an import without documents: the code answers (the request, the answer and the skeleton are one transition)
-        return {"stage": stage, **{key: value for key, value in cases_import.import_requirements(root, attempt_id).items() if key != "artifact"}}
+    if "by_code" in step:  # the requirements of an import without documents, or of OpenSpec files alone: the code answers (the request, the answer and the skeleton are one transition)
+        made = pilot_state.openspec_marker_requirements(root, attempt_id) if cases_import.cases_path(root) is None else cases_import.import_requirements(root, attempt_id)
+        return {"stage": stage, **{key: value for key, value in made.items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
         if reuse_from is not None and stage == "plan" and not step["done"]:  # the plan of the source: its subject and date, compared with the source before anything is written
             _refuse_terminal(state, attempt_id)  # as the submit of the plan does
@@ -555,6 +557,8 @@ def _submit(run_root: Path, stage: str, load: Callable[[str, Path], Any], *, dry
     check, told = STEPS[stage.split(":", 1)[0]][2], {}
     key = step.get("extra")  # a key of the slot that is not part of the answer (the evidence of the review): taken out before the answer is checked
     value, extra = ({k: v for k, v in answer.value.items() if k != key}, answer.value.get(key)) if key and isinstance(answer.value, Mapping) else (answer.value, None)
+    if stage.startswith("context-marker:batch-"):  # the requirements of a part are the step's: code puts them in, the model writes its observations only
+        value = with_requirements(value, cases_import.requirements_answer(root, attempt_id))
     published = pilot_state.publish_model_stage_artifact(root, attempt_id, stage, value, transport_attempts=transport_attempts, raw_bytes=answer.raw_bytes,
                                                          dry_run=dry_run, before_write=(lambda value: told.update(check(root, stage, value, dry_run, extra) or {})) if check else None)
     return {**{key: value for key, value in published.items() if key != "artifact"}, **(told or ({} if dry_run else _accepted(root, stage)))}
