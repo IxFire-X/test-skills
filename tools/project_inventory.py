@@ -1509,14 +1509,17 @@ def template_refs(inventory: Mapping[str, Any], project_root: Path, kept: Iterab
                 tails.setdefault(key, []).append(item)
     refs: Counter[str] = Counter()
     suffixes: set[str] = set()
+    root = Path(project_root).resolve()
     for opaque in kept:
         path = str(index[opaque]["project_path"])
         if is_source(Path(path).name):
-            for match in _STRING.finditer(_read_context_file(Path(project_root).resolve(), path).decode("utf-8", "replace")):
+            for match in _STRING.finditer(_read_context_file(root, path).decode("utf-8", "replace")):
                 literal = re.sub(r"^(?:classpath\*?:|file:)?/*", "", match.group(2))
-                refs.update(item["opaque_id"] for item in tails.get(literal, ()) if item["opaque_id"] not in selected)
                 _, dot, tail = literal.rpartition(".")
-                if dot and "." + tail.casefold() in _TEMPLATE_SUFFIXES and literal not in tails and (literal.startswith(".") or "%" in literal or "{" in literal):
+                suffixed = bool(dot) and "." + tail.casefold() in _TEMPLATE_SUFFIXES
+                carried = tails.get(literal, ())
+                refs.update(item["opaque_id"] for item in carried if item["opaque_id"] not in selected and (len(carried) == 1 or "/" in literal or suffixed))  # a bare name that several templates carry names none
+                if suffixed and literal not in tails and (literal.startswith(".") or "%" in literal or "{" in literal):
                     suffixes.add("." + tail.casefold())
     room = byte_budget // 4
     for opaque, count in sorted(refs.items(), key=lambda row: (-row[1], str(index[row[0]]["project_path"]))):

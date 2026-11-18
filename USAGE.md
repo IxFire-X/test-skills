@@ -50,7 +50,7 @@ build outputs, binaries, generated artifacts и потенциальные secre
 sanitized source, safe fixture или opaque runtime handle.
 
 Шаблон вне `--target`, который код под `--target` называет строкой («owners/detail», «detailsScreen.ftlh»), входит в контекст вместе с кодом и стоит первым в первом батче:
-не больше четверти пачки и 40 файлов (`context_summary.resource_files`, строка `ready`); `paths.include` файл вне `--target` не возвращает. Имя, собранное в коде из частей
+не больше четверти пачки и 40 файлов (`context_summary.resource_files`, строка `ready`); `paths.include` файл вне `--target` не возвращает. Голое имя без папки и суффикса («welcome») находит шаблон, только если такой в проекте один. Имя, собранное в коде из частей
 (`name + ".ftlh"`), так не находится: `ready` предупреждает, нужен `--target` на общего родителя (например `src/main`).
 
 Что исключается по каталогу (`tools/scan_rules.py`):

@@ -58,6 +58,22 @@ def test_a_literal_that_names_no_file_adds_nothing(tmp_path: Path) -> None:
     assert DETAIL not in kept and templates["paths"] == [] and templates["unfound"] is None
 
 
+def test_a_bare_name_that_one_template_carries_finds_it(tmp_path: Path) -> None:
+    kept, *_ = _preview(_project(tmp_path, {"src/web/views.py": 'def home():\n    return "welcome"\n', "templates/welcome.html": "<p></p>\n"}))
+    assert "templates/welcome.html" in kept
+
+
+def test_a_bare_name_that_two_templates_carry_names_none(tmp_path: Path) -> None:
+    kept, _skipped, templates = _preview(_project(tmp_path, {"src/web/views.py": 'def show():\n    return "list"\n', "templates/owners/list.html": "<ul></ul>\n", "templates/vets/list.html": "<ul></ul>\n"}))
+    assert templates["paths"] == [] and "templates/owners/list.html" not in kept and "templates/vets/list.html" not in kept
+
+
+def test_the_plan_with_no_context_receipts_names_no_file() -> None:
+    from tools.batch_assembly import pick_context
+
+    assert pick_context(Path("."), [], 0, [], []) is None
+
+
 def test_a_template_of_a_test_folder_is_not_taken(tmp_path: Path) -> None:
     kept, *_ = _preview(_project(tmp_path, {"src/web/views.py": VIEW, "tests/templates/owners/detail.html": "<p></p>\n"}))
     assert "tests/templates/owners/detail.html" not in kept
