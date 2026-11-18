@@ -125,6 +125,23 @@ def _trailing_json(text: str) -> Any:
     return _NO_JSON
 
 
+def _json_block_count(text: str, limit: int = 2) -> int:
+    """JSON containers that open a line and are not inside another one; counting stops at ``limit``."""
+    decoder, end, count = json.JSONDecoder(), 0, 0
+    for match in _LINE_OPENING_BRACKET.finditer(text):
+        if match.start(1) < end:
+            continue
+        try:
+            value, stop = decoder.raw_decode(text, match.start(1))
+        except (json.JSONDecodeError, RecursionError):
+            continue
+        if isinstance(value, (dict, list)):
+            end, count = stop, count + 1
+            if count == limit:
+                break
+    return count
+
+
 def _json_value_at(value: Any, tokens: tuple[str, ...]) -> Any:
     current = value
     for token in tokens:
@@ -245,6 +262,12 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
                     "HTTP body assertions require one trailing human JSON response template",
                 ))
             continue
+        if _json_block_count(expectation["text"]) > 1:  # the check reads the last one; the one before it would be read by nobody and could say anything
+            diagnostics.append(_diagnostic(
+                _pointer(*step_path, "expectations", expectation_index, "text"),
+                "SEMANTIC_HUMAN_EXPECTATION_BODY_DUPLICATE",
+                "an HTTP expectation holds one JSON block, the response template; the text has more",
+            ))
         for assertion in body_assertions:
             tokens = _rfc6901_tokens(assertion["actual"]["pointer"])
             rendered = _json_value_at(response, tokens)
@@ -667,8 +690,10 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
                 effective_targets.add(key)
             if location == "path":
                 path_inputs.add(target["name"])
-            if location in {"path", "header"} and _representation(stored) != "string":
-                diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TARGET_TYPE", f"{location} target requires string type"))
+            if location == "header" and _representation(stored) != "string":
+                diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TARGET_TYPE", "header target requires string type"))
+            if location == "path" and _representation(stored) not in {"boolean", "integer", "number", "string"}:  # an id from a response is an integer: its type is not changed, the URL prints it
+                diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TARGET_TYPE", "path target requires a string, integer, number or boolean type"))
             if location == "query" and _representation(stored) not in {"null", "boolean", "integer", "number", "string"}:
                 diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_TARGET_TYPE", "query target requires a scalar type"))
             if location == "body":
@@ -999,3 +1024,5 @@ def document_sha256(document: dict[str, Any]) -> str:
 
 # Public name for batch_assembly: the same object under a name without an underscore; a rename of the private name is then a rename here.
 json_type = _json_type
+line_opening_bracket = _LINE_OPENING_BRACKET
+rfc6901_tokens = _rfc6901_tokens

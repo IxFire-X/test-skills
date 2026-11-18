@@ -160,9 +160,12 @@ FIXES: dict[str, str] = {
     "SEMANTIC_MISSING_OPERATION_BLOCKER": "у шага без operation (null) должен быть блокер с field_path /operation, например "
                                           '{"blocker_id": "BLOCK-<namespace>-1", "code": "UNRESOLVED_OPERATION", "field_path": "/operation", '
                                           '"reason": "…", "provenance": ["…"]}; либо опиши operation',
-    "SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING": "в конец text ожидания допиши JSON-шаблон тела ответа с отступом (полями, на которые "
-                                               "есть утверждения http_body); значения — из утверждений или человеческие плейсхолдеры "
-                                               "вроде <идентификатор>; для not_exists шаблон не нужен",
+    "SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING": "JSON-шаблон тела ответа должен быть ПОСЛЕДНИМ блоком text ожидания, с отступом (полями, на которые "
+                                               "есть утверждения http_body); значения — из утверждений или плейсхолдеры <значение присутствующего поля>. "
+                                               "Пример тела уже есть выше — сделай его последним (убери слова после него), второй блок не дописывай. "
+                                               "Шаблона нет: код допишет его сам, когда утверждения задают одну форму; раз не дописал — корневой указатель, "
+                                               "пропуск индекса массива или указатель-предок другого, допиши сам; для not_exists шаблон не нужен",
+    "SEMANTIC_HUMAN_EXPECTATION_BODY_DUPLICATE": "в text ожидания HTTP-шага один JSON-блок — шаблон тела ответа, последний: слей пример тела и шаблон в один, остальные убери",
     "SEMANTIC_HUMAN_EXPECTATION_FIELD_MISSING": "добавь в JSON-шаблон text ожидания поле, на которое есть утверждение (путь — в message)",
     "SEMANTIC_HUMAN_EXPECTATION_UNEXPECTED_FIELD": "убери из JSON-шаблона text поле, на отсутствие которого есть утверждение not_exists",
     "SEMANTIC_HUMAN_EXPECTATION_PLACEHOLDER": "для утверждения exists в шаблоне text — плейсхолдер вроде <идентификатор>, не придуманное значение",
@@ -199,7 +202,8 @@ FIXES: dict[str, str] = {
     "SEMANTIC_OPERATION_TARGET_KIND": "location входа не подходит операции шага: path/query/header/body — для http, arg — для project_action",
     "SEMANTIC_OPERATOR_TYPE": "оператор утверждения не подходит типу значения: сравнения больше/меньше — для чисел, matches — для строк",
     "SEMANTIC_OUTPUT_TYPE": "semantic_type выхода не подходит его источнику",
-    "SEMANTIC_TARGET_TYPE": "semantic_type входа не подходит его цели",
+    "SEMANTIC_TARGET_TYPE": "semantic_type входа не подходит его цели: path — string, integer, number или boolean (id из ответа остаётся integer, URL печатает код), "
+                            "header — string, query — скаляр; тип выхода не меняй, чтобы подойти пути",
     "SEMANTIC_TYPE_MISMATCH": "тип источника и тип цели различаются: приведи semantic_type к одному",
     "SEMANTIC_PARAM_GROUP_MISMATCH": "кейс группы param_group отличается от первого кейса группы не только вариантом. Сравнивается всё, кроме `case_id`, `display_order`, `title`, `objective`, "
                                      "`design_refs`, `param_group`, у шагов — `step_id`, `action`, `test_data`, у входов и утверждений — `input_id`/`assertion_id` и литеральных значений: "

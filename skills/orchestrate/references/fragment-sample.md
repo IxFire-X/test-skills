@@ -59,6 +59,28 @@
 За тобой: `case_id`, `requirement_ids`, `capability_id`, тексты, значения, `output_id` у `http_body`/`http_status`; ссылка `step_output` — полным id шага
 по этой схеме (`"step_id": "STEP-B1-003-02"`).
 
+## Шаг HTTP (`operation.kind: "http"`)
+
+Два шага кейса: первый создаёт владельца и отдаёт `ownerId`, второй читает его. Идентификатор из ответа остаётся `integer`: вход `path` с таким типом допустим, URL строит код — тип выхода под путь не меняй.
+Тело ответа в `text` ожидания не пиши: код допишет `Пример тела:` из утверждений `http_body`; корневой указатель, пропуск индекса массива и кейс импорта — исключение, там один JSON-блок последним пишешь сам.
+
+```json
+[
+  { "action": "POST /api/owners", "test_data": "{\n  \"lastName\": \"Davis\"\n}",
+    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<фраза источника>"] }, "method": "POST", "path": "/api/owners" },
+    "inputs": [ { "target": { "location": "body", "pointer": "/lastName" }, "source": { "kind": "literal", "value": "Davis" } } ],
+    "outputs": [ { "output_id": "ownerId", "source": { "kind": "http_body", "pointer": "/id" }, "semantic_type": { "kind": "json", "type": "integer" }, "type_provenance": ["<файл контракта: схема>"] } ],
+    "expectations": [ { "text": "Владелец создан.\n\nHTTP 201 Created", "assertions": [ { "operator": "equals", "actual": { "kind": "http_status" }, "expected": { "kind": "literal", "value": 201 } } ] } ] },
+  { "action": "GET /api/owners/{ownerId}", "test_data": "Тело запроса отсутствует.",
+    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<фраза источника>"] }, "method": "GET", "path": "/api/owners/{ownerId}" },
+    "inputs": [ { "target": { "location": "path", "name": "ownerId" }, "source": { "kind": "step_output", "step_id": "STEP-B1-001-01", "output_id": "ownerId" } } ],
+    "outputs": [],
+    "expectations": [ { "text": "Владелец найден, фамилия Davis.\n\nHTTP 200 OK", "assertions": [
+      { "operator": "equals", "actual": { "kind": "http_status" }, "expected": { "kind": "literal", "value": 200 } },
+      { "operator": "equals", "actual": { "kind": "http_body", "pointer": "/lastName", "semantic_type": { "kind": "json", "type": "string" }, "type_provenance": ["<файл контракта: схема>"] }, "expected": { "kind": "literal", "value": "Davis" } } ] } ] }
+]
+```
+
 ## Три проверки, которые слабеют первыми
 
 Каждое ожидание — только то, что выражают операторы схемы (`equals`, `contains` — строка в строке, `greater_*`, `length_equals`, …) над

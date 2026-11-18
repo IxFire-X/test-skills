@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import json_type, validate_canonical_document_all
+from tools.canonical_document import json_type, line_opening_bracket, rfc6901_tokens, validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -721,6 +721,47 @@ def _missing(item: Mapping[str, Any], key: str) -> bool:
     return item.get(key) in (None, "") if key in ("step_id", "input_id", "output_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
 
 
+_BODY_PLACEHOLDER = "<значение присутствующего поля>"
+
+
+def _http_body_template(assertions: Any) -> str | None:
+    """The human JSON template of a response body, laid out from the assertions on it: ``equals`` a literal → the literal, any other
+    operator but ``not_exists`` → the placeholder.  None where the shape is not the only one — a root pointer, a gap in an array, a pointer
+    that is an ancestor of another, two values for one pointer — and where no assertion needs a field: the check refuses those as it does."""
+    tree: dict[str, Any] = {}  # a branch is a dict, a leaf is a one-tuple (a literal may be null)
+    for item in assertions if isinstance(assertions, list) else ():
+        actual = item.get("actual") if isinstance(item, dict) else None
+        if not isinstance(actual, dict) or actual.get("kind") != "http_body" or item.get("operator") == "not_exists":
+            continue
+        pointer, expected = actual.get("pointer"), item.get("expected")
+        if not isinstance(pointer, str) or not pointer.startswith("/"):
+            return None
+        literal = item.get("operator") == "equals" and isinstance(expected, dict) and expected.get("kind") == "literal" and "value" in expected
+        leaf, node, tokens = (expected["value"] if literal else _BODY_PLACEHOLDER,), tree, rfc6901_tokens(pointer)
+        for token in tokens[:-1]:
+            node = node.setdefault(token, {})
+            if isinstance(node, tuple):
+                return None
+        if node.setdefault(tokens[-1], leaf) != leaf:
+            return None
+    if not tree:
+        return None
+
+    def built(node: Any) -> Any:
+        if isinstance(node, tuple):
+            return node[0]
+        if any(key.isdigit() for key in node):
+            if not all(key == str(position) for position, key in enumerate(sorted(node, key=lambda key: int(key) if key.isdigit() else -1))):
+                raise ValueError("array")
+            return [built(node[str(position)]) for position in range(len(node))]
+        return {key: built(value) for key, value in node.items()}
+
+    try:
+        return json.dumps(built(tree), ensure_ascii=False, indent=2)
+    except ValueError:
+        return None
+
+
 def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """What the model need not write — the mechanics of a fragment that the code lays out by rule.
 
@@ -728,7 +769,8 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
     ``STEP-<tail of case_id>-<NN>``, ``INPUT-…-<NN>-<k>``, ``EXP-…-<NN>-<k>``, ``ASSERT-…-<NN>-<k>-<j>``; ``output_id`` = the source name;
     ``target.sensitive`` (true only for a secret_handle), ``manual_only`` false with ``manual_reason`` null, ``automation_blockers`` [],
     ``diagnostics`` []; and the ``semantic_type`` the code can take without a guess: of a literal (its JSON type), of a step_output (the type of the
-    output), of a capability argument or result, of http_status (integer) and http_header (string).  A value the model wrote is never changed —
+    output), of a capability argument or result, of http_status (integer) and http_header (string); and the JSON template of the response body (``Пример тела:`` at the
+    end of the text of an HTTP expectation) where the text has no JSON container and the assertions fix one shape (``_http_body_template``).  A value the model wrote is never changed —
     a different one is the refusal the checks make (CANONICAL_DISPLAY_ORDER, SEMANTIC_DUPLICATE_ID, SEMANTIC_TYPE_MISMATCH).  Returns the copy and a
     summary ``["display_order ×N", …]`` (names and counts, not paths)."""
     if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
@@ -817,13 +859,20 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                 if tail is not None:
                     put(expectation, "expectation_id", f"EXP-{tail}-{number:02d}-{e_position}")
                 put(expectation, "display_order", e_position)
+                text = expectation.get("text")
+                if (isinstance(operation, dict) and operation.get("kind") == "http" and step.get("manual_only") is False and isinstance(text, str) and text.strip()
+                        and not (((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale"))  # an imported case keeps its text
+                        and not line_opening_bracket.search(text)  # a JSON the model wrote is never merged with: the check names what is wrong in it
+                        and (template := _http_body_template(expectation.get("assertions"))) is not None):
+                    expectation["text"] = f"{text.rstrip()}\n\nПример тела:\n{template}"
+                    counts["http_body_template"] = counts.get("http_body_template", 0) + 1
                 for a_position, assertion in enumerate(expectation.get("assertions") or [], start=1):
                     if isinstance(assertion, dict):
                         if tail is not None:
                             put(assertion, "assertion_id", f"ASSERT-{tail}-{number:02d}-{e_position}-{a_position}")
                         put(assertion, "display_order", a_position)
     order = ["diagnostics", "display_order", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "manual_only", "manual_reason",
-             "automation_blockers", "sensitive", "semantic_type"]
+             "automation_blockers", "sensitive", "semantic_type", "http_body_template"]
     return value, [f"{name} ×{counts[name]}" for name in order if name in counts]
 
 

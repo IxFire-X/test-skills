@@ -120,3 +120,10 @@ def test_a_closed_attempt_names_the_scan_of_a_new_run(tmp_path: Path, monkeypatc
                                           input_digests=["sha256:" + "1" * 64])
     fix = str(refused.value).split("; fix: ", 1)[1]
     assert "--new-run" in fix and ("run_pipeline scan" in fix or "scan с теми же" in fix), fix
+
+
+def test_the_body_missing_fix_keeps_an_existing_example_last_not_doubled() -> None:
+    from tools.fixes import fix_for
+
+    fix = fix_for("SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING")
+    assert "уже есть" in fix and "второй блок не дописывай" in fix
