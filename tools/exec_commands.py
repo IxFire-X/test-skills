@@ -63,6 +63,29 @@ def _resolve_host_context(
     return execution_root, language, module
 
 
+def _attempt_module(project: Path, coordinates: Mapping[str, Any], args: Any) -> tuple[Path, str, dict[str, Any]]:
+    """The module of the call, settled before anything is written: ``--module`` when given, else the one scan chose for this attempt.  A module that is not
+    the attempt's is a stop with its way out, not a rejection that persists a receipt and ends the attempt."""
+    from tools.skillsrc_manifest import SkillsrcError
+
+    request = coordinates["manifest"].get("scan_request")
+    chosen = getattr(args, "module", None) or (request.get("module") if isinstance(request, Mapping) else None)
+    try:
+        context = _resolve_host_context(project, chosen, getattr(args, "language", None))
+    except SkillsrcError as error:
+        raise HostStop(str(error.code).upper(), str(error), "повторите с --module <id модуля из .skillsrc>: модуль попытки — тот, с которым сделан scan; ничего не записано") from error
+    if context[0].resolve() != Path(coordinates["module_root"]).resolve():
+        raise HostStop("MODULE_MISMATCH", f"модуль {chosen} (флаг --module) — не модуль этой попытки ({coordinates['attempt']['module']})",
+                       "уберите --module или назовите модуль, с которым сделан scan; ничего не записано")
+    return context
+
+
+def _dead_attempt_fix() -> str:
+    from tools.finalize_attempt import NEW_RUN_FIX
+
+    return f"попытка не закрывается: {NEW_RUN_FIX}"
+
+
 def _validated_execution_coordinates(project: Path, run_id: str) -> dict[str, Any]:
     """Bind CLI execution to one durable local-pilot run and its latest attempt."""
     root, run, state = _read_run_coordinate(project, run_id)
@@ -171,7 +194,7 @@ def _reject_prestart_execution(
     except (KeyError, TypeError, ValueError, OSError, RuntimeError):
         _print({
             "status": "error", "reason": "EXECUTION_RECEIPT",
-            "message": "pre-start rejection could not be persisted as an execution receipt",
+            "message": "pre-start rejection could not be persisted as an execution receipt", "fix": _dead_attempt_fix(),
             "attempt_id": coordinates["attempt"]["attempt_id"],
         })
         return 2
@@ -189,7 +212,7 @@ def _reject_prestart_execution(
         )
     except (KeyError, TypeError, ValueError, OSError, RuntimeError) as error:
         _print({
-            "status": "error", "reason": "FINALIZATION", "message": str(error),
+            "status": "error", "reason": "FINALIZATION", "message": str(error), "fix": _dead_attempt_fix(),
             "attempt_id": coordinates["attempt"]["attempt_id"],
         })
         return 2
@@ -360,9 +383,7 @@ def _closed_request(project: Path, coordinates: Mapping[str, Any], args: Any, ca
     from tools.run_tests import build_closed_execution_request, validate_execution_eligibility
 
     try:
-        execution_root, language, module = _resolve_host_context(project, getattr(args, "module", None), getattr(args, "language", None))
-        if execution_root.resolve() != Path(coordinates["module_root"]).resolve():
-            raise HostStop("EXECUTION_COORDINATES", "selected module differs from the attempt module")
+        execution_root, language, module = _attempt_module(project, coordinates, args)
         coordinates = {**coordinates, "module": module}
         request, _compatibility = build_closed_execution_request(execution_root, language, module, carriers["document"], carriers["automation"])
     except HostStop as error:
@@ -770,6 +791,7 @@ def cmd_materialize(args: Any) -> int:
         return 2
     try:
         command_text([sys.executable, str(project), str(attempt["module"])])  # what the printed lines will hold, before anything is written
+        _attempt_module(project, coordinates, args)  # the module of the call is settled before the tests are written
         _prepare_execution(coordinates)
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), **({"fix": stop.fix} if stop.fix else {}),
