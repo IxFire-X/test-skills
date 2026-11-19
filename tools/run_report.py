@@ -594,8 +594,8 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
 
 _WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
-                 "REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
-                 "REVIEW_WEAK": "ревьюер поймал не все контрольные ошибки (канарейки) своего вида",
+                 "REVIEW_UNRELIABLE": "ревью ненадёжно, accepted=false",
+                 "REVIEW_WEAK": "ревью слабое",
                  "REVIEW_UNMEASURED": "ревью не измерено канарейками (прогон открыт до P7)",
                  "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией журнала",
                  "STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
@@ -1339,6 +1339,15 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _warning_line(code: str, report: Mapping[str, Any]) -> str:
+    """A line of «Предупреждения»; a weak or unreliable review says how many control errors of its view it caught (the numbers of the run, not a guess)."""
+    canaries = report.get("review_canaries") or {}
+    if code in {"REVIEW_UNRELIABLE", "REVIEW_WEAK"} and type(canaries.get("seeded")) is int and type(canaries.get("caught")) is int:
+        counted = f"поймано {canaries['caught']} из {canaries['seeded']}" if code == "REVIEW_UNRELIABLE" else f"пропущено {canaries['seeded'] - canaries['caught']} из {canaries['seeded']}"
+        return f"- {code}: {counted} контрольных ошибок (канареек) в виде ревьюера — {_WARNING_TEXT[code]}"
+    return f"- {code}: {_WARNING_TEXT.get(code, code)}"
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     totals = report.get("model_totals") or model_totals(report["model_calls"])
@@ -1364,7 +1373,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
           for c in report["model_calls"]),
         f"| Итого по прогону | вызовов модели {totals['calls']} | | | {totals['input_bytes']} | {totals['input_tokens_est']} | | | "
         f"{totals['output_bytes']} | {totals['output_tokens_est']} |", "",
-        "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
+        "## Предупреждения", "", *(_warning_line(code, report) for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
         *([*(f"  - {_one_line(row['path']) or '?'}: номеров {row['labels']}" for row in report["requirement_labels"]["documents"]), f"  - требований в разметке: {report['requirement_labels']['requirements']}"]
           if report.get("requirement_labels") else []),

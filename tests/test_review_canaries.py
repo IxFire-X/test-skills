@@ -419,6 +419,14 @@ def test_the_report_says_how_many_blocking_findings_were_on_canaries_and_that_th
     assert "блокирующих замечаний" not in "\n".join(_canary_lines({"review_canaries": {**base, "blocking": 0}}))
 
 
+def test_the_warning_of_an_unreliable_review_names_how_many_control_errors_were_caught() -> None:
+    from tools.run_report import _warning_line
+
+    line = _warning_line("REVIEW_UNRELIABLE", {"review_canaries": {"seeded": 8, "caught": 2}})
+    assert "поймано 2 из 8" in line and "ни одна" not in line
+    assert "пропущено 3 из 8" in _warning_line("REVIEW_WEAK", {"review_canaries": {"seeded": 8, "caught": 5}})
+
+
 def test_the_report_shows_the_catch_by_kind_and_the_model_of_the_reviewer() -> None:
     from tools.run_report import _canary_lines
 
