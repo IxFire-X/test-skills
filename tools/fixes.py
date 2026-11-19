@@ -168,7 +168,7 @@ FIXES: dict[str, str] = {
     "SEMANTIC_HUMAN_EXPECTATION_UNEXPECTED_FIELD": "убери из JSON-шаблона text поле, на отсутствие которого есть утверждение not_exists",
     "SEMANTIC_HUMAN_EXPECTATION_PLACEHOLDER": "для утверждения exists в шаблоне text — плейсхолдер вроде <идентификатор>, не придуманное значение",
     "SEMANTIC_HUMAN_EXPECTATION_LITERAL_MISMATCH": "значение в JSON-шаблоне text должно равняться литералу утверждения equals",
-    "SEMANTIC_HUMAN_BODY_MISSING": "в конец test_data шага допиши полный JSON тела запроса с отступом — по нему идут входы body",
+    "SEMANTIC_HUMAN_BODY_MISSING": "в конец test_data шага допиши полный JSON тела запроса с отступом — по нему идут входы body; тело — валидный JSON: значение-заглушка — строка в кавычках (\"<…>\"), не голое <…>",
     "SEMANTIC_HUMAN_BODY_UNBOUND": "каждое листовое поле JSON тела в test_data должно иметь вход location=body с pointer (RFC 6901) "
                                    "этого поля: добавь недостающие входы (их перечень — в message), контейнер объектом не связывай",
     "SEMANTIC_HUMAN_BODY_BINDING_MISSING": "вход body указывает на поле, которого нет в JSON тела test_data: поправь pointer или допиши поле",
@@ -293,7 +293,7 @@ FIXES: dict[str, str] = {
                                "новое ревью — новый прогон (`scan --new-run`)",
     "REVIEWER_SESSION_OPEN_EVIDENCE": "запрос evidence ждёт ответа: ответь на него (ключ `evidence` с путями в проекте в слоте ответа, затем `submit`) или закрой сессию "
                                       "`submit --stage tc-reviewer:canonical --abort REVIEW_CONTEXT_LIMIT`",
-    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: проси только пути из inventory (уже выданные называет `status`); пустой `evidence` — убери ключ",
+    "REVIEWER_EVIDENCE_PATH_UNKNOWN": "этого файла нет в inventory попытки: `evidence` — только пути файлов проекта из inventory (файлы запросов и ответов прогона, например из model-stage-artifacts, туда не входят; уже выданные называет `status`); пустой `evidence` — убери ключ",
     "REVIEWER_EVIDENCE_DUPLICATE": "эти файлы уже выданы ревьюеру: не проси их снова, а новые пути — отдельным запросом",
     "REVIEWER_ABORT_REASON_INVALID": "`submit --abort` — REVIEW_CONTEXT_LIMIT (не хватило бюджета на evidence) или REVIEW_UNUSABLE "
                                      "(ответ дважды не прошёл проверку)",
