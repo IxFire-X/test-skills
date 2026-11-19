@@ -1213,6 +1213,8 @@ def _canary_lines(report: Mapping[str, Any]) -> list[str]:
 
             lines.extend(f"- по виду «{CLASS_NAMES[cls]}»: поймано {row['caught']} из {row['seeded']} ({round(100 * row['caught'] / row['seeded'])} %)"
                          for cls, row in canaries["by_class"].items())
+    if canaries and canaries.get("blocking"):
+        lines.append(f"- блокирующих замечаний ревьюера к контрольным ошибкам: {canaries['blocking']} — они кейсы не отклоняют (отклоняют только замечания к настоящим кейсам)")
     if report.get("review_model"):
         lines.append(f"- модель ревьюера (по названию из запроса): {report['review_model']}")
     if codeword:

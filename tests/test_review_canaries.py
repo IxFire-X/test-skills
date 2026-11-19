@@ -401,6 +401,24 @@ def test_the_outcome_counts_the_caught_by_kind_of_error() -> None:
     assert outcome(canaries, answer)["by_class"] == {"boundary": {"seeded": 1, "caught": 1}, "status": {"seeded": 1, "caught": 1}, "state_check_removed": {"seeded": 2, "caught": 1}}
 
 
+def test_the_outcome_counts_the_blocking_findings_that_stand_on_canaries() -> None:
+    from tools.review_canaries import outcome
+
+    canaries = [{"canary_id": f"CAN-{n}", "class": "assertion_removed", "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
+                 "field": "assertions", "original": "a", "mutated": "", "markers": []} for n in (1, 2)]
+    findings = [_finding("BLOCKING", ["TC-1", "EXP-1"]), _finding("BLOCKING", ["TC-2", "EXP-2"]), _finding("BLOCKING", ["TC-3", "EXP-3"]), _finding("WARNING", ["TC-1", "EXP-1"])]
+    assert outcome(canaries, {"artifacts": {"validation_report": {"findings": findings}}})["blocking"] == 2  # the real case TC-3 and a warning are not counted
+
+
+def test_the_report_says_how_many_blocking_findings_were_on_canaries_and_that_they_reject_no_case() -> None:
+    from tools.run_report import _canary_lines
+
+    line = "- блокирующих замечаний ревьюера к контрольным ошибкам: 5 — они кейсы не отклоняют (отклоняют только замечания к настоящим кейсам)"
+    base = {"status": "ALL_CAUGHT", "seeded": 10, "caught": 10, "note": "n"}
+    assert line in "\n".join(_canary_lines({"review_canaries": {**base, "blocking": 5}}))
+    assert "блокирующих замечаний" not in "\n".join(_canary_lines({"review_canaries": {**base, "blocking": 0}}))
+
+
 def test_the_report_shows_the_catch_by_kind_and_the_model_of_the_reviewer() -> None:
     from tools.run_report import _canary_lines
 

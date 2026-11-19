@@ -462,7 +462,10 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
         status, warning, note = "ALL_CAUGHT", None, f"поймано {seeded} из {seeded} контрольных ошибок"
     by_class = {cls: {"seeded": sum(row["class"] == cls for row in canaries), "caught": sum(row["class"] == cls and row["canary_id"] in hits for row in canaries)}
                 for cls in CLASSES if any(row["class"] == cls for row in canaries)}
-    return {"status": status, "seeded": seeded, "caught": len(hits), "missed_classes": classes, "by_class": by_class, "hits": hits, "warning": warning,
+    blocking = sum(1 for item in (answer.get("artifacts") or {}).get("validation_report", {}).get("findings") or []  # the blocking findings that reject no case: they stand on a canary
+                   if isinstance(item, Mapping) and item.get("severity") == "BLOCKING"
+                   and canary_finding(canaries, item, {str(i) for i in item.get("related_ids") or [] if str(i).startswith("TC-")}))
+    return {"status": status, "seeded": seeded, "caught": len(hits), "missed_classes": classes, "by_class": by_class, "hits": hits, "blocking": blocking, "warning": warning,
             "note": note + "; " + NOTE}
 
 
