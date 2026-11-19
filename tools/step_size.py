@@ -40,6 +40,7 @@ OUTPUT_TRUNCATED = "MODEL_OUTPUT_TRUNCATED"
 OUTPUT_SIZES = "output-sizes.jsonl"
 TRUNCATED_HINT = ("похоже, ответ упёрся в лимит выхода модели; повтори стадию один раз (как при ошибке схемы) и попроси "
                   "ответить тем же JSON целиком, компактно, без отступов и переносов — так ответ почти вдвое меньше")
+JSON_INVALID_FIX = ('ответ целый, но не разбирается как JSON (место ошибки — в сообщении): запиши его заново целиком одним JSON-объектом в UTF-8 — без текста до и после, без комментариев и дублей ключей, кавычки внутри строк экранированы; подай новый файл единственным повтором стадии (--transport-attempts 2)')  # a whole answer that does not read as JSON: not cut, so the repeat asks for it written again, not shortened
 TRUNCATED_FIX = ("повтори стадию один раз (--transport-attempts 2) и попроси модель ответить тем же JSON целиком, компактно, без отступов "
                  "и переносов; дальше — finish, если повтор тоже оборван")
 DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real output limit of the work model is not known yet
@@ -134,7 +135,7 @@ def require_generator_context_all(project: Path) -> None:
 
 
 def looks_truncated(text: str) -> bool:
-    """The JSON ends inside a string or with an open bracket — cut in the middle, not merely malformed."""
+    """The JSON ends inside a string or with an open bracket and reads as a valid beginning to its end — cut in the middle, not merely malformed."""
     depth, in_string, escape = 0, False, False
     for char in text:
         if in_string:
@@ -150,7 +151,15 @@ def looks_truncated(text: str) -> bool:
             depth += 1
         elif char in "}]":
             depth -= 1
-    return bool(text.strip()) and (in_string or depth > 0)
+    if not (text.strip() and (in_string or depth > 0)):
+        return False
+    try:  # a cut text is a valid beginning: the parser reaches its end; a mistake in the middle (an unescaped quote, a comma) stops it there, and the answer is whole
+        json.loads(text)
+    except json.JSONDecodeError as error:
+        return error.pos >= len(text.rstrip()) - 6 or error.msg.startswith("Unterminated string")  # 6: a cut inside true, false, null
+    except ValueError:  # a nesting past the recursion limit and the like: as before, open at the end is cut
+        pass
+    return True
 
 
 def truncated_message(byte_count: int) -> str:

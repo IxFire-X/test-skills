@@ -134,7 +134,22 @@ def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: 
     assert code == 2 and output["code"] == "ANSWER_JSON_INVALID" and "MODEL_OUTPUT_TRUNCATED" not in json.dumps(output, ensure_ascii=False)
 
 
-@pytest.mark.parametrize("text", ['{"a": "abc', '{"a": [1, 2', '{"a": {"b": 1}', '{"a": "x\\"', '  '])
+QUOTE = '{"a": "he said "hi" ok", "b": {"c": 1}}'  # whole, ends with its brackets, but an unescaped quote turns the string over: open at the end by count
+
+
+def test_a_whole_answer_with_an_unescaped_quote_is_not_called_truncated_and_has_its_own_human(tmp_path: Path) -> None:
+    from tests.test_review_two_commands import _select_verdict
+    from tools.step_size import looks_truncated
+
+    assert looks_truncated(QUOTE) is False
+    path = tmp_path / "quote.json"
+    path.write_text(QUOTE, encoding="utf-8")
+    code, output = _select_verdict(_review_run(tmp_path), str(path))
+    assert code == 2 and output["code"] == "ANSWER_JSON_INVALID" and output["human"].startswith("Ответ модели не читается как JSON"), output
+    assert "оборвал" not in json.dumps(output, ensure_ascii=False) and "заново" in output["fix"]
+
+
+@pytest.mark.parametrize("text", ['{"a": "abc', '{"a": [1, 2', '{"a": {"b": 1}', '{"a": "x\\"', '{"a": tru', '  '])
 def test_an_open_string_or_bracket_at_the_end_is_truncated(text: str) -> None:
     from tools.step_size import looks_truncated
 

@@ -104,8 +104,7 @@ def _load_answer(path: str, project: Path | None = None) -> _Answer:
     except (UnicodeDecodeError, StrictJsonError) as error:
         if step_size.looks_truncated(raw.decode("utf-8", "replace")):
             raise ValueError(step_size.truncated_message(len(raw)) + "; fix: " + step_size.TRUNCATED_FIX) from error
-        raise ValueError(f"ANSWER_JSON_INVALID: {path}: {error}; fix: файл ответа — один JSON-объект в UTF-8 без комментариев и дублей ключей; "
-                         "исправь файл и подай его единственным повтором стадии (--transport-attempts 2)") from error
+        raise ValueError(f"ANSWER_JSON_INVALID: {path}: {error}; fix: " + step_size.JSON_INVALID_FIX) from error
 
 
 def _yes_no(value: str) -> bool:
