@@ -1,0 +1,151 @@
+"""Where the package publishes and reads a path the agent names: the published directory and the input files.
+
+A path from the command line or from a file is input, not a boundary.  The published directory is ``<run>/published`` of an existing run: no
+command names it, the code takes it from the run root and asks ``run_output_directory`` — a link or junction in its place leads out of the
+run and is refused.  An input file is inside the project (or, for a command without a run, inside the run it lies in), with no link or
+junction on the way.  Every path is judged by its text first — no NUL, no UNC or device path, no ``..`` — so a path that would reach the
+network is refused before anything opens it.  Nothing is created here.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+from pathlib import Path, PureWindowsPath
+
+OUT_CODE = "API_OUT_OUTSIDE_RUN"
+DIR_CODE = "OUTPUT_DIR_OUTSIDE_RUN"
+IN_CODE = "INPUT_OUTSIDE_PROJECT"
+OUT_FIX = "--run-root — существующий прогон <project>/.pilot-runs/<run_id> (каталог из вывода scan); повтори команду с ним"
+DIR_FIX = "каталог публикации прогона `<run>/published` подменён ссылкой (junction) или ведёт за пределы прогона: код ничего туда не записал; агент ничего не правит — человек удаляет эту ссылку (на её месте должна быть обычная папка внутри прогона или её нет) и повторяет ту же команду"
+PACK_ROOT = Path(__file__).resolve().parents[1]
+PACK_FIX = "схема — файл пакета (schemas/…), путь от каталога пакета, обычный файл без ссылок и «..»"
+RUN_FIX = "--run — id прогона (32 символа 0-9a-f из вывода scan), не путь; путь к проекту — в --project"
+IN_FIX = ("передай --run-root <run> (или --project <проект>) и файл внутри этого проекта; без них — файл внутри прогона "
+          "<project>/.pilot-runs/<run_id>/ (свои файлы агент кладёт в <run>/tmp/); путь — обычный файл без ссылок и junction, без «..», не UNC")
+
+
+class OutputRefused(ValueError):
+    def __init__(self, code: str, message: str, fix: str) -> None:
+        self.code, self.fix = code, fix
+        super().__init__(message)
+
+
+def local_path_text(raw: str) -> bool:
+    """A path that names a place on this machine by its text alone — no NUL, no UNC or device prefix: nothing that would reach the
+    network.  Judged before anything opens, resolves or stats the path; ``\\??\\`` too — the prefix of an NT path, Win32 passes it as it is."""
+    return "\x00" not in raw and not raw.replace("/", "\\").startswith(("\\\\", "\\??\\"))
+
+
+def _plain(raw: str, *, relative: bool = False) -> bool:
+    """``local_path_text`` and no ``..``; a *relative* one also no root and no drive."""
+    windows = PureWindowsPath(raw)
+    if not local_path_text(raw) or ".." in windows.parts:
+        return False
+    return not relative or not (windows.drive or windows.root or raw.startswith("/"))
+
+
+def _inside(root: Path, candidate: Path) -> Path:
+    """*candidate* (absolute, judged by its text) below *root*, no link or junction from *root* down, a regular file."""
+    base = Path(os.path.abspath(root))
+    try:
+        relative = candidate.relative_to(base)
+    except ValueError:
+        try:
+            base = base.resolve()
+            relative = candidate.relative_to(base)
+        except (OSError, ValueError):
+            raise OutputRefused(IN_CODE, f"{candidate}: the file is outside {root}", IN_FIX) from None
+    current, details = base, None
+    for part in relative.parts:
+        current = current / part
+        details = os.lstat(current)
+        if stat.S_ISLNK(details.st_mode) or getattr(details, "st_file_attributes", 0) & 0x400:
+            raise OutputRefused(IN_CODE, f"{candidate}: a link or junction on the way", IN_FIX)
+    if details is None or not stat.S_ISREG(details.st_mode):
+        raise OutputRefused(IN_CODE, f"{candidate}: not a regular file", IN_FIX)
+    return current
+
+
+def plain_path(value: str | Path) -> Path:
+    """A path of a command that has no project and no run to judge it by (a standalone checker): the text only — no NUL, no UNC or device
+    prefix, no ``..`` — before anything opens it.  Nothing is opened here."""
+    if not _plain(str(value)):
+        raise OutputRefused(IN_CODE, f"{value}: not a local path (UNC, device, NUL or ..)", IN_FIX)
+    return Path(value)
+
+
+def package_file(value: str | Path) -> Path:
+    """A file of the package itself (a schema): by its text, then below the root of the package, no link on the way, a regular file."""
+    raw = str(value)
+    if not _plain(raw):
+        raise OutputRefused(IN_CODE, f"{raw}: not a local path (UNC, device, NUL or ..)", PACK_FIX)
+    return _inside(PACK_ROOT, Path(os.path.abspath(raw)))
+
+
+def run_name(value: object) -> str:
+    """The id of a run as a name: ``[0-9a-f]{32}``, judged by its text before a path is built from it (never a path itself)."""
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{32}", value) is None:
+        raise OutputRefused(OUT_CODE, f"--run must be the id of a run: 32 hexadecimal characters, not a path", RUN_FIX)
+    return value
+
+
+def project_path(project: Path, value: str) -> Path:
+    """A ``project_path`` (relative to the project) judged by its text alone — nothing is opened."""
+    if not _plain(str(value), relative=True):
+        raise OutputRefused(IN_CODE, f"{value!r}: a project path is relative, inside the project, without .., a drive or UNC", IN_FIX)
+    return Path(project) / value
+
+
+def project_file(project: Path, value: str) -> Path:
+    """The file a ``project_path`` names: by its text, then inside the project with no link on the way."""
+    return _inside(Path(project), Path(os.path.abspath(project_path(project, value))))
+
+
+def input_file(value: str | Path, project: Path | None, *, base: Path | None = None) -> Path:
+    """The file a path of the command line names (relative to *base*, else the working directory): by its text, then inside
+    *project* — or, without one, inside the run of a project it lies in (``<project>/.pilot-runs/<run_id>/``)."""
+    raw = str(value)
+    if not _plain(raw):
+        raise OutputRefused(IN_CODE, f"{raw}: not a local path (UNC, device, NUL or ..)", IN_FIX)
+    candidate = Path(os.path.abspath(Path(base) / raw if base is not None else raw))
+    if project is not None:
+        return _inside(project, candidate)
+    parts = candidate.parts
+    runs = [index for index in range(1, len(parts) - 2) if parts[index].lower() == ".pilot-runs"]
+    if not runs:
+        raise OutputRefused(IN_CODE, f"{raw}: without --run-root the file lies in a run (<project>/.pilot-runs/<run_id>/)", IN_FIX)
+    try:
+        _project, run = existing_run(Path(*parts[: runs[-1] + 2]))
+    except OutputRefused:
+        raise OutputRefused(IN_CODE, f"{raw}: without --run-root the file lies in an existing run", IN_FIX) from None
+    return _inside(run, candidate)
+
+
+def existing_run(run_root: object) -> tuple[Path, Path]:
+    """``(project, run)`` of a run that exists: ``<project>/.pilot-runs/<id>`` with its ``run-manifest.json``."""
+    from tools import pilot_state
+    from tools.run_lock import JournalRefusal
+
+    if not local_path_text(str(run_root)):
+        raise OutputRefused(OUT_CODE, "--run-root must name an existing run: <project>/.pilot-runs/<run_id>/", OUT_FIX)
+    try:
+        project, run = pilot_state._run_root(Path(str(run_root)))
+    except JournalRefusal:  # a busy run is no wrong --run-root
+        raise
+    except (ValueError, OSError, TypeError):
+        raise OutputRefused(OUT_CODE, "--run-root must name an existing run: <project>/.pilot-runs/<run_id>/", OUT_FIX) from None
+    if not (run / "run-manifest.json").is_file():
+        raise OutputRefused(OUT_CODE, "--run-root must name an existing run: no run-manifest.json there", OUT_FIX)
+    return project, run
+
+
+def run_output_directory(path: str | Path, run_root: object) -> Path:
+    """``path`` as the published directory of the run ``run_root`` names: ``<run>/published`` or below it, links resolved; a link out of it is refused."""
+    _project, run = existing_run(run_root)
+    published = run / "published"
+    directory = Path(path).resolve() if local_path_text(str(path)) else None
+    if directory is None or (directory != published and published not in directory.parents):
+        raise OutputRefused(DIR_CODE, f"{published} must be a plain directory inside the run, not a link or junction out of it", DIR_FIX)
+    return directory

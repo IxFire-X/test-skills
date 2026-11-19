@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/retained-native-rerun-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "run_id", "attempt_id", "policy_profile", "terminal_result_digest", "execution_receipt_digest", "execution_request_digest", "disposition_receipt_digest", "before", "after", "outcome", "reports", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "kind": {"const": "retained-native-rerun"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"const": "local-pilot-v1"},
+    "terminal_result_digest": {"$ref": "#/$defs/digest"},
+    "execution_receipt_digest": {"$ref": "#/$defs/digest"},
+    "execution_request_digest": {"$ref": "#/$defs/digest"},
+    "disposition_receipt_digest": {"$ref": "#/$defs/digest"},
+    "before": {"$ref": "#/$defs/retained_snapshot"},
+    "after": {"$ref": "#/$defs/retained_snapshot"},
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "exit_code"],
+      "properties": {"kind": {"const": "EXIT"}, "exit_code": {"const": 0}}
+    },
+    "reports": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_path", "source_digest", "before_fingerprint", "after_fingerprint", "normalization", "path", "digest"],
+        "properties": {
+          "source_path": {"$ref": "#/$defs/relative_path"},
+          "source_digest": {"$ref": "#/$defs/digest"},
+          "before_fingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fingerprint"}]},
+          "after_fingerprint": {"$ref": "#/$defs/fingerprint"},
+          "normalization": {"const": "junit-semantic-v1"},
+          "path": {
+            "allOf": [
+              {"$ref": "#/$defs/relative_path"},
+              {"pattern": "^artifacts/[0-9a-f]{32}/retained-rerun/reports/[^\\r\\n]+$"}
+            ]
+          },
+          "digest": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "relative_path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mtime_ns", "size", "digest"],
+      "properties": {
+        "mtime_ns": {"type": "integer", "minimum": 0},
+        "size": {"type": "integer", "minimum": 0},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "retained_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_id", "path", "digest"],
+      "properties": {
+        "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
+        "path": {"$ref": "#/$defs/relative_path"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "retained_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "files", "digest"],
+      "properties": {
+        "kind": {"const": "RETAINED_FILES"},
+        "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/retained_file"}},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

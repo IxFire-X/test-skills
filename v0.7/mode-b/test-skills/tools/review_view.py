@@ -1,0 +1,799 @@
+"""The compact view of a canonical candidate that the reviewer reads instead of the full JSON.
+
+The view is a pure function of the candidate: the same candidate gives the same bytes.  It keeps what a person
+reviews — source and canonical requirements, case title, requirements, objective, preconditions, each step's action,
+test data, automation blockers, expected text and its assertions in one line — and the machine part whose
+meaning only the reviewer judges: one line per step with its operation, inputs and outputs, and the list of
+capabilities with action, arguments, results and the first line of provenance (the test boundary).  The validator
+checks structure and references, not meaning.  A literal longer than ``LITERAL_LIMIT`` is cut with a mark; a sensitive
+input is ``***``. A parameter group is shown once at its first case — its lines with the IDs of the first
+case and ``<параметр>`` where the cases differ, then a table with a row per case ID.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
+step's action and data — a number of any length as a whole token or a Russian numeral of the same value
+(«через три дня» names 3), other text from ``MIN_LITERAL`` characters.  The hint never changes the case text.
+
+``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
+``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
+
+The profile ``autotest`` is the view of the effective document that the automation generator reads instead of
+the full JSON (``prepare`` of the generator writes ``<run>/review-views/<document sha>.autotest.md``).  It keeps what a test is built
+from — the canonical requirements (ID and text: the testing-work constraints), the capabilities with their whole
+provenance (the test boundary), each case's requirement IDs, objective, preconditions, each step's action, operation,
+inputs, outputs, blockers, expectation text and every assertion with its ID — and the machine part whole: every ID,
+target (name or body pointer), semantic type, type provenance and literal exactly, a secret input as its handle and safe
+label, nothing cut.  It drops what the generator does not use: source requirements, mappings, the provenance and
+design of requirements, management, blocker provenance and the step's test data (values come from the structured
+inputs only).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any, Collection, Iterable, Mapping
+
+from tools.canonical_document import param_groups
+from tools.json_cli import JsonArgumentParser, cli_error
+from tools.reference_match import reference_match
+from tools.test_case_projections import SLOT, template_texts
+
+VIEW_VERSION = "review-view-v2"
+AUTOTEST_VIEW_VERSION = "autotest-view-v1"
+PROFILES = ("review", "autotest", "autotest-review")
+DATA_MISMATCH = "CV_DATA_MISMATCH"
+NO_END_TO_END = "CV_NO_END_TO_END"
+MIN_LITERAL = 3
+LITERAL_LIMIT = 200
+_PLACEHOLDER = re.compile(r"\{[^{}]*\}")
+_NUMERIC = re.compile(r"^-?\d+(?:[.,]\d+)?$")
+HINT_LIMIT = 50
+_SHOWN = 3
+_OPERATORS = {
+    "equals": "=", "not_equals": "≠", "exists": "есть", "not_exists": "нет", "contains": "содержит", "matches": "~",
+    "greater_than": ">", "greater_or_equal": "≥", "less_than": "<", "less_or_equal": "≤", "length_equals": "длина =",
+    "schema_matches": "по схеме",
+}
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _value(value: Mapping[str, Any]) -> str:
+    kind = value.get("kind")
+    if kind == "literal":
+        return _json(value.get("value"))
+    if kind == "step_output":
+        return f"{value.get('step_id')}.{value.get('output_id')}"
+    if kind == "http_status":
+        return "status"
+    if kind == "http_body":
+        return "body" + str(value.get("pointer", ""))
+    if kind in {"http_header", "project_result"}:
+        return str(value.get("name"))
+    return f"{kind}:{value['name']}" if "name" in value else str(kind)
+
+
+def _assertion(assertion: Mapping[str, Any]) -> str:
+    text = f"{_value(assertion['actual'])} {_OPERATORS.get(assertion['operator'], assertion['operator'])}"
+    return text + (f" {_value(assertion['expected'])}" if isinstance(assertion.get("expected"), Mapping) else "")
+
+
+def _cut(text: str) -> str:
+    """A long literal is cut with a mark; the full value stays in the candidate JSON at the same step."""
+    return text if len(text) <= LITERAL_LIMIT else f"{text[:LITERAL_LIMIT]}…(+{len(text) - LITERAL_LIMIT} симв.)"
+
+
+def _input(item: Mapping[str, Any]) -> str:
+    target = item.get("target") or {}
+    name = target.get("name") or item.get("input_id")
+    return f"{name}=***" if target.get("sensitive") else f"{name}={_cut(_value(item.get('source') or {}))}"
+
+
+def _operation(step: Mapping[str, Any], actions: Mapping[str, str]) -> str:
+    """One line of the machine part of a step: what it calls, with which inputs, and what it outputs."""
+    operation = step.get("operation") or {}
+    capability_id = operation.get("capability_id")
+    if capability_id:
+        head = f"{capability_id} ({actions.get(capability_id, '—')})"
+    else:
+        rest = {key: value for key, value in operation.items() if key != "kind"}
+        head = str(operation.get("kind") or "—") + (f" {_cut(_json(rest))}" if rest else "")
+    inputs = ", ".join(_input(item) for item in sorted(step.get("inputs") or [], key=lambda row: row.get("display_order", 0))) or "—"
+    outputs = ", ".join(str(row.get("output_id")) for row in step.get("outputs") or []) or "—"
+    return f"   Операция: {head} | входы: {inputs} | выходы: {outputs}"
+
+
+def _type(row: Mapping[str, Any]) -> str:
+    semantic = row.get("semantic_type") or {}
+    return str(semantic.get("type") or semantic.get("kind") or "?")
+
+
+def _capability(capability: Mapping[str, Any]) -> str:
+    arguments = ", ".join(f"{row['name']}:{_type(row)}{'*' if row.get('required') else ''}" for row in capability.get("arguments") or []) or "—"
+    results = ", ".join(f"{row['name']}:{_type(row)}" for row in capability.get("results") or []) or "—"
+    line = f"- {capability['capability_id']}: {capability['action']}, adapter {capability['adapter']}; аргументы {arguments}; результаты {results}"
+    first = next(iter(str((capability.get("provenance") or [""])[0]).splitlines()), "")
+    return line + (f"; граница: {_cut(first)}" if first else "")
+
+
+def _soft_forms(word: str) -> tuple[str, ...]:
+    """Nominative, genitive/dative/prepositional and instrumental of a numeral in -ь (пять, пяти, пятью)."""
+    return word, word[:-1] + "и", word[:-1] + "ью"
+
+
+# Russian cardinal numerals as the equal of a digit token ("через три дня" names 3), every case form
+_NUMBER_WORDS: dict[str, int] = {
+    **dict.fromkeys(("ноль", "нуль", "ноля", "нуля", "нолю", "нулю", "нолём", "нулём", "нолем", "нулем"), 0),
+    **dict.fromkeys(("один", "одна", "одно", "одни", "одного", "одной", "одному", "одним", "одном", "одну", "одною", "одних", "одними"), 1),
+    **dict.fromkeys(("два", "две", "двух", "двум", "двумя"), 2),
+    **dict.fromkeys(("три", "трёх", "трех", "трём", "трем", "тремя"), 3),
+    **dict.fromkeys(("четыре", "четырёх", "четырех", "четырём", "четырем", "четырьмя"), 4),
+    **{form: value for value, word in ((5, "пять"), (6, "шесть"), (7, "семь"), (9, "девять"), (10, "десять"), (11, "одиннадцать"),
+                                       (12, "двенадцать"), (13, "тринадцать"), (14, "четырнадцать"), (15, "пятнадцать"),
+                                       (16, "шестнадцать"), (17, "семнадцать"), (18, "восемнадцать"), (19, "девятнадцать"),
+                                       (20, "двадцать"), (30, "тридцать")) for form in _soft_forms(word)},
+    **dict.fromkeys(("восемь", "восьми", "восемью", "восьмью"), 8),
+    **dict.fromkeys(("сорок", "сорока"), 40),
+    **dict.fromkeys(("пятьдесят", "пятидесяти", "пятьюдесятью"), 50),
+    **dict.fromkeys(("шестьдесят", "шестидесяти", "шестьюдесятью"), 60),
+    **dict.fromkeys(("семьдесят", "семидесяти", "семьюдесятью"), 70),
+    **dict.fromkeys(("восемьдесят", "восьмидесяти", "восемьюдесятью"), 80),
+    **dict.fromkeys(("девяносто", "девяноста"), 90),
+    **dict.fromkeys(("сто", "ста"), 100),
+    # a date offset in days named by the day ("дата D (сегодня)" names the offset 0)
+    "позавчера": -2, "вчера": -1, "сегодня": 0, "завтра": 1, "послезавтра": 2,
+}
+_WORD = re.compile(r"[а-яё]+")
+
+
+def _numbers_in_words(text: str) -> set[int]:
+    """The values the numerals of a text name — each word alone and a ten with its unit (двадцать пять = 25)."""
+    values = [_NUMBER_WORDS.get(word) for word in _WORD.findall(text.lower())]
+    named = {value for value in values if value is not None}
+    named |= {tens + unit for tens, unit in zip(values, values[1:])
+              if tens is not None and unit is not None and 20 <= tens <= 90 and tens % 10 == 0 and 1 <= unit <= 9}
+    return named
+
+
+def _named(leaf: str, text: str) -> bool:
+    """A number of any length is named only as a whole token (17 is not in 170 or 1.17), or as a
+    Russian numeral of the same integer value; other text from MIN_LITERAL."""
+    if not leaf.strip():  # a blank value (three spaces) cannot be named literally — the text says «пробелы»
+        return True
+    if _PLACEHOLDER.search(leaf):  # a route template — its fixed parts are named, the placeholder is a value of another input
+        return all(part in text for part in _PLACEHOLDER.split(leaf) if part.strip())
+    if _NUMERIC.fullmatch(leaf):
+        if re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None:
+            return True
+        return re.fullmatch(r"-?\d+", leaf) is not None and int(leaf) in _numbers_in_words(text)
+    return len(leaf) < MIN_LITERAL or leaf in text
+
+
+def _leaves(value: Any) -> Iterable[str]:
+    if isinstance(value, Mapping):
+        for item in value.values():
+            yield from _leaves(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _leaves(item)
+    elif not isinstance(value, bool) and value is not None:
+        yield str(value)
+
+
+def data_mismatches(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One ``CV_DATA_MISMATCH`` per step whose literal inputs are not all named in its action or test data."""
+    hints = []
+    for case in document["test_cases"]:
+        for step in case["steps"]:
+            text = f"{step.get('action') or ''}\n{step.get('test_data') or ''}"
+            missing: list[str] = []
+            for item in step["inputs"]:
+                source = item.get("source") or {}
+                if source.get("kind") != "literal" or (item.get("target") or {}).get("sensitive"):
+                    continue
+                for leaf in _leaves(source.get("value")):
+                    if not _named(leaf, text) and leaf not in missing:
+                        missing.append(leaf)
+            if missing:
+                hints.append({"code": DATA_MISMATCH, "case_id": case["case_id"], "step_id": step["step_id"], "count": len(missing),
+                              "values": [value[:40] for value in missing[:_SHOWN]]})
+    return hints
+
+
+def end_to_end_hint(document: Mapping[str, Any], groups: Mapping[str, str | None],
+                    batches: Iterable[Iterable[str]] | None = None) -> dict[str, Any] | None:
+    """``CV_NO_END_TO_END`` when the requirements form two or more process groups and no case links two of them.
+
+    *groups* — ``batch_assembly.requirement_groups`` (the rule the plan cuts by); a requirement without a group counts
+    for none.  A group every case cites (the common constraints of the document) is not a step of a process and is left
+    out.  *batches* — the owned source requirements of each batch: a case cites only its batch, so when no batch holds two
+    groups there is no hint (the plan notes say the path cannot cross batches).  A hint, not a verdict."""
+    cases, constraints = _case_groups(document, groups)
+    process = {group for group in groups.values() if group} - constraints
+    if len(process) < 2:
+        return None
+    if batches is not None and not any(len({groups.get(source) for source in members} - {None} - constraints) >= 2 for members in batches):
+        return None
+    if any(len(linked) >= 2 for _case_id, linked in cases):
+        return None
+    return {"code": NO_END_TO_END, "groups": len(process), "linking_cases": 0}
+
+
+def linking_cases(document: Mapping[str, Any], groups: Mapping[str, str | None]) -> list[str]:
+    """The cases that link two or more process groups (the constraint groups every case cites left out)."""
+    return [case_id for case_id, linked in _case_groups(document, groups)[0] if len(linked) >= 2]
+
+
+def _case_groups(document: Mapping[str, Any], groups: Mapping[str, str | None]) -> tuple[list[tuple[str, set[str]]], set[str]]:
+    """Each case with its process groups, and the constraint groups (cited by every case).  A canonical requirement belongs
+    to the group of its source requirements when they share one; one built from several groups (a common one) to none."""
+    sources: dict[str, set[str]] = {}
+    for mapping in document["source_to_canonical_mappings"]:
+        for requirement_id in mapping["canonical_requirement_ids"]:
+            sources.setdefault(requirement_id, set()).add(mapping["source_requirement_id"])
+    owner = {requirement_id: next(iter(found)) for requirement_id, members in sources.items()
+             if len(found := {groups.get(source) for source in members}) == 1 and None not in found}
+    cited = [(case["case_id"], {owner[requirement_id] for requirement_id in case["requirement_ids"] if requirement_id in owner})
+             for case in document["test_cases"]]
+    constraints = set.intersection(*(linked for _case_id, linked in cited)) if len(cited) >= 2 else set()
+    return [(case_id, linked - constraints) for case_id, linked in cited], constraints
+
+
+def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, Any]) -> tuple[dict[str, str | None], list[list[str]] | None] | None:
+    """The requirement groups of a run's document (by the context receipt the plan was built from, else the last
+    context of the attempt) and the batches of its published plan (None in a run of an earlier version); None — nothing to group by."""
+    from tools.batch_assembly import requirement_groups
+
+    found = _plan_context(Path(root), attempt_id)
+    if found is None:
+        return None
+    plan, receipt = found
+    groups = requirement_groups(list(document["source_requirements"]), Path(root).parent.parent, dict(receipt))
+    return groups, None if plan is None else [list(batch["owned_source_requirement_ids"]) for batch in plan["batches"]]
+
+
+def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
+    """The map of existing project tests for the context the generator's plan was built from (the one of
+    the list of reading of ``prepare``); empty when the project has none."""
+    from tools.batch_assembly import generator_receipts
+    from tools.existing_tests import for_context
+    from tools.pilot_state import read_context_selection
+
+    found = _plan_context(Path(root), attempt_id)
+    if found is None:
+        return {}
+    plan, receipt = found
+    if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
+        return for_context(Path(root).parent.parent, receipt, Path(root))
+    return for_context(Path(root).parent.parent, generator_receipts([read_context_selection(Path(root), attempt_id, str(digest))
+                                                                    for digest in plan["context_receipt_digests"]], plan.get("context_files")), Path(root))
+
+
+def run_context_note(root: Path, attempt_id: str) -> str | None:
+    """With more than one context batch, which of them the generator saw — the line of the plan; None with one
+    context batch (the view keeps its bytes) or before a plan."""
+    from tools.batch_assembly import context_digests, context_note
+    from tools.pilot_state import derive_state, read_context_selection
+
+    found = _plan_context(Path(root), attempt_id)
+    if found is None or found[0] is None:
+        return None
+    selected = list(dict.fromkeys(str(event["artifact_digest"]) for event in derive_state(Path(root))["events"]
+                                  if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+    if len(selected) < 2:
+        return None
+    receipts = sorted((read_context_selection(Path(root), attempt_id, digest) for digest in selected), key=lambda item: int(item["batch_index"]))
+    seen = set(context_digests(found[0]))
+    taken = [receipt for receipt in receipts if receipt["digest"] in seen]
+    if not found[0].get("context_files"):  # a plan that names its files has its own line (``missed_note``), none here
+        return context_note([*taken, *(receipt for receipt in receipts if receipt["digest"] not in seen)], len(taken))
+    return None
+
+
+def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None, Mapping[str, Any]] | None:
+    """The published plan (None in a run of an earlier version) and the context receipt it was built from (else the last of the attempt)."""
+    from tools.pilot_state import derive_state, read_attempt_receipt, read_context_selection
+
+    try:
+        plan = read_attempt_receipt(root, attempt_id, "batch-plan", "ARTIFACT_READ_BACK")["record"]["plan"]
+    except (KeyError, OSError, ValueError):
+        plan = None
+    if plan is not None:
+        # a plan without the top-level field names its context in the batches (as _plan_contexts reads it)
+        context_digest = str(plan.get("context_receipt_digest") or plan["batches"][0]["context_receipt_digest"])
+    else:
+        selected = [event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
+        if not selected:
+            return None
+        context_digest = str(selected[-1]["artifact_digest"])
+    return plan, read_context_selection(root, attempt_id, context_digest)
+
+
+def _ids(values: list[str]) -> str:
+    return ", ".join(values[:_SHOWN]) + (f" и ещё {len(values) - _SHOWN}" if len(values) > _SHOWN else "")
+
+
+def _reference_lines(match: Mapping[str, Any] | None) -> list[str]:
+    """``CV_REFERENCE`` — counts and IDs only, no case text."""
+    if match is None:
+        return []
+    line = (f"- {match['code']}: эталонов {match['reference']}, новых кейсов {match['cases']}, пар {len(match['pairs'])}; "
+            f"пробелы (эталон без пары) {len(match['gaps'])}" + (f": {_ids(match['gaps'])}" if match["gaps"] else "")
+            + f"; новые без пары {len(match['new'])}" + (f": {_ids(match['new'])}" if match["new"] else "")
+            + f"; возможные дубли {len(match['duplicates'])}" + (f": {_ids(match['duplicates'])}" if match["duplicates"] else ""))
+    return [line + " — справка: пробел проверь по требованиям, дубль — по шагам"]
+
+
+def _reference_counts(match: Mapping[str, Any]) -> dict[str, Any]:
+    return {"reference": match["reference"], "cases": match["cases"], "pairs": len(match["pairs"]), "gaps": match["gaps"],
+            "new": match["new"], "duplicates": match["duplicates"]}
+
+
+def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
+    if hint is None:
+        return []
+    return [f"- {hint['code']}: групп требований {hint['groups']}, кейсов, связывающих две и больше групп, — 0: если документ описывает "
+            "процесс, первым нужен сквозной позитивный кейс (для библиотеки — типичная цепочка использования); нет процесса — отклони"]
+
+
+def _existing_lines(document: Mapping[str, Any], existing: Mapping[str, Any]) -> list[str]:
+    """``CV_EXISTING_TEST`` (count and case IDs) and the map lines, the same lines the generator reads."""
+    from tools.existing_tests import hint_line, render_map, repeats
+
+    body = render_map(existing).decode("utf-8")
+    if not body:
+        return []
+    line = hint_line(repeats(document, existing))
+    return ([line] if line else []) + ["- Существующие тесты проекта (справка, не вердикт):"] + ["  " + row for row in body.splitlines()]
+
+
+def _hint_lines(hints: list[dict[str, Any]]) -> list[str]:
+    lines = [f"- {hint['code']} {hint['case_id']} {hint['step_id']}: нет в действии и данных шага — "
+             + ", ".join(_json(value) for value in hint["values"]) + (f" и ещё {hint['count'] - _SHOWN}" if hint["count"] > _SHOWN else "")
+             for hint in hints[:HINT_LIMIT]]
+    return lines + ([f"- ещё {len(hints) - HINT_LIMIT} шаг(ов) с {DATA_MISMATCH}"] if len(hints) > HINT_LIMIT else [])
+
+
+def _exact(value: Mapping[str, Any]) -> str:
+    """A source, actual or expected value whole: a literal as its exact JSON, else its kind and its fields."""
+    if value.get("kind") == "literal":
+        return _json(value.get("value"))
+    rest = {key: item for key, item in value.items() if key != "kind"}
+    return str(value.get("kind")) + (_json(rest) if rest else "")
+
+
+def _semantic(row: Mapping[str, Any]) -> str:
+    semantic = dict(row.get("semantic_type") or {})
+    head = f"{semantic.pop('kind', '?')}/{semantic.pop('type', '?')}"
+    return head + (_json(semantic) if semantic else "")
+
+
+def _typed(row: Mapping[str, Any]) -> str:
+    """The semantic type of an input or output and, when the document gives it, where the type comes from."""
+    return _semantic(row) + (f" (тип: {_json(row['type_provenance'])})" if row.get("type_provenance") else "")
+
+
+def _target(target: Mapping[str, Any]) -> str:
+    """Where an input goes, exactly: a name (path, query, header, arg) or the JSON pointer of the body."""
+    return f"{target.get('location')}:{target['pointer'] if 'pointer' in target else target.get('name')}"
+
+
+def _autotest_capability(capability: Mapping[str, Any]) -> list[str]:
+    arguments = ", ".join(f"{row['name']}:{_semantic(row)}{'*' if row.get('required') else ''}" for row in capability["arguments"]) or "—"
+    results = ", ".join(f"{row['name']}:{_semantic(row)}" for row in capability["results"]) or "—"
+    return ([f"- {capability['capability_id']}: {capability['action']}, adapter {capability['adapter']}; аргументы {arguments};"
+             f" результаты {results}"] + [f"  граница: {line}" for line in capability["provenance"]])
+
+
+def _short(value: Mapping[str, Any]) -> str:
+    """:func:`_exact` in the short form of the reviewer's view: ``@x`` is ``project_result{"name":"x"}``, ``STEP-….x`` the ``step_output`` of that step and output; any other form is as it is."""
+    kind, rest = value.get("kind"), [key for key in value if key != "kind"]
+    if kind == "project_result" and rest == ["name"] and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", str(value["name"])):  # a name of any other form (a line break) is the exact JSON
+        return f"@{value['name']}"
+    return f"{value['step_id']}.{value['output_id']}" if kind == "step_output" and rest == ["output_id", "step_id"] else _exact(value)
+
+
+def _step_operation(step: Mapping[str, Any], short: bool) -> str:
+    operation = step["operation"]
+    if operation is None:  # a manual step: the word of the neighbour views, not JSON ``null``
+        return "—"
+    return operation["capability_id"] if short and isinstance(operation, Mapping) and list(operation) == ["capability_id", "kind"] and operation["kind"] == "project_action" else _json(operation)
+
+
+def _check(row: Mapping[str, Any], exact: Any) -> str:
+    return f"{exact(row['actual'])} {row['operator']}" + (f" {exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
+
+
+def autotest_facts(document: Mapping[str, Any]) -> dict[tuple[str, str, str], str]:
+    """``(case_id, step_id, "")`` is the operation of a step, ``(case_id, step_id, assertion_id)`` is ``actual operator expected``: as the reviewer's view writes them.
+    ``tools.automation_text`` puts those of the steps and assertions an implementation relates into its tables, and the view leaves them out (*moved*)."""
+    return {(case["case_id"], step["step_id"], part): text for case in document["test_cases"] for step in case["steps"]
+            for part, text in [("", _step_operation(step, True)), *((row["assertion_id"], _check(row, _short)) for item in step["expectations"] for row in item["assertions"])]}
+
+
+def _autotest_step(step: Mapping[str, Any], short: bool = False, moved: Collection[str] = ()) -> list[str]:
+    exact = _short if short else _exact
+    manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
+    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", *([] if "" in moved else [f"   Операция: {_step_operation(step, short)}"])]
+    for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
+        # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
+        secret = " (секрет)" if item["target"].get("sensitive") else ""
+        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {exact(item['source'])}")
+    lines += [f"   Выход {row['output_id']} {_typed(row)}" + ("" if short and row["source"] == {"kind": "project_result", "name": row["output_id"]} else f" ← {_exact(row['source'])}")
+              for row in sorted(step["outputs"], key=lambda row: row["display_order"])]
+    lines += [f"   Блокер автоматизации {blocker['blocker_id']} [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
+              for blocker in step["automation_blockers"]]
+    for expectation in sorted(step["expectations"], key=lambda row: row["display_order"]):
+        lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
+        lines += [f"     {row['assertion_id']}: {_check(row, exact)}" for row in sorted(expectation["assertions"], key=lambda row: row["display_order"]) if row["assertion_id"] not in moved]
+    return lines
+
+
+REVIEW_LEGEND = ("- Вид для ревьюера, короткая запись: `Операция: CAP-…` — операция project_action этой capability, `Операция: —` — ручной шаг; `@x` — project_result{\"name\":\"x\"}; `STEP-….x` — step_output этого шага и выхода x;"
+                 " у `Выход x тип` источник — project_result того же имени. Операция шага и ASSERT (оператор, значение), у которых есть связь с кодом, — в `tables.txt`"
+                 " у символа: у такого шага в виде нет строк `Операция:` и `ASSERT-…`. Остальное — как в JSON.")
+
+
+def _autotest(document: Mapping[str, Any], digest: str, short: bool = False, moved: Iterable[tuple[str, str, str]] = ()) -> list[str]:
+    hidden: dict[tuple[str, str], set[str]] = {}
+    for case_id, step_id, part in moved:
+        hidden.setdefault((case_id, step_id), set()).add(part)
+    lines = [
+        f"# Вид для генератора автотестов {document['document_id']} r{document['revision']}", "",
+        f"- Вид: {AUTOTEST_VIEW_VERSION}, построен кодом из effective-документа; одинаковый документ — одинаковые байты.",
+        f"- document_sha256: {digest}",
+        "- Машинная часть целиком: ID, цели, типы и литералы точно как в JSON (литерал — его JSON). Значения запроса бери только"
+        " отсюда; текст действия и ожидания — пояснение. Полный JSON — только для диагностики валидатора.", *([REVIEW_LEGEND] if short else []), "",
+        # the testing-work constraints (boundary, framework, dependencies, edits, interface, authorization) live in the
+        # canonical requirements the cases link (automation-output-contract)
+        "## Требования", "", *(f"- {row['requirement_id']}: {row['text']}" for row in document["requirements"]), "",
+        "## Операции (capabilities)", "",
+        *([line for row in document["operation_capabilities"] for line in _autotest_capability(row)] or ["- нет"]), "",
+    ]
+    from tools.canonical_document import blocked_cases
+
+    blocked = blocked_cases(document)
+    if blocked:  # these cases stay manual — the automation lists them in excluded_cases, the reviewer sees why
+        lines += ["## Кейсы с блокерами — вручную, в excluded_cases", "",
+                  f"- автоматизируется {len(document['test_cases']) - len(blocked)} из {len(document['test_cases'])} кейсов;"
+                  " блокер, который выражается операторами проверок, — замечание WARNING: вопрос к следующему прогону,"
+                  " автоматизацию не отклоняет", "",
+                  *(f"- {row['case_id']}: " + "; ".join(f"{step['step_id']} {', '.join(str(code) for code in step['codes'])}" for step in row["steps"])
+                    for row in blocked), ""]
+    lines.append("## Кейсы")
+    for case in document["test_cases"]:
+        lines += ["", f"### {case['case_id']} {case['title']}", "", f"- требования {', '.join(case['requirement_ids'])}",
+                  *([f"- param_group: {case['param_group']}"] if case.get("param_group") else []), f"- Цель: {case['objective']}"]
+        lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+        for step in sorted(case["steps"], key=lambda row: row["display_order"]):
+            lines += _autotest_step(step, short, hidden.get((case["case_id"], step["step_id"]), ()))
+    return lines
+
+
+def _cells(number: int) -> str:
+    tail = "ячейка" if number % 10 == 1 and number % 100 != 11 else "ячейки" if 2 <= number % 10 <= 4 and not 12 <= number % 100 <= 14 else "ячеек"
+    return f"{number} {tail}"
+
+
+IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предусловия, действие, данные и ожидаемый результат кейсов взяты из CSV человека"
+               " дословно, код сверил их байт в байт. Их текст не оценивай и вердикт из-за него не снижай — замечание к нему только"
+               " для человека. Проверяй машинную часть против этого текста: операция соответствует действию, входы — данным шага,"
+               " каждое утверждение — ожидаемому результату; невыводимое из текста должно быть manual или blocked.")
+
+
+def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
+           batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
+           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
+           context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None,
+           basis: Mapping[str, Any] | None = None, moved: Iterable[tuple[str, str, str]] = ()) -> bytes:
+    """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` for the
+    automation generator. With the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
+    without them the bytes are the same as before. With the map of *existing* project tests the hints add
+    ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before.
+    With the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same.
+    *basis* is the real candidate when *document* is its copy with canaries (``tools.review_canaries.seed``): the header, the
+    digest and every hint of the code are the real candidate's, only the cases show the control errors."""
+    from tools.canonical_document import document_sha256, require_valid_canonical_document
+
+    if profile not in PROFILES:
+        raise ValueError(f"unknown view profile: {profile}")
+    real = document if basis is None else basis
+    require_valid_canonical_document(dict(real))
+    if profile in ("autotest", "autotest-review"):  # the second is the reviewer's: the same facts in the short form (the generator's view is not changed)
+        return ("\n".join(_autotest(document, document_sha256(dict(document)), profile == "autotest-review", moved)) + "\n").encode("utf-8")
+    sources: dict[str, list[str]] = {}
+    for mapping in document["source_to_canonical_mappings"]:
+        for requirement_id in mapping["canonical_requirement_ids"]:
+            sources.setdefault(requirement_id, []).append(mapping["source_requirement_id"])
+    from tools.cases_import import is_new_case
+
+    new = [case["case_id"] for case in real["test_cases"]
+           if import_gaps and is_new_case(case, real["source_to_canonical_mappings"], set(import_gaps[0]))]  # the cases the generator wrote for the gaps
+    hints = data_mismatches(real)
+    path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(real, groups, batches))
+    path_hint += _existing_lines(real, existing or {})
+    path_hint += _reference_lines(None if reference is None else reference_match(real, list(reference)))
+    lines = [
+        f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
+        f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
+        f"- candidate document_sha256: {document_sha256(dict(real))}",
+        "- Код проверил структуру и ссылки (типы, ID, порядок, поток данных между шагами), не смысл. Смысл операций, входов"
+        " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
+        " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
+        *(["- " + IMPORT_NOTE] if imported else []),  # one line, the view of other runs keeps its bytes
+        *([f"- {context[:1].upper()}{context[1:]}."] if context else []),  # one line with more than one context batch
+        *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
+           " сверка человеческих полей идёт с ними"] if imported and normalized else []),
+        *([f"- Импорт с документами: требований без кейса в CSV (для них написаны новые кейсы) — {_ids(import_gaps[0]) or 'нет'}; кейсов вне документов (SREQ-CSV-) — "
+           f"{_ids(import_gaps[1]) or 'нет'}; это вопросы аналитику, на вердикт не влияют"
+           + (f"; новые кейсы ({', '.join(new)}) написал генератор, а не человек — их текст оценивай и правь как обычно" if new else "")]
+          if import_gaps else []),
+        "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
+        "## Исходные требования", "",
+        *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",
+        "## Требования", "",
+        *(f"- {row['requirement_id']} (из {', '.join(sources.get(row['requirement_id'], [])) or '—'}): {row['text']}"
+          for row in document["requirements"]), "",
+        "## Подсказки кода", "", *(path_hint + _hint_lines(hints) or ["- нет"]), "",
+        "## Операции (capabilities)", "",
+        *([_capability(row) for row in document.get("operation_capabilities") or []] or ["- нет"]), "",
+        "## Кейсы",
+    ]
+    actions = {row["capability_id"]: row["action"] for row in document.get("operation_capabilities") or []}
+    groups = {group["cases"][0]["case_id"]: group for group in param_groups(document)} if SLOT not in json.dumps(document, ensure_ascii=False) else {}
+    folded = {case["case_id"] for group in groups.values() for case in group["cases"][1:]}
+    for case in document["test_cases"]:
+        if case["case_id"] in groups:
+            lines += _group_lines(groups[case["case_id"]], actions)
+        elif case["case_id"] not in folded:
+            lines += ["", f"### {case['case_id']} {case['title']}", *_case_lines(case, actions)]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _case_lines(case: Mapping[str, Any], actions: Mapping[str, str]) -> list[str]:
+    facts = [f"требования {', '.join(case['requirement_ids'])}", f"приоритет {case['priority']}",
+             f"категории {', '.join(case['categories'])}"]
+    if case.get("technique"):
+        facts.append(f"техника {case['technique']}")
+    lines = ["", "- " + "; ".join(facts), f"- Цель: {case['objective']}"]
+    lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+    for step in case["steps"]:
+        manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
+        lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}",
+                  _operation(step, actions)]
+        # the reviewer judges whether a gap is justified (missing oracle, input, access or setup), so a blocker is shown
+        lines += [f"   Блокер автоматизации [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
+                  for blocker in step["automation_blockers"]]
+        for expectation in step["expectations"]:
+            lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
+            if expectation["assertions"]:
+                lines.append("   Проверки: " + "; ".join(_assertion(item) for item in expectation["assertions"]))
+    return lines
+
+
+def _as_first(case: Mapping[str, Any], first: Mapping[str, Any], line: str) -> str:
+    """A line of a group case with its step and expectation IDs written as those of the first case (same positions)."""
+    for own_step, base_step in zip(case["steps"], first["steps"]):
+        pairs = [(own_step["step_id"], base_step["step_id"])]
+        pairs += [(own["expectation_id"], base["expectation_id"]) for own, base in zip(own_step["expectations"], base_step["expectations"])]
+        for own, base in pairs:
+            line = re.sub(r"(?<![A-Za-z0-9_:-])" + re.escape(own) + r"(?![A-Za-z0-9_:-])", base, line)
+    return line
+
+
+def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[str]:
+    """The lines of a group once — ``<параметр>`` where its cases differ — and a row per case ID."""
+    cases, parameter = group["cases"], group["parameter"]
+    per_case = [[_as_first(case, cases[0], line) for line in _case_lines(case, actions)] for case in cases]
+    values: list[list[str]] = [[] for _ in cases]
+    expected: list[list[str]] = [[] for _ in cases]
+    shown = []
+    for texts in zip(*per_case):
+        line, middles = template_texts(list(texts))
+        into = expected if line.lstrip().startswith(("Ожидание", "Проверки")) else values
+        for own, middle in zip(into, middles):
+            shown_middle = middle.strip() or _json(middle)  # an empty or blank value is told apart by its quotes, as in JSON
+            if shown_middle not in own:
+                own.append(shown_middle)
+        shown.append(line.replace(SLOT, f"<{parameter['name']}>"))
+    title, _ = template_texts([case["title"] for case in cases])
+    titled = len({case["title"] for case in cases}) > 1
+    rows = []
+    for index, case in enumerate(cases):
+        own = [item for item in expected[index] if item not in values[index]]
+        cells = [str(index + 1), "; ".join(values[index]) or "—", "; ".join(own) or "—", *([case["title"]] if titled else []), case["case_id"]]
+        rows.append("| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ") for cell in cells) + " |")
+    head = ["№", parameter["name"], "ожидаемое", *(["название"] if titled else []), "ID кейса"]
+    return ["", f"### {group['group_id']} {title.replace(SLOT, '<' + parameter['name'] + '>')}", "",
+            f"- Группа {group['group_id']}: кейсы {', '.join(case['case_id'] for case in cases)} — варианты параметра {parameter['id']}"
+            f" «{parameter['name']}», шаги одни; ниже ID шагов и ожиданий первого кейса, у остальных — те же позиции в JSON кандидата.",
+            *shown, "", "| " + " | ".join(head) + " |", "|" + "---|" * len(head), *rows]
+
+
+def _import_gaps(root: Path, state: Mapping[str, Any]) -> tuple[list[str], list[str]] | None:
+    """(requirements without a case of the CSV, rows of the cases outside the documents) of an import with
+    documents; None for any other run or before the skeleton."""
+    from tools.cases_import import outside_rows, planned_gaps
+    from tools.pilot_state import read_attempt_receipt
+
+    try:
+        attempt_id = str(state["attempts"][-1]["attempt_id"])
+        imported = read_attempt_receipt(root, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    except (KeyError, IndexError, OSError, ValueError):
+        return None
+    if "gaps" not in imported:
+        return None
+    return planned_gaps(root, attempt_id, imported), [f"строка {row}" for row in outside_rows(imported)]
+
+
+def _normalized(root: Path, state: Mapping[str, Any]) -> int:
+    """How many cells code normalized in the skeleton of the import (0 when it is not published)."""
+    from tools.pilot_state import read_attempt_receipt
+
+    try:
+        imported = read_attempt_receipt(root, str(state["attempts"][-1]["attempt_id"]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    except (KeyError, IndexError, OSError, ValueError):
+        return 0
+    return len(imported.get("normalized") or [])
+
+
+def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any], profile: str,
+                basis: Mapping[str, Any] | None = None) -> tuple[bytes, Any, Any]:
+    """``(bytes, grouping, reference)``: the view of *document* with the hints of the run.  *basis* — the real candidate when
+    *document* is its copy with canaries (the hints of the code are the real candidate's)."""
+    from tools.cases_import import cases_path
+    from tools.pilot_state import read_reference_cases
+
+    real = document if basis is None else basis
+    review = profile == "review"
+    attempt_id = str(state["attempts"][-1]["attempt_id"]) if state["attempts"] else None
+    try:  # the hint never stops the view — without groups the view is the plain one
+        grouping = None if not review or attempt_id is None else run_requirement_groups(root, attempt_id, dict(real))
+    except (OSError, ValueError, KeyError, TypeError):
+        grouping = None
+    try:  # the map is a hint too — none, and the view is the plain one
+        existing = None if not review or attempt_id is None else run_existing_tests(root, attempt_id)
+    except (OSError, ValueError, KeyError, TypeError):
+        existing = None
+    try:  # which context batches the generator saw — a hint too, never a stop
+        context = None if not review or attempt_id is None else run_context_note(root, attempt_id)
+    except (OSError, ValueError, KeyError, TypeError):
+        context = None
+    reference = None if not review or attempt_id is None else read_reference_cases(root, attempt_id)
+    imported = review and cases_path(root) is not None
+    data = render(document, profile, *(grouping or (None, None)), existing=existing,
+                  reference=None if reference is None else reference["cases"],
+                  imported=imported, normalized=_normalized(root, state) if imported else 0,
+                  context=context, import_gaps=_import_gaps(root, state) if imported else None, basis=basis)
+    return data, grouping, reference
+
+
+def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any]) -> dict[str, Any]:
+    """The reviewer's view of the assembled candidate with canaries, its map and the receipt that binds both to the journal.
+
+    The view is rendered from a copy of the candidate with up to 15 control errors (``tools.review_canaries.seed``); the candidate, its
+    bundles and its journal events stay as they are.  The map and the view are written next to each other in
+    ``<run>/review-views/``, the receipt ``review-canaries`` (and its event pair) carries their digests and the candidate's.  A run
+    that already has the receipt and files that match it is left as it is — the same call again changes nothing."""
+    from tools import review_canaries
+    from tools.canonical_document import document_sha256
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.pilot_state import derive_state, publish_review_canaries
+
+    state = derive_state(root)
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    digest = document_sha256(dict(document))
+    published = [event for event in state["events"] if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
+    if not published or published[-1].get("artifact_digest") != digest:
+        raise ValueError("the candidate is not the assembled candidate of the run")
+    target = review_canaries.view_target(root, digest)
+    seeded: list[Any] = []
+
+    def seeding() -> tuple[dict[str, Any], bytes, bytes]:
+        """What the seeding of the journal's candidate gives now: ``(receipt facts, view, map)`` — computed once."""
+        if not seeded:
+            mutated, canaries = review_canaries.seed(document)
+            data, _grouping, _reference = _run_render(root, state, mutated, "review", basis=document)
+            mapped = review_canaries.map_bytes(digest, canaries)
+            seeded.append((review_canaries.receipt_facts(digest, data, mapped, len(canaries)), data, mapped))
+        return seeded[0]
+
+    try:
+        existing = review_canaries.verify(root, attempt_id)
+    except review_canaries.CanaryMismatch:
+        # a seeding cut short between the receipt and its events: finish it — only if the files are what the seeding gives
+        if not review_canaries.resume_binding(root, attempt_id, seeding):
+            raise
+        existing = review_canaries.verify(root, attempt_id)
+    else:
+        if existing is None and review_canaries.resume_binding(root, attempt_id, seeding):  # the receipt file is there, its events are not
+            existing = review_canaries.verify(root, attempt_id)
+    if existing is not None:
+        return {"path": target, "created": False, "canaries": len(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
+    facts, data, mapped = seeding()
+    atomic_write_confined_bytes_at_root(project, root, target, data)
+    atomic_write_confined_bytes_at_root(project, root, review_canaries.map_target(root, digest), mapped)
+    receipt = publish_review_canaries(root, attempt_id, facts)
+    return {"path": target, "created": bool(receipt.get("created")), "canaries": facts["canary_count"], "candidate_sha256": digest, "bytes": len(data)}
+
+
+def _hints_of_run(root: Path, state: Mapping[str, Any], document: Mapping[str, Any]) -> tuple[Any, Any]:
+    """The requirement groups and the reference cases of the run, for the output of the view command."""
+    from tools.pilot_state import read_reference_cases
+
+    if not state["attempts"]:
+        return None, None
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    try:
+        grouping = run_requirement_groups(root, attempt_id, dict(document))
+    except (OSError, ValueError, KeyError, TypeError):
+        grouping = None
+    return grouping, read_reference_cases(root, attempt_id)
+
+
+def ensure_autotest_view(project: Path, root: Path, state: Mapping[str, Any]) -> dict[str, Any]:
+    """The autotest view of the effective document of the run: what the generator of the automation reads, made by the code — ``prepare`` of the
+    generator calls it before the step is measured.  Written where the bytes differ; the same call again changes nothing."""
+    from tools.canonical_document import document_sha256
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.pilot_state import read_effective_canonical
+    from tools.step_size import autotest_view
+
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    effective = read_effective_canonical(root, str(state["attempts"][-1]["attempt_id"]))
+    document = effective["document"]
+    digest = document_sha256(dict(document))
+    if digest != effective["document_digest"]:
+        raise ValueError("the effective document does not match its digest")
+    target = autotest_view(root, digest)
+    data, grouping, reference = _run_render(root, state, document, "autotest")
+    if not target.is_file() or target.read_bytes() != data:
+        atomic_write_confined_bytes_at_root(project, root, target, data)
+    return {"path": target, "digest": digest, "data": data, "document": document, "grouping": grouping, "reference": reference}
+
+
+def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    parser = JsonArgumentParser(description="Write the compact view of the assembled candidate (reviewer) of a run.")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--run", required=True)
+    parser.add_argument("--candidate", required=True)
+    args = parser.parse_args(argv)
+    try:
+        from tools.pilot_state import derive_state
+
+        project = Path(args.project).resolve()
+        if Path(args.run).name != args.run or args.run in {"", ".", ".."}:
+            raise ValueError(f"unknown run: {args.run}")
+        root = project / ".pilot-runs" / args.run
+        state = derive_state(root)
+        from tools.output_guard import input_file
+
+        document, profile = json.loads(input_file(args.candidate, project).read_text(encoding="utf-8")), "review"  # inside the project
+        made = ensure_reviewer_view(project, root, document)
+        target, digest = made["path"], made["candidate_sha256"]
+        data = Path(target).read_bytes()
+        grouping, reference = _hints_of_run(root, state, document)
+        extra = {"canaries": made["canaries"], "canaries_created": made["created"], "canaries_note": "канарейки — сигнал качества ревью, не защита"}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(json.dumps({**cli_error(error, fix="--project, --run — проект и прогон; --candidate — файл кандидата "
+                                      "(тот же, что в журнале); вид ревьюера строит и `tools.api prepare --stage tc-reviewer:canonical`"), "message": str(error)[:2000]}, ensure_ascii=False))
+        return 2
+    view = VIEW_VERSION
+    print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
+                      "data_mismatch": len(data_mismatches(document)),
+                      "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping),
+                      "reference": None if reference is None else _reference_counts(reference_match(document, reference["cases"])),
+                      **extra},
+                     ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

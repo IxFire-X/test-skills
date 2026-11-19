@@ -1,0 +1,45 @@
+{
+  "schema_version": "5.0.0",
+  "version": "3.0",
+  "project": {
+    "name": "example-workspace",
+    "methodology": "sdd"
+  },
+  "discovery": {
+    "on_missing": "automatic",
+    "conflict_policy": "ask_user"
+  },
+  "modules": [
+    {
+      "id": "backend",
+      "root": "backend",
+      "stack": {
+        "language": "java",
+        "build_tool": "maven"
+      },
+      "paths": {
+        "source": [
+          "src/main/java"
+        ],
+        "tests": [
+          "src/test/java"
+        ]
+      },
+      "test": {
+        "framework": "junit5",
+        "adapter_id": "maven-wrapper:selected-symbols-v1",
+        "wrapper": "mvnw",
+        "build_profile": "default",
+        "adapter_parameters": {}
+      },
+      "feature_sources": {
+        "requirements": [
+          "docs/requirements"
+        ]
+      },
+      "detected_from": [
+        "backend/pom.xml"
+      ]
+    }
+  ]
+}

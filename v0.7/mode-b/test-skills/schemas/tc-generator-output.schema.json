@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/tc-generator-output.schema.json",
+  "type": "object",
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "5.0.0"},
+    "stage": {"const": "tc-generator"},
+    "artifacts": {
+      "type": "object",
+      "required": ["candidate_fragment"],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_fragment": {"$ref": "candidate-fragment.schema.json"}
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

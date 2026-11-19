@@ -1,0 +1,131 @@
+"""Marking of the failed test methods as findings (wave 3, F; contract amendment A4; q1).
+
+A test that failed by the requirement is a finding, not a quarantined test: it stays active, and the package only labels it, one line
+directly above the method, so the human can leave the label out of the build with one option:
+
+* JUnit 5 — ``@org.junit.jupiter.api.Tag("test-skills-finding") // test-skills finding: <ref> <note>`` (fully qualified, no import changes);
+* pytest — ``@pytest.mark.test_skills_finding  # test-skills finding: <ref> <note>`` (``import pytest`` is added when the module has none).
+
+A file of an earlier run may still carry the old line (``@Disabled("test-skills quarantine: …")`` / strict ``xfail``): it is recognised, not doubled.
+Nothing else in the file changes.
+"""
+from __future__ import annotations
+
+import re
+from typing import Iterable, Mapping, Sequence
+
+from tools.code_slices import slice_file
+
+TAG = "test-skills-finding"
+MARK = "test-skills finding"
+_OLD = re.escape("test-skills quarantine")
+_JAVA_LINE = re.compile(r'^\s*(?:@org\.junit\.jupiter\.api\.Tag\("' + TAG + r'"\) // ' + re.escape(MARK) + r':[^\n]*|'
+                        r'@org\.junit\.jupiter\.api\.Disabled\("' + _OLD + r':[^\n]*\))\s*$')
+_PYTHON_LINE = re.compile(r'^\s*(?:@pytest\.mark\.test_skills_finding  # ' + re.escape(MARK) + r':[^\n]*|'
+                          r'@pytest\.mark\.xfail\(strict=True, reason="' + _OLD + r':[^\n]*\))\s*$')
+_SAFE = re.compile(r"[^A-Za-z0-9 ._:/#@=+-]")
+
+
+_ASSERT_REF = re.compile(r"ASSERT-[A-Za-z0-9_.:-]+")
+NOTE_LIMIT = 120
+
+
+def failure_note(message: str) -> tuple[str, str]:
+    """``(ref, message)`` of a framework failure — the ``ASSERT-…`` label or ``FAIL``, and its first line made safe."""
+    from tools.run_tests import masked_failure_text  # the same check as the receipt: a secret is not written into the source file
+
+    first = masked_failure_text((message or "").strip().splitlines()[0].strip()) if (message or "").strip() else ""
+    match = _ASSERT_REF.search(first)
+    if match and match.start() == int(first.startswith("[")):  # AssertJ writes the label of ``as(…)`` in brackets
+        # The mark already shows the ref, so the note does not repeat it.
+        first = first[match.end():].lstrip(" :-]")
+    return (match.group(0) if match else "FAIL"), _SAFE.sub("_", first)[:NOTE_LIMIT].rstrip()
+
+
+def _note(reason: str, ref: str) -> str:
+    """The mark's text: only characters that need no escaping in a Java or Python string."""
+    return f"{MARK}: {_SAFE.sub('_', reason)} {_SAFE.sub('_', ref)}".strip()
+
+
+def _split(content: str) -> tuple[list[str], str, bool]:
+    newline = "\r\n" if "\r\n" in content else "\n"
+    trailing = content.endswith(("\n",))
+    lines = content.replace("\r\n", "\n").split("\n")
+    if trailing:
+        lines = lines[:-1]
+    return lines, newline, trailing
+
+
+def _join(lines: Sequence[str], newline: str, trailing: bool) -> str:
+    return newline.join(lines) + (newline if trailing else "")
+
+
+def _members(path: str, content: str, locators: Sequence[Mapping[str, object]]):
+    symbols = [{"symbol_id": f"Q{index}", "locator": dict(locator)} for index, locator in enumerate(locators)]
+    language = "python" if path.endswith(".py") else "java"
+    slices = slice_file({"file_id": "quarantine", "path": path, "content": content.replace("\r\n", "\n"), "language": language}, symbols)
+    return [slices.symbols[f"Q{index}"] for index in range(len(locators))], language
+
+
+def is_marked(line: str) -> bool:
+    return bool(_JAVA_LINE.match(line) or _PYTHON_LINE.match(line))
+
+
+def quarantine(path: str, content: str, methods: Iterable[tuple[Mapping[str, object], str, str]]) -> str:
+    """Label each ``(locator, reason, ref)`` method as a finding; an already marked method keeps its mark."""
+    methods = list(methods)
+    if not methods:
+        return content
+    lines, newline, trailing = _split(content)
+    members, language = _members(path, content, [locator for locator, _reason, _ref in methods])
+    inserts = []
+    for member, (_locator, reason, ref) in zip(members, methods):
+        first = lines[member.start - 1]
+        if member.start >= 2 and is_marked(lines[member.start - 2]) or any(is_marked(line) for line in lines[member.start - 1:member.end]):
+            continue
+        indent = first[:len(first) - len(first.lstrip())]
+        text = (f'@org.junit.jupiter.api.Tag("{TAG}") // {_note(reason, ref)}' if language == "java"
+                else f"@pytest.mark.test_skills_finding  # {_note(reason, ref)}")
+        inserts.append((member.start - 1, indent + text))
+    for index, line in sorted(inserts, reverse=True):
+        lines.insert(index, line)
+    if language == "python" and inserts and not any(_imports_pytest(line) for line in lines):
+        lines.insert(_python_import_line(lines), "import pytest")
+    return _join(lines, newline, trailing)
+
+
+def _imports_pytest(line: str) -> bool:
+    """A top-level ``import pytest`` that binds the name ``pytest`` (not ``from pytest import …``, not ``as pt``)."""
+    match = re.match(r"^import\s+(.+?)\s*(?:#.*)?$", line)
+    return bool(match) and any(re.fullmatch(r"pytest", item.strip()) for item in match.group(1).split(","))
+
+
+def _python_import_line(lines: Sequence[str]) -> int:
+    """The line after the module's leading comments, docstring and ``from __future__`` imports (review 2.1 item 17)."""
+    index = 0
+    while index < len(lines) and (not lines[index].strip() or lines[index].lstrip().startswith("#")):
+        index += 1
+    opening = re.match(r'^\s*[rRuUbB]{0,2}("""|\'\'\'|"|\')', lines[index]) if index < len(lines) else None
+    if opening:
+        quote = opening.group(1)
+        rest = lines[index][opening.end():]
+        if len(quote) == 1 or quote in rest:
+            index += 1
+        else:
+            index = next((number + 1 for number in range(index + 1, len(lines)) if quote in lines[number]), index + 1)
+    after = index
+    cursor = index
+    while cursor < len(lines):
+        line = lines[cursor].strip()
+        if not line or line.startswith("#"):
+            cursor += 1
+            continue
+        if re.match(r"from\s+__future__\s+import\b", line):
+            if "(" in line and ")" not in line:
+                while cursor < len(lines) and ")" not in lines[cursor]:
+                    cursor += 1
+            cursor += 1
+            after = cursor
+            continue
+        break
+    return after
