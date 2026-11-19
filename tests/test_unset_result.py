@@ -34,6 +34,11 @@ def test_a_requirement_with_the_verb_to_refine_keeps_its_case() -> None:
     assert scope_pause.cut_rows([dict(ROWS[0], text="REQ-1 Пользователь может уточнить поиск фильтрами."), ROWS[1]], set()) == []
 
 
+def test_two_requirements_that_cannot_both_hold_are_cut_when_each_text_says_it_needs_clarifying() -> None:
+    rows = [dict(ROWS[0], text="REQ-1 На странице 5 владельцев (требует уточнения)."), dict(ROWS[0], source_requirement_id="SREQ-3", text="REQ-3 На странице 10 владельцев (требует уточнения)."), ROWS[1]]
+    assert [row["source_requirement_id"] for row in scope_pause.cut_rows(rows, set())] == ["SREQ-1", "SREQ-3"]
+
+
 def test_a_requirement_with_a_case_of_the_human_is_not_cut() -> None:
     assert scope_pause.cut_rows(ROWS, set(), {"cases": [{"source_requirement_ids": ["SREQ-1"]}]}) == []
 

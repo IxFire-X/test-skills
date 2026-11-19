@@ -47,6 +47,12 @@ def test_a_gap_on_an_unmarked_requirement_still_pauses(tmp_path: Path) -> None:
     assert scope_pause.scope_state(root, attempt_id)["pending"] is True
 
 
+def test_the_question_of_a_contradiction_in_the_form_of_the_role_is_a_question(tmp_path: Path) -> None:
+    warning = f"{FIRST} вопрос (docs/feature.md:6) — противоречит SREQ-batch-a-002 — какое верно?"
+    root, attempt_id = _marked_run(tmp_path, "REQ-1 На странице 5 владельцев.", warnings=[warning])
+    assert [row["question"] for row in scope_pause.unclear_rows(root, attempt_id)] == ["какое верно?"]
+
+
 def test_a_three_field_question_of_the_marker_asks_and_does_not_pause(tmp_path: Path) -> None:
     root, attempt_id = _marked_run(tmp_path, "REQ-1 Оплата заказа картой.", warnings=[ASK])
     assert scope_pause.scope_state(root, attempt_id)["pending"] is False

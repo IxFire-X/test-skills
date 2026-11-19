@@ -132,6 +132,11 @@ def test_a_part_that_changes_the_requirements_is_rejected(tmp_path: Path) -> Non
         _publish_part(root, attempt_id, baseline, 1, receipts[0], requirements, _marker(["src/part0.py — x"], requirements=changed))
 
 
+def test_a_statement_said_twice_is_one_row_with_two_lines_of_provenance_and_the_marker_stands() -> None:
+    rows = [{**_requirements()[0], "provenance": ["docs/feature.md:26", "docs/feature.md:29"]}]
+    pilot_state.check_model_stage_artifact("context-marker:baseline", _marker(["src/part0.py — x"], [], requirements=rows))
+
+
 def test_merge_stops_while_a_part_is_missing(tmp_path: Path) -> None:
     from tools.context_marker_parts import merge_parts
 
