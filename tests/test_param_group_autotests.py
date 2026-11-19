@@ -250,6 +250,19 @@ def test_a_repeated_row_index_is_an_error() -> None:
     assert errors, errors
 
 
+def test_a_gradle_row_with_its_case_id_in_quotes_is_matched() -> None:
+    xml = (FIXTURES / "gradle-sample.xml").read_text(encoding="utf-8")
+    for index in (1, 2, 3):
+        xml = xml.replace(f"[{index}] TC-B1-00{index}", f"[{index}] &quot;TC-B1-00{index}&quot;")  # JUnit 6 writes a String argument of the display name in quotes
+    assert _match(xml.encode("utf-8"))[1] == []
+
+
+def test_a_row_of_a_group_that_names_no_case_id_is_not_blamed_on_a_display_name() -> None:
+    xml = (FIXTURES / "gradle-sample.xml").read_text(encoding="utf-8").replace("[3] TC-B1-003", "[3] 3 of 3")
+    errors = _match(xml.encode("utf-8"))[1]
+    assert "parameterized row of a reviewed class is not named by a case ID of its group" in errors and not any("@DisplayName" in error for error in errors), errors
+
+
 def test_a_gradle_testcase_named_by_the_display_name_of_a_method_says_so() -> None:
     xml = ('<testsuite name="p.GroupTest" tests="1"><testcase name="TC-B1-014 Вход с верными данными" classname="p.GroupTest" time="0.1"/></testsuite>').encode("utf-8")
     _rows, errors = _match(xml)

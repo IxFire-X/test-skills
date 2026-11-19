@@ -954,7 +954,8 @@ def _case_matches_pair(case: JUnitCase, binding: Mapping[str, Any], java: bool) 
 
 # an invocation of a group method — Surefire `method(Type, …)[N]`, Gradle `[N] <case ID>` (the display name).
 _SUREFIRE_INVOCATION = re.compile(r"\[(\d+)\]$")
-_DISPLAY_INVOCATION = re.compile(r"\[(\d+)\] (\S+)$")
+_DISPLAY_INVOCATION = re.compile(r'\[(\d+)\] "?([^"\s]+)"?$')  # JUnit 6 writes a String argument of the display name in quotes
+_ROW_NAME = re.compile(r"\[\d+\] ")  # a testcase named as a row of a group, whatever follows
 
 
 def _group_invocation(case: JUnitCase) -> tuple[int, str | None] | None:
@@ -1055,8 +1056,12 @@ def match_junit_cases(
         group_rows[pair] = [{"index": index, "case_id": rows[index - 1], "status": status} for index, _name_id, status in sorted(seen)]
     if strict and unmatched:
         errors.append("unmatched JUnit testcase")
-        if java and any(case.classname == binding["locator"].get("class_fqn") for case in unmatched for binding in compatibility.bindings.values()):
+        classes = {binding["locator"].get("class_fqn") for binding in compatibility.bindings.values()} if java else set()
+        reviewed = [case for case in unmatched if case.classname in classes]
+        if any(_ROW_NAME.match(case.name) is None for case in reviewed):
             errors.append("testcase of a reviewed class is named by text, not by a method: @DisplayName on a method")
+        if any(_ROW_NAME.match(case.name) for case in reviewed):
+            errors.append("parameterized row of a reviewed class is not named by a case ID of its group")
     if strict:
         missing = [pair for pair, values in observed.items() if not values]
         if missing:

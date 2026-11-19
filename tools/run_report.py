@@ -920,6 +920,11 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         except (OSError, KeyError, TypeError, ValueError):
             terminal = {}
     evidence = terminal.get("evidence") or {}
+    if attempt_id and "reviewer_isolation_state" not in evidence:  # a run with no finish (an ingest that refused) has no terminal result: its ledger says
+        try:
+            evidence = {**evidence, "reviewer_isolation_state": pilot.terminal_reviewer_evidence(root, attempt_id).get("isolation")}
+        except (OSError, KeyError, TypeError, ValueError):
+            pass
     execution: Mapping[str, Any] = {}
     if attempt_id:
         try:
@@ -1276,9 +1281,10 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     if acc["outcome"] == "PARTIAL" and removed * 100 > acc.get("share_set", acc["share"]) * total:  # the rework left more out than the limit allows
         lines += [f"> Не вошло больше допустимого: {removed} из {total} (предел {acc.get('share_set', acc['share'])} %) — принятые кейсы просмотрите внимательнее перед импортом.", ""]
     lines += _label_lines(report)
-    who = "независимое (INDEPENDENT)" if report.get("reviewer_isolation_state") == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"
+    state = report.get("reviewer_isolation_state")
+    who = None if state is None else "независимое (INDEPENDENT)" if state == "verified" and (rework or {}).get("independent", True) else "в той же сессии (SELF)"  # None: the report has no word to say
     if acc["outcome"] != "PARTIAL":
-        return lines + ([f"Ревью: {who}, 2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])
+        return lines + ([f"Ревью: {who + ', ' if who else ''}2 круга: весь набор, затем только доработанный кейс.", ""] if rework and rework["state"] == "reviewed" else [])
     gaps, files, kept = acc["coverage_gaps"], acc["files"], acc.get("restored") or []  # kept: the cases of the CSV the export has as the human wrote them
     names = [f"{row['key'] or 'Key нет'} (строка {row['row']})" for row in kept]
     rework = rework if rework and rework["state"] != "not_started" else None  # nothing was sent back: the three rows of V6
@@ -1286,7 +1292,7 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     lines += ["| | Кейсов |", "|---|---|", f"| Сгенерировано | {total} |", f"| Принято в первом круге ревью | {first} |",
               *([f"| Отклонено и отправлено на доработку | {rework['sent']} |", f"| Принято после доработки | {rework['accepted']} |"] if rework else []),
               f"| Не принято (вынесено отдельно) | {left} |", "",
-              f"Ревью: {who}, "
+              f"Ревью: {who + ', ' if who else ''}"
               + ("2 круга: весь набор, затем только доработанный кейс." if rework and rework["state"] == "reviewed" else "1 круг: весь набор."),
               (f"Пробелы покрытия: {len(gaps)} {plural(len(gaps), 'требование осталось', 'требования остались', 'требований остались')} без принятого кейса — см. «Пробелы покрытия»." if gaps
                else "Пробелов покрытия нет: у каждого требования остался принятый кейс."),

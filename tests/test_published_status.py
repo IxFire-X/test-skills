@@ -119,6 +119,14 @@ def _report(run: dict) -> tuple[dict, str]:
     return json.loads((run["run_root"] / "report.json").read_text(encoding="utf-8")), (run["run_root"] / "report.md").read_text(encoding="utf-8")
 
 
+def test_a_report_of_a_run_without_a_terminal_result_does_not_call_an_independent_review_self(tmp_path: Path) -> None:
+    run = _generated_run(tmp_path)
+    assert _open(run)[0] == 0 and _select_verdict(run, _verdict(run, "ПРИНЯТО"))[0] == 0
+    assert not (run["run_root"] / "terminal-results").exists()  # an ingest that refused leaves no finish
+    report, markdown = _report(run)
+    assert report["reviewer_isolation_state"] == "verified" and "SELF" not in markdown
+
+
 def test_status_report_and_the_reviewer_step_work_before_the_verdict_with_no_set_on_disk(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_closure_deadlocks import _run
 
