@@ -51,3 +51,15 @@ def test_the_report_says_in_one_line_how_many_requirements_have_no_case_and_why(
     line = f"- без кейсов: 1 требование ({FIRST}) — ожидаемый результат не задан, в документе помечено неясным; вопросы аналитику — questions-for-analyst.md; прогон не останавливался"
     assert line in (root / "report.md").read_text(encoding="utf-8")
     assert json.loads((root / "report.json").read_text(encoding="utf-8"))["unconfirmed"]["without_case"] == [FIRST]
+
+
+def test_a_mark_the_marker_worded_away_is_found_in_the_line_of_the_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_openspec_selection import _scan
+    from tests.test_requirement_labels import DOC, _marker, _project
+    from tests.test_sections import _plan
+
+    scan = _scan(_project(tmp_path, "1.1.1. Оплата картой.\n2.1.1. Размер страницы — TBD.\n"), monkeypatch, [DOC])
+    assert _marker(tmp_path / "project", scan, 2, capsys)[0] == 0  # the rows say «Требование 2» without the mark
+    assert _plan(scan, capsys)[0] == 0
+    plan = _published_plan_of(Path(scan["run_root"]), scan["attempt_id"])
+    assert plan["out_of_scope"] == [{"source_requirement_id": "SREQ-0002", "reason": scope_pause.UNCLEAR_REASON}]

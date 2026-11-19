@@ -86,14 +86,25 @@ def mark_of(text: Any) -> str | None:
     return " ".join(found.group(0).split()) if found else None
 
 
-def cut_rows(requirements: Sequence[Mapping[str, Any]], left: set[str], imported: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
-    """The requirements that get no case: marked as unset (``_CUT``), not left out by the human, not traced by a case of the human's CSV — and only
+def doc_line(requirement: Mapping[str, Any], texts: Mapping[str, str]) -> str:
+    """The line of the document the first provenance ``path:line`` of a requirement points at (``texts``: path -> text, as the receipts of the run hold it); '' when none."""
+    found = re.match(r"(.+?):(\d+)", str((requirement.get("provenance") or [""])[0]))
+    lines = texts.get(found.group(1), "").splitlines() if found else []
+    return lines[int(found.group(2)) - 1] if found and 0 < int(found.group(2)) <= len(lines) else ""
+
+
+def unset_ids(requirements: Sequence[Mapping[str, Any]], texts: Mapping[str, str] | None = None) -> set[str]:
+    """The requirements marked as unset (``_CUT``) in their text or in the line of the document they were taken from (the marker may have worded the mark away)."""
+    return {str(row["source_requirement_id"]) for row in requirements if any(_CUT.search(part) for part in (str(row.get("text") or ""), doc_line(row, texts or {})))}
+
+
+def cut_rows(requirements: Sequence[Mapping[str, Any]], left: set[str], imported: Mapping[str, Any] | None = None, texts: Mapping[str, str] | None = None) -> list[dict[str, str]]:
+    """The requirements that get no case: marked as unset (``unset_ids``), not left out by the human, not traced by a case of the human's CSV — and only
     while one requirement is left to plan.  ``out_of_scope`` rows of the plan with the reason ``UNCLEAR_REASON``."""
     from tools.cases_import import case_sources
 
     traced = {source for case in (imported or {}).get("cases") or [] for source in case_sources(case)}
-    rows = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": UNCLEAR_REASON} for row in requirements
-            if str(row["source_requirement_id"]) not in left | traced and _CUT.search(str(row.get("text") or ""))]
+    rows = [{"source_requirement_id": sid, "reason": UNCLEAR_REASON} for sid in sorted(unset_ids(requirements, texts) - left - traced)]
     return rows if len(rows) + len(left) < len(requirements) else []
 
 
@@ -110,7 +121,7 @@ def question_row(warning: Any, known: Sequence[str] | set[str]) -> dict[str, str
     return {"source_requirement_id": token, "source": f"{token} {rest[len('вопрос'):].strip()}".strip(), "unclear": parts[1], "question": parts[2], "warning": text}
 
 
-def unclear_of(marker: Mapping[str, Any], left: set[str] | frozenset[str] = frozenset()) -> list[dict[str, str]]:
+def unclear_of(marker: Mapping[str, Any], left: set[str] | frozenset[str] = frozenset(), texts: Mapping[str, str] | None = None) -> list[dict[str, str]]:
     """The requirements the marker asks about, in the order of the document, one block each: the questions the model wrote, else the mark in the
     text of the requirement (code, even when the model wrote nothing; a requirement left out of the scope in ``left`` gets none of its own)."""
     requirements = requirements_of(marker)
@@ -123,7 +134,7 @@ def unclear_of(marker: Mapping[str, Any], left: set[str] | frozenset[str] = froz
     rows: list[dict[str, str]] = []
     for requirement in requirements:
         sid = str(requirement["source_requirement_id"])
-        mark = mark_of(requirement.get("text"))
+        mark = mark_of(requirement.get("text")) or mark_of(doc_line(requirement, texts or {}))
         if sid in asked:
             rows.extend(asked[sid])
         elif mark and sid not in left:
@@ -164,7 +175,17 @@ def unclear_rows(run_root: Path, attempt_id: str, state: Mapping[str, Any] | Non
         return []
     left = {row["source_requirement_id"] for row in (published["out_of_scope"] if published is not None else out_of_scope(decision))}
     cut = set(published["unclear_cut"]) if published is not None else set()  # no case is written for these
-    return [dict(row, no_case=True) if row["source_requirement_id"] in cut else row for row in unclear_of(marker, left)] if marker is not None else []
+    return [dict(row, no_case=True) if row["source_requirement_id"] in cut else row for row in unclear_of(marker, left, _document_texts(root, attempt_id, state))] if marker is not None else []
+
+
+def _document_texts(root: Path, attempt_id: str, state: Mapping[str, Any] | None) -> dict[str, str]:
+    """The documents ``--docs`` names as the receipts of the run hold them (``pilot_state.document_texts``); none where they cannot be read: the text of the requirement stands alone."""
+    from tools import pilot_state
+
+    try:
+        return pilot_state.document_texts(root, attempt_id, state if state is not None else pilot_state.derive_state(root))
+    except (KeyError, OSError, TypeError, ValueError, IndexError, StopIteration):
+        return {}
 
 
 def draft_questions(marker: Mapping[str, Any]) -> str:
@@ -404,7 +425,7 @@ def check_plan(run_root: Path, attempt_id: str, plan: Mapping[str, Any], state: 
     listed = [row for row in (plan.get("out_of_scope") if isinstance(plan, Mapping) else None) or [] if isinstance(row, Mapping)]
     given = sorted(str(row.get("source_requirement_id")) for row in listed if row.get("reason") != UNCLEAR_REASON)
     cut = {str(row.get("source_requirement_id")) for row in listed if row.get("reason") == UNCLEAR_REASON}  # the code's own: only requirements the text marks as unset
-    marked = {str(row["source_requirement_id"]) for row in requirements_of(marker) if _CUT.search(str(row.get("text") or ""))} if marker is not None else cut
+    marked = unset_ids(requirements_of(marker), _document_texts(root, attempt_id, state)) if marker is not None else cut
     if given != expected or not cut <= marked:
         raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план называет вне охвата {given or 'ничего'}, решение человека — {expected or 'без исключений'}; "
                            "fix: повтори `submit --stage plan` — план строит код из записанного решения человека")

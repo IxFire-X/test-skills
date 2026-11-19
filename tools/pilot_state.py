@@ -6090,6 +6090,11 @@ def header_document_id(docs: Sequence[str], module: str) -> str:
     return "TCDOC-" + (slug(first) or slug(module) or "run")
 
 
+def document_texts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, str]:
+    """The plain documents ``--docs`` names as the context receipts of the attempt hold them (path -> text, read by the digests of the receipts)."""
+    return _named_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
+
+
 def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
     """What the plan is built from — the journal's: the requirements of the answered marker (and the file of that answer, measured for the batch
     window), the context receipts, the exclusions the human recorded."""
@@ -6101,7 +6106,8 @@ def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[s
                   and event.get("stage_instance_id") == "context-marker:baseline")
     read = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", str(answer["artifact_digest"]))
     requirements, human = read["artifact"]["artifacts"]["analytics_documentation"]["requirements"], out_of_scope(scope_state(root, attempt_id, state)["decision"])
-    left = human + cut_rows(requirements, {row["source_requirement_id"] for row in human}, run_skeleton(root, _attempt_of(state, attempt_id)))  # a requirement with no expected result gets no case
+    left = human + cut_rows(requirements, {row["source_requirement_id"] for row in human}, run_skeleton(root, _attempt_of(state, attempt_id)),
+                                                                                 _named_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item['digest']) for item in receipts]))  # a requirement with no expected result gets no case
     return {"requirements": requirements, "answer": root / read["path"], "receipts": receipts,
             "sources": read["artifact"]["artifacts"]["source_code_and_diff"].get("sources") or [], "out_of_scope": left or None}
 
