@@ -512,9 +512,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
                          for target in targets)  # digest: the input of the request the file stands for; sha256: the file itself (the source digest of a requirement is this one)
             if position == 0 and stage in ("context-marker:requirements", "context-marker:baseline"):  # the step that reads the documents also reads the numbers of them, as the code counts them
                 from tools.build_context import numbering_view
+                from tools.pilot_state import label_texts
 
-                numbers = numbering_view({target.relative_to(project).as_posix() if target.is_relative_to(project) else target.name: target.read_text(encoding="utf-8", errors="replace")
-                                          for target in targets}, project)
+                numbers = numbering_view(label_texts(root, attempt_id, state), project)  # the documents as the receipts hold them (by their digests, no link), the numbers as the check of the submit counts them
                 if numbers:
                     view = Path(root) / "marker-views" / (digest.removeprefix("sha256:") + ".md")
                     _write_view(project, root, view, numbers.encode("utf-8"), write_views)

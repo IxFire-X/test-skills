@@ -1994,16 +1994,22 @@ def _named_sections(project: Path, root: Path) -> dict[str, list[str]]:
     return named
 
 
-def _label_found(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, list[str]]:
-    """The labels of the plain documents ``--docs`` names (``tools.build_context.document_label_counts``) — of the named sections of a file, not of the whole file."""
-    from tools.build_context import document_label_counts
+def _label_texts(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, str]:
+    """The texts the labels are counted in: the plain documents ``--docs`` names (read where the receipts hold them, by their digests) — the named sections of a file, not the whole file."""
     from tools.doc_sections import find_section, view
 
     texts = _named_texts(project, root, attempt, receipts)
     for path, headings in _named_sections(project, root).items():
         if headings and path in texts:
             texts[path] = view(texts[path], [find_section(texts[path], heading, path) for heading in headings], path, note=False)
-    return document_label_counts(texts, project)
+    return texts
+
+
+def _label_found(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, list[str]]:
+    """The labels of the plain documents ``--docs`` names (``tools.build_context.document_label_counts``) — of the named sections of a file, not of the whole file."""
+    from tools.build_context import document_label_counts
+
+    return document_label_counts(_label_texts(project, root, attempt, receipts), project)
 
 
 def _named_texts(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str]) -> dict[str, str]:
@@ -6093,6 +6099,11 @@ def header_document_id(docs: Sequence[str], module: str) -> str:
 def document_texts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, str]:
     """The plain documents ``--docs`` names as the context receipts of the attempt hold them (path -> text, read by the digests of the receipts)."""
     return _named_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
+
+
+def label_texts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, str]:
+    """The texts the labels of the documents are counted in (path -> text) as the context receipts of the attempt hold them: the step of the marker reads the numbers of these."""
+    return _label_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
 
 
 def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, Any]:

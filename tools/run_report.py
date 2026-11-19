@@ -452,6 +452,11 @@ def _identifier(value: Any) -> str | None:
     return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else None
 
 
+def _plain_path(value: Any) -> str | None:
+    """The path of a file of the project as the inventory has it; one with a control character (a line break in a file name) is dropped."""
+    return value if isinstance(value, str) and re.fullmatch(r"[^\x00-\x1f\x7f-\x9f]+", value) else None
+
+
 def _count(value: Any) -> int | None:
     return value if type(value) is int else None
 
@@ -958,6 +963,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
     if requirements is not None:
         try:
             labels = pilot.requirement_label_counts(root, marker["attempt_id"], requirements)
+            labels = labels and {**labels, "documents": [{**row, "path": _plain_path(row["path"])} for row in labels["documents"]]}  # the name of a file is no text for the report unless it is one plain line
         except (KeyError, OSError, TypeError, ValueError):
             labels = None
     cases = None
@@ -1256,7 +1262,7 @@ def _tests_clause(report: Mapping[str, Any]) -> str:
 def _label_lines(report: Mapping[str, Any]) -> list[str]:
     """The warning for fewer requirements than the numbers of the documents (the paths and the numbers), whatever the outcome of the review."""
     found = report.get("requirement_labels")
-    return [] if not found else [f"> **Внимание: в документе {', '.join(row['path'] for row in found['documents'])} номеров {sum(row['labels'] for row in found['documents'])}, требований в разметке {found['requirements']}.** "
+    return [] if not found else [f"> **Внимание: в документе {', '.join(_one_line(row['path']) or '?' for row in found['documents'])} номеров {sum(row['labels'] for row in found['documents'])}, требований в разметке {found['requirements']}.** "
                                  "Сверьте, что ни одно требование не пропущено и не склеено.", ""]
 
 
@@ -1351,7 +1357,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"{totals['output_bytes']} | {totals['output_tokens_est']} |", "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
-        *([*(f"  - {row['path']}: номеров {row['labels']}" for row in report["requirement_labels"]["documents"]), f"  - требований в разметке: {report['requirement_labels']['requirements']}"]
+        *([*(f"  - {_one_line(row['path']) or '?'}: номеров {row['labels']}" for row in report["requirement_labels"]["documents"]), f"  - требований в разметке: {report['requirement_labels']['requirements']}"]
           if report.get("requirement_labels") else []),
         *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),
         *([f"  - кейсов, повторяющих тесты проекта: {len(report['existing_tests']['repeating'])} из {report['existing_tests']['cases']}"
