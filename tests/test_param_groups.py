@@ -136,6 +136,32 @@ def test_a_group_whose_cases_differ_beyond_values_is_refused_at_the_first_differ
                for found, code in codes), codes
 
 
+def _imported(document: dict, *, keys: tuple[str, ...] = ("PC-T1", "PC-T2")) -> None:
+    for case, key in zip(document["test_cases"], keys):
+        case["management"]["external_keys"] = {"zephyr_scale": key}
+
+
+def test_imported_cases_of_a_group_keep_their_own_key_priority_and_preconditions() -> None:
+    document = grouped()
+    _imported(document)
+    document["test_cases"][1].update(priority="LOW", preconditions=["Предусловие из CSV другого варианта."])
+    document["test_cases"][1]["management"]["labels"] = ["из-csv"]
+    assert _codes(document) == []
+
+
+def test_imported_cases_of_a_group_are_still_compared_by_their_steps() -> None:
+    document = grouped()
+    _imported(document)
+    _set(document, 1, ("steps", 1, "operation", "capability_id"), "CAP-B1-owners_state")
+    assert any(code == "SEMANTIC_PARAM_GROUP_MISMATCH" for _path, code in _codes(document))
+
+
+def test_the_fix_of_the_group_refusal_names_the_fields_an_imported_case_keeps() -> None:
+    from tools.fixes import FIXES
+
+    assert "management" in FIXES["SEMANTIC_PARAM_GROUP_MISMATCH"]
+
+
 def test_a_group_with_a_missing_step_is_refused() -> None:
     document = grouped()
     document["test_cases"][2]["steps"].pop()

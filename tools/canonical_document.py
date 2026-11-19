@@ -418,6 +418,7 @@ def uncovered_requirements(requirements: Sequence[Mapping[str, Any]], cases: Seq
 
 
 _GROUP_FREE_CASE_FIELDS = frozenset({"case_id", "display_order", "title", "objective", "design_refs", "param_group"})
+_GROUP_IMPORTED_CASE_FIELDS = frozenset({"management", "priority", "preconditions"})  # an imported case has its own, as its CSV row has them: the Key, the folder, the labels, the priority
 
 
 def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, Any]:
@@ -429,8 +430,8 @@ def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, 
     return value
 
 
-def _group_shape(case: dict[str, Any]) -> dict[str, Any]:
-    """The case without what its variants may differ in — literal values, human texts and document-global ids."""
+def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]:
+    """The case without what its variants may differ in — literal values, human texts and document-global ids; of a group with an imported case also the fields each such case has of its own."""
     positions = {step["step_id"]: index for index, step in enumerate(case["steps"])}
     steps = []
     for step in case["steps"]:
@@ -444,7 +445,8 @@ def _group_shape(case: dict[str, Any]) -> dict[str, Any]:
              **{key: _group_value(assertion[key], positions) for key in ("actual", "expected") if key in assertion}}
             for assertion in expectation["assertions"]]} for expectation in step["expectations"]]
         steps.append(shape)
-    return {**{key: value for key, value in case.items() if key not in _GROUP_FREE_CASE_FIELDS}, "steps": steps}
+    free = _GROUP_FREE_CASE_FIELDS | _GROUP_IMPORTED_CASE_FIELDS if imported else _GROUP_FREE_CASE_FIELDS
+    return {**{key: value for key, value in case.items() if key not in free}, "steps": steps}
 
 
 def _first_difference(left: Any, right: Any, path: tuple[object, ...] = ()) -> tuple[object, ...] | None:
@@ -507,9 +509,10 @@ def _param_group_diagnostics(document: dict[str, Any], diagnostics: list[dict[st
         if len(members) < 2:
             diagnostics.append(_diagnostic(_pointer("test_cases", first_index, "param_group"), "SEMANTIC_PARAM_GROUP_SINGLE", f"{group_id}: a group needs at least two cases"))
             continue
-        shape = _group_shape(first)
+        imported = any(((case.get("management") or {}).get("external_keys") or {}).get("zephyr_scale") for _, case in members)
+        shape = _group_shape(first, imported)
         for case_index, case in members[1:]:
-            found = _first_difference(shape, _group_shape(case))
+            found = _first_difference(shape, _group_shape(case, imported))
             if found is not None:
                 diagnostics.append(_diagnostic(_pointer("test_cases", case_index, *found), "SEMANTIC_PARAM_GROUP_MISMATCH",
                                                f"{group_id}: {case['case_id']} differs from {first['case_id']} beyond the values of its variant"))

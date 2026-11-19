@@ -211,7 +211,7 @@ FIXES: dict[str, str] = {
     "SEMANTIC_TYPE_MISMATCH": "semantic_type входа равен типу его источника (оба в message): literal — json-тип значения, step_output — тип выхода; у fixture/environment/secret_handle — тип аргумента "
                               "и type_provenance. Нужен другой тип — меняй источник, а не semantic_type",
     "SEMANTIC_PARAM_GROUP_MISMATCH": "кейс группы param_group отличается от первого кейса группы не только вариантом. Сравнивается всё, кроме `case_id`, `display_order`, `title`, `objective`, "
-                                     "`design_refs`, `param_group`, у шагов — `step_id`, `action`, `test_data`, у входов и утверждений — `input_id`/`assertion_id` и литеральных значений: "
+                                     "`design_refs`, `param_group` (в группе с импортированным кейсом — ещё `management`, `priority`, `preconditions`: у каждого свои из CSV), у шагов — `step_id`, `action`, `test_data`, у входов и утверждений — `input_id`/`assertion_id` и литеральных значений: "
                                      "операции, capability, виды и места входов и утверждений, ссылки `step_output` (по номеру шага), `expectations`, `automation_blockers` и число шагов "
                                      "должны совпасть. Путь в диагностике — первое расхождение в этом кейсе: выровняй кейс по первому кейсу группы. Тот же код при занятом имени: "
                                      "PG-… уже есть в прошлой пачке — дай группе новое имя, группа живёт в одной пачке",
