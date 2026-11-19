@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Устройство «Трассы» v0.7.1: роли, маршрут прогона, шаг модели, автотесты, итог, границы, OpenSpec, живые прогоны">
+<title>Устройство «Трассы» v0.7.1</title>
+<style>
+:root {
+  --bg: #f2f4f5; --surface: #fcfcfb; --ink: #15202b; --ink-2: #455361; --muted: #6b7884;
+  --line: #d6dce1; --soft: #e8ecef;
+  --model: #4a3aa7; --review: #d65a24; --project: #16956a; --code: #5b6670;
+  --pass: #1f7a3a; --warn: #a35a00;
+  --s-in: #1f7a3a; --s-ready: #1d5fa8; --s-wip: #a35a00;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --col: 780px; --wide: 1040px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+    --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+    --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+  --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+  --pass: #5cc97a; --warn: #e8ad52; --s-in: #5cc97a; --s-ready: #6fb0f0; --s-wip: #e8ad52;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { max-width: var(--col); margin-inline: auto; }
+.wide { max-width: var(--wide); margin-inline: auto; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(26px, 5vw, 42px); letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-weight: 650; font-size: clamp(21px, 3vw, 28px); }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { margin: 14px 0 0; padding: 12px 14px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; white-space: pre; }
+pre code { background: none; padding: 0; font-size: inherit; }
+a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+strong { font-weight: 600; }
+header.top { padding-block: 40px 24px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lead { font-size: 18px; color: var(--ink-2); max-width: 66ch; margin-top: 16px; }
+.toc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 26px; }
+.toc > div { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.toc .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 8px 0 0; padding-left: 22px; font-size: 14.5px; color: var(--ink-2); display: grid; gap: 3px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+nav.bar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+nav.bar ul { list-style: none; margin: 0 auto; padding: 0; max-width: var(--wide); display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+nav.bar a { display: block; padding: 10px 12px; font-size: 14px; white-space: nowrap; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; }
+nav.bar a:hover { color: var(--ink); border-bottom-color: var(--line); }
+nav.bar li.grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; padding: 12px 6px 10px 2px; white-space: nowrap; }
+section { padding-block: 48px 8px; scroll-margin-top: 48px; }
+.part { padding-block: 52px 0; }
+.part .pt { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.part h2 { font-size: clamp(25px, 4vw, 34px); margin-top: 10px; }
+.sec-head { display: grid; gap: 8px; margin-bottom: 20px; }
+.sec-head .n { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.prose { display: grid; gap: 14px; max-width: 68ch; }
+.note { font-size: 14.5px; color: var(--ink-2); }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; background: var(--soft); color: var(--ink); white-space: nowrap; }
+.chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--code)); }
+.chip.model { --c: var(--model); } .chip.review { --c: var(--review); } .chip.project { --c: var(--project); } .chip.code { --c: var(--code); }
+.chip.human { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.chip.human::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+/* Три состояния. Чтобы перенести блок из «в работе» в «готово»: сменить класс st-wip -> st-ready (или st-in) и текст плашки. */
+.st { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 5px; white-space: nowrap; box-shadow: inset 0 0 0 1.5px var(--c); color: var(--c); background: transparent; vertical-align: middle; }
+.st-in { --c: var(--s-in); } .st-ready { --c: var(--s-ready); } .st-wip { --c: var(--s-wip); }
+.stlegend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.stlegend > div { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 14px; font-size: 14px; color: var(--ink-2); min-width: 0; }
+.stlegend .st { margin-bottom: 6px; }
+@media (max-width: 760px) { .stlegend { grid-template-columns: minmax(0, 1fr); } }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 26px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.flow > div { padding: 14px 16px; min-width: 0; }
+.flow > div + div { border-left: 1px solid var(--line); }
+.flow .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.flow .v { font-family: var(--font-mono); font-size: 12.5px; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.45; }
+.flow .d { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+@media (max-width: 720px) { .flow { grid-template-columns: minmax(0, 1fr); } .flow > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+.who { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+.who > div { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.who p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.cap { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cap h3 { font-size: 16.5px; }
+.cap p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.cap .pf { font-size: 13.5px; color: var(--ink); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.cap .top { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+@media (max-width: 820px) { .caps, .toc { grid-template-columns: minmax(0, 1fr); } .who { grid-template-columns: minmax(0, 1fr); } }
+.roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.role { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.role p { font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 980px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .roles { grid-template-columns: minmax(0, 1fr); } }
+figure { margin: 24px 0 0; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 14px 10px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 680px; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; max-width: 72ch; }
+svg text { font-family: var(--font-body); }
+svg .mono { font-family: var(--font-mono); }
+.tbl { overflow-x: auto; margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; background: var(--soft); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 5px; white-space: nowrap; background: transparent; }
+.tag.ok { color: var(--pass); box-shadow: inset 0 0 0 1px var(--pass); }
+.tag.wn { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.tag.rv { color: var(--review); box-shadow: inset 0 0 0 1px var(--review); }
+.tag.mu { color: var(--muted); box-shadow: inset 0 0 0 1px var(--muted); }
+.steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--c, var(--code)); }
+.steps .h { font-weight: 600; }
+.steps .s { font-size: 14.5px; color: var(--ink-2); margin-top: 2px; }
+.steps .now { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+.c-model { --c: var(--model); } .c-review { --c: var(--review); } .c-project { --c: var(--project); } .c-code { --c: var(--code); } .c-human { --c: var(--ink-2); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.split3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.panel h3 { font-size: 16.5px; }
+.panel ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; color: var(--ink-2); }
+.panel li .st { margin-right: 4px; }
+@media (max-width: 900px) { .split, .split3 { grid-template-columns: minmax(0, 1fr); } }
+.callout { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--ink-2); font-size: 14.5px; color: var(--ink-2); max-width: 72ch; }
+.callout.warn { border-color: var(--warn); }
+.items { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.items > li { padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; }
+.col > pre, .items pre { max-width: 100%; }
+.items > li:last-child { border-bottom: 1px solid var(--line); }
+.items .h { font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.items .s { font-size: 14.5px; color: var(--ink-2); margin-top: 4px; }
+dl.gloss { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px 20px; margin: 22px 0 0; }
+dl.gloss dt { font-weight: 600; }
+dl.gloss dd { margin: 0; color: var(--ink-2); min-width: 0; }
+@media (max-width: 600px) { dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; } dl.gloss dd { margin-bottom: 10px; } }
+footer { padding-block: 44px 64px; color: var(--muted); font-size: 13.5px; }
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.bx.model { stroke: var(--model); stroke-width: 2; }
+.bx.review { stroke: var(--review); stroke-width: 2; }
+.bx.project { stroke: var(--project); stroke-width: 2; }
+.bx.code { stroke: var(--code); stroke-width: 2; }
+.bx.human { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.bx.opt { stroke-dasharray: 5 3; }
+.ln { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.ln.ret { stroke-dasharray: 5 4; }
+.bound { stroke: var(--ink-2); stroke-width: 1.2; stroke-dasharray: 2 4; }
+.tt { font-size: 14px; font-weight: 600; fill: var(--ink); }
+.ts { font-size: 12px; fill: var(--ink-2); }
+.tl { font-size: 12px; fill: var(--ink-2); }
+.tm { font-size: 12px; fill: var(--muted); }
+.th { font-size: 12px; fill: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+.grid { stroke: var(--line); stroke-width: 1; }
+.axis { font-size: 12px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-over { fill: var(--review); } .bar-ok { fill: var(--model); }
+.limit { stroke: var(--ink); stroke-width: 1.5; }
+.val { font-size: 12.5px; fill: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rlab { font-size: 13px; fill: var(--ink); }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.card .t { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.card h3 { font-size: 16.5px; }
+.card p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 760px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: no-preference) { nav.bar a { transition: color .15s, border-color .15s; } }
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="col">
+    <div class="eyebrow">Трасса · версия v0.7.1 · состояние на 19 ноября 2026 · основа — тег v0.7.1 (3f4581a0)</div>
+    <h1 style="margin-top:14px">Устройство «Трассы» v0.7.1: прогон ведёт агент, проверяет код</h1>
+    <p class="lead">«Трасса» — набор инструкций для агента в вашей программе с моделью и Python-инструментов к ним. По документу требований она готовит тест-кейсы, отдаёт их на ревью и, если вы попросите, пишет автотесты. Агент идёт по инструкции и сам играет роли модели; код пакета проверяет каждый ответ и записывает журнал. Пакет ничего не запускает на вашей машине: сборку и тесты запускаете вы. Страница описывает тег v0.7.1; там, где v0.7 изменила устройство, стоит плашка «новое в v0.7». Устройство v0.6 — на <a href="ustroystvo-trassa-v06.html">прежней странице</a>.</p>
+    <div class="stlegend" aria-label="Три состояния">
+      <div><span class="st st-in">с v0.6</span><br>Было в v0.6 и осталось в v0.7.1 без изменений по существу.</div>
+      <div><span class="st st-ready">новое в v0.7</span><br>Появилось или изменилось в v0.7 и v0.7.1; есть в папках поставки v0.7.1.</div>
+      <div><span class="st st-wip">отложено в v0.8</span><br>Известное ограничение этой версии.</div>
+    </div>
+    <div class="toc" aria-label="Содержание">
+      <div><div class="k">Часть I · Обзор</div><ol><li><a href="#what">Что это</a></li><li><a href="#can">Что умеет</a></li><li><a href="#states">Что в каком состоянии</a></li></ol></div>
+      <div><div class="k">Часть II · Устройство</div><ol start="4"><li><a href="#roles">Кто что делает</a></li><li><a href="#route">Маршрут прогона</a></li><li><a href="#cycle">Как идёт один шаг модели</a></li><li><a href="#modeb">Автотесты: запускает человек</a></li><li><a href="#result">Итог прогона и файлы</a></li><li><a href="#bounds">Границы: что пакет делает на машине</a></li><li><a href="#scan">Что видит модель</a></li><li><a href="#openspec">OpenSpec</a></li><li><a href="#runs">Живые прогоны</a></li><li><a href="#glossary">Словарь</a></li></ol></div>
+    </div>
+  </div>
+</header>
+
+<nav class="bar wrap" aria-label="Разделы">
+  <ul>
+    <li class="grp">Обзор</li>
+    <li><a href="#what">Что это</a></li>
+    <li><a href="#can">Что умеет</a></li>
+    <li><a href="#states">Состояния</a></li>
+    <li class="grp">Устройство</li>
+    <li><a href="#roles">Роли</a></li>
+    <li><a href="#route">Маршрут</a></li>
+    <li><a href="#cycle">Шаг модели</a></li>
+    <li><a href="#modeb">Автотесты</a></li>
+    <li><a href="#result">Итог</a></li>
+    <li><a href="#bounds">Границы</a></li>
+    <li><a href="#scan">Контекст</a></li>
+    <li><a href="#openspec">OpenSpec</a></li>
+    <li><a href="#runs">Прогоны</a></li>
+    <li><a href="#glossary">Словарь</a></li>
+  </ul>
+</nav>
+
+<main>
+<div class="part wrap"><div class="col"><div class="pt">Часть I</div><h2>Обзор: что это, что умеет, что в каком состоянии</h2></div></div>
+
+<section id="what" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">1</div><h2>Что это</h2></div>
+    <div class="prose">
+      <p>Пакет состоит из шести инструкций (оркестратор и пять ролей: разметка требований, генератор кейсов, ревьюер кейсов, генератор автотестов, ревьюер автотестов) и 63 модулей Python в <code>tools/</code>. Он кладётся в проект в папку <code>.tools/test-skills</code>. Нужен только Python 3.11–3.13: сторонние пакеты и виртуальное окружение не требуются.</p>
+      <p>На входе — документ требований в Markdown или спецификация OpenSpec. На выходе — тест-кейсы (JSON, HTML, Markdown), CSV для Zephyr Scale, отчёт ревью, отчёт прогона и файл вопросов аналитику. В режиме автотестов — ещё файлы тестов в тестовом корне модуля и напечатанная команда запуска.</p>
+      <p><strong>Первое: прогон ведёт агент, проверяет код.</strong> Агент читает <code>skills/orchestrate/SKILL.md</code> и вызывает команды пакета. Каждую стадию модели ведут два вызова — <code>prepare</code> и <code>submit</code>; код проверяет ответ по схеме, записывает его в журнал прогона и не пускает дальше, если что-то не сходится.</p>
+      <p><strong>Второе: ожидаемый результат берётся из требования, а не из кода.</strong> Упавший автотест — повод для вопроса аналитику или баг-репорта, а не для подгонки теста: он остаётся в проекте активным как находка. Если ожидаемого результата в требовании нет, кейс не пишется — пишется вопрос аналитику.</p>
+      <p><strong>Третье: пакет ничего не запускает.</strong> Ни сборку, ни тесты, ни git, ни сеть. Где в поставке есть автотесты, команду запуска печатает пакет, а выполняете её вы.</p>
+    </div>
+    <div class="flow" role="list" aria-label="Что на входе и что на выходе">
+      <div role="listitem"><div class="k">Вход</div><div class="v">документ .md · openspec/</div><div class="d">Требования; путь передаётся явно</div></div>
+      <div role="listitem"><div class="k">Кейсы</div><div class="v">published/….r1.json · .html · .md</div><div class="d">Один документ кейсов со ссылками на требования; CSV для Zephyr — у принятого набора</div></div>
+      <div role="listitem"><div class="k">Автотесты</div><div class="v">…Tests.java · test_*.py</div><div class="d">Только в режиме автотестов, только в тестовом корне модуля</div></div>
+      <div role="listitem"><div class="k">Итог</div><div class="v">.pilot-runs/&lt;run_id&gt;/</div><div class="d">Журнал, отчёты, итог попытки</div></div>
+    </div>
+    <div class="who">
+      <div><div class="label">Тестировщику</div><p>Кейсы по требованиям с ревью и трассировкой «требование — кейс»; пауза после разметки, где вы решаете, что делать с неполными требованиями.</p></div>
+      <div><div class="label">Аналитику</div><p><code>questions-for-analyst.md</code>: пробелы требований, требования без ожидаемого результата, противоречия и поведение, которого документ не описывает, — вопросами по существу, без технических пометок.</p></div>
+      <div><div class="label">Команде</div><p>Кейсы в формате для импорта в Zephyr Scale и, в режиме автотестов, тесты в проекте; прерванный прогон продолжается по журналу.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="can" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">2</div><h2>Что умеет</h2></div>
+    <div class="prose"><p>Плашка у карточки — с какой версии возможность есть. Числа живых прогонов — в разделе 12.</p></div>
+  </div>
+  <div class="wide">
+    <div class="caps">
+      <div class="cap"><div class="top"><h3>Размечает требования и спрашивает вас</h3><span class="st st-in">с v0.6</span></div><p>Агент нормализует требования и выделяет пробелы. Если нет наблюдаемого результата, канала или доступа, прогон останавливается и показывает список (<code>SCOPE_PENDING</code>): вы либо исключаете требования с причиной, либо продолжаете как есть. Решение записывается в прогон.</p><p class="pf"><span class="st st-ready">новое в v0.7</span> Пакет сам даёт разметке вид номеров документа — список номеров требований. Требование — пронумерованное утверждение, абзац без номера — контекст. Дубль сливается в одно требование, отвергнутая идея требованием не становится. Требования OpenSpec собирает код, без модели.</p></div>
+      <div class="cap"><div class="top"><h3>Задаёт вопросы аналитику вместо выдуманных кейсов</h3><span class="st st-ready">новое в v0.7</span></div><p>Вопросы приходят с двух шагов. От разметки: требование без ожидаемого результата («TBD», «требует уточнения», «открытый вопрос») и два противоречащих требования остаются без кейса; неясная деталь — кейс есть, вопрос тоже. От генератора: поведение, которого документ не описывает, становится вопросом, а не кейсом. Прогон при этом не останавливается; отчёт называет требования без кейса.</p></div>
+      <div class="cap"><div class="top"><h3>Пишет кейсы по пачкам</h3><span class="st st-in">с v0.6</span></div><p>Требования делятся на пачки, на каждую — один вызов генератора. У кейса человеческая часть (цель, шаги, ожидание) и машинная (входы, вызов, проверки). Код собирает один документ и проверяет, что у каждого требования есть кейс.</p><p class="pf"><span class="st st-ready">новое в v0.7</span> Техническую часть HTTP-шага ставит код; пример тела ответа строится из проверок кейса; файлы, которые разметка назвала нужными, генератор получает первыми; шаблоны, которые код называет по имени, попадают в контекст.</p></div>
+      <div class="cap"><div class="top"><h3>Проводит ревью и одну доработку</h3><span class="st st-in">с v0.6</span></div><p>Ревьюер оценивает каждый кейс. В вид кейсов код вставляет контрольные ошибки — по ним отчёт показывает, насколько внимательно прошло ревью.</p><p class="pf"><span class="st st-ready">новое в v0.7</span> Отклонено не больше половины набора — отклонённые кейсы (и только они) один раз возвращаются генератору и снова проходят ревью; итог — «принят» или «принят частично», CSV есть. Контрольных ошибок — от 3 до 15, по размеру набора; замечания ревьюера к ним кейсы не отклоняют.</p></div>
+      <div class="cap"><div class="top"><h3>Пишет автотесты (режим Б)</h3><span class="st st-in">с v0.6</span></div><p>Тестовые методы по принятым кейсам, затем статическое ревью кода тестов и не больше одной исправленной ревизии. Генератору называются пути, которые в проекте уже заняты. Тесты кладутся в тестовый корень модуля; команду запуска печатает пакет, выполняете её вы.</p><p class="pf"><span class="st st-ready">новое в v0.7</span> Упавший тест — находка: он остаётся активным и получает метку, а не отключается. Модуль берётся у прогона, если <code>--module</code> не назван. Результаты Gradle с JUnit 6 сопоставляются с кейсами.</p></div>
+      <div class="cap"><div class="top"><h3>Берёт готовое из прошлого прогона</h3><span class="st st-in">с v0.6</span></div><p>Новый прогон по тем же требованиям берёт готовые разметку, план, кейсы, ревью и автотесты прошлого прогона (<code>scan</code> называет прошлый прогон и команду). Работает и для второго прогона в той же папке: тесты, записанные пакетом раньше, узнаются. Кейсы берутся не всегда: если ревью прошлого прогона запрашивало файлы проекта, повторно берётся только разметка.</p></div>
+      <div class="cap"><div class="top"><h3>Выгружает для Zephyr Scale</h3><span class="st st-in">с v0.6</span></div><p>CSV для импорта — у набора, принятого ревью целиком или частично. Набор, отклонённый целиком, — файлы <code>*.REJECTED.*</code> с замечаниями в шапке, без CSV. По вашему шаблону выгрузки пакет заполнит пользовательские поля отдельным файлом <code>…zephyr-import.csv</code>. Большой документ ведётся по разделам, одна команда собирает один CSV; сводка называет требования без кейса.</p></div>
+      <div class="cap"><div class="top"><h3>Обновляет кейсы под изменившиеся требования</h3><span class="st st-in">с v0.6</span></div><p>Старые кейсы (выгрузка из Zephyr) получают вердикт «подходит / переписать / устарел». Подходящие остаются байт в байт; в сомнении кейс остаётся как есть и выносится в отчёт «проверить вручную». Устаревший кейс остаётся в выгрузке с меткой «устарел». Ключ Zephyr у сохранённых кейсов остаётся, у новых пуст: импорт создаст новые кейсы, а не обновит старые.</p></div>
+      <div class="cap"><div class="top"><h3>Продолжается после перерыва и обрыва</h3><span class="st st-in">с v0.6</span></div><p>Состояние лежит в <code>.pilot-runs/&lt;run_id&gt;/</code>. После <code>/clear</code> команда <code>status</code> называет состояние и печатает следующую команду целиком. Прогон восстанавливается после обрыва процесса; параллельные команды одного прогона не запускаются — вторая ждёт первую.</p></div>
+      <div class="cap"><div class="top"><h3>Объясняет каждую остановку</h3><span class="st st-ready">новое в v0.7</span></div><p>У каждого отказа есть код, подсказка агенту и текст для человека. Если повтор шага исчерпан, пакет говорит «прогон дальше не пойдёт» и называет одну команду закрытия; <code>status</code> говорит то же.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="states" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">3</div><h2>Что в каком состоянии</h2></div>
+    <div class="prose"><p>Сводка на тег v0.7.1 (19 ноября). Всё в первых двух колонках есть в папках поставки v0.7.1; третья колонка — известные ограничения, отложенные в v0.8.</p></div>
+  </div>
+  <div class="wide">
+    <div class="split split3">
+      <div class="panel"><h3><span class="st st-in">было в v0.6</span></h3><ul>
+        <li>запуск без установки: Python 3.11–3.13 и стандартная библиотека; проверка целостности <code>doctor</code></li>
+        <li>цикл <code>prepare</code> / <code>submit</code> для каждой стадии модели; <code>status</code> с полями <code>state</code>, <code>next</code>, <code>waiting_for</code></li>
+        <li>пауза после разметки, исключение требований с причиной</li>
+        <li>требования по номерам документа; сверка «сколько номеров — столько требований»</li>
+        <li>OpenSpec: изменение выбирается файлами в <code>--docs</code>, остальные изменения и архив в модель не идут</li>
+        <li>контрольные ошибки в виде кейсов для ревьюера</li>
+        <li>режим автотестов: запуск человеком, <code>materialize</code> и <code>ingest</code></li>
+        <li>большой документ — по разделам, один файл для Zephyr</li>
+        <li>обновление существующих кейсов под изменившиеся требования</li>
+        <li>повтор готового из прошлого прогона, в том числе в той же папке</li>
+        <li>восстановление после обрыва процесса; отчёт прогона</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-ready">новое в v0.7 и v0.7.1</span></h3><ul>
+        <li>требования OpenSpec собирает код; расхождения спецификации и изменения — отказ при сканировании, до модели</li>
+        <li>доработка отклонённых кейсов: один круг, до половины набора</li>
+        <li>вид номеров документа для разметки; дубль, противоречие и отвергнутая идея разбираются при разметке</li>
+        <li>вопросы аналитику от разметки и от генератора; требование без ожидаемого результата и неописанное поведение — без кейса</li>
+        <li>шаблоны, которые код называет по имени, — в контексте генератора</li>
+        <li>упавший автотест — находка, а не карантин</li>
+        <li>выбор модуля у прогона в режиме с автотестами; Gradle с JUnit 6</li>
+        <li>контрольных ошибок от 3 до 15, по размеру набора</li>
+        <li>у каждого отказа текст для человека; закрытие прогона при исчерпанном повторе одной командой</li>
+        <li>чтение документов для разметки со сверкой отпечатка</li>
+      </ul></div>
+      <div class="panel"><h3><span class="st st-wip">отложено в v0.8</span></h3><ul>
+        <li>доработка, которой нужна новая операция: такой кейс остаётся отклонённым</li>
+        <li>свои контрольные ошибки во втором круге ревью</li>
+        <li>сверка кодом номера строки в происхождении требования</li>
+        <li>слабая модель-ревьюер на видах больше 300 КБ</li>
+        <li>на больших документах генератору не хватает места для нужных файлов</li>
+        <li>словарь операций: выдуманные имена результатов в проверках</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<div class="part wrap"><div class="col"><div class="pt">Часть II</div><h2>Устройство</h2><p class="note" style="margin-top:12px">Для тех, кто запускает: роли, маршрут по шагам, шаг модели, режим автотестов, итог, границы, контекст модели, OpenSpec, живые прогоны и словарь.</p></div></div>
+
+<section id="roles" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">4</div><h2>Кто что делает</h2></div>
+    <div class="prose"><p>Пять участников; цвет участника используется во всех схемах. Команды пакета и записи в журнал делает агент по инструкции, но проверяет и записывает код пакета. Сборку проекта запускаете вы.</p></div>
+  </div>
+  <div class="wide">
+    <div class="roles">
+      <div class="role"><span class="chip human">Человек</span><p>Кладёт папку пакета в проект, формулирует запрос, отвечает на вопросы (модуль, пауза по пробелам, согласие на ревью в той же сессии), просматривает файлы тестов, запускает напечатанную команду сборки.</p></div>
+      <div class="role"><span class="chip model">Агент CLI</span><p>Агент в вашей программе с моделью: ведёт прогон по главной инструкции <code>orchestrate/SKILL.md</code>, вызывает команды пакета и сам пишет ответы разметки, генерации кейсов и автотестов.</p></div>
+      <div class="role"><span class="chip review">Ревьюер</span><p>Роли ревью кейсов и автотестов. По инструкции — отдельная сессия без истории генерации; если в вашем CLI её нет, ревью идёт в той же сессии по вашему согласию (пометка SELF).</p></div>
+      <div class="role"><span class="chip code">Код пакета</span><p>Программа на Python: проверяет каждый ответ модели, ведёт журнал прогона и публикует результат. Основные модули — <code>run_pipeline</code> и <code>api</code> (команды <code>prepare</code> и <code>submit</code>); они составляют опись файлов, сверяют ответы со схемами и записывают итоги.</p></div>
+      <div class="role"><span class="chip project">Сборка проекта</span><p><code>mvnw</code>, системный <code>mvn</code>, <code>gradlew</code> или pytest. Запускается только вашей рукой, напечатанной командой.</p></div>
+    </div>
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 910 380" role="img" aria-label="Схема участников. Человек ставит задачу агенту CLI. Агент вызывает команды пакета и получает JSON. Агент передаёт пакет ревью ревьюеру и получает ответ. Пакет пишет журнал и публикует кейсы. Человек запускает команду сборки проекта, которую печатает пакет, и приносит отчёты.">
+          <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <line class="bound" x1="430" y1="14" x2="430" y2="336"/>
+          <text class="tm" x="418" y="28" text-anchor="end">сессия CLI и её модель</text>
+          <text class="tm" x="442" y="28">код пакета и проект</text>
+          <rect class="bx human" x="16" y="128" width="120" height="58" rx="8"/><text class="tt" x="76" y="153" text-anchor="middle">Человек</text><text class="ts" x="76" y="172" text-anchor="middle">задача, ответы</text>
+          <rect class="bx model" x="196" y="96" width="196" height="118" rx="8"/><text class="tt" x="294" y="126" text-anchor="middle">Агент CLI</text><text class="ts" x="294" y="148" text-anchor="middle">идёт по orchestrate/SKILL.md</text><text class="ts" x="294" y="166" text-anchor="middle">играет роли модели</text><text class="ts" x="294" y="184" text-anchor="middle">вызывает prepare и submit</text>
+          <rect class="bx review" x="196" y="250" width="196" height="64" rx="8"/><text class="tt" x="294" y="276" text-anchor="middle">Ревьюер</text><text class="ts" x="294" y="296" text-anchor="middle">отдельная сессия, если CLI умеет</text>
+          <rect class="bx code" x="486" y="96" width="196" height="118" rx="8"/><text class="tt" x="584" y="126" text-anchor="middle">Инструменты пакета</text><text class="ts mono" x="584" y="148" text-anchor="middle">run_pipeline · api</text><text class="ts" x="584" y="166" text-anchor="middle">проверяют схемы и порядок</text><text class="ts" x="584" y="184" text-anchor="middle">записывают и публикуют</text>
+          <rect class="bx code" x="760" y="40" width="136" height="62" rx="8"/><text class="tt" x="828" y="66" text-anchor="middle">Журнал</text><text class="ts mono" x="828" y="86" text-anchor="middle">.pilot-runs/&lt;run&gt;</text>
+          <rect class="bx code" x="760" y="126" width="136" height="62" rx="8"/><text class="tt" x="828" y="152" text-anchor="middle">Кейсы</text><text class="ts mono" x="828" y="172" text-anchor="middle">published/</text>
+          <rect class="bx project" x="760" y="250" width="136" height="62" rx="8"/><text class="tt" x="828" y="276" text-anchor="middle">Сборка проекта</text><text class="ts mono" x="828" y="296" text-anchor="middle">mvn · gradle · pytest</text>
+          <line class="ln" x1="138" y1="148" x2="194" y2="148" marker-start="url(#ar1)" marker-end="url(#ar1)"/><text class="tl" x="166" y="140" text-anchor="middle">задача</text><text class="tl" x="166" y="166" text-anchor="middle">вопросы</text>
+          <line class="ln" x1="392" y1="126" x2="484" y2="126" marker-end="url(#ar1)"/><text class="tl" x="438" y="117" text-anchor="middle">команды</text>
+          <line class="ln ret" x1="484" y1="184" x2="394" y2="184" marker-end="url(#ar1)"/><text class="tl" x="438" y="202" text-anchor="middle">ответ JSON</text>
+          <line class="ln" x1="274" y1="216" x2="274" y2="248" marker-end="url(#ar1)"/><text class="tl" x="266" y="236" text-anchor="end">вид кейсов</text>
+          <line class="ln ret" x1="314" y1="248" x2="314" y2="216" marker-end="url(#ar1)"/><text class="tl" x="322" y="236">ответ</text>
+          <line class="ln" x1="682" y1="112" x2="758" y2="76" marker-end="url(#ar1)"/><text class="tl" x="716" y="88" text-anchor="middle">пишет</text>
+          <line class="ln" x1="682" y1="156" x2="758" y2="158" marker-end="url(#ar1)"/><text class="tl" x="718" y="148" text-anchor="middle">публикует</text>
+          <path class="ln ret" d="M76,188 L76,350 L828,350 L828,314" marker-end="url(#ar1)"/>
+          <text class="tl" x="450" y="342" text-anchor="middle">команда запуска из materialize — выполняет человек; отчёты он передаёт агенту (ingest)</text>
+        </svg>
+      </div>
+      <figcaption>Модель общается с кодом только через команды пакета. Решает, что вызвать, агент по инструкции; что можно записать, решает код. Пакет сборку не запускает: человек выполняет напечатанную команду и сообщает, где отчёты.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="route" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">5</div><h2>Маршрут прогона</h2></div>
+    <div class="prose"><p>Два профиля прогона. <code>cases-only-v1</code> — кейсы и их ревью; подходит для любой поставки. <code>local-pilot-v1</code> — плюс автотесты; для него нужна поставка с режимом автотестов (в папке пакета есть <code>HOW-TO-USE-MODE-B.md</code>), и он включается только явной просьбой в запросе. Шаги идут строго по порядку.</p></div>
+  </div>
+  <div class="wide">
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 1010 370" role="img" aria-label="Маршрут. Подготовка: подготовка папки, doctor, ready, scan, разметка, пауза по пробелам, план. Кейсы: генератор по пачкам, сборка набора, ревью кейсов, доработка и повторное ревью, итог для режима только кейсов. Автотесты: автотесты, ревью, исправление и повторное ревью, materialize, запуск человеком, ingest, закрытие и отчёт.">
+          <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <text class="th" x="8" y="22">ПОДГОТОВКА</text>
+          <rect class="bx human" x="8" y="32" width="130" height="58" rx="8"/><text class="tt" x="73" y="56" text-anchor="middle">Подготовка</text><text class="ts" x="73" y="76" text-anchor="middle">папка, запрос</text>
+          <rect class="bx code" x="152" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="217" y="56" text-anchor="middle">doctor</text><text class="ts" x="217" y="76" text-anchor="middle">целостность</text>
+          <rect class="bx code" x="296" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="361" y="56" text-anchor="middle">ready</text><text class="ts" x="361" y="76" text-anchor="middle">только чтение</text>
+          <rect class="bx code" x="440" y="32" width="130" height="58" rx="8"/><text class="tt mono" x="505" y="56" text-anchor="middle">scan</text><text class="ts" x="505" y="76" text-anchor="middle">опись, baseline</text>
+          <rect class="bx model" x="584" y="32" width="130" height="58" rx="8"/><text class="tt" x="649" y="56" text-anchor="middle">Разметка</text><text class="ts" x="649" y="76" text-anchor="middle">требования, пробелы</text>
+          <rect class="bx human" x="728" y="32" width="130" height="58" rx="8"/><text class="tt" x="793" y="56" text-anchor="middle">Пауза</text><text class="ts" x="793" y="76" text-anchor="middle">исключить или идти</text>
+          <rect class="bx code" x="872" y="32" width="130" height="58" rx="8"/><text class="tt" x="937" y="56" text-anchor="middle">План</text><text class="ts" x="937" y="76" text-anchor="middle">пачки требований</text>
+          <line class="ln" x1="138" y1="61" x2="150" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="61" x2="294" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="61" x2="438" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="570" y1="61" x2="582" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="714" y1="61" x2="726" y2="61" marker-end="url(#ar2)"/><line class="ln" x1="858" y1="61" x2="870" y2="61" marker-end="url(#ar2)"/>
+          <polyline class="ln" points="937,90 937,118 73,118 73,146" marker-end="url(#ar2)"/>
+          <text class="th" x="8" y="138">КЕЙСЫ</text>
+          <rect class="bx model" x="8" y="148" width="130" height="58" rx="8"/><text class="tt" x="73" y="172" text-anchor="middle">Генератор</text><text class="ts" x="73" y="192" text-anchor="middle">вызов на пачку</text>
+          <rect class="bx code" x="152" y="148" width="130" height="58" rx="8"/><text class="tt" x="217" y="172" text-anchor="middle">Набор и аудит</text><text class="ts" x="217" y="192" text-anchor="middle">JSON · HTML · MD</text>
+          <rect class="bx review" x="296" y="148" width="130" height="58" rx="8"/><text class="tt" x="361" y="172" text-anchor="middle">Ревью кейсов</text><text class="ts" x="361" y="192" text-anchor="middle">один ревьюер</text>
+          <rect class="bx review opt" x="440" y="148" width="130" height="58" rx="8"/><text class="tt" x="505" y="172" text-anchor="middle">Доработка</text><text class="ts" x="505" y="192" text-anchor="middle">до половины, раз</text>
+          <rect class="bx code opt" x="584" y="148" width="130" height="58" rx="8"/><text class="tt" x="649" y="172" text-anchor="middle">Итог: кейсы</text><text class="ts mono" x="649" y="192" text-anchor="middle">cases-only-v1</text>
+          <line class="ln" x1="138" y1="177" x2="150" y2="177" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="177" x2="294" y2="177" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="177" x2="438" y2="177" marker-end="url(#ar2)"/><line class="ln ret" x1="570" y1="177" x2="582" y2="177" marker-end="url(#ar2)"/>
+          <polyline class="ln" points="505,206 505,234 73,234 73,262" marker-end="url(#ar2)"/>
+          <text class="tl" x="515" y="228">local-pilot-v1: автотесты</text>
+          <text class="th" x="8" y="254">АВТОТЕСТЫ И ЗАПУСК · local-pilot-v1</text>
+          <rect class="bx model" x="8" y="264" width="130" height="58" rx="8"/><text class="tt" x="73" y="288" text-anchor="middle">Автотесты</text><text class="ts" x="73" y="308" text-anchor="middle">по принятым кейсам</text>
+          <rect class="bx review" x="152" y="264" width="130" height="58" rx="8"/><text class="tt" x="217" y="288" text-anchor="middle">Ревью тестов</text><text class="ts" x="217" y="308" text-anchor="middle">статическое</text>
+          <rect class="bx model opt" x="296" y="264" width="130" height="58" rx="8"/><text class="tt" x="361" y="288" text-anchor="middle">Исправление</text><text class="ts" x="361" y="308" text-anchor="middle">и ревью, раз</text>
+          <rect class="bx code" x="440" y="264" width="130" height="58" rx="8"/><text class="tt mono" x="505" y="288" text-anchor="middle">materialize</text><text class="ts" x="505" y="308" text-anchor="middle">файлы и команда</text>
+          <rect class="bx human" x="584" y="264" width="130" height="58" rx="8"/><text class="tt" x="649" y="288" text-anchor="middle">Запуск</text><text class="ts" x="649" y="308" text-anchor="middle">выполняет человек</text>
+          <rect class="bx code" x="728" y="264" width="130" height="58" rx="8"/><text class="tt mono" x="793" y="288" text-anchor="middle">ingest</text><text class="ts" x="793" y="308" text-anchor="middle">приём отчётов</text>
+          <rect class="bx code opt" x="872" y="264" width="130" height="58" rx="8"/><text class="tt" x="937" y="288" text-anchor="middle">Итог и отчёт</text><text class="ts mono" x="937" y="308" text-anchor="middle">PASS · FAIL</text>
+          <line class="ln" x1="138" y1="293" x2="150" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="282" y1="293" x2="294" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="426" y1="293" x2="438" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="570" y1="293" x2="582" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="714" y1="293" x2="726" y2="293" marker-end="url(#ar2)"/><line class="ln" x1="858" y1="293" x2="870" y2="293" marker-end="url(#ar2)"/>
+          <text class="tm" x="8" y="352">Пунктирная рамка — шаг, который идёт не всегда, или конечная точка. Прогон только кейсов закрывается командой finish после ревью.</text>
+        </svg>
+      </div>
+      <div class="legend"><span class="chip human">человек</span><span class="chip model">агент и роли модели</span><span class="chip review">ревьюер</span><span class="chip code">код пакета</span></div>
+    </figure>
+  </div>
+  <div class="col">
+    <ol class="steps">
+      <li class="c-human"><div class="num">1</div><div><div class="h">Подготовка</div><div class="s">Папка пакета в <code>.tools/test-skills</code>; три строки в <code>.gitignore</code> проекта (<code>.tools/</code>, <code>.pilot-runs/</code>, <code>.skillsrc*</code>); запрос агенту.</div></div></li>
+      <li class="c-code"><div class="num">2</div><div><div class="h"><code>doctor</code> и <code>ready</code></div><div class="s"><code>doctor</code> сверяет файлы пакета с <code>release/manifest.json</code> и версию Python; называет профиль поставки. <code>ready</code> только читает проект, показывает все проблемы сразу и к каждой — команду исправления.</div></div></li>
+      <li class="c-code"><div class="num">3</div><div><div class="h"><code>scan</code></div><div class="s">Создаёт прогон и попытку, строит опись (список файлов модуля, которые можно показать модели), фиксирует исходные данные прогона — baseline (требования, <code>.skillsrc</code>, входы, модуль), показывает <code>exclusion_summary</code> и, если есть, прошлый прогон с теми же входами (<code>reuse</code>). Один модуль на попытку. Для OpenSpec здесь же код сверяет спецификацию с изменением: расхождение — отказ до первого вызова модели.</div></div></li>
+      <li class="c-model"><div class="num">4</div><div><div class="h">Разметка</div><div class="s">Нормализованные требования с ID <code>SREQ-NNNN</code>, наблюдения по коду, пробелы. Для обычного документа пакет кладёт во вход разметки вид номеров документа — список номеров требований: требование — пронумерованное утверждение, абзац без номера — контекст; код сверяет число требований с числом номеров. Для OpenSpec требования собирает код, модель их не пишет, и в отчёте этот шаг помечен как сделанный кодом. Разметка же формирует вопросы аналитику: неясная деталь; требование без ожидаемого результата; два противоречащих требования.</div></div></li>
+      <li class="c-human"><div class="num">5</div><div><div class="h">Пауза по пробелам</div><div class="s">Если в требованиях есть пробелы — не сказано, где наблюдать результат, каким он должен быть или как получить доступ, — прогон ждёт вас (состояние <code>scope_pause</code>): вы отвечаете «исключи … потому что …» или «продолжай как есть». Без ответа план отказывает <code>SCOPE_PENDING</code>. Требование, помеченное в самом документе как неясное («TBD», «требует уточнения», «открытый вопрос»), паузы не вызывает: оно остаётся без кейса и уходит вопросом аналитику.</div></div></li>
+      <li class="c-code"><div class="num">6</div><div><div class="h">План</div><div class="s">Код делит требования на пачки; от агента нужно только название предмета проверки.</div></div></li>
+      <li class="c-model"><div class="num">7</div><div><div class="h">Генератор и сборка набора</div><div class="s">Одна пачка — один вызов. Файлы, которые разметка назвала нужными, идут генератору первыми. Вместе с кейсами генератор возвращает вопросы аналитику: поведение, которого документ не описывает, становится вопросом, а не кейсом. После последней пачки <code>submit</code> собирает один документ кейсов с трассировкой «требование — кейс» и проверяет схему, смысл и происхождение. Публикация — в <code>published/</code>.</div></div></li>
+      <li class="c-review"><div class="num">8</div><div><div class="h">Ревью кейсов и доработка</div><div class="s">Ревьюер оценивает каждый кейс. Отклонено не больше половины набора — отклонённые кейсы, и только они, один раз возвращаются генератору и снова проходят ревью; итог — набор принят целиком или принят частично, CSV есть в обоих случаях. Отклонено больше половины — набор возвращается целиком, CSV нет, <code>status</code> печатает команду следующего захода. Круг доработки один. Замечания ревьюера к контрольным ошибкам кейсы не отклоняют; отчёт называет их число.</div></div></li>
+      <li class="c-model"><div class="num">9</div><div><div class="h">Автотесты (режим Б)</div><div class="s">Тестовые методы по принятым кейсам, затем статическое ревью. Не принято с первого раза — одна исправленная ревизия и ещё одно ревью. Не принято и после неё — прогон закрывается с причиной <code>AUTOMATION_REJECTED</code>, автотестов нет.</div></div></li>
+      <li class="c-code"><div class="num">10</div><div><div class="h"><code>materialize</code></div><div class="s">Кладёт принятые тесты в тестовый корень модуля и печатает команду запуска (формы для cmd/sh и для PowerShell). Сам её не выполняет. Модуль берётся у попытки, если <code>--module</code> не назван; ошибка в модуле — отказ с подсказкой до любой записи.</div></div></li>
+      <li class="c-human"><div class="num">11</div><div><div class="h">Запуск человеком и <code>ingest</code></div><div class="s">Вы просматриваете файлы, выполняете команду, сообщаете агенту, где отчёты. <code>ingest</code> сверяет отчёты с попыткой и закрывает её. Упавшие тесты получают метку находки и остаются активными.</div></div></li>
+      <li class="c-code"><div class="num">12</div><div><div class="h">Закрытие и отчёт</div><div class="s"><code>finish</code> закрывает попытку (в режиме Б это делает <code>ingest</code>); <code>report</code> пишет <code>report.md</code>, <code>report.json</code> и <code>questions-for-analyst.md</code>. Если повтор шага исчерпан и прогон дальше не пойдёт, остановка называет одну команду закрытия — <code>finish --abandon &lt;причина&gt;</code>; после неё новый прогон начинается обычным <code>scan</code>.</div></div></li>
+    </ol>
+  </div>
+</section>
+
+<section id="cycle" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">6</div><h2>Как идёт один шаг модели</h2></div>
+    <div class="prose">
+      <p>Проще говоря: на каждом шаге пакет сначала выдаёт задание (<code>prepare</code>), модель кладёт ответ в файл, а пакет проверяет ответ (<code>submit</code>) и либо принимает его, либо возвращает с подсказкой. Подробнее: каждая стадия, где работает модель (разметка, пачки, ревью, автотесты), идёт одним циклом. <code>prepare</code> записывает запрос в журнал и печатает, что читать, куда положить ответ и какой бюджет у шага. Агент (или отдельный ревьюер) пишет ответ в файл-слот <code>incoming/&lt;стадия&gt;.json</code>. <code>submit</code> проверяет ответ и записывает квитанцию; <code>submit --dry-run</code> только проверяет и ничего не пишет.</p>
+      <p>Отказ — это JSON с кодом, подсказкой агенту <code>fix</code> и текстом для человека. Список ошибок схемы агент получает целиком и исправляет за один заход. На каждую стадию — один повтор (<code>--transport-attempts 2</code>). Когда повтор исчерпан, все три места говорят одно: человеку — «прогон дальше не пойдёт», агенту — одна команда закрытия (<code>finish --abandon</code> с причиной из остановки), <code>status</code> — то же. Какой шаг следующий, говорит <code>status</code>: поля <code>state</code>, <code>next</code>, <code>waiting_for</code> и готовая команда.</p>
+    </div>
+  </div>
+  <div class="wide">
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 1010 210" role="img" aria-label="Цикл стадии: prepare пишет запрос в журнал и печатает read, answer_slot и budget; роль пишет ответ в слот incoming; submit проверяет и записывает квитанцию; при отказе код и fix возвращают к исправлению ответа.">
+          <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+          <rect class="bx code" x="8" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="93" y="58" text-anchor="middle">prepare</text><text class="ts" x="93" y="80" text-anchor="middle">запрос — в журнал</text><text class="ts" x="93" y="96" text-anchor="middle">read · answer_slot · budget</text>
+          <rect class="bx model" x="218" y="30" width="170" height="86" rx="8"/><text class="tt" x="303" y="58" text-anchor="middle">Роль модели</text><text class="ts" x="303" y="80" text-anchor="middle">читает вход, пишет ответ</text><text class="ts mono" x="303" y="96" text-anchor="middle">incoming/&lt;стадия&gt;.json</text>
+          <rect class="bx code opt" x="428" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="513" y="58" text-anchor="middle">submit --dry-run</text><text class="ts" x="513" y="80" text-anchor="middle">только проверка,</text><text class="ts" x="513" y="96" text-anchor="middle">ничего не пишет</text>
+          <rect class="bx code" x="638" y="30" width="170" height="86" rx="8"/><text class="tt mono" x="723" y="58" text-anchor="middle">submit</text><text class="ts" x="723" y="80" text-anchor="middle">схема, трассировка,</text><text class="ts" x="723" y="96" text-anchor="middle">происхождение</text>
+          <rect class="bx code" x="848" y="30" width="154" height="86" rx="8"/><text class="tt" x="925" y="58" text-anchor="middle">Квитанция</text><text class="ts" x="925" y="80" text-anchor="middle">запись в журнале,</text><text class="ts" x="925" y="96" text-anchor="middle">следующий шаг</text>
+          <line class="ln" x1="178" y1="73" x2="216" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="388" y1="73" x2="426" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="598" y1="73" x2="636" y2="73" marker-end="url(#ar3)"/><line class="ln" x1="808" y1="73" x2="846" y2="73" marker-end="url(#ar3)"/>
+          <path class="ln ret" d="M723,118 L723,170 L303,170 L303,118" marker-end="url(#ar3)"/>
+          <text class="tl" x="513" y="164" text-anchor="middle">отказ: code и fix — исправить ответ, один повтор</text>
+        </svg>
+      </div>
+      <figcaption>Файлы <code>incoming/</code> и квитанции лежат в папке прогона. Агент их руками не правит: записывает ответ в слот, остальное делает код.</figcaption>
+    </figure>
+    <figure>
+      <div class="fig">
+        <svg viewBox="0 0 780 330" role="img" aria-label="Размер входа каждого шага модели в живом прогоне 16 ноября, в килобайтах, против бюджета шага 500 КБ. Разметка 283, пачка один 347, пачка два 361, ревью кейсов 274, доработка 355, ревью доработки 111, автотесты первой ревизии 363, их ревью 421, автотесты второй ревизии 655, их ревью 422.">
+          <!-- масштаб: x = 270 + КБ * 0.6 ; 700 КБ = 690 -->
+          <line class="grid" x1="270" y1="30" x2="270" y2="290"/><line class="grid" x1="330" y1="30" x2="330" y2="290"/><line class="grid" x1="390" y1="30" x2="390" y2="290"/><line class="grid" x1="450" y1="30" x2="450" y2="290"/><line class="grid" x1="510" y1="30" x2="510" y2="290"/><line class="grid" x1="570" y1="30" x2="570" y2="290"/><line class="grid" x1="630" y1="30" x2="630" y2="290"/><line class="grid" x1="690" y1="30" x2="690" y2="290"/>
+          <text class="axis" x="270" y="310" text-anchor="middle">0</text><text class="axis" x="330" y="310" text-anchor="middle">100</text><text class="axis" x="390" y="310" text-anchor="middle">200</text><text class="axis" x="450" y="310" text-anchor="middle">300</text><text class="axis" x="510" y="310" text-anchor="middle">400</text><text class="axis" x="570" y="310" text-anchor="middle">500</text><text class="axis" x="630" y="310" text-anchor="middle">600</text><text class="axis" x="690" y="310" text-anchor="middle">700 КБ</text>
+          <text class="rlab" x="258" y="46" text-anchor="end">Разметка</text><rect class="bar-ok" x="270" y="36" width="170" height="16" rx="3"/><text class="val" x="446" y="49">283</text>
+          <text class="rlab" x="258" y="72" text-anchor="end">Генератор, пачка 1</text><rect class="bar-ok" x="270" y="62" width="208" height="16" rx="3"/><text class="val" x="484" y="75">347</text>
+          <text class="rlab" x="258" y="98" text-anchor="end">Генератор, пачка 2</text><rect class="bar-ok" x="270" y="88" width="217" height="16" rx="3"/><text class="val" x="493" y="101">361</text>
+          <text class="rlab" x="258" y="124" text-anchor="end">Ревью кейсов</text><rect class="bar-ok" x="270" y="114" width="164" height="16" rx="3"/><text class="val" x="440" y="127">274</text>
+          <text class="rlab" x="258" y="150" text-anchor="end">Доработка кейсов</text><rect class="bar-ok" x="270" y="140" width="213" height="16" rx="3"/><text class="val" x="489" y="153">355</text>
+          <text class="rlab" x="258" y="176" text-anchor="end">Ревью доработки</text><rect class="bar-ok" x="270" y="166" width="66" height="16" rx="3"/><text class="val" x="342" y="179">111</text>
+          <text class="rlab" x="258" y="202" text-anchor="end">Автотесты, ревизия 1</text><rect class="bar-ok" x="270" y="192" width="218" height="16" rx="3"/><text class="val" x="494" y="205">363</text>
+          <text class="rlab" x="258" y="228" text-anchor="end">Ревью автотестов 1</text><rect class="bar-ok" x="270" y="218" width="253" height="16" rx="3"/><text class="val" x="529" y="231">421</text>
+          <text class="rlab" x="258" y="254" text-anchor="end">Автотесты, ревизия 2</text><rect class="bar-over" x="270" y="244" width="393" height="16" rx="3"/><text class="val" x="669" y="257">655</text>
+          <text class="rlab" x="258" y="280" text-anchor="end">Ревью автотестов 2</text><rect class="bar-ok" x="270" y="270" width="253" height="16" rx="3"/><text class="val" x="529" y="283">422</text>
+          <line class="limit" x1="570" y1="24" x2="570" y2="292" stroke-dasharray="5 4"/><text class="tl" x="574" y="22">бюджет шага 500 КБ</text>
+        </svg>
+      </div>
+      <figcaption>Вход одного вызова модели (файлы и текст роли вместе) в прогоне на Petclinic 16 ноября — замер на v0.6, в v0.7 не повторялся. Превышение бюджета — не остановка: пакет выдаёт предупреждение <code>STEP_OVER_BUDGET</code>, шаг идёт дальше, вход не обрезается и ответ не делится.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="modeb" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">7</div><h2>Автотесты: запускает человек</h2></div>
+    <div class="prose">
+      <p>Режим автотестов — обычный прогон кейсов, после которого агент пишет тесты, а вы их просматриваете и запускаете. Он входит в поставку с профилем <code>mode-b</code>; в поставку <code>cases-only</code> он не входит, и <code>doctor</code> называет профиль вашей поставки.</p>
+      <p><code>materialize</code> кладёт принятые тесты в тестовый корень модуля и печатает команду запуска: первым токеном идёт абсолютный путь запускателя (обёртка модуля, системный Maven или интерпретатор модуля). Вы читаете файлы из <code>files_to_review</code>, проверяете, на какой стенд смотрят тесты, выполняете команду сами и сообщаете агенту, где лежат отчёты. После запуска агент вызывает <code>ingest</code> — команду, которая читает отчёты запуска тестов и закрывает попытку. Тесты между <code>materialize</code> и <code>ingest</code> не правятся: изменённый файл даёт <code>INGEST_TESTS_CHANGED</code>, вернуть тесты — <code>materialize --restore</code>.</p>
+      <p>Пакет не опрашивает стенд: адрес берётся из переменной окружения, имя которой стоит в <code>.skillsrc</code> модуля (<code>service_url_env</code>), стенд поднимаете вы. Если сборка проекта не готова, <code>ready</code> показывает «сборка не готова: …», а прогон идёт как только кейсы.</p>
+      <p><strong>Модуль у прогона.</strong> В многомодульном проекте попытка знает свой модуль с момента <code>scan</code>. Если в <code>materialize</code> не назван <code>--module</code>, пакет берёт модуль попытки. Неверный модуль — отказ с подсказкой до записи файлов: записанные тесты не стираются, прогон остаётся живым.</p>
+      <p><strong>Упавший тест — находка.</strong> Тест, упавший при вашем запуске, пакет не отключает: над методом появляется метка (<code>@Tag("test-skills-finding")</code> в JUnit, <code>@pytest.mark.test_skills_finding</code> в pytest), список находок с видом падения — в отчёте. Сборка проекта красная, пока находки не разобраны; как временно исключить их из запуска — в <code>HOW-TO-USE-MODE-B.md</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="result" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">8</div><h2>Итог прогона и файлы</h2></div>
+    <div class="prose"><p>Главное в прогоне только кейсов — вердикт ревью. <code>verification=NOT_APPLICABLE</code> и <code>accepted=false</code> там ожидаемы: запуска автотестов нет, ревью кейсы не отвергло. <code>accepted=true</code> бывает только в режиме автотестов и только если выполнены оба условия: все автотесты прошли при запуске человеком, и в наборе нет «ручных» кейсов. Ручной кейс — тот, который пакет не смог превратить в автотест: например, документ не определяет ожидаемый результат или его нельзя проверить кодом (скажем, текущую дату сервера). Такой кейс человек проходит сам, поэтому пока он есть, набор полностью не принят.</p></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Исход ревью кейсов</th><th>Что в <code>published/</code></th></tr></thead>
+        <tbody>
+          <tr><td>принят целиком или после доработки</td><td><code>.html</code>, <code>.md</code>, <code>.json</code> и <code>.zephyr-scale.csv</code></td></tr>
+          <tr><td>принят частично (после круга доработки часть кейсов осталась отклонённой)</td><td>годные кейсы в наборе и в CSV; отклонённые отдельно, <code>*.REJECTED-CASES.*</code> — в Zephyr не импортировать</td></tr>
+          <tr><td>отклонён целиком (отклонено больше половины кейсов)</td><td><code>*.REJECTED.html</code>, <code>.md</code> с замечаниями в шапке, CSV нет</td></tr>
+          <tr><td>прогон закрыт без вердикта</td><td><code>*.UNREVIEWED.html</code>, <code>.md</code>, CSV нет</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Исход запуска (режим Б)</th><th>Что значит</th><th>Файлы тестов</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag ok">PASS</span></td><td>все автотесты прошли</td><td>остаются</td></tr>
+          <tr><td><span class="tag rv">FAIL</span></td><td>часть тестов упала</td><td>упавшие методы остаются активными и получают метку находки (текст <code>test-skills finding:</code>), прошедшие остаются как есть</td></tr>
+          <tr><td><span class="tag mu">NOT_RUNNABLE</span></td><td>сборка или окружение не дали запустить</td><td>неизменённые файлы пакета убираются</td></tr>
+          <tr><td><span class="tag wn">UNKNOWN</span></td><td>запуск был, но отчётов нет или результат потерян</td><td>остаются, убирать запрещено</td></tr>
+          <tr><td><span class="tag mu">NOT_APPLICABLE</span></td><td>запуска не было: прогон закрыт раньше, например ревью вернуло кейсы</td><td>тестов нет</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Частичная автоматизация: если часть кейсов автоматизировать нельзя (они остаются ручными), итог — <code>completion: PARTIAL</code>, причина <code>AUTOMATION_PARTIAL</code>, агент называет «автоматизировано N из M, вручную K».</p>
+  </div>
+</section>
+
+<section id="bounds" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">9</div><h2>Границы: что пакет делает на машине</h2></div>
+    <div class="prose"><p>Факты по инструкции оркестратора (блок <code>permissions</code> в её шапке) и руководству режима Б.</p></div>
+  </div>
+  <div class="wide">
+    <div class="split">
+      <div class="panel"><h3>Читает</h3><ul>
+        <li>файлы проекта по описи: без каталогов VCS и зависимостей, результатов сборки, бинарников и файлов, где найден пароль или ключ</li>
+        <li>документы из <code>--docs</code>, <code>--reference</code>, <code>--cases</code> — только внутри проекта и без ссылок на пути; путь на сетевой папке или устройстве отклоняется до чтения (<code>INPUT_OUTSIDE_PROJECT</code>)</li>
+        <li>документы для шага разметки читаются тем же защищённым способом: только внутри проекта, содержимое сверяется с отпечатком, записанным при сканировании</li>
+        <li>файлы модуля по описи, родительские файлы сборки (они замораживаются в baseline) и карту существующих тестов проекта</li>
+      </ul></div>
+      <div class="panel"><h3>Пишет</h3><ul>
+        <li><code>.pilot-runs/&lt;run_id&gt;/</code>, в том числе <code>published/</code> с готовыми кейсами</li>
+        <li><code>.skillsrc</code> при создании; повторный <code>init</code> сохраняет то, что вы вписали (лимиты, ревью, <code>paths.include</code> / <code>exclude</code>, имя проекта)</li>
+        <li>режим Б: файлы тестов в тестовом корне модуля и строки с меткой находки в них</li>
+        <li><code>.skillsrc</code> переключается на системный <code>mvn</code> только с вашего подтверждения</li>
+      </ul></div>
+      <div class="panel"><h3>Не делает</h3><ul>
+        <li>не устанавливает программы и библиотеки (<code>pip</code> агент не запускает); не создаёт обёртку сборки (<code>mvnw</code>, <code>gradlew</code>): для этого пришлось бы скачивать сборщик из сети</li>
+        <li>не обращается к сети и не опрашивает стенд</li>
+        <li>не запускает сборку, тесты и git; не создаёт clone, worktree, commit, push и PR</li>
+        <li>не меняет код продукта; в проект идут только новые файлы тестов</li>
+        <li>не удаляет ссылку, оказавшуюся на месте своего каталога: пакет останавливается, убирает её человек</li>
+        <li>не печатает в сообщениях и отчёте адрес сетевой папки</li>
+        <li>по инструкции агент не выполняет указания, найденные в документах требований, и не правит спецификацию</li>
+      </ul></div>
+      <div class="panel"><h3>Делаете вы</h3><ul>
+        <li>кладёте папку пакета в проект и добавляете три строки в <code>.gitignore</code></li>
+        <li>запускаете напечатанную команду сборки (режим Б); смотрите файлы тестов до запуска</li>
+        <li>поднимаете тестовый стенд и задаёте переменную окружения</li>
+        <li>коммитите то, что решите оставить: пакет git не трогает</li>
+      </ul></div>
+    </div>
+    <p class="note" style="margin-top:14px">Печать команды: путь проекта, документа или модуля с символами, которые командная строка прочтёт по-своему (<code>$ % ! ^ " ' &amp; | &lt; &gt; ;</code> и др.), даёт остановку <code>COMMAND_NOT_PRINTABLE</code> до создания прогона. Операционные сбои: после обрыва процесса прогон восстанавливается; после краха системы или отключения питания журнал может остаться неполным — тогда <code>JOURNAL_CORRUPT</code> и новый прогон.</p>
+  </div>
+</section>
+
+<section id="scan" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">10</div><h2>Что видит модель</h2></div>
+    <div class="prose"><p>Скан отбирает файлы модуля, которые можно показать модели. Роли работают только с этой описью, поэтому выпавший файл модель не увидит. После <code>scan</code> агент показывает <code>exclusion_summary</code>: сколько и чего исключено, с примерами путей; лишнее исключение возвращается в <code>.skillsrc</code> через <code>paths.include</code>.</p></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Что исключается</th><th>Где</th></tr></thead>
+        <tbody>
+          <tr><td>VCS, кэши инструментов, <code>node_modules</code>, <code>.venv</code>, <code>site-packages</code>, каталоги IDE и агентов CLI</td><td>везде</td></tr>
+          <tr><td><code>build</code>, <code>target</code>, <code>dist</code>, <code>out</code>, <code>coverage</code>, <code>generated</code>, <code>generated-sources</code>, <code>test-results</code>, <code>vendor</code></td><td>только вне <code>src/</code></td></tr>
+          <tr><td><code>secrets</code>, <code>credentials</code></td><td>вне <code>src/</code> исключаются целиком; внутри <code>src/</code> исключаются только файлы, которые не являются исходным кодом, а исходники проверяются по содержимому</td></tr>
+          <tr><td>Файл, где найден пароль или ключ</td><td>выпадает целиком, всегда</td></tr>
+          <tr><td>Не код (<code>CONTEXT_NOT_CODE</code>), слишком большие файлы (<code>CONTEXT_TOO_LARGE</code>), шрифты и картинки (<code>CONTEXT_ASSET</code>)</td><td>идут в <code>context_skipped</code> с причиной; в живом прогоне 16 ноября так пропущено 19 файлов, 887 627 Б</td></tr>
+          <tr><td>Тесты, записанные пакетом в прошлых прогонах (<code>CONTEXT_OWN_TEST</code>)</td><td>модели не идут; <code>scan</code> называет их в <code>context_skipped</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Документ задачи всегда входит в контекст. <code>--docs файл.md#Раздел</code> берёт один раздел Markdown-файла. Документ может лежать вне выбранного модуля, но внутри проекта.</p>
+    <p class="note" style="margin-top:10px"><strong>Шаблоны по имени из кода.</strong> Если код из <code>--target</code> называет шаблон по имени (например, <code>detailsScreen.ftlh</code>), пакет находит этот файл и добавляет его в контекст генератора, даже когда он лежит вне <code>--target</code>. <code>ready</code> пишет, сколько шаблонов подтянуто и какие. Файлы, которые разметка назвала нужными, генератор получает первыми, при том же объёме входа.</p>
+  </div>
+</section>
+
+<section id="openspec" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">11</div><h2>OpenSpec</h2></div>
+    <p><span class="st st-in">с v0.6</span> <span class="st st-ready">в v0.7 требования собирает код</span></p>
+    <div class="prose" style="margin-top:12px">
+      <p>OpenSpec — формат, в котором спецификация и предлагаемые изменения хранятся рядом с кодом. Требования лежат в папке <code>openspec/</code> в корне проекта:</p>
+      <ul style="margin:0;padding-left:22px;display:grid;gap:6px">
+        <li><code>openspec/specs/&lt;область&gt;/spec.md</code> — <strong>как система работает сейчас</strong> (действующая спецификация, «база»);</li>
+        <li><code>openspec/changes/&lt;имя&gt;/</code> — <strong>папка-заявка «хотим поменять вот так»</strong>: в её <code>spec.md</code> — что добавляется, меняется, убирается (блоки ADDED, MODIFIED, REMOVED, RENAMED), рядом <code>proposal.md</code>, <code>design.md</code>, <code>tasks.md</code> — замысел и задачи. Пока заявку не приняли и не перенесли в архив (<code>openspec/changes/archive/</code>), это только предложение.</li>
+      </ul>
+      <p><strong>Правило: один прогон — одна заявка.</strong> Пример. В спецификации: «описание визита — до 255 символов». В проекте две незавершённые заявки: А — «сделать до 500», Б — «сделать до 1000». Если взять обе сразу, непонятно, какой кейс писать — на 500 или на 1000: это решится, только когда одну из заявок примут. Поэтому пакет берёт одну заявку — ту, что названа в <code>--docs</code>, — пишет кейсы под неё, а вторую не видит.</p>
+    </div>
+    <div class="split" style="margin-top:20px">
+      <div class="panel"><h3>Что можно</h3><ul>
+        <li><strong>В проекте сколько угодно заявок.</strong> Называете одну — прогон идёт по ней; остальные заявки и архив в модель не идут, <code>scan</code> перечисляет их одной строкой.</li>
+        <li><strong>В одной заявке много правок по разным областям</strong> — всё за один прогон. В <code>--docs</code> называется папка заявки и области, которые она меняет; забыли область — <code>scan</code> подскажет.</li>
+        <li><strong>Нужны кейсы по двум заявкам</strong> — два прогона подряд; агент проводит их в одном запросе.</li>
+        <li><strong>Требования собирает код.</strong> Спецификацию и заявку разбирает код пакета: модель требования не переписывает, пропустить или добавить требование на этом шаге нельзя, шаг занимает секунды. <code>proposal</code>, <code>design</code>, <code>tasks</code> заявки остаются контекстом, требованиями они не становятся. Исключение — прогон обновления кейсов (<code>--cases</code>): там шаг ведёт модель, а код сверяет её ответ с составом заявки и спецификации (<code>OPENSPEC_MISSING</code>, <code>OPENSPEC_EXTRA</code>).</li>
+      </ul></div>
+      <div class="panel"><h3>Когда пакет остановит</h3><ul>
+        <li>в одном прогоне названы две заявки;</li>
+        <li><code>--docs</code> не задан, а незавершённых заявок в проекте две и больше;</li>
+        <li>заявка меняет область, чей <code>spec.md</code> не назван.</li>
+        <li>требование заявки расходится со <code>spec.md</code>: другой текст у ADDED или имя MODIFIED, которого в спецификации нет, — остановка называет оба места;</li>
+        <li>ошибка в пути <code>--docs</code> — своя причина и ближайшие существующие имена.</li>
+        <li><strong>Не остановка:</strong> заявка, уже вписанная в спецификацию. Прогон идёт, в отчёте строка «уже вписано».</li>
+        <li><strong>Это не падение прогона:</strong> <code>scan</code> останавливается до первого вызова модели — ничего не потрачено — и печатает, что указать (<code>OPENSPEC_SOURCE_CONFLICT</code> с подсказкой).</li>
+      </ul></div>
+    </div>
+    <p class="note" style="margin-top:12px">Проверено живым прогоном: на стенде две незавершённые заявки, в <code>--docs</code> названа одна — прогон дошёл до отчёта, вторая заявка в модель не попала. Прежний обходной путь (исключать лишние заявки в <code>.skillsrc</code>) больше не нужен.</p>
+    <p class="note" style="margin-top:12px">Кампания v0.7: на проекте «как на работе» наборы приняты 37 из 37, 26 из 26, 18 из 18, 11 из 11 и 93 из 93; первая остановка на модели — через 20–25 секунд после <code>scan</code>.</p>
+    <p class="note" style="margin-top:12px">Команды-примеры (имена областей и заявки выдуманы; тот же набор <code>--docs</code> передаётся и в <code>scan</code>):</p>
+    <pre><code># вся спецификация
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 --docs openspec/specs
+
+# одна заявка: её папка и области, которые она меняет
+python -m tools.ready --project &lt;проект&gt; --profile cases-only-v1 \
+  --docs openspec/specs/owners --docs openspec/changes/add-search</code></pre>
+    <div class="callout warn"><strong>Ограничения.</strong> Для нестандартной схемы OpenSpec поддержка не заявлена. Одна попытка — один модуль: полная спецификация, которая не помещается в этот маршрут, остаётся блокером и не подменяется одним удобным модулем.</div>
+  </div>
+</section>
+
+<section id="runs" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">12</div><h2>Живые прогоны</h2></div>
+    <div class="prose"><p>Кампания v0.7 — 32 сценария на открытых учебных проектах перед тегом версии. Числа — по заметкам этих прогонов. В части сценариев разметку и кейсы писала сильная модель, а ревью вела слабая; в части — наоборот. Это не рабочая модель тестировщиков. Одной цифры «качество» здесь нет: это замеры, а не оценка.</p></div>
+  </div>
+  <div class="wide">
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Что проверяли</th><th>Итог</th><th>Что важно</th></tr></thead>
+        <tbody>
+          <tr><td>OpenSpec «как на работе»: вся спецификация, одно изменение, несколько изменений в проекте</td><td>приняты целиком наборы 37 из 37, 26 из 26, 18 из 18, 11 из 11, 93 из 93</td><td>Доработка вживую вернула в наборы 12, 3, 3 и 29 кейсов. Ошибки в путях и расхождения останавливали прогон до модели, с ближайшими именами.</td></tr>
+          <tr><td>OpenSpec: обновление старых кейсов из Zephyr</td><td>принят частично, 63 из 67</td><td>Устаревшие кейсы помечены «устарел»; уже применённое удаление требования — строка в отчёте, не остановка.</td></tr>
+          <tr><td>OpenSpec: изменение новой области, кода ещё нет</td><td>принят, 7 из 7</td><td>До правки ревью отклоняло 7 из 9 кейсов — набор возвращался целиком. После правки неописанное поведение ушло пятью вопросами аналитику.</td></tr>
+          <tr><td>Случай из рабочего прогона: ответ строится из шаблона, узкий <code>--target</code></td><td>принят, 81 из 81</td><td>Семь шаблонов подтянуты по имени и дошли до генератора; остановок и повторов не было. Ревью здесь слабое: поймано 3 из 8 контрольных ошибок, отчёт предупреждает.</td></tr>
+          <tr><td>Большой документ, 128 требований</td><td>4 прогона по разделам → один CSV на 346 кейсов</td><td>126 из 128 требований покрыты, два без кейса названы в сводке. Решений человека — 0.</td></tr>
+          <tr><td>Режим с автотестами: проект с 11 подложенными дефектами</td><td>поймано 10 из 11, ложных срабатываний 0</td><td>Класс считается так, как он лежит в проекте после прогона. Одиннадцатый дефект на этой базе данных не меняет поведения — поймать его нельзя.</td></tr>
+          <tr><td>Режим с автотестами: многомодульный Maven и Gradle</td><td>оба дошли до отчёта с автотестами</td><td>До исправлений оба останавливались: Maven — на записи тестов без <code>--module</code>, Gradle — на приёме отчётов.</td></tr>
+          <tr><td>Разметка хаотичного документа без номеров, 13 требований</td><td>13 из 13, лишних 0</td><td>Дубль слит в одно требование, противоречие ушло вопросом, отвергнутая идея требованием не стала.</td></tr>
+          <tr><td>Повтор готового прогона</td><td>тот же итог за 47 секунд</td><td>Вызовов модели — 0.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">Не всё зелёное. В одном сценарии с двумя изменениями ревью отклонило 27 кейсов из 45 — больше половины, набор вернулся целиком. Доработка четырёх импортированных кейсов в сценарии обновления не закрылась: поля, которые заполнил человек, пакет менять не даёт. На слабой модели число кейсов по одному документу в трёх прогонах гуляло от 78 до 121 — вслед за разметкой; правка разметки (раздел 3) сделана после этого замера.</p>
+    <p class="note" style="margin-top:12px">Полный набор тестов самого пакета: 4642 на теге v0.7, 4658 на теге v0.7.1. Вывод «лучше или хуже, чем у тестировщиков» из чисел кампании не следует: у них другие проекты и другая модель.</p>
+  </div>
+</section>
+
+<section id="glossary" class="wrap">
+  <div class="col">
+    <div class="sec-head"><div class="n">13</div><h2>Словарь</h2></div>
+    <dl class="gloss">
+      <dt>Прогон (run)</dt><dd>Один запуск на проекте; папка <code>.pilot-runs/&lt;run_id&gt;/</code>; переживает перерывы.</dd>
+      <dt>Попытка (attempt)</dt><dd>Один заход внутри прогона: кейсы, ревью, при режиме Б — автотесты; закрывается итогом. Один модуль на попытку.</dd>
+      <dt>Baseline</dt><dd>Исходные данные попытки, зафиксированные на старте: требования, настройки <code>.skillsrc</code>, файлы модуля. Если файлы после <code>scan</code> изменились, <code>status</code> скажет об этом (дрейф) и подскажет команду.</dd>
+      <dt>Опись</dt><dd>Список файлов модуля, которые разрешено показывать модели.</dd>
+      <dt>Стадия</dt><dd>Шаг, где работает модель: разметка, пачка, ревью, автотесты. Идёт циклом <code>prepare</code> / <code>submit</code>.</dd>
+      <dt>Слот ответа</dt><dd>Файл <code>incoming/&lt;стадия&gt;.json</code>, в который модель кладёт ответ шага.</dd>
+      <dt>Квитанция</dt><dd>Запись в журнале о том, что шаг выполнен, и по каким входным данным (их отпечаткам — дайджестам).</dd>
+      <dt>Дайджест</dt><dd>Отпечаток содержимого файла (SHA-256): по нему видно, что вход не подменили и не изменили.</dd>
+      <dt>Набор кейсов</dt><dd>Один документ с кейсами и трассировкой к требованиям; из него — HTML, Markdown и CSV для Zephyr.</dd>
+      <dt>Ревизия</dt><dd>Версия набора: <code>r1</code> — первая, дальше публикуются ревизии после правок по ревью и после доработки отклонённых кейсов .</dd>
+      <dt>SREQ</dt><dd>Номер требования из документа после разметки, <code>SREQ-0001</code>.</dd>
+      <dt>Вид номеров</dt><dd>Список номеров требований документа, который пакет кладёт во вход разметки, чтобы абзацы без номера не становились требованиями.</dd>
+      <dt>Доработка</dt><dd>Один круг: отклонённые ревью кейсы (не больше половины набора) возвращаются генератору и снова проходят ревью.</dd>
+      <dt><code>.skillsrc</code></dt><dd>Настройки проекта: модули, сборка, пути, лимиты, ревью, шаблон выгрузки.</dd>
+      <dt>Профиль прогона</dt><dd><code>cases-only-v1</code> — кейсы и ревью; <code>local-pilot-v1</code> — плюс автотесты.</dd>
+      <dt>Профиль поставки</dt><dd><code>cases-only</code> — только кейсы; <code>mode-b</code> — ещё и режим автотестов. Называет <code>doctor</code>.</dd>
+      <dt>SELF</dt><dd>Ревью в той же сессии, что и генерация, с вашего согласия; результат не называется независимым.</dd>
+      <dt>Контрольная ошибка</dt><dd>Ошибка, которую код вставляет в вид кейсов для ревьюера (от 3 до 15, по размеру набора); по числу замеченных отчёт показывает, насколько ревью надёжно. Замечание к ней кейс не отклоняет. Сигнал качества, не защита.</dd>
+      <dt>Находка</dt><dd>Тест, упавший при запуске человеком: не отключается, получает метку и попадает в список находок отчёта. Это либо расхождение кода с требованием, либо ошибка самого теста.</dd>
+    </dl>
+  </div>
+</section>
+</main>
+
+<footer class="wrap"><div class="col">Источники: <code>README.md</code>, <code>HOW-TO-USE.md</code>, <code>HOW-TO-USE-MODE-B.md</code>, <code>skills/orchestrate/SKILL.md</code> и инструкции ролей тега v0.7.1 (3f4581a0); список изменений v0.7 и v0.7.1; заметки кампании живых прогонов v0.7. Что изменилось для тестировщика — на странице <a href="chto-novogo-v07.html">«Что нового в v0.7»</a>. Обновлено 2026-11-19.</div></footer>
+
+</body>
+</html>
