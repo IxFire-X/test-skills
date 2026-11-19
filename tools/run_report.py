@@ -447,6 +447,15 @@ def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
 
 
+_BY_NOTE = {"code": " (кодом)", "reuse": " (из прошлого прогона)"}  # a row of the table of calls the model did not make
+
+
+def _os_name() -> str:
+    """``Windows 11`` where ``platform.release()`` says «10» (it does on Windows 11 too): the build 22000 and over is 11."""
+    release = platform.release()
+    return f"{platform.system()} {'11' if platform.system() == 'Windows' and release == '10' and sys.getwindowsversion().build >= 22000 else release}"  # type: ignore[attr-defined]
+
+
 def _identifier(value: Any) -> str | None:
     """A command, code, stage or batch name; anything else (a path, a message) is dropped — the report never copies text."""
     return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else None
@@ -1097,7 +1106,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,
         "expectations": expectation_summary(document) if isinstance(document, Mapping) else None,
         "autotest_assertions": autotest_summary(automation) if isinstance(automation, Mapping) else None,
-        "environment": {"python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
+        "environment": {"python": platform.python_version(), "os": _os_name(),
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }
     return report, list(status.get("warnings") or [])
@@ -1348,7 +1357,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа | Токены ответа (оценка) |", "|---|---|---|---|---|---|---|---|---|---|",
-        *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
+        *(f"| {_dash(c['stage'])}{_BY_NOTE.get(c.get('by'), '')} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
           f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') in ('code', 'reuse') else _dash(c.get('fits'))} | "
           f"{_dash(c.get('output_raw_bytes') if c.get('output_raw_bytes') is not None else c.get('output_bytes'))}{' (большой)' if c.get('output_large') else ''} | "
           f"{_dash(c.get('output_tokens_est'))} |"

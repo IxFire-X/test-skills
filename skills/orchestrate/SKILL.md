@@ -19,7 +19,7 @@ permissions:
 До работы — `python -m tools.doctor --root <pack-root>`. tools вызывай с cwd пакета и абсолютным `--project`; функции пакета не импортируй.
 `prepare` и `submit` — `python -m tools.api <команда> --run-root <run> --stage <id>`; `scan`, `status`, `finish`, `report` — `python -m tools.run_pipeline <имя>` (ниже — целиком). Ответ — одна строка JSON: `status: ok` и `result`,
 `invalid` (код 1) или `error` (код 2: `code`, `message`, `fix`). Писать можно только в `<project>/.pilot-runs/`, `.skillsrc` и `<run>/published`.
-В `model_id` пиши фактический ID модели твоей CLI. Clone, worktree, sandbox, dependency, CI/cron, commit, push и PR не создавай.
+В `--model-id` пиши фактический ID модели твоей CLI. Clone, worktree, sandbox, dependency, CI/cron, commit, push и PR не создавай.
 
 Вход шага не урезай и модель ради вместимости не меняй. `STEP_OVER_BUDGET`, `STEP_OUTPUT_LARGE`, `STEP_INPUT_UNRESOLVED` — не стоп: одна
 строка человеку (с `hint`), продолжай; ответ не дели и не переписывай. `MODEL_OUTPUT_TRUNCATED` — отказ: покажи человеку байты и подсказку, повтори стадию единственный раз по `fix`.

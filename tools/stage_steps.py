@@ -467,7 +467,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     pilot_state.context_receipts(root, attempt_id, state)  # a changed file of the context is CONTEXT_DRIFTED with its way out, before any request or consent is written (the readers below fail after them)
     if "by_code" in step:  # the requirements of an import without documents, or of OpenSpec files alone: the code answers (the request, the answer and the skeleton are one transition)
         made = pilot_state.openspec_marker_requirements(root, attempt_id) if cases_import.cases_path(root) is None else cases_import.import_requirements(root, attempt_id)
-        return {"stage": stage, **{key: value for key, value in made.items() if key != "artifact"}}
+        return {"stage": stage, "model_call": False, "note": "ответа модели не нужно: требования собрал код", **{key: value for key, value in made.items() if key != "artifact"}}
     if "direct" in step:  # no request of a model: the step says what the answer needs and takes it itself
         if reuse_from is not None and stage == "plan" and not step["done"]:  # the plan of the source: its subject and date, compared with the source before anything is written
             _refuse_terminal(state, attempt_id)  # as the submit of the plan does

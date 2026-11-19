@@ -433,7 +433,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
             human = human_for(stop.code, str(stop))  # the phrase of the cause first, the old text after it
             return _row("context:openspec", CASES, "STOP", f"{human} ({stop.code}: {stop})" if human else f"{stop.code}: {stop}", stop.fix)
         # a task document problem is the task-documents check's row
-        return _row("context:skipped", CASES, "WARN", f"контекст не посчитан: {stop.code}", stop.fix)
+        return _row("context:selection", CASES, "WARN", f"контекст не посчитан: {stop.code}", stop.fix)
     summary = skipped_summary(skipped)
     reasons = ", ".join(f"{code} {value['files']} ({value['bytes']} Б)" for code, value in summary["by_reason"].items())
     message = (f"модели не пойдут {summary['files']} файлов, {summary['bytes']} Б: {reasons}" if summary["files"]
@@ -442,9 +442,9 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
         shown = ", ".join(templates["paths"][:5]) + (f" и ещё {len(templates['paths']) - 5}" if len(templates["paths"]) > 5 else "")
         message += f"; из кода --target подтянуты шаблоны: {len(templates['paths'])} файлов, {templates['bytes']} Б ({shown}) — код называет их по имени"
     if (lost := templates["unfound"]) is not None:
-        return _row("context:skipped", CASES, "WARN", f"{message}; код называет шаблоны ({', '.join(lost['suffixes'])}), но файл не найден по имени: таких файлов вне --target: {lost['files']} ({lost['bytes']} Б)",
+        return _row("context:selection", CASES, "WARN", f"{message}; код называет шаблоны ({', '.join(lost['suffixes'])}), но файл не найден по имени: таких файлов вне --target: {lost['files']} ({lost['bytes']} Б)",
                     "расширьте --target до общего родителя (например --target src/main): так шаблоны войдут целиком", summary)
-    return _row("context:skipped", CASES, "OK", message + f"; пачка {budget} Б", None, summary)
+    return _row("context:selection", CASES, "OK", message + f"; пачка {budget} Б", None, summary)
 
 
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
@@ -698,7 +698,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                          "вопрос не задаётся (свежий контекст всё равно лучше)"))
     else:
         # PT: the row is OK — there is nothing to fix; the scan with the SELF flag is data for the one case the human says yes to
-        rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); если CLI этого не умеет — "
+        rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный субагент или вызов без истории генерации); если программа с моделью так не умеет — "
                          "спросите человека о прогоне с пометкой SELF; команду scan с флагом SELF (details.self_review_scan) — только после его «да»",
                          None, {"self_review_scan": _self_review_scan(project, typed, profile, module, target, cases)}))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)

@@ -134,7 +134,7 @@ def test_ready_shows_the_same_skip_as_scan(tmp_path: Path, monkeypatch: pytest.M
     _write(project, f"{MODULE}/static/app.min.js", "var a=1;\n")
     _write(project, f"{MODULE}/static/fonts/x.woff2", "font\n")
     report = check(project, [DOCS], profile="cases-only-v1")
-    row = next(item for item in report["checks"] if item["id"] == "context:skipped")
+    row = next(item for item in report["checks"] if item["id"] == "context:selection")
     code, scan = _scan(project, monkeypatch)
     assert code == 0, scan
     assert row["details"]["files"] == scan["context_skipped"]["files"] and row["details"]["bytes"] == scan["context_skipped"]["bytes"]
