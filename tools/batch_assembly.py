@@ -1186,6 +1186,13 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         if not isinstance(references, list) or not references or any(item not in requirement_ids for item in references):
             add("BATCH_PARTITION_CONFLICT", "BATCH_PARTITION_CONFLICT", f"/test_cases/{index}/requirement_ids",
                 "case references a canonical requirement outside its batch")
+        if isinstance(case, dict) and "наблюдение" in ((case.get("management") or {}).get("labels") or []):
+            add("BATCH_SEMANTIC_CONFLICT", "SEMANTIC_OBSERVATION_CASE", f"/test_cases/{index}", "a case with the label «наблюдение»: an outcome the document does not describe is no case",
+                "исход, которого нет в документе, — вопрос аналитику: убери кейс и запиши вопрос в analyst_questions фрагмента ({question, requirement_ids})")
+    for index, item in enumerate(fragment.get("analyst_questions") or []):
+        if any(reference not in requirement_ids for reference in item["requirement_ids"]):  # the schema has stood: the item is an object with a list
+            add("BATCH_PARTITION_CONFLICT", "BATCH_PARTITION_CONFLICT", f"/analyst_questions/{index}/requirement_ids", "question names a canonical requirement outside its batch",
+                "requirement_ids вопроса — CREQ этой пачки")
     before = len(rows)
     check(require_batch_coverage, fragment)
     uncovered = len(rows) > before  # the same fact assemble calls SEMANTIC_UNCOVERED_REQUIREMENT: said once
