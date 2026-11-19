@@ -13,7 +13,8 @@ from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
 from tools.context_marker_merge import with_requirements
-from tools.fixes import human_for
+from tools.fixes import human_for, spent_abandon
+from tools.json_cli import spent_stages
 from tools.project_inventory import read_inventory_receipt
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
 
@@ -576,6 +577,9 @@ def stage_status(root: Path, family: str) -> dict[str, Any]:
     pending = [part for part in parts if not part["done"]]
     asked = next((part for part in pending if _events(state, attempt_id, part["stage"], "MODEL_REQUESTED")), None)
     step = asked or (pending[0] if pending else parts[-1])  # every part of the marker answered, the merge not: submit repeats it
+    if asked and step["stage"] in spent_stages(root) and (cause := spent_abandon(step["stage"])):  # the one retry was refused: submit again is no way on, the run is closed
+        return {"next": {"verb": "finish", "stage": None}, "abandon": cause, "waiting_for": "agent",
+                "recovery": f"повтор стадии {step['stage']} исчерпан, третьего вызова модели нет: закрой прогон командой next_command (finish --abandon {cause}) и выполни команду нового scan, которую она напечатает"}
     verb = "submit" if asked or not pending or ("direct" in step and slot(root, step["stage"]).is_file()) else "prepare"
     return {"next": {"verb": verb, "stage": step["stage"]}, "waiting_for": "model" if asked else "agent",
             **({"budget": _budget(root, step)} if "bytes" in step or asked else {}), **({} if "by_code" in step else {"answer_slot": str(slot(root, step["stage"]))})}

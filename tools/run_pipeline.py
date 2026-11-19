@@ -188,7 +188,9 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         if cut is not None and not left:  # nothing goes on from half a context
             result["scan_incomplete"] = f"scan оборван: записано {cut}; повтори тот же scan (scan_command) — он достроит недостающее в этом прогоне"
         if (left or cut is not None) and isinstance(request, Mapping):  # after /clear the flags of the request are nowhere else
-            result["scan_command"] = _scan_command(project, request)
+            result["scan_command"] = _scan_command(project, request, extra=("--new-run",) if left else ())  # a left run: the command finish printed
+        if left:
+            result["attempt_note"] = "прогон оставлен до ревью кейсов: попытка в журнале не закрыта, итога нет — следующий шаг scan_command"
         note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
         if note:
             result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
@@ -208,18 +210,18 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         bare = result["next"] is table
     for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
         result.pop(gone, None)
-    if not bare and (command := _next_command(project, Path(run_root), result["next"])):
+    if not bare and (command := _next_command(project, Path(run_root), result["next"], result.get("abandon"))):
         result["next_command"] = command
     return result
 
 
-def _next_command(project: Path, run_root: Path, step: Mapping[str, Any]) -> str | None:
+def _next_command(project: Path, run_root: Path, step: Mapping[str, Any], abandon: str | None = None) -> str | None:
     """The command of ``next`` to copy as it is: prepare and submit live in ``tools.api``, finish and report in this module."""
     verb, stage = step.get("verb"), step.get("stage")
     if verb in ("prepare", "submit") and stage:
         return f"{printed(sys.executable)} -m tools.api {verb} --run-root {printed(run_root)} --stage {stage}"
     if verb in ("finish", "report"):
-        return f"{printed(sys.executable)} -m tools.run_pipeline {verb} --project {printed(project)} --run {printed(run_root.name)}"
+        return f"{printed(sys.executable)} -m tools.run_pipeline {verb} --project {printed(project)} --run {printed(run_root.name)}" + (f" --abandon {abandon}" if abandon and verb == "finish" else "")
     return None
 
 
@@ -1954,7 +1956,7 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
                else "scan с теми же --module, --docs и --profile, что у этого прогона, и --new-run")
     return {
         "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
-        "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
+        "message": "попытку нельзя закрыть до ревью кейсов: ревью не начиналось, а стадии до ревью не дают закрывающего состояния",
         "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (state, next); если нет — "
                f"{printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project)} --run {printed(manifest['run_id'])} --abandon "
                "LEFT_BEFORE_REVIEW оставит прогон, и простой scan начнёт новый; следующий заход: " + command,

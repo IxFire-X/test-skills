@@ -52,6 +52,14 @@ def test_the_mark_is_written_with_its_pair_of_events(tmp_path: Path, capsys, mon
     assert code == 0 and (root / "events.jsonl").read_bytes() == before, again  # the same call again writes nothing
 
 
+def test_status_of_a_left_run_names_the_scan_finish_printed_and_says_the_attempt_is_not_closed(tmp_path: Path, capsys, monkeypatch) -> None:
+    project, first, _root = _left_run(tmp_path, monkeypatch)
+    code, left = _main(capsys, ["finish", "--project", str(project), "--run", first["run_id"], "--abandon", "LEFT_BEFORE_REVIEW"])
+    assert code == 0, left
+    code, status = _main(capsys, ["status", "--project", str(project), "--run", first["run_id"]])
+    assert status["scan_command"] == left["next_run"]["command"] and "--new-run" in status["scan_command"] and "не закрыта" in status["attempt_note"], status
+
+
 def test_a_planted_mark_without_events_leaves_nothing_and_the_same_command_binds_it(tmp_path: Path, capsys, monkeypatch) -> None:
     from tools.pilot_state import LEFT_MARK, left_attempt
     from tools.run_pipeline import _left_mark

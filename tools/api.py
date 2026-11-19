@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import canonical_document, output_guard, stage_steps, step_size
+from tools.fixes import RETRY_SPENT
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -208,7 +209,7 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
         return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
-    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None))
+    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), spent=str(envelope.get("fix") or "").startswith(RETRY_SPENT))
 
 
 def main(argv: list[str] | None = None) -> int:

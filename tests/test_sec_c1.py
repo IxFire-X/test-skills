@@ -41,6 +41,9 @@ SPECIFIC = {
     ("ready.py", "target"): "the text of the STOP row for the --target the person typed, not a command to run",
     ("ready.py", "profile"): "a choice of the parser (cases-only-v1 | local-pilot-v1)",
     ("finalize_attempt.py", "code"): "an abandon code of a closed table",
+    ("pilot_state.py", "cause"): "an abandon code of the closed table of spent_abandon",
+    ("stage_steps.py", "cause"): "an abandon code of the closed table of spent_abandon",
+    ("run_pipeline.py", "abandon"): "an abandon code of the closed table of spent_abandon, from the status of a stage",
     ("skillsrc_manifest.py", "python"): "set from printed() or the literal template on the lines above",
     ("skillsrc_manifest.py", "where"): "set from printed() or the literal template on the lines above",
 }

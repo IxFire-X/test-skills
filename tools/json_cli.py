@@ -13,7 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-from tools.fixes import fix_for, human_for
+from tools.fixes import RETRY_SPENT, SPENT_HUMAN, fix_for, human_for
 
 
 _CODE_PREFIX = re.compile(r"^([A-Z][A-Z0-9_]+)(?::|$)")
@@ -61,7 +61,7 @@ def error_fields(error: BaseException, table: bool = True) -> dict[str, str]:
 def error_envelope(error: BaseException, next_step: str | None = None) -> dict[str, object]:
     """The one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null); ``human`` — the tester's phrase, when the code has one."""
     fields = error_fields(error)
-    human = human_for(fields["code"], fields["message"])
+    human = SPENT_HUMAN if str(fields.get("fix") or "").startswith(RETRY_SPENT) else human_for(fields["code"], fields["message"])  # a spent retry says the same whatever the code
     return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step, **({"human": human} if human else {})}
 
 
@@ -85,7 +85,7 @@ _REFUSALS = "refusals.jsonl"
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")  # a stage or a batch id; anything else is not a label of the run
 
 
-def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None) -> None:
+def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None, spent: bool = False) -> None:
     """One line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
     invalid) of a command that names its run; the run report counts the file.  No content, no paths, no messages — the code
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
@@ -109,7 +109,7 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
         stage = stage if isinstance(stage, str) and _LABEL.fullmatch(stage) else None
         batch = batch if isinstance(batch, str) and _LABEL.fullmatch(batch) else (stage.split(":", 1)[1] if stage and stage.startswith("tc-generator:") else None)
         row = {"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), "command": str(command),
-               "code": str(code or "INVALID"), "stage": stage, "batch": batch}
+               "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent else {})}  # spent: the one retry of the stage was refused (a bool, no text)
         path = root / _REFUSALS
         before = path.read_bytes() if path.is_file() else b""
         line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -122,6 +122,17 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
         pilot_state.append_event(root, "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
     except (OSError, ValueError, KeyError, TypeError):
         return
+
+
+def spent_stages(run_root: object) -> set[str]:
+    """The stages whose one retry was refused, by the lines of ``refusals.jsonl`` (a dry run writes none)."""
+    from pathlib import Path
+
+    try:
+        rows = [json.loads(line) for line in (Path(str(run_root)) / _REFUSALS).read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, ValueError):
+        return set()
+    return {str(row["stage"]) for row in rows if isinstance(row, dict) and row.get("spent") is True and row.get("stage")}
 
 
 def _module_name(prog: str | None) -> str:

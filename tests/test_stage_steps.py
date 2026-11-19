@@ -592,6 +592,45 @@ def test_a_refused_fragment_has_the_code_of_the_check_and_the_one_retry(tmp_path
     assert _call(capsys, "submit", run["root"], run["stages"][0], "--transport-attempts", "2")[0] == 0
 
 
+def _spent_retry(tmp_path: Path, capsys: pytest.CaptureFixture[str], *extra: str) -> tuple[dict, int, dict]:
+    """A generator run whose batch answer is refused, given as the one retry (``--transport-attempts 2``): ``(run, code, the refusal)``."""
+    run = _generator(tmp_path)
+    bad = {**{key: value for key, value in run["values"][0].items() if key != "digest"}, "namespace": "B9"}
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], bad)
+    return (run, *_call(capsys, "submit", run["root"], run["stages"][0], "--transport-attempts", "2", *extra))
+
+
+def test_a_refused_retry_has_the_human_of_a_spent_retry_and_one_command_to_close_the_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.fixes import SPENT_HUMAN
+
+    _run_, code, out = _spent_retry(tmp_path, capsys)
+    assert code == 2 and out["human"] == SPENT_HUMAN
+    assert out["fix"].count("tools.run_pipeline finish") == 1 and "--abandon LEFT_BEFORE_REVIEW" in out["fix"] and "--new-run" not in out["fix"]
+
+
+def test_a_refusal_of_the_first_answer_keeps_its_own_human_and_the_retry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.fixes import SPENT_HUMAN
+
+    run = _generator(tmp_path)
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], {**{key: value for key, value in run["values"][0].items() if key != "digest"}, "namespace": "B9"})
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 2 and out.get("human") != SPENT_HUMAN and "--transport-attempts 2" in out["fix"]
+
+
+def test_status_after_a_refused_retry_names_the_closing_command_not_submit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run, _code, _out = _spent_retry(tmp_path, capsys)
+    status = _status(run["root"])
+    assert status["next"]["verb"] == "finish" and status["next_command"].endswith("--abandon LEFT_BEFORE_REVIEW") and "submit" not in status["next_command"]
+
+
+def test_a_dry_run_of_the_retry_leaves_no_trace_and_status_still_names_submit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run, code, out = _spent_retry(tmp_path, capsys, "--dry-run")
+    assert code == 2 and "--abandon LEFT_BEFORE_REVIEW" in out["fix"]  # the refusal says it, the journal does not count a dry run
+    assert _status(run["root"])["next"]["verb"] == "submit"
+
+
 def test_the_last_batch_assembles_the_candidate_the_review_reads(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.batch_assembly import assemble_candidate, canonical_bytes
     from tools.orchestrate_test_case_revision import journal_assembly

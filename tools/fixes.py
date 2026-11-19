@@ -370,6 +370,17 @@ HUMAN: dict[str, str] = {
 }
 
 
+RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "  # the start of a fix once the one retry is spent
+SPENT_HUMAN = ("Повтор уже был, а ответ модели всё равно не прошёл проверку: этот прогон дальше не пойдёт. "
+               "Скажите агенту закрыть его и начать заново тем же запросом.")
+
+
+def spent_abandon(stage: str) -> str | None:
+    """The cause that leaves the run when the retry of ``stage`` is spent: before the review of the cases the run is left, the automation is abandoned; None — no command is promised."""
+    family = stage.split(":", 1)[0]
+    return "STAGE_RETRY_EXHAUSTED" if family in ("tc-to-autotest", "autotest-reviewer") else "LEFT_BEFORE_REVIEW" if family in ("context-marker", "tc-generator", "plan") else None
+
+
 CLOSE_RUN_FIX = ("закрой прогон: `python -m tools.run_pipeline finish --project <проект> --run <id прогона> --abandon LEFT_BEFORE_REVIEW`, "
                  "затем тот же `scan` (простой scan начнёт новый прогон)")  # after a refused plan: the one command the run can be left by
 _ONE_CHANGE = ("один прогон — одно изменение OpenSpec: спроси человека, какое проверять; назови в --docs папку одного openspec/changes/<имя>/ и spec.md его областей "

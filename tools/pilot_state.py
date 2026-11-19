@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import execution_gate, run_lock
-from tools.fixes import CLOSE_RUN_FIX, delete_field_fix, human_for
+from tools.fixes import CLOSE_RUN_FIX, RETRY_SPENT, delete_field_fix, human_for, spent_abandon
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
 
@@ -2689,7 +2689,18 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
                          "единственным повтором стадии (--transport-attempts 2), ничего не записано") from None
 
 
-_RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "
+def _spent_fix(run_root: Path, stage_instance_id: str) -> str:
+    """The fix of a stage whose one retry is spent: one command that leaves the run (it prints the next one), or the general words where no command is promised."""
+    import sys
+
+    from tools.run_pipeline import printed
+
+    cause = spent_abandon(stage_instance_id)
+    if cause is None:
+        return RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
+    root = Path(run_root).resolve()
+    return (RETRY_SPENT + f"закрой прогон одной командой: {printed(sys.executable)} -m tools.run_pipeline finish --project {printed(root.parents[1])} "
+            f"--run {printed(root.name)} --abandon {cause} — она напечатает next_run.command; выполни его")
 
 
 @closure_cached
@@ -2719,14 +2730,15 @@ def publish_model_stage_artifact(
                                              raw_bytes=raw_bytes, dry_run=dry_run, before_write=before_write)
     except Exception as error:
         if transport_attempts == 2 and "--transport-attempts 2" in str(error):
-            error.args = tuple(_retry_spent(arg) if isinstance(arg, str) and "--transport-attempts 2" in arg else arg for arg in error.args)
+            spent = _spent_fix(run_root, stage_instance_id)
+            error.args = tuple(_retry_spent(arg, spent) if isinstance(arg, str) and "--transport-attempts 2" in arg else arg for arg in error.args)
             if isinstance(getattr(error, "fix", None), str):
-                error.fix = _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
+                error.fix = spent
         raise
 
 
-def _retry_spent(text: str) -> str:
-    return text.split("; fix: ", 1)[0] + "; fix: " + _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
+def _retry_spent(text: str, spent: str) -> str:
+    return text.split("; fix: ", 1)[0] + "; fix: " + spent
 
 
 def _publish_model_stage_artifact(
