@@ -184,9 +184,9 @@ def test_status_names_each_step_with_its_stage_slot_and_size(tmp_path: Path, cap
 def test_status_next_command_for_prepare_and_submit_names_the_api_module(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, *_ = _run(tmp_path)
     python = f'"{sys.executable}"'
-    assert _status(root)["next_command"] == f'{python} -m tools.api prepare --run-root "{root}" --stage {REQUIREMENTS}'
+    assert _status(root)["next_command"] == f'{python} -m tools.api prepare --run-root "{root}" --stage "{REQUIREMENTS}"'
     _call(capsys, "prepare", root, REQUIREMENTS)
-    assert _status(root)["next_command"] == f'{python} -m tools.api submit --run-root "{root}" --stage {REQUIREMENTS}'
+    assert _status(root)["next_command"] == f'{python} -m tools.api submit --run-root "{root}" --stage "{REQUIREMENTS}"'
 
 
 def test_status_next_command_for_finish_and_report_names_run_pipeline_with_project_and_run() -> None:

@@ -202,12 +202,12 @@ def test_report_is_a_pipeline_command(tmp_path: Path, capsys: pytest.CaptureFixt
 
 
 def test_a_long_error_list_is_cut_to_twenty_and_four_kilobytes() -> None:
-    from tools.validate_artifact import RETRY_BYTES, RETRY_TAIL, retry_prompt
+    from tools.validate_artifact import RETRY_BYTES, RETRY_TAIL_MORE, retry_prompt
 
     errors = [{"path": f"/artifacts/items/{index}/" + "x" * 60, "code": "SCHEMA_TYPE", "message": "y" * 200} for index in range(100)]
     prompt = retry_prompt({"artifacts": {}}, errors)
     assert len(prompt.encode("utf-8")) <= RETRY_BYTES
-    assert prompt.count("\n- ") <= 20 and "и ещё " in prompt and prompt.rstrip().endswith(RETRY_TAIL)
+    assert prompt.count("\n- ") <= 20 and "и ещё " in prompt and prompt.rstrip().endswith(RETRY_TAIL_MORE)
     shown = prompt.count("\n- ")
     assert f"и ещё {100 - shown} ошибок" in prompt
 

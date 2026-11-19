@@ -219,7 +219,7 @@ def _next_command(project: Path, run_root: Path, step: Mapping[str, Any], abando
     """The command of ``next`` to copy as it is: prepare and submit live in ``tools.api``, finish and report in this module."""
     verb, stage = step.get("verb"), step.get("stage")
     if verb in ("prepare", "submit") and stage:
-        return f"{printed(sys.executable)} -m tools.api {verb} --run-root {printed(run_root)} --stage {stage}"
+        return f"{printed(sys.executable)} -m tools.api {verb} --run-root {printed(run_root)} --stage {printed(stage)}"
     if verb in ("finish", "report"):
         return f"{printed(sys.executable)} -m tools.run_pipeline {verb} --project {printed(project)} --run {printed(run_root.name)}" + (f" --abandon {abandon}" if abandon and verb == "finish" else "")
     return None
@@ -1114,6 +1114,10 @@ def _scan_request(args: Any) -> dict[str, Any]:
 
 def relative_to_project(project: Path, raw: Any) -> str:
     """A path as the person typed it (relative or absolute), as the path inside the project with posix separators — the form the context and the inventory know."""
+    from tools.output_guard import local_path_text
+
+    if not local_path_text(str(raw)):  # a share or a device is never looked at: not even by resolve()
+        return str(raw).replace("\\", "/")
     path = Path(str(raw))
     try:
         return (path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix()

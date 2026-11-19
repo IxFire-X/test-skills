@@ -107,6 +107,7 @@ HINT_LIMIT = 80
 RETRY_ERRORS = 20
 RETRY_BYTES = 4096
 RETRY_TAIL = "Исправь только эти поля и верни весь JSON заново по той же схеме."
+RETRY_TAIL_MORE = "Исправь поля выше и остальные из полного списка и верни весь JSON заново по той же схеме."
 
 
 def _short(text: str) -> str:
@@ -130,7 +131,7 @@ def _at(artifact: Any, pointer: str) -> str:
     return _short(json.dumps(value, ensure_ascii=False))
 
 
-def retry_prompt(artifact: Any, errors: list[dict[str, str]]) -> str:
+def retry_prompt(artifact: Any, errors: list[dict[str, str]], full_list: str = "") -> str:
     """The text for the one retry of a model stage — each error's path, what is expected and what came."""
     lines = ["Ответ не прошёл проверку схемы:"]
     # The retry input grows by at most RETRY_BYTES: the first RETRY_ERRORS errors that fit, then a count of the rest.
@@ -147,8 +148,8 @@ def retry_prompt(artifact: Any, errors: list[dict[str, str]]) -> str:
         lines.append(line)
         shown += 1
     if len(errors) > shown:
-        lines.append(f"и ещё {len(errors) - shown} ошибок")
-    lines.append(RETRY_TAIL)
+        lines.append(f"и ещё {len(errors) - shown} ошибок" + (f" — полный список: {full_list}" if full_list else ""))
+    lines.append(RETRY_TAIL_MORE if len(errors) > shown else RETRY_TAIL)
     return "\n".join(lines) + "\n"
 
 

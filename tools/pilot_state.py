@@ -2638,7 +2638,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in diagnostics[:3])
             + (f" and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else "")
             + "; fix: " + cause + "give the role its original input and this retry_prompt, then submit --transport-attempts 2 — "
-            "nothing is written; retry_prompt:\n" + retry_prompt(dict(value), diagnostics)
+            "nothing is written; retry_prompt:\n"
+            + retry_prompt(dict(value), diagnostics, "python -m tools.validate_artifact schemas/" + schema_name + " <файл ответа>")  # the name is one of the closed list above
         )
 
 

@@ -29,16 +29,31 @@ _HINTS = {
     "ASSEMBLE_SECTIONS_MISSING": "разделы без прогона: проведи по ним прогоны (scan --docs путь#Раздел …) и повтори; собрать только то, что есть, — явным списком --run",
     "ASSEMBLE_NOTHING": "ни у одного прогона нет CSV для Zephyr: сводка называет причину по каждому",
     "ASSEMBLE_CSV_MISMATCH": "CSV прогона не тот, что опубликован, или шапки прогонов разные: ничего не правь руками; повтори `submit --stage tc-reviewer:canonical` прогона, а если прогон испорчен — проведи его заново",
-    "ASSEMBLE_CONFLICT": "в <прогон>/assembled/ уже лежит другой файл с таким именем: переименуй или удали его, если он больше не нужен",
+    "ASSEMBLE_CONFLICT": "в <прогон>/assembled/ уже лежит другой файл с таким именем (путь — в сообщении): покажи этот путь человеку — переименовать или удалить файл, если он больше не нужен, может только он",
     "ASSEMBLE_RUN": "прогон не читается (занят другой командой или повреждён): подожди и повтори, id берётся из вывода scan",
     "ASSEMBLE_RUN_UNREADABLE": "часть прогонов проекта не читается (заняты или повреждены): раздел, который такой прогон покрывал, нельзя считать не начатым; подожди и повтори, повреждённый прогон проведи заново",
 }
 
 
 class AssembleRefused(ValueError):
-    def __init__(self, code: str, detail: str = "") -> None:
-        self.code, self.hint = code, _HINTS[code]
+    def __init__(self, code: str, detail: str = "", hint: str | None = None) -> None:
+        self.code, self.hint = code, hint or _HINTS[code]
         super().__init__(f"{code}: {detail or self.hint}")
+
+
+_LINK_HINT = ("на месте файла в <прогон>/assembled/ лежит ссылка (junction) или папка: код её не открывал и ничего туда не записал; "
+              "агент ничего не правит — человек удаляет её (путь — в сообщении) и повторяет ту же команду")
+
+
+def _already_there(root: Path, target: Path, payload: bytes) -> bool:
+    """Whether the file is already there with these bytes; anything else on its place is a refusal (a link or a folder is not opened)."""
+    if not (target.is_symlink() or target.exists()):
+        return False
+    if target.is_symlink() or not target.is_file():
+        raise AssembleRefused("ASSEMBLE_CONFLICT", str(target), _LINK_HINT)
+    if output_guard.input_file(target, root).read_bytes() != payload:
+        raise AssembleRefused("ASSEMBLE_CONFLICT", str(target))
+    return True
 
 
 def _numbers(root: Path) -> dict[str, Any]:
@@ -219,9 +234,7 @@ def assemble(project: Path, run_ids: list[str], *, doc: str | None = None) -> di
     root = _read_run_coordinate(project, run_ids[-1])[0]
     for name, payload in ((f"{stem}.zephyr-scale.csv", data), (f"{stem}.summary.json", json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=1).encode("utf-8") + b"\n")):
         target = root / "assembled" / name
-        if target.is_symlink() or target.exists():
-            if target.is_symlink() or not target.is_file() or output_guard.input_file(target, root).read_bytes() != payload:
-                raise AssembleRefused("ASSEMBLE_CONFLICT", str(target))
+        if _already_there(root, target, payload):
             continue
         atomic_write_confined_bytes_at_root(project, root, target, payload)
     lost = [(f"п. {gap['number']} " if gap["number"] else "") + f"({gap['requirement']}, прогон {number} — нет принятого кейса)" for number, row in enumerate(runs, 1) for gap in row.get("uncovered", [])]
