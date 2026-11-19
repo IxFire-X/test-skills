@@ -86,16 +86,25 @@ def mark_of(text: Any) -> str | None:
     return " ".join(found.group(0).split()) if found else None
 
 
-def doc_line(requirement: Mapping[str, Any], texts: Mapping[str, str]) -> str:
-    """The line of the document the first provenance ``path:line`` of a requirement points at (``texts``: path -> text, as the receipts of the run hold it); '' when none."""
-    found = re.match(r"(.+?):(\d+)", str((requirement.get("provenance") or [""])[0]))
-    lines = texts.get(found.group(1), "").splitlines() if found else []
-    return lines[int(found.group(2)) - 1] if found and 0 < int(found.group(2)) <= len(lines) else ""
+def doc_lines(requirements: Sequence[Mapping[str, Any]], texts: Mapping[str, str]) -> dict[str, str]:
+    """Requirement -> the line of the document its first provenance ``path:line`` points at (``texts``: path -> text, as the receipts of the run hold it) — only where no
+    other requirement points at the same line: a line of two requirements says nothing of either."""
+    from collections import Counter
+
+    places = [re.match(r"(.+?):(\d+)", str((row.get("provenance") or [""])[0])) for row in requirements]
+    count = Counter(found.groups() for found in places if found)
+    lines: dict[str, str] = {}
+    for row, found in zip(requirements, places):
+        text = texts.get(found.group(1), "").splitlines() if found else []
+        if found and count[found.groups()] == 1 and 0 < int(found.group(2)) <= len(text):
+            lines[str(row["source_requirement_id"])] = text[int(found.group(2)) - 1]
+    return lines
 
 
 def unset_ids(requirements: Sequence[Mapping[str, Any]], texts: Mapping[str, str] | None = None) -> set[str]:
     """The requirements marked as unset (``_CUT``) in their text or in the line of the document they were taken from (the marker may have worded the mark away)."""
-    return {str(row["source_requirement_id"]) for row in requirements if any(_CUT.search(part) for part in (str(row.get("text") or ""), doc_line(row, texts or {})))}
+    lines = doc_lines(requirements, texts or {})
+    return {str(row["source_requirement_id"]) for row in requirements if any(_CUT.search(part) for part in (str(row.get("text") or ""), lines.get(str(row["source_requirement_id"]), "")))}
 
 
 def cut_rows(requirements: Sequence[Mapping[str, Any]], left: set[str], imported: Mapping[str, Any] | None = None, texts: Mapping[str, str] | None = None) -> list[dict[str, str]]:
@@ -132,9 +141,10 @@ def unclear_of(marker: Mapping[str, Any], left: set[str] | frozenset[str] = froz
         if row:
             asked.setdefault(row["source_requirement_id"], []).append(row)
     rows: list[dict[str, str]] = []
+    lines = doc_lines(requirements, texts or {})
     for requirement in requirements:
         sid = str(requirement["source_requirement_id"])
-        mark = mark_of(requirement.get("text")) or mark_of(doc_line(requirement, texts or {}))
+        mark = mark_of(requirement.get("text")) or mark_of(lines.get(sid))
         if sid in asked:
             rows.extend(asked[sid])
         elif mark and sid not in left:
@@ -175,10 +185,10 @@ def unclear_rows(run_root: Path, attempt_id: str, state: Mapping[str, Any] | Non
         return []
     left = {row["source_requirement_id"] for row in (published["out_of_scope"] if published is not None else out_of_scope(decision))}
     cut = set(published["unclear_cut"]) if published is not None else set()  # no case is written for these
-    return [dict(row, no_case=True) if row["source_requirement_id"] in cut else row for row in unclear_of(marker, left, _document_texts(root, attempt_id, state))] if marker is not None else []
+    return [dict(row, no_case=True) if row["source_requirement_id"] in cut else row for row in unclear_of(marker, left, document_texts(root, attempt_id, state))] if marker is not None else []
 
 
-def _document_texts(root: Path, attempt_id: str, state: Mapping[str, Any] | None) -> dict[str, str]:
+def document_texts(root: Path, attempt_id: str, state: Mapping[str, Any] | None) -> dict[str, str]:
     """The documents ``--docs`` names as the receipts of the run hold them (``pilot_state.document_texts``); none where they cannot be read: the text of the requirement stands alone."""
     from tools import pilot_state
 
@@ -425,7 +435,7 @@ def check_plan(run_root: Path, attempt_id: str, plan: Mapping[str, Any], state: 
     listed = [row for row in (plan.get("out_of_scope") if isinstance(plan, Mapping) else None) or [] if isinstance(row, Mapping)]
     given = sorted(str(row.get("source_requirement_id")) for row in listed if row.get("reason") != UNCLEAR_REASON)
     cut = {str(row.get("source_requirement_id")) for row in listed if row.get("reason") == UNCLEAR_REASON}  # the code's own: only requirements the text marks as unset
-    marked = unset_ids(requirements_of(marker), _document_texts(root, attempt_id, state)) if marker is not None else cut
+    marked = unset_ids(requirements_of(marker), document_texts(root, attempt_id, state)) if marker is not None else cut
     if given != expected or not cut <= marked:
         raise ScopeRefused("SCOPE_PLAN_MISMATCH", f"план называет вне охвата {given or 'ничего'}, решение человека — {expected or 'без исключений'}; "
                            "fix: повтори `submit --stage plan` — план строит код из записанного решения человека")

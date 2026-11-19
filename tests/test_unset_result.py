@@ -63,3 +63,17 @@ def test_a_mark_the_marker_worded_away_is_found_in_the_line_of_the_document(tmp_
     assert _plan(scan, capsys)[0] == 0
     plan = _published_plan_of(Path(scan["run_root"]), scan["attempt_id"])
     assert plan["out_of_scope"] == [{"source_requirement_id": "SREQ-0002", "reason": scope_pause.UNCLEAR_REASON}]
+
+
+def test_a_line_of_the_document_that_two_requirements_were_taken_from_marks_neither(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests import test_requirement_labels as labels
+    from tests.test_openspec_selection import _scan
+    from tests.test_sections import _plan
+
+    row = {"display_order": 1, "text": "Требование", "provenance": [f"{labels.DOC}:1"]}
+    monkeypatch.setattr(labels, "_rows", lambda _count: [dict(row, source_requirement_id="SREQ-0001"), dict(row, source_requirement_id="SREQ-0002", display_order=2, provenance=[f"{labels.DOC}:2"]),
+                                                          dict(row, source_requirement_id="SREQ-0003", display_order=3, provenance=[f"{labels.DOC}:2"])])
+    scan = _scan(labels._project(tmp_path, "1.1.1. Оплата картой.\n2.1.1. Размер страницы — TBD. 2.1.2. Ответ на ошибку — 400.\n"), monkeypatch, [labels.DOC])
+    assert labels._marker(tmp_path / "project", scan, 3, capsys)[0] == 0
+    assert _plan(scan, capsys)[0] == 0
+    assert "out_of_scope" not in _published_plan_of(Path(scan["run_root"]), scan["attempt_id"])
