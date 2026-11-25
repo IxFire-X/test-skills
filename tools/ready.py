@@ -638,7 +638,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
 
     project = Path(project).resolve()
     requested_profile = profile or execution_gate.default_profile()  # what this package can do
-    profile, refused = execution_gate.resolve_profile(profile)  # a refused profile runs as cases-only: no execution rows to check
+    profile, refused = execution_gate.resolve_profile(profile or None)  # "" is no profile, as before; a refused profile runs as cases-only: no execution rows
     rows: list[dict[str, Any]] = [check_python()]
     if refused:
         rows.append(_row("profile", CASES, "STOP", refused, "запустите ready без --profile или с --profile cases-only-v1"))

@@ -69,6 +69,15 @@ def test_execution_rows_are_warnings_never_stops(tmp_path: Path) -> None:
     assert "Нужно только для исполнения" in table and "СТОП" not in table.split("Нужно только для исполнения")[1]
 
 
+def test_an_empty_profile_is_the_profile_of_the_delivery(tmp_path: Path) -> None:
+    from tests.test_secret_inputs import _two_test_roots
+    from tools.ready import check
+
+    project = _two_test_roots(tmp_path)
+    ids = lambda profile: [row["id"] for row in check(project, ["services/api/docs/feature.md"], profile=profile)["checks"]]
+    assert ids("") == ids(None)
+
+
 def test_ready_target_previews_the_narrowed_context(tmp_path: Path) -> None:
     from tools.ready import check
 
