@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.automation_validation import automation_sha256
 from tools.quarantine import failure_cause, failure_groups, failure_line, failure_texts, one_cause
 
 pytestmark = pytest.mark.contract
@@ -95,15 +96,13 @@ def _automation() -> dict:
                                                  "locator": {"kind": "java_class_method", "class_fqn": "p.ApiTest", "method_name": "a"}}]}}
 
 
-def test_failure_texts_ties_the_text_to_the_method(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tools.automation_validation.automation_sha256", lambda artifact: "sha256:same")
-    execution = {"automation_sha256": "sha256:same", "failed_methods": [{"nodeid": "FILE-1::SYMBOL-1", "message": 'expected: "x" but was: "y"'}]}
+def test_failure_texts_ties_the_text_to_the_method() -> None:
+    execution = {"automation_sha256": automation_sha256(_automation()), "failed_methods": [{"nodeid": "FILE-1::SYMBOL-1", "message": 'expected: "x" but was: "y"'}]}
     assert failure_texts(execution, _automation()) == {("src/test/java/ApiTest.java", "ApiTest.a"): 'expected: "x" but was: "y"'}
 
 
-def test_failure_texts_of_another_automation_are_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tools.automation_validation.automation_sha256", lambda artifact: "sha256:other")
-    execution = {"automation_sha256": "sha256:same", "failed_methods": [{"nodeid": "FILE-1::SYMBOL-1", "message": "boom"}]}
+def test_failure_texts_of_another_automation_are_none() -> None:
+    execution = {"automation_sha256": "sha256:" + "0" * 64, "failed_methods": [{"nodeid": "FILE-1::SYMBOL-1", "message": "boom"}]}
     assert failure_texts(execution, _automation()) == {}
 
 
