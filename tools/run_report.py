@@ -754,6 +754,32 @@ def render_expectations(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _failure_groups(rows: Sequence[Mapping[str, Any]], execution: Mapping[str, Any], automation: Any) -> dict[str, Any]:
+    """``{"failure_groups": [...]}`` of the findings, nothing without findings (they are only in mode B): the causes of the failed
+    methods, the text of each one taken before its note from the execution receipt, so the literals of the test data are cut out."""
+    if not rows:
+        return {}
+    failure_texts, failure_groups = execution_gate.from_mode_b("quarantine", "failure_texts", "failure_groups")
+    return {"failure_groups": failure_groups(rows, failure_texts(execution, automation))}
+
+
+def _one_cause(report: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The group of the line «one cause» of «Итог», or nothing (no findings, or no cause that big)."""
+    if not report.get("failure_groups"):
+        return None
+    (one_cause,) = execution_gate.from_mode_b("quarantine", "one_cause")
+    return one_cause(report["failure_groups"], len(report.get("quarantine") or []))
+
+
+def _cause_lines(report: Mapping[str, Any]) -> list[str]:
+    """The block «Причины» at the top of «Находки»: a line a group, its first three methods (the rest are in the list below)."""
+    from tools.test_case_projections import escape_inline
+
+    shown = 3
+    return ["Причины:", *(f"- {group['count']} — {escape_inline(group['cause'])}; тесты: {', '.join(group['methods'][:shown])}"
+                          + (f" и ещё {len(group['methods']) - shown}" if len(group["methods"]) > shown else "") for group in report["failure_groups"]), ""]
+
+
 def automation_artifact(root: Path, events: Sequence[Mapping[str, Any]]) -> Any:
     """The newest ``tc-to-autotest`` answer of the run, by its journal digest."""
     response = next((event for event in reversed(events) if event["event_type"] == "MODEL_RESPONSE_RECEIVED"
@@ -1129,6 +1155,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "execution_stats": execution.get("stats"),
         "quarantine": [{key: row[key] for key in ("file", "method", "ref", "kind", "failed_rows", "disabled_passed_rows") if key in row}
                        for row in status.get("quarantine") or []],
+        **_failure_groups(status.get("quarantine") or [], execution, automation),
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
         "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,
@@ -1289,10 +1316,12 @@ def _tests_clause(report: Mapping[str, Any]) -> str:
 
     failed = stats.get("failed", 0) + stats.get("errors", 0)
     unit = f"{stats.get('total')} {plural(stats.get('total') or 0, 'метода', 'методов', 'методов')}"  # Maven and Gradle show the runs: the unit is named
+    groups = report.get("failure_groups") or []  # the causes are told when every failure has its text: a failure without it is no cause
+    causes = f", причин: {len(groups)}" if groups and all(group["rule"] != "unknown" for group in groups) else ""
     tests = ("тесты не запустились (сборка или окружение)" if counts.get("execution") == "NOT_RUNNABLE" else
              "результаты запуска не получены" if counts.get("execution") == "UNKNOWN" else  # closed without reports (the numbers of such a close are zeros) or no verdict
              f"прошли {stats['passed']} из {unit}" if counts.get("execution") == "PASS" and stats else
-             f"упали {failed} из {unit}" if stats else "запуск не выполнен")
+             f"упали {failed} из {unit}{causes}" if stats else "запуск не выполнен")
     return f"Автотесты: {tests}. Прогон {'принят' if counts.get('accepted') else 'не принят'}."
 
 
@@ -1328,6 +1357,10 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     else:
         head = "**ТРЕБУЕТ ДОРАБОТКИ:** замечание ревьюера относится ко всему набору."
     lines = ["## Итог", "", head, ""]
+    one = _one_cause(report)
+    if one:
+        lines += [f"**Одна причина у {one['count']} из {len(report['quarantine'])} упавших автотестов: {escape_inline(one['cause'])}.** Скорее всего это одно расхождение "
+                  f"окружения или адреса, а не {one['count']} дефектов — разберите её первой.", ""]
     if report.get("quarantine"):
         lines += ["Находки: тесты упали при запуске, это расхождения кода с требованиями или ошибки самих тестов — разберите каждый (список — в разделе «Находки»; "
                   "вид падения: assertion_failed — не совпала проверка, возможный дефект приложения; error — исключение при выполнении, чаще ошибка теста или окружения). "
@@ -1455,7 +1488,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     if report.get("autotest_assertions"):
         lines += [render_autotest_assertions(report["autotest_assertions"]), ""]
     if report["quarantine"] or report["quarantine_unresolved"]:
-        lines += ["## Находки", "", *(f"- {row['file']} :: {row['method']} ({row['ref']}{', ' + row['kind'] if row.get('kind') else ''})" + (
+        lines += ["## Находки", "", *(_cause_lines(report) if report.get("failure_groups") else []), *(f"- {row['file']} :: {row['method']} ({row['ref']}{', ' + row['kind'] if row.get('kind') else ''})" + (
             f"; упали строки {', '.join(row['failed_rows'])}; вместе с методом помечены и прошедшие строки: "
             f"{', '.join(row['disabled_passed_rows']) or 'нет'}" if "failed_rows" in row else "") for row in report["quarantine"])]
         lines += [f"- {report['quarantine_unresolved']}"] if report["quarantine_unresolved"] else []

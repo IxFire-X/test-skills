@@ -79,13 +79,13 @@ JUNIT_SEVERAL = ("org.opentest4j.MultipleFailuresError: EXP-B2-002-01-1 (2 failu
 def test_several_failures_of_assertj_give_the_line_of_the_first_check() -> None:
     from tools.quarantine import failure_line
 
-    assert failure_line(ASSERTJ_SEVERAL) == "[ASSERT-B2-001-04-1-3]"
+    assert failure_line(ASSERTJ_SEVERAL) == "[ASSERT-B2-001-04-1-3] expected: true but was: false"
 
 
 def test_several_failures_of_junit_give_the_line_of_the_first_check_without_the_class() -> None:
     from tools.quarantine import failure_line
 
-    assert failure_line(JUNIT_SEVERAL) == "[ASSERT-B2-002-01-1-1]"
+    assert failure_line(JUNIT_SEVERAL) == "[ASSERT-B2-002-01-1-1] expected: 201 but was: 403"
 
 
 def test_one_failure_keeps_its_first_line() -> None:

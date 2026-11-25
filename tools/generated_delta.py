@@ -636,6 +636,9 @@ def _method_name(locator: Mapping[str, Any]) -> str:
     return str(locator.get("function_name"))
 
 
+method_name = _method_name  # the name of a marked method: the report ties the text of a failure to it (quarantine.failure_texts)
+
+
 def plan_quarantine(
     files: Sequence[Mapping[str, Any]], symbols: Sequence[Mapping[str, Any]], payload: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]] | None:
