@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import types
 import uuid
 from contextlib import contextmanager
@@ -7222,7 +7223,11 @@ def _journal_modules() -> tuple[types.ModuleType, ...]:
 
 
 def _journal_mode_b() -> tuple[types.ModuleType, ...]:
-    """The module of the journal of mode B, when the delivery carries mode B."""
+    """The module of the journal of mode B, when the delivery carries mode B: once loaded, from ``sys.modules`` — a miss of the facade
+    asks no finder (a blocked module, ``None`` there, still reads as absent); before that, through the gate."""
+    loaded = sys.modules.get("tools.execution_journal")
+    if loaded is not None:
+        return (loaded,)
     return (execution_gate.load_mode_b("execution_journal"),) if execution_gate.mode_b_available() else ()
 
 
