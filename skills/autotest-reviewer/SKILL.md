@@ -1,6 +1,6 @@
 ---
 name: autotest-reviewer
-description: Use when selected effective canonical test cases and generated V5 automation require a static, role-isolated completeness and traceability review before execution.
+description: Use when selected effective canonical test cases and generated automation require a static, role-isolated completeness and traceability review before execution.
 permissions:
   read: "step inputs from the controller"
   write: "role answer in <run>/tmp/ only"
@@ -12,7 +12,7 @@ permissions:
 
 # Static automation review
 
-Consume the selected effective canonical document, V5 automation artifact, and every declared generated file plus its required authorized dependencies. Read the [review contract](references/autotest-review-contract.md) and `schemas/autotest-reviewer-output.schema.json`. The generator's answer already passed the meaning check and the static runner check in its `submit` (`generator_checks` of your `prepare` names them): do not redo them; read their source only to diagnose a failure.
+Consume the selected effective canonical document, automation artifact (`schema_version` 5.0.0), and every declared generated file plus its required authorized dependencies. Read the [review contract](references/autotest-review-contract.md) and `schemas/autotest-reviewer-output.schema.json`. The generator's answer already passed the meaning check and the static runner check in its `submit` (`generator_checks` of your `prepare` names them): do not redo them; read their source only to diagnose a failure.
 
 ## Procedure
 
@@ -22,7 +22,7 @@ provenance evidence, not generator conversation. Do not inspect generator dialog
 
 1. Independently verify source digest and attempt-owned `effective_bundle_receipt_digest`, every declared file's exact UTF-8 `content`, project-native setup, and every locator variant. Confirm that each generated framework equals the selected `.skillsrc` module framework and that every Java path is the class FQN under its selected native test root. The static runner check of the inline content was made in the generator's `submit`; the controller repeats the on-disk check after materialization and before execution.
    Отдельным шагом сверь импорты и аннотации тестового фреймворка в коде с версиями в файле сборки модуля (`pom.xml` / `build.gradle`; он главнее) и с импортами тестов проекта: оба — в `read` (основания `файл сборки` и `окружение тестов`). Импорт из пакета, которого в версии проекта нет, — ошибка компиляции: `BLOCKING` либо механическая правка в `corrections`, но не замечание; зависимость, пришедшая через стартер или родительский файл сборки, расхождением не считается. Для этого шага только читай файлы из `read`: без команд сборки, ничего вне проекта (`~/.m2`, кэш Gradle).
-2. Verify atomic operation/assertion relation ownership, order, and coverage for every operation and assertion, including canonical manual/blocker branches. With `excluded_cases` (FaT-PA) the cases with blockers stay manual: check each listed blocker — one the canonical assertion operators can express (`not_equals` with a `step_output`, `length_equals`, …) is a WARNING finding (ПРИНЯТО with a note): a question for the next run's canonical review, never a rejection — the automation cannot change it (`excluded_cases` must equal the canon's blocked cases), and the canonical reviewer owns blockers. Compare every canonical input literal and binding to its actual generated symbol; drift requires rework even when relations and digests otherwise match.
+2. Verify atomic operation/assertion relation ownership, order, and coverage for every operation and assertion, including canonical manual/blocker branches. With `excluded_cases` the cases with blockers stay manual: check each listed blocker — one the canonical assertion operators can express (`not_equals` with a `step_output`, `length_equals`, …) is a WARNING finding (ПРИНЯТО with a note): a question for the next run's canonical review, never a rejection — the automation cannot change it (`excluded_cases` must equal the canon's blocked cases), and the canonical reviewer owns blockers. Compare every canonical input literal and binding to its actual generated symbol; drift requires rework even when relations and digests otherwise match.
    Группа `param_group` (Java): один `@ParameterizedTest(name = "[{index}] {0}")`, строки-литералы в том же классе с case ID первым аргументом по display_order группы; `submit` генератора проверил это сам (`RUNNER_PARAM_ROWS`, `RUNNER_PARAMS_UNAVAILABLE`).
    Follow each claimed relation into the actual symbol: the operation must execute and
    its assertion must inspect the observed result, with the canonical comparator/value.
@@ -53,7 +53,7 @@ provenance evidence, not generator conversation. Do not inspect generator dialog
    case's Expected says that nothing changed; of `AT_SELF_COMPUTED` whether the expected value is written down in the
    case or taken from the code under test.
 3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
-4. One fresh role-isolated reviewer invocation serves each automation version. `prepare` makes and reads back the attempt-owned `automation-review-boundary-r1` or `-r2` before the review. A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` and `ТРЕБУЕТ ДОРАБОТКИ` each permit only one complete revision-2 regeneration and fresh second review (the agent may finish instead); neither authorizes the old artifact or regeneration after runtime `FAIL`.
+4. One fresh role-isolated reviewer invocation serves each automation version. `prepare` makes and reads back the attempt-owned `automation-review-boundary-r1` or `-r2` before the review. A model statement or caller-supplied receipt is never sufficient. Return a static-review verdict (`schema_version` 5.0.0) bound to that exact automation digest. `AUTO_FIX_APPLIED` and `ТРЕБУЕТ ДОРАБОТКИ` each permit only one complete revision-2 regeneration and fresh second review (the agent may finish instead); neither authorizes the old artifact or regeneration after runtime `FAIL`.
 
 This is static review. It does not compile, execute, or claim a runtime result.
 An accepted verdict permits the controller to form and materialize the generated delta;
@@ -73,4 +73,4 @@ These notes document source review, not execution or proof of complete semantic 
 
 ## Stop conditions
 
-Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or work outside the authorized scope. Reject stale source digests, undeclared files, incomplete pairs, and artifacts that require project modification.
+Stop on invalid or schema_version 2.1.0 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or work outside the authorized scope. Reject stale source digests, undeclared files, incomplete pairs, and artifacts that require project modification.

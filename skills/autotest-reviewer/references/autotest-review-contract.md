@@ -1,4 +1,4 @@
-# V5 static automation-review contract
+# Static automation-review contract (schema_version 5.0.0)
 
 The code validated the canonical JSON and the artifact relations, and the static runner fit, in the generator's `submit`. Verify the automation source against the selected effective document's exact digest and its exact attempt-owned `effective_bundle_receipt_digest`, then inspect every declared file's UTF-8 `content` (the `FILE-…` files of `read`, byte for byte as in the answer) and every generated locator. Nothing is written into the project during this review. On-disk digest/confinement checks remain mandatory after controller materialization.
 

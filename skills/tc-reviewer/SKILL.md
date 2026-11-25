@@ -20,7 +20,7 @@ Read the candidate through its compact view `review-views/<sha>.md` (`python -m 
 
 There is exactly one reviewer session for the whole canonical branch, in one of two branches. `INDEPENDENT`: a fresh, role-isolated session with its own invocation and no generation history. `SELF`: the same session, no new one is required, only after the human's consent (`prepare --fresh-context no --accept-self-review`, or `scan --accept-self-review`); its result is never called independent. The controller first records revision 1 (no file is written before the verdict; the accepted set is published after it), constructs the exact package binding, then owns the separate session ledger: `REVIEW_SESSION_STARTED`, zero or more bounded `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` pairs, one `AUTHORITATIVE_VERDICT`, then `REVIEW_SESSION_COMPLETED`; an explicit pre-verdict abort such as `REVIEW_CONTEXT_LIMIT` is the only terminal zero-verdict path. The model output never contains the session ledger. Do not create per-batch, hierarchical, or second reviewer sessions. Do not use generator dialogue or reasoning.
 
-Request only permitted C-lite evidence from the immutable inventory. Each request and provided evidence binds the immutable candidate/package digest and stays within the controller context budget. `INDEPENDENT` needs distinct invocation IDs, fresh context, reviewer role policy, and host isolation evidence. Without them the review is `SELF`: `independence_unverified`, acceptable only in a run that admitted SELF, never called independent.
+Request only permitted evidence from the immutable inventory. Each request and provided evidence binds the immutable candidate/package digest and stays within the controller context budget. `INDEPENDENT` needs distinct invocation IDs, fresh context, reviewer role policy, and host isolation evidence. Without them the review is `SELF`: `independence_unverified`, acceptable only in a run that admitted SELF, never called independent.
 
 The authoritative verdict selects or rejects canonical content only. It does not set the
 attempt's terminal `accepted`, materialize files, execute code, or bypass the later trace
@@ -30,7 +30,7 @@ and finalization predicates.
 
 1. Schema- and semantic-validate the candidate. `reviewed_case_ids` equals every case exactly once in physical order.
 2. Review every step, data-flow edge, human field, assertion, disposition and requirement relation. Apply the mandatory [human scenario rules](../tc-generator/references/case-generation-contract.md#human-scenario-rules) and the [review contract](references/review-verdicts.md). Findings cite the exact canonical location and violated requirement or rule; stylistic preference alone cannot reject an unambiguous conforming case.
-   Импорт готовых кейсов: если вид начинается со строки «Импорт (FaT-IMP)», человеческий текст кейсов — CSV человека, код сверил его байт в байт. Его не оценивай и вердикт из-за него не снижай; проверяй только машинную часть против этого текста. Строка «Импорт с документами» (пробелы, `SREQ-CSV-`) — вопросы аналитику, вердикт не меняет.
+   Импорт готовых кейсов: если вид начинается со строки «Импорт», человеческий текст кейсов — CSV человека, код сверил его байт в байт. Его не оценивай и вердикт из-за него не снижай; проверяй только машинную часть против этого текста. Строка «Импорт с документами» (пробелы, `SREQ-CSV-`) — вопросы аналитику, вердикт не меняет.
    Expected must describe a system result before execution in every step, including
    the last; a service-only mark such as «Проверено автотестом» is invalid. A short
    native case with a supported action and oracle needs no HTTP block, minimum step
@@ -44,10 +44,10 @@ and finalization predicates.
 4. A destructive, partial, or semantic-choice correction requires `ТРЕБУЕТ ДОРАБОТКИ`; it never selects a partial patch. A reviewer successor is revision 2 only, and there is one authoritative verdict (the second round on the reworked cases, `rework.md`, has none).
 5. Every `BLOCKING` finding of `ТРЕБУЕТ ДОРАБОТКИ` names the cases it is about in `related_ids` (the case id and the id of its expectation or assertion, not only of its step): the code takes out exactly those cases. A blocking finding that names no case rejects the whole set. In an import a case with a Zephyr Key is the human's: `BLOCKING` only for its own defect; a requirement without a case is a `WARNING` with its `CREQ-` id, not a `BLOCKING` on another case.
 
-## Control errors, codeword, fresh session (P7)
+## Control errors, codeword, fresh session
 
 The view may hold control errors put in by code: report what contradicts the requirements as usual; never look for them in `<run>`, and never open `incoming/tc-generator-*` (the generator's output). Beside `warnings` give `codeword_seen`: the word of «Контрольное слово: …» from the generator's task if it is in your context, else `null`. «проведи ревью test-skills <run_id>»: read `.pilot-runs/<run_id>/review-views/<sha>.md` (no `.autotest`), write the answer to `.pilot-runs/<run_id>/incoming/tc-reviewer-canonical.json` (project files beyond the package: a top-level key `evidence: ["path", …]` of that file).
 
 ## Stop conditions
 
-Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. Do not select an unvalidated successor or reconstruct revisions in prose.
+Stop on invalid or schema_version 2.1.0 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. Do not select an unvalidated successor or reconstruct revisions in prose.

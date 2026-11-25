@@ -19,14 +19,14 @@ read back the exact authorized inventory/context receipts. Produce the complete 
 source-requirement set from those inputs; the controller creates batches afterwards. Do
 not rescan the project, create a run/attempt, or widen feature/module scope.
 
-## Parts (FaT-5)
+## Parts
 
 A module whose context does not fit one call is marked in parts (`status` names the step, `tools.api prepare` publishes it):
 
 - `context-marker:requirements` — the documents of the run only, no code. Produce the complete normalized requirement
   set as below, with the one source `шаг требований — код не анализировался`. OpenSpec files alone (no `--cases`): code answers this step
   (`prepare` says so, no slot) — the rest of it is for a plain document, a mix with one, and `--cases`.
-  Import with documents (FaT-IMP3, `scan --cases` with `--docs`): the step also reads the CSV of ready cases. Add
+  Import with documents (`scan --cases` with `--docs`): the step also reads the CSV of ready cases. Add
   `analytics_documentation.case_links` — one row per case of the CSV (`row` = the number of its record in the CSV, the header being 1, the first case 2): the
   `source_requirement_ids` of the documents that case checks, or `[]` with a `reason` when it checks none. The cases are
   never requirements: no SREQ from the CSV. A requirement the change ADDED (an ADDED section) is linked to no row: new cases are written for it. The controller refuses a missing, repeated or unknown link before the write

@@ -87,7 +87,7 @@ The HTML preview and the default v5 Zephyr CSV display only `action`, `test_data
 
 ## Canonical physical order
 
-In a batch fragment the code puts in order `arguments` and `results` (by name, Unicode code points), `categories` (V3 precedence), `requirement_ids` and the document's `operation_capabilities` (by capability_id); `normalized` in the `submit` result names what it moved. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
+In a batch fragment the code puts in order `arguments` and `results` (by name, Unicode code points), `categories` (in the category order of canonical model 3.0.0), `requirement_ids` and the document's `operation_capabilities` (by capability_id); `normalized` in the `submit` result names what it moved. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
 
 Never invent capability arguments, values, operations, assertions, roles, or environment facts. Validate before publication; a projection cannot repair invalid semantics.
 

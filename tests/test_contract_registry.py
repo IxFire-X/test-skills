@@ -83,7 +83,7 @@ def test_frozen_registries_are_complete_ordered_and_truthful(pack_root: Path) ->
         {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
     ]
     assert contract["release_qualification"] == {
-        "package_version": "0.5.0-pilot", "execution_profile_version": "v1", "manifest_path": "release/manifest.json",
+        "package_version": "0.7.2", "execution_profile_version": "v1", "manifest_path": "release/manifest.json",
         "component_state": "implemented_unverified", "ready_tuple": None,
         "not_applicable": ["company_runner", "zephyr_tenant", "production_rollback"],
     }

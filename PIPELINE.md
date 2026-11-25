@@ -97,7 +97,7 @@ Version: `4.0`
 
 ## Release qualification
 
-- package: `0.5.0-pilot` via `release/manifest.json`
+- package: `0.7.2` via `release/manifest.json`
 - execution profile: `v1`
 - component state: `implemented_unverified`; ready tuple: `null`
 - core-pilot N/A: `company_runner, zephyr_tenant, production_rollback`

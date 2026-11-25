@@ -1,10 +1,9 @@
 """Readiness of a project for a first run: every check at once, each problem with the command that fixes it.
 
-``python -m tools.ready --project <abs> --docs <path> [--docs …] [--profile …] [--module <ID>]`` reads, and starts one
-project process: the offline validate phase of a Maven module with the flags of the selected-tests run.  It never
-stops at the first problem: Python and the package dependencies, the pack itself (doctor), git, the requirement
+``python -m tools.ready --project <abs> --docs <path> [--docs …] [--profile …] [--module <ID>]`` only reads: it starts
+no process.  It never stops at the first problem: Python and the package dependencies, the pack itself (doctor), git, the requirement
 documents, ``.skillsrc``, the module, the scan with its exclusions and — as a separate block that cases do not need — the
-build (wrapper, system ``mvn``, JDK, the module interpreter, the project's style checks, the validate probe).  The JSON
+build (wrapper, system ``mvn``, JDK, the module interpreter, the project's style checks).  The JSON
 report goes to stdout, a table to stderr; the exit code is 0 when cases can start.
 
 Only the standard library at module level, so a broken pack is reported by a check and not by a traceback: every part of

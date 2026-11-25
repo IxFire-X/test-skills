@@ -2,9 +2,10 @@
 
 Для первого запуска откройте **[HOW-TO-USE.md](HOW-TO-USE.md)**: подготовка окружения, готовые запросы и список результатов. Ниже — справочник разработчика: подробные правила настройки и выполнения.
 
-**Сборка разработки и режим Б.** Тексты поставки «только кейсы» (`README.md`, `HOW-TO-USE.md`, `skills/orchestrate/SKILL.md`) режима автотестов
-(`local-pilot-v1`) не описывают. Его описание — `skills/orchestrate/references/mode-b.md` (в поставку не входит; роли `tc-to-autotest` и
-`autotest-reviewer` тоже): агент, который идёт по `local-pilot-v1`, читает его вместе с `SKILL.md`. Остальной этот файл описывает оба режима.
+**Две поставки.** Поставка «только кейсы» (`cases-only`: `README.md`, `HOW-TO-USE.md`, `skills/orchestrate/SKILL.md`) режим автотестов
+(`local-pilot-v1`) не описывает и его файлов не несёт. Поставка режима Б (`mode-b`) добавляет `HOW-TO-USE-MODE-B.md`,
+`skills/orchestrate/references/mode-b.md` и роли `tc-to-autotest` и `autotest-reviewer`: агент, который идёт по `local-pilot-v1`, читает `mode-b.md`
+вместе с `SKILL.md`. Состав каждой — `python -m tools.release_manifest --list cases-only|mode-b`. Остальной этот файл описывает оба режима.
 
 ## 1. Подключите пакет
 
