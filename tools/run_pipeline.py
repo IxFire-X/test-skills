@@ -1465,11 +1465,10 @@ def _scan_cases(project: Path, args: Any) -> int | None:
 def _scan_profile(args: Any) -> None:
     """No ``--profile`` is what the package can do; ``local-pilot-v1`` asked of a package without its execution files
     is refused before any run exists."""
-    requested = getattr(args, "profile", None)
-    if requested is None:
-        args.profile = execution_gate.default_profile()
-    elif requested == execution_gate.LOCAL_PILOT and not execution_gate.execution_available():
-        raise HostStop("PROFILE_NOT_IN_PACKAGE", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает")
+    profile, refused = execution_gate.resolve_profile(getattr(args, "profile", None))
+    if refused:
+        raise HostStop("PROFILE_NOT_IN_PACKAGE", refused)
+    args.profile = profile
 
 
 def _module_warnings(module: Mapping[str, Any], given: str | None) -> list[str]:

@@ -4,7 +4,7 @@ Everything that starts a build or a test process, or opens a connection to the s
 files; the core never imports them.  The profile of a delivery is the presence of those files — a file cannot be "enabled"
 without copying the code — so a delivery without them is cases-only, and ``local-pilot-v1`` is not offered by it.
 
-The nine modules of mode B (generation and run of automated tests) are the same kind of thing: a delivery of cases does not carry
+The ten modules of mode B (generation and run of automated tests) are the same kind of thing: a delivery of cases does not carry
 them, and the core reaches one only through ``load_mode_b`` — the module, or ``ModeBMissing`` with a code and a fix.
 
 This module is the only place that loads a module by name (``find_spec`` and ``import_module``), and only ``tools.<name>`` for
@@ -23,6 +23,7 @@ MODE_B_MODULES = ("run_tests", "generated_delta", "automation_validation", "exec
                   "build_trace_document", "quarantine", "code_slices", "automation_text")
 LOCAL_PILOT = "local-pilot-v1"
 CASES_ONLY = "cases-only-v1"
+NOT_OFFERED = "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает"
 
 
 class ModeBMissing(RuntimeError):
@@ -48,8 +49,18 @@ def default_profile() -> str:
     return LOCAL_PILOT if execution_available() else CASES_ONLY
 
 
+def resolve_profile(requested: str | None) -> tuple[str, str | None]:
+    """The profile a request runs by: no profile is what the delivery can do (``default_profile``); ``local-pilot-v1`` asked of a
+    delivery without its execution files is refused — ``(cases-only-v1, the reason)``; any other profile is taken as asked."""
+    if requested is None:
+        return default_profile(), None
+    if requested == LOCAL_PILOT and not execution_available():
+        return CASES_ONLY, NOT_OFFERED
+    return requested, None
+
+
 def mode_b_available() -> bool:
-    """Whether the package has all nine modules of mode B."""
+    """Whether the package has all ten modules of mode B."""
     return all(_present(name) for name in MODE_B_MODULES)
 
 

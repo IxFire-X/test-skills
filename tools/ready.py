@@ -637,15 +637,11 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     from tools import execution_gate
 
     project = Path(project).resolve()
-    profile = profile or execution_gate.default_profile()  # what this package can do
+    requested_profile = profile or execution_gate.default_profile()  # what this package can do
+    profile, refused = execution_gate.resolve_profile(profile)  # a refused profile runs as cases-only: no execution rows to check
     rows: list[dict[str, Any]] = [check_python()]
-    if profile == "local-pilot-v1" and not execution_gate.execution_available():
-        rows.append(_row("profile", CASES, "STOP", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает",
-                         "запустите ready без --profile или с --profile cases-only-v1"))
-        profile = "cases-only-v1"  # no execution rows: this package has nothing to check them with
-        requested_profile = "local-pilot-v1"
-    else:
-        requested_profile = profile
+    if refused:
+        rows.append(_row("profile", CASES, "STOP", refused, "запустите ready без --profile или с --profile cases-only-v1"))
     deps = check_deps()
     rows.append(deps)
     rows.append(_git_row(project, profile))
