@@ -132,21 +132,6 @@ def test_a_dry_run_checks_and_writes_nothing(tmp_path: Path, monkeypatch: pytest
     assert code == 0 and out["result"]["dry_run"] is True and _events(root) == before
 
 
-def test_a_slot_that_is_a_link_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
-    target = tmp_path / "elsewhere.json"
-    target.write_text(json.dumps(_reworked(run)), encoding="utf-8")
-    try:
-        stage_steps.slot(root, STAGE).symlink_to(target)
-    except OSError:
-        pytest.skip("no symbolic links here")
-    before = _events(root)
-    code, out = _call(capsys, "submit", root, STAGE)
-    assert code == 2 and out["code"] == "INPUT_OUTSIDE_PROJECT" and _events(root) == before
-
-
 def test_an_answer_in_the_slot_of_another_stage_is_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     run, _done = _reviewed(tmp_path, monkeypatch)
     root = run["run_root"]

@@ -73,9 +73,8 @@ def test_a_label_longer_than_40_characters_is_refused() -> None:
 def test_the_old_document_keeps_its_digest() -> None:
     from tools.canonical_document import document_sha256
 
-    assert document_sha256(canonical_fixture()) == document_sha256(json.loads(json.dumps(canonical_fixture())))
     assert "technique" not in json.dumps(canonical_fixture())
-    # FaT-WT: a reference digest — the comparison above holds for any deterministic function, even one that adds empty
+    # FaT-WT: a reference digest — comparing two copies would hold for any deterministic function, even one that adds empty
     # design/technique fields; the digest of a document without them is pinned (develop 79a5906) and recomputed by hand
     pinned = "sha256:586d34a13b02ee4dd8a68e2d773fe6fe28efe78bdf4b883450022f4b638cc135"
     by_hand = json.dumps(canonical_fixture(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

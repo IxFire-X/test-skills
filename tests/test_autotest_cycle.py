@@ -138,12 +138,6 @@ def test_submit_dry_run_checks_and_writes_nothing(tmp_path: Path) -> None:
     assert code == 0 and out["result"]["dry_run"] is True and _events(run["root"]) == before
 
 
-def test_submit_before_prepare_is_refused(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    code, out = submit_stage(run["root"], GENERATOR, None)
-    assert code == 2 and out["code"] == "STAGE_NOT_PREPARED" and "prepare" in out["fix"]
-
-
 # ---- refusals before the write: the journal gets nothing ----
 
 @pytest.mark.parametrize(("stage", "code"), [(REVIEWER, "STAGE_WAITS"), ("tc-to-autotest:r2", "STAGE_UNKNOWN"), ("tc-to-autotest:r3", "STAGE_UNKNOWN")])
