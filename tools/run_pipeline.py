@@ -381,7 +381,7 @@ def human_summary(acceptance: Mapping[str, Any], csv: str | None, present: bool)
                else "замечание ревьюера относится ко всему набору")
         return f"Кейсы требуют доработки: {why}, файл для Zephyr не создан."
     whole = acceptance["outcome"] == "ACCEPTED_WHOLE"
-    head = f"Кейсы приняты ({accepted} из {total})" if whole else f"Кейсы приняты частично ({accepted} из {total}): {total - accepted} не прошли ревью и в файл не вошли"
+    head = f"Кейсы приняты ({accepted} из {total})" if whole else f"Кейсы приняты частично ({accepted} из {total}): {total - accepted} не вошли в файл (отклонены ревью или сняты вместе со своей группой)"
     if not present:
         return f"{head}, но файла для Zephyr в прогоне нет" + (f": {csv}." if csv else ".")
     rejected = "" if whole else f", отклонённые — {str(csv).removesuffix('.zephyr-scale.csv')}.REJECTED-CASES.html"

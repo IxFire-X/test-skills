@@ -42,7 +42,7 @@ def test_a_whole_set_names_the_csv() -> None:
 def test_a_partial_set_names_the_rejected() -> None:
     acceptance = {"outcome": "PARTIAL", "generated": 12, "accepted": 9, "removed": 3}
     text = run_pipeline.human_summary(acceptance, "p/x.zephyr-scale.csv", True)
-    assert text.startswith("Кейсы приняты частично (9 из 12): 3 не прошли ревью") and "p/x.REJECTED-CASES.html" in text
+    assert text.startswith("Кейсы приняты частично (9 из 12): 3 не вошли в файл (отклонены ревью или сняты вместе со своей группой); файл") and "p/x.REJECTED-CASES.html" in text
 
 
 def test_a_rework_says_there_is_no_file() -> None:
