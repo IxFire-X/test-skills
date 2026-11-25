@@ -31,8 +31,15 @@ CLASSES = ("assertion_removed", "boundary", "status", "state_check_removed")
 # the order the seeding takes the classes in: two of three are omissions (a removed line or a removed item of the checks) — the errors a
 # reviewer misses; a changed code or a shifted number is caught every time (R&D-01), so these are put less often
 _ROUND = ("assertion_removed", "boundary", "state_check_removed", "assertion_removed", "status", "state_check_removed")
-CLASS_NAMES = {"assertion_removed": "убрана строка проверок", "boundary": "сдвинута граница", "status": "изменён статус", "state_check_removed": "убран пункт проверок"}
-MAP_VERSION = "1.0.0"
+# the text classes: steps without machine checks (an expectation with no assertions), every error tied to the text of the case's
+# requirements; after the machine ones in each round, the flipped outcome and the dropped state first — the measure of strictness;
+# a number or a quoted literal is caught every time and is only the floor (R&D-13 §5)
+TEXT_CLASSES = ("outcome", "state", "literal", "number", "data")
+TWIN = "twin"  # a harmless rewording (two parts around «; » swapped): a BLOCKING on it is a false alarm
+CLASS_NAMES = {"assertion_removed": "убрана строка проверок", "boundary": "сдвинута граница", "status": "изменён статус", "state_check_removed": "убран пункт проверок",
+               "outcome": "перевёрнут исход", "state": "убрана проверка состояния", "literal": "текст в кавычках из требования",
+               "number": "число из требования", "data": "данные шага из требования"}
+MAP_VERSION = "1.1.0"
 # every number that sets how many errors are put and how many misses are tolerated is here: ⌈√n⌉ errors, from MIN to MAX (never all the cases);
 # a review is UNRELIABLE when fewer than 1/THIRD of them are caught and WEAK when more than (N−1)//THIRD are missed
 MIN_CANARIES, MAX_CANARIES, THIRD = 3, 15, 3
@@ -66,8 +73,24 @@ def view_target(root: Path, candidate_digest: str) -> Path:
     return Path(root) / "review-views" / (candidate_digest.removeprefix("sha256:") + ".md")
 
 
+class Seeded(list):
+    """The rows of a seeding — control errors, then twins (class ``twin``) — and ``wanted``, how many errors the size of the set
+    asked for (``None`` for a map of 1.0.0)."""
+
+    wanted: int | None = None
+
+
+def counted(rows: Sequence[Mapping[str, Any]]) -> int:
+    """How many control errors the rows hold (twins are no errors)."""
+    return sum(1 for row in rows if row["class"] != TWIN)
+
+
 def map_bytes(candidate_digest: str, canaries: Sequence[Mapping[str, Any]]) -> bytes:
-    return canonical_bytes({"schema_version": MAP_VERSION, "candidate_digest": candidate_digest, "canaries": [dict(row) for row in canaries]})
+    twins = [dict(row) for row in canaries if row["class"] == TWIN]
+    wanted = getattr(canaries, "wanted", None)
+    return canonical_bytes({"schema_version": MAP_VERSION, "candidate_digest": candidate_digest,
+                            "canaries": [dict(row) for row in canaries if row["class"] != TWIN],
+                            **({"twins": twins} if twins else {}), **({"wanted": wanted} if wanted is not None else {})})
 
 
 # --- seeding ---------------------------------------------------------------------------------------
@@ -187,15 +210,159 @@ def _options(cls: str, case: dict[str, Any], digest: str) -> list[tuple[dict[str
     return found
 
 
+# --- text control errors: steps without machine checks (R&D-13, rnd/scripts/q13/build_text_canaries.py) ----------------------
+
+_NUMBER = re.compile(r"(?<![\w.])(\d{1,6})(?![\w.])")
+_QUOTED = re.compile(r"«([^«»]{2,60})»")
+_FLIP = (("принимается", "отклоняется"), ("отклоняется", "принимается"), ("принят", "отклонён"), ("принято", "отклонено"),
+         ("отклонён", "принят"), ("отклонено", "принято"), ("сохраняется", "не сохраняется"), ("сохранён", "не сохранён"),
+         ("сохранено", "не сохранено"), ("создаётся", "не создаётся"), ("создан", "не создан"), ("появляется", "не появляется"),
+         ("показана", "не показана"), ("показано", "не показано"), ("показаны", "не показаны"), ("показан", "не показан"),
+         ("открывается", "не открывается"), ("открыта", "не открыта"), ("присутствует", "отсутствует"), ("отсутствует", "присутствует"),
+         ("выбрасывает", "не выбрасывает"), ("возвращает", "не возвращает"))
+_STATE_WORDS = re.compile(r"\b(не\s+сохраня|не\s+созда|не\s+измен|оста[её]тся|без\s+изменени)", re.I)
+
+
+def _has_number(text: str, value: str) -> bool:
+    return re.search(rf"(?<![\w.]){value}(?![\w.])", text) is not None
+
+
+def _shift_number(text: str, value: str) -> str:
+    return re.sub(rf"(?<![\w.]){value}(?![\w.])", str(int(value) + 1), text, count=1)
+
+
+def _flip(text: str, linked: str) -> tuple[str, str, str] | None:
+    """``(mutated, word, new word)``: the first outcome word whose stem the requirement has, turned over.  Not a word already
+    after «не», not one before «без» («создан без исключения» → «не создан без …» is no clear contradiction); the case of the
+    first letter is kept («Показан» → «Не показан»)."""
+    for word, other in _FLIP:
+        hit = re.search(rf"(?<![\w-]){word}(?![\w-])", text, re.I)
+        if hit is None or word[:5] not in linked:
+            continue
+        if text[:hit.start()].lower().endswith("не ") or text[hit.end():].lower().startswith(" без"):
+            continue
+        new = other[0].upper() + other[1:] if hit.group(0)[0].isupper() else other
+        return text[:hit.start()] + new + text[hit.end():], hit.group(0), new
+    return None
+
+
+def _drop_state(text: str, linked: str) -> tuple[str, str] | None:
+    """``(mutated, removed)``: the clause about an unchanged state («… не сохраняется / остаётся / без изменений»), when the requirement
+    names that state and enough of the expectation is left."""
+    hit = _STATE_WORDS.search(text)
+    if hit is None:
+        return None
+    stem = re.sub(r"\s+", " ", hit.group(1).lower()).removeprefix("не ").removeprefix("без ")[:4]
+    if stem not in linked:
+        return None
+    for clause in re.finditer(r"[;,]?\s*[^.;,]+", text):
+        if hit.start() >= clause.start() and hit.end() <= clause.end():
+            rest = (text[:clause.start()] + text[clause.end():]).strip()
+            rest = re.sub(r"^[;,]\s*", "", re.sub(r"\s{2,}", " ", rest))
+            if len(rest) <= 20:
+                return None
+            if text[:1].isupper() and rest[:1].islower():
+                rest = rest[0].upper() + rest[1:]
+            return rest, clause.group(0).strip(" ;,")
+    return None
+
+
+def _twin(text: str) -> str | None:
+    """The same expectation with its two parts around «; » swapped — the meaning is the same (rnd/13: 0 BLOCKING of 26)."""
+    parts = text.split("; ")
+    if len(parts) != 2 or not all(len(part.strip()) > 10 for part in parts):
+        return None
+    first, second = parts[0].strip(), parts[1].strip()
+    period = second.endswith(".")
+    second = second.rstrip(".")
+    if re.match(r"[а-яё]", second):
+        second = second[0].upper() + second[1:]
+    if re.match(r"[А-ЯЁ](?:[а-яё]|\s)", first):
+        first = first[0].lower() + first[1:]
+    return f"{second}; {first}" + ("." if period else "")
+
+
+def _linked(document: Mapping[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """``(text of each requirement, the quoted literals of all of them)`` — what a text error is tied to."""
+    texts = {str(item["requirement_id"]): str(item.get("text") or "") for item in document.get("requirements") or []}
+    literals = sorted({quoted.strip() for text in texts.values() for quoted in _QUOTED.findall(text)
+                       if quoted == quoted.strip() and 3 <= len(quoted) <= 40 and re.search(r"[а-яёa-z]", quoted, re.I)})
+    return texts, literals
+
+
+def _text_options(cls: str, case: dict[str, Any], digest: str, texts: Mapping[str, str], literals: Sequence[str]) -> list[tuple[dict[str, Any], Any]]:
+    """The text errors of one class that fit one case: ``(map row without id, apply)``, on expectations without assertions (and,
+    for ``data``, the test data of a step none of whose expectations has assertions)."""
+    linked = " ".join(texts.get(str(item), "") for item in case.get("requirement_ids") or []).lower()
+    found: list[tuple[dict[str, Any], Any]] = []
+    for step in case["steps"]:
+        manual = [exp for exp in step["expectations"] if not exp["assertions"]]
+        if cls == "data" and manual and len(manual) == len(step["expectations"]):
+            data = str(step.get("test_data") or "")
+            for value in sorted(set(_NUMBER.findall(data))):
+                if _has_number(linked, value):
+                    shifted = _shift_number(data, value)
+                    row = _base(cls, case, step, None, None, "test_data", data, shifted, [str(int(value) + 1), value])
+
+                    def apply(step=step, shifted=shifted) -> None:
+                        step["test_data"] = shifted
+                    found.append((row, apply))
+        for exp in manual if cls != "data" else ():
+            text, made = exp["text"], []
+            if cls == "number":
+                made = [(_shift_number(text, value), [str(int(value) + 1), value]) for value in sorted(set(_NUMBER.findall(text)))
+                        if _has_number(linked, value)]
+            elif cls == "literal":
+                for quoted in sorted(set(_QUOTED.findall(text))):
+                    others = [item for item in literals if item.lower() != quoted.lower()]
+                    if quoted.lower() in linked and others:
+                        new = others[_rank(digest, case["case_id"], exp["expectation_id"], quoted) % len(others)]
+                        made.append((text.replace(f"«{quoted}»", f"«{new}»", 1), [new, quoted]))
+            elif cls == "outcome":
+                flipped = _flip(text, linked)
+                made = [(flipped[0], [flipped[2], flipped[1]])] if flipped else []
+            elif cls == "state":
+                dropped = _drop_state(text, linked)
+                made = [(dropped[0], [])] if dropped else []
+            for mutated, markers in made:
+                row = _base(cls, case, step, exp, None, "expectation", text, mutated, markers)
+
+                def apply(exp=exp, mutated=mutated) -> None:
+                    exp["text"] = mutated
+                found.append((row, apply))
+    return found
+
+
+def _twins(order: Sequence[dict[str, Any]], used: set[str], count: int, digest: str) -> list[dict[str, Any]]:
+    """Up to *count* twins, one a case, on expectations without assertions of the cases with no error; applied to the working copy."""
+    rows: list[dict[str, Any]] = []
+    for case in order:
+        if len(rows) >= count:
+            break
+        if case["case_id"] in used:
+            continue
+        spots = [(step, exp, twin) for step in case["steps"] for exp in step["expectations"]
+                 if not exp["assertions"] and (twin := _twin(exp["text"])) is not None]
+        if not spots:
+            continue
+        step, exp, twin = spots[_rank(digest, case["case_id"], TWIN) % len(spots)]
+        rows.append(_base(TWIN, case, step, exp, None, "expectation", exp["text"], twin, []))
+        exp["text"] = twin
+    for index, row in enumerate(rows, start=1):
+        row["canary_id"] = f"TWIN-{index}"
+    return rows
+
+
 def canary_count(eligible: int) -> int:
     """How many control errors a candidate of *eligible* cases gets: ⌈√n⌉, at least 3 and at most 15, never all the cases (n−1)."""
     return max(0, min(MAX_CANARIES, max(MIN_CANARIES, math.isqrt(max(eligible, 1) - 1) + 1), eligible - 1))
 
 
-def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """``(document for the view, canaries)``.  The document of the view is a copy with ``canary_count`` cases mutated (one error a
+def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], "Seeded"]:
+    """``(document for the view, rows)``.  The document of the view is a copy with ``canary_count`` cases mutated (one error a
     case), none of them in a parameter group; the argument is not changed.  With fewer than two such cases nothing is seeded (one
-    case of one would be a view that is all control)."""
+    case of one would be a view that is all control).  Each round takes the machine classes, then the text ones (steps without
+    machine checks); as many twins as text errors follow, on other cases.  ``rows.wanted`` — what the size asked for."""
     from tools.canonical_document import document_sha256, param_groups
     from tools.test_case_projections import SLOT
 
@@ -207,18 +374,19 @@ def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
     eligible = [case for case in work["test_cases"] if case["case_id"] not in grouped]
     order = sorted(eligible, key=lambda case: _rank(digest, case["case_id"]))
     wanted = canary_count(len(eligible))
+    texts, literals = _linked(work)
     used: set[str] = set()
     rows: list[dict[str, Any]] = []
     progressed = True
     while len(rows) < wanted and progressed:
         progressed = False
-        for cls in _ROUND:
+        for cls in (*_ROUND, *TEXT_CLASSES):
             if len(rows) >= wanted:
                 break
             for case in order:
                 if case["case_id"] in used:
                     continue
-                options = _options(cls, case, digest)
+                options = _options(cls, case, digest) if cls in CLASSES else _text_options(cls, case, digest, texts, literals)
                 if not options:
                     continue
                 row, apply = options[_rank(digest, case["case_id"], cls) % len(options)]
@@ -229,7 +397,9 @@ def seed(document: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
                 break
     for index, row in enumerate(rows, start=1):
         row["canary_id"] = f"CAN-{index}"
-    return work, rows
+    result = Seeded([*rows, *_twins(order, used, sum(row["class"] in TEXT_CLASSES for row in rows), digest)])
+    result.wanted = wanted
+    return work, result
 
 
 # --- the chain of trust: journal -> receipt -> map and view -----------------------------------------
@@ -301,7 +471,9 @@ def _read_canaries(run_root: Path, attempt_id: str, events: list[dict[str, Any]]
     if schema_diagnostics(value, schema, schema.parents[1]) or value.get("candidate_digest") != candidate \
             or len(value["canaries"]) != record["canary_count"]:
         raise _mismatch("карта канареек не соответствует схеме или кандидату")
-    return list(value["canaries"])
+    rows = Seeded([*value["canaries"], *(value.get("twins") or [])])  # twins ride along: an edit of one is dropped, a BLOCKING on one rejects nothing
+    rows.wanted = value.get("wanted")
+    return rows
 
 
 def resume_binding(run_root: Path, attempt_id: str, expected: Any) -> bool:
@@ -347,6 +519,9 @@ def _has_id(text: str, identifier: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9_.:-]){re.escape(identifier)}(?![A-Za-z0-9_.:-])", text) is not None
 
 
+_BY_PLACE = frozenset({"assertion_removed", TWIN, *TEXT_CLASSES})
+
+
 def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, strict: bool = False) -> bool:
     """A finding is about a canary when its ``related_ids`` or its text name the mutated step, expectation or assertion, or name
     the case and, in the text, a value of the canary.  A bare case ID in a general finding is not a hit.  *strict* — what a refusal
@@ -362,7 +537,7 @@ def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, stric
         # schemas/canonical-test-document.schema.json)
         if any(item.startswith(("STEP-", "EXP-", "ASSERT-")) and item not in specific for item in ids):
             return False
-        if canary.get("class") == "assertion_removed":  # the view shows the step without the removed checks: nothing to quote, the place is the hit
+        if canary.get("class") in _BY_PLACE:  # nothing to quote (a removed line, a dropped clause) or a text error: the place is the hit (R&D-13)
             place = {str(canary[key]) for key in ("expectation_id", "assertion_id") if canary.get(key)} or specific
             named_ids = set(re.findall(r"(?<![\w.:-])(?:STEP|EXP|ASSERT)-[\w.:-]*\w", text))  # a finding to the step is the canary's when it names the canary's expectation or assertion, and no other one
             return bool(ids & place) or (str(canary["step_id"]) in ids and bool(named_ids & place) and named_ids <= specific)
@@ -399,15 +574,23 @@ def filter_edits(canaries: Sequence[Mapping[str, Any]], artifacts: Mapping[str, 
     return result, dropped
 
 
+def _blocking_on(row: Mapping[str, Any], findings: Sequence[Any]) -> bool:
+    return any(isinstance(item, Mapping) and item.get("severity") == "BLOCKING" and finding_hits(row, item, strict=True) for item in findings)
+
+
 def hit_ids(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) -> dict[str, str]:
-    """``{canary_id: how}`` for each canary the answer names — by a finding of any severity or by an edit of its text."""
+    """``{canary_id: how}`` for each canary the answer names — by an edit of its text, or by a finding: of any severity for a
+    machine error, only a BLOCKING on its place for a text error (a WARNING on a flipped outcome is a miss, R&D-13).  Twins: never."""
     artifacts = answer.get("artifacts") or {}
-    report = artifacts.get("validation_report") or {}
+    findings = (artifacts.get("validation_report") or {}).get("findings") or []
     found: dict[str, str] = {}
     for canary in canaries:
+        if canary["class"] == TWIN:
+            continue
         if any(isinstance(edit, Mapping) and edit_hits(canary, edit) for edit in artifacts.get("successor_edits") or []):
             found[str(canary["canary_id"])] = "edit"
-        elif any(finding_hits(canary, finding) for finding in report.get("findings") or [] if isinstance(finding, Mapping)):
+        elif _blocking_on(canary, findings) if canary["class"] in TEXT_CLASSES else \
+                any(finding_hits(canary, finding) for finding in findings if isinstance(finding, Mapping)):
             found[str(canary["canary_id"])] = "finding"
     return found
 
@@ -440,6 +623,9 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     if canaries is None:
         return {"status": "NOT_SEEDED", "seeded": None, "caught": None, "warning": "REVIEW_UNMEASURED",
                 "note": "ревью не измерено канарейками (прогон открыт до P7)"}
+    wanted = getattr(canaries, "wanted", None)
+    twins = [row for row in canaries if row["class"] == TWIN]
+    canaries = [row for row in canaries if row["class"] != TWIN]
     seeded = len(canaries)
     if seeded == 0:
         return {"status": "NONE", "seeded": 0, "caught": 0, "warning": None, "note": "контроль ревьюера не измерен: ни одной контрольной ошибки не поставлено — в кандидате нечего мутировать"}
@@ -449,10 +635,15 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     missed = [row for row in canaries if row["canary_id"] not in hits]
     classes = sorted({row["class"] for row in missed})
     allowed = (seeded - 1) // THIRD  # misses that are no sign of a weak review: none up to 3 errors, a third of the rest
-    if THIRD * len(hits) < seeded:  # fewer than a third caught (none of 3, as before)
+    # UNRELIABLE (and accepted false) stands on the machine errors only: in v0.8 a text error counts towards WEAK and the report, not
+    # towards the acceptance — the flipped outcome and the dropped state were caught as BLOCKING 0 of 4 (R&D-13); the user decides on a measure
+    machine = [row for row in canaries if row["class"] in CLASSES]
+    caught_machine = sum(1 for row in machine if row["canary_id"] in hits)
+    if machine and THIRD * caught_machine < len(machine):  # fewer than a third caught (none of 3, as before)
         status, warning = "UNRELIABLE", "REVIEW_UNRELIABLE"
-        got = "ни одна из" if not hits else f"поймано {len(hits)} из"
-        note = f"ревью ненадёжно (REVIEW_UNRELIABLE): {got} {seeded} контрольных ошибок {'не поймана' if not hits else 'меньше трети'}, классы {', '.join(classes)}"
+        got = "ни одна из" if not caught_machine else f"поймано {caught_machine} из"
+        note = (f"ревью ненадёжно (REVIEW_UNRELIABLE): {got} {len(machine)} контрольных ошибок {'не поймана' if not caught_machine else 'меньше трети'}, "
+                f"классы {', '.join(sorted({row['class'] for row in machine if row['canary_id'] not in hits}))}")
     elif len(missed) > allowed:
         status, warning = "WEAK", "REVIEW_WEAK"
         note = f"ревью слабое: пропущено {len(missed)} из {seeded}, классы {', '.join(classes)}"
@@ -461,12 +652,23 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     else:
         status, warning, note = "ALL_CAUGHT", None, f"поймано {seeded} из {seeded} контрольных ошибок"
     by_class = {cls: {"seeded": sum(row["class"] == cls for row in canaries), "caught": sum(row["class"] == cls and row["canary_id"] in hits for row in canaries)}
-                for cls in CLASSES if any(row["class"] == cls for row in canaries)}
-    blocking = sum(1 for item in (answer.get("artifacts") or {}).get("validation_report", {}).get("findings") or []  # the blocking findings that reject no case: they stand on a canary
+                for cls in (*CLASSES, *TEXT_CLASSES) if any(row["class"] == cls for row in canaries)}
+    findings = (answer.get("artifacts") or {}).get("validation_report", {}).get("findings") or []
+    blocking = sum(1 for item in findings  # the blocking findings that reject no case: they stand on a canary
                    if isinstance(item, Mapping) and item.get("severity") == "BLOCKING"
                    and canary_finding(canaries, item, {str(i) for i in item.get("related_ids") or [] if str(i).startswith("TC-")}))
+    texts = sum(1 for row in canaries if row["class"] in TEXT_CLASSES)
+    alarms = sum(1 for row in twins if _blocking_on(row, findings))
+    notes = [note]
+    if texts:
+        notes.append("текстовые контрольные ошибки (в ручных шагах) засчитываются только как BLOCKING: WARNING или INFO на них — пропуск")
+    if twins:
+        notes.append(f"безобидных правок в виде ревьюера (двойников): {len(twins)}, ложных BLOCKING на них: {alarms}")
+    if texts and wanted is not None and seeded < wanted:
+        notes.append(f"в ручных кейсах мало мест, привязанных к требованию: контрольных ошибок {seeded} из {wanted} по размеру набора")
     return {"status": status, "seeded": seeded, "caught": len(hits), "missed_classes": classes, "by_class": by_class, "hits": hits, "blocking": blocking, "warning": warning,
-            "note": note + "; " + NOTE}
+            **({"twins": {"seeded": len(twins), "blocking": alarms}} if twins else {}), **({"wanted": wanted} if texts and wanted is not None else {}),
+            "note": "; ".join([*notes, NOTE])}
 
 
 def recorded_answer(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:

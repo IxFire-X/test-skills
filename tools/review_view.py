@@ -699,7 +699,7 @@ def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any])
             mutated, canaries = review_canaries.seed(document)
             data, _grouping, _reference = _run_render(root, state, mutated, "review", basis=document)
             mapped = review_canaries.map_bytes(digest, canaries)
-            seeded.append((review_canaries.receipt_facts(digest, data, mapped, len(canaries)), data, mapped))
+            seeded.append((review_canaries.receipt_facts(digest, data, mapped, review_canaries.counted(canaries)), data, mapped))
         return seeded[0]
 
     try:
@@ -713,7 +713,7 @@ def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any])
         if existing is None and review_canaries.resume_binding(root, attempt_id, seeding):  # the receipt file is there, its events are not
             existing = review_canaries.verify(root, attempt_id)
     if existing is not None:
-        return {"path": target, "created": False, "canaries": len(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
+        return {"path": target, "created": False, "canaries": review_canaries.counted(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
     facts, data, mapped = seeding()
     atomic_write_confined_bytes_at_root(project, root, target, data)
     atomic_write_confined_bytes_at_root(project, root, review_canaries.map_target(root, digest), mapped)

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/review-canaries.schema.json",
-  "description": "P7: the map of the control errors (canaries) that code put into the reviewer's view of a candidate. A signal of the quality of the review, not a protection: the map lies in <run>/review-views/ next to the view.",
+  "description": "P7: the map of the control errors (canaries) that code put into the reviewer's view of a candidate. A signal of the quality of the review, not a protection: the map lies in <run>/review-views/ next to the view. 1.1.0 (v0.8): text errors of steps without machine checks, tied to the requirement (R&D-13); `twins` — harmless rewordings, a BLOCKING on one is a false alarm; `wanted` — how many errors the size of the set asked for.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "candidate_digest", "canaries"],
   "properties": {
-    "schema_version": {"const": "1.0.0"},
+    "schema_version": {"enum": ["1.0.0", "1.1.0"]},
     "candidate_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "canaries": {
       "type": "array",
@@ -17,7 +17,7 @@
         "required": ["canary_id", "class", "case_id", "step_id", "expectation_id", "assertion_id", "field", "original", "mutated", "markers"],
         "properties": {
           "canary_id": {"type": "string", "pattern": "^CAN-([1-9]|1[0-5])$"},
-          "class": {"enum": ["assertion_removed", "boundary", "status", "state_check_removed"]},
+          "class": {"enum": ["assertion_removed", "boundary", "status", "state_check_removed", "outcome", "state", "literal", "number", "data"]},
           "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"},
           "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"},
           "expectation_id": {"type": ["string", "null"], "pattern": "^EXP-[A-Za-z0-9_.:-]+$"},
@@ -28,6 +28,28 @@
           "markers": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}}
         }
       }
-    }
+    },
+    "twins": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["canary_id", "class", "case_id", "step_id", "expectation_id", "assertion_id", "field", "original", "mutated", "markers"],
+        "properties": {
+          "canary_id": {"type": "string", "pattern": "^TWIN-([1-9]|1[0-5])$"},
+          "class": {"const": "twin"},
+          "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"},
+          "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"},
+          "expectation_id": {"type": ["string", "null"], "pattern": "^EXP-[A-Za-z0-9_.:-]+$"},
+          "assertion_id": {"type": ["string", "null"], "minLength": 1},
+          "field": {"enum": ["expectation", "test_data", "assertions"]},
+          "original": {"type": "string"},
+          "mutated": {"type": "string"},
+          "markers": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "wanted": {"type": "integer", "minimum": 0, "maximum": 15}
   }
 }
