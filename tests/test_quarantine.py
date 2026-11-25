@@ -70,6 +70,40 @@ def test_the_note_keeps_the_assertion_ref_and_a_short_safe_first_line() -> None:
     assert failure_note("") == ("FAIL", "")
 
 
+# the messages of several failures as the reports wrote them (AssertJ soft assertions in Surefire; JUnit assertAll in Gradle)
+ASSERTJ_SEVERAL = "\nMultiple Failures (3 failures)\n-- failure 1 --\n[ASSERT-B2-001-04-1-3] \nexpected: true\n but was: false\n-- failure 2 --\n[ASSERT-B2-001-05-1-1] \nexpected: 16\n but was: 0"
+JUNIT_SEVERAL = ("org.opentest4j.MultipleFailuresError: EXP-B2-002-01-1 (2 failures)\r\n\torg.opentest4j.AssertionFailedError: [ASSERT-B2-002-01-1-1] \r\n"
+                 "expected: 201\r\n but was: 403\r\n\torg.opentest4j.AssertionFailedError: [ASSERT-B2-002-01-1-2] \r\nexpected: \"jake_b2_002\"\r\n but was: null")
+
+
+def test_several_failures_of_assertj_give_the_line_of_the_first_check() -> None:
+    from tools.quarantine import failure_line
+
+    assert failure_line(ASSERTJ_SEVERAL) == "[ASSERT-B2-001-04-1-3]"
+
+
+def test_several_failures_of_junit_give_the_line_of_the_first_check_without_the_class() -> None:
+    from tools.quarantine import failure_line
+
+    assert failure_line(JUNIT_SEVERAL) == "[ASSERT-B2-002-01-1-1]"
+
+
+def test_one_failure_keeps_its_first_line() -> None:
+    from tools.quarantine import failure_line
+
+    assert failure_line(FAILURE) == FAILURE.splitlines()[0]
+
+
+def test_the_mark_of_several_failures_names_the_first_check_not_multiple_failures() -> None:
+    from xml.sax.saxutils import quoteattr
+
+    from tools.quarantine import failure_note
+    from tools.run_tests import parse_junit_bytes
+
+    xml = f'<testsuite><testcase name="t()" classname="c"><failure message={quoteattr(JUNIT_SEVERAL, {chr(13): "&#13;", chr(10): "&#10;", chr(9): "&#9;"})}/></testcase></testsuite>'
+    assert failure_note(parse_junit_bytes(xml.encode("utf-8")).cases[0].message)[0] == "ASSERT-B2-002-01-1-1"
+
+
 def test_java_three_methods_one_failed_marks_only_that_method() -> None:
     from tools.quarantine import failure_note, quarantine
 

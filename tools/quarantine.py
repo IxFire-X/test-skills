@@ -28,6 +28,19 @@ _SAFE = re.compile(r"[^A-Za-z0-9 ._:/#@=+-]")
 
 _ASSERT_REF = re.compile(r"ASSERT-[A-Za-z0-9_.:-]+")
 NOTE_LIMIT = 120
+_SEVERAL = re.compile(r"\(\d+ failures?\)$")  # the head of several failures: JUnit assertAll and AssertJ soft assertions end it with «(N failures)»
+_EXCEPTION_CLASS = re.compile(r"^[\w.$]+(?:Error|Exception): ")
+
+
+def failure_line(text: str) -> str:
+    """The line of a framework failure that names it: the first one; for several failures (whose head names no check) the first line
+    with an ``ASSERT-…`` label, without its indent and the class of its exception."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if lines and _SEVERAL.search(lines[0]):
+        found = next((line for line in lines[1:] if _ASSERT_REF.search(line)), None)
+        if found is not None:
+            return _EXCEPTION_CLASS.sub("", found)
+    return lines[0] if lines else ""
 
 
 def failure_note(message: str) -> tuple[str, str]:

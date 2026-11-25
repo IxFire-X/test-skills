@@ -901,7 +901,9 @@ def _failure_message(item: ET.Element) -> str:
     if found is None:
         return ""
     text = (found.attrib.get("message") or found.text or "").strip()
-    return masked_failure_text(text.splitlines()[0][:500]) if text else ""
+    from tools.quarantine import failure_line  # several failures: the line of the first check, not the head «Multiple Failures (N failures)»
+
+    return masked_failure_text(failure_line(text)[:500]) if text else ""
 
 
 def parse_junit_element(root: ET.Element) -> JUnitParseResult:
