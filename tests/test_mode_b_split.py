@@ -19,7 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 MODE_B = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
-          "build_trace_document", "quarantine", "code_slices", "automation_text")
+          "build_trace_document", "quarantine", "code_slices", "automation_text", "execution_journal")
 EXEC = ("exec_commands", "exec_runner")
 ABSENT = MODE_B + EXEC
 

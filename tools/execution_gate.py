@@ -4,7 +4,7 @@ Everything that starts a build or a test process, or opens a connection to the s
 files; the core never imports them.  The profile of a delivery is the presence of those files — a file cannot be "enabled"
 without copying the code — so a delivery without them is cases-only, and ``local-pilot-v1`` is not offered by it.
 
-The ten modules of mode B (generation and run of automated tests) are the same kind of thing: a delivery of cases does not carry
+The eleven modules of mode B (generation and run of automated tests) are the same kind of thing: a delivery of cases does not carry
 them, and the core reaches one only through ``load_mode_b`` — the module, or ``ModeBMissing`` with a code and a fix.
 
 This module is the only place that loads a module by name (``find_spec`` and ``import_module``), and only ``tools.<name>`` for
@@ -20,7 +20,7 @@ from typing import Any
 
 EXEC_MODULES = ("exec_commands", "exec_runner")
 MODE_B_MODULES = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
-                  "build_trace_document", "quarantine", "code_slices", "automation_text")
+                  "build_trace_document", "quarantine", "code_slices", "automation_text", "execution_journal")
 LOCAL_PILOT = "local-pilot-v1"
 CASES_ONLY = "cases-only-v1"
 NOT_OFFERED = "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает"
@@ -60,7 +60,7 @@ def resolve_profile(requested: str | None) -> tuple[str, str | None]:
 
 
 def mode_b_available() -> bool:
-    """Whether the package has all ten modules of mode B."""
+    """Whether the package has all eleven modules of mode B."""
     return all(_present(name) for name in MODE_B_MODULES)
 
 
