@@ -24,7 +24,7 @@ def test_the_text_of_the_rework_names_the_form_the_code_checks() -> None:
 
 def test_the_text_of_the_rework_tells_no_one_to_build_install_or_call_the_network() -> None:
     text = REWORK.read_text(encoding="utf-8")
-    assert re.search(r"Не запускай сборку, не ставь зависимости, не ходи в сеть", text) and not re.search(r"\b(pip|mvn|gradle|npm|curl|git)\b", text)
+    assert re.search(r"Do not run the build, do not install dependencies, do not go to the network", text) and not re.search(r"\b(pip|mvn|gradle|npm|curl|git)\b", text)
 
 
 def test_the_file_is_in_every_delivery_profile() -> None:
@@ -47,5 +47,5 @@ def test_the_text_of_the_second_round_fits_its_limit_names_the_form_and_no_role_
     assert path.stat().st_size <= 2000 and path not in role_files("tc-reviewer")
     for word in ("tc-reviewer:rework-1", "incoming/tc-reviewer-rework-1.json", "REWORK_REVIEW_FIX", "reviewed_case_ids", "related_ids", "--transport-attempts 2"):
         assert word in text, word
-    assert not re.search(r"(pip|mvn|gradle|npm|curl|git)", text) and "Не запускай сборку, не ставь зависимости, не ходи в сеть" in text
+    assert not re.search(r"(pip|mvn|gradle|npm|curl|git)", text) and "Do not run the build, do not install dependencies, do not go to the network" in text
     assert all("skills/tc-reviewer/rework.md" in profile_paths(["skills/tc-reviewer/rework.md"], profile) for profile in PROFILES)
