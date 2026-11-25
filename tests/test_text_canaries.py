@@ -1,8 +1,8 @@
 """v0.8 «текстовые контрольные ошибки» (R&D-13): steps without machine checks get control errors tied to the requirement text.
 
 Five operators (outcome, state, literal, number, data) on expectations without assertions, as many harmless twins on other cases;
-a text error counts only when a BLOCKING finding stands on its place (or an edit of its text); a BLOCKING on a twin is a false alarm
-and rejects no case; missed text errors make a review WEAK, never UNRELIABLE (v0.8: not the acceptance).  The exact lines for the
+a text error counts only when a BLOCKING finding stands on its place (or an edit of its text); a BLOCKING on a twin rejects its case
+as any finding and is counted; missed text errors make a review WEAK, never UNRELIABLE (v0.8: not the acceptance).  The exact lines for the
 tester wait for the user's approval and are not pinned here."""
 from __future__ import annotations
 
@@ -54,6 +54,14 @@ def test_outcome_leaves_a_verb_before_without() -> None:
 
 def test_state_drops_the_clause_the_requirement_names() -> None:
     assert _made("state", _case(1, "Показано «Неверный телефон»; форма создания остаётся открытой.")) == ["Показано «Неверный телефон»."]
+
+
+def test_a_word_that_only_starts_like_the_state_is_no_link() -> None:
+    assert _made("state", _case(1, "Показано «Неверный телефон»; форма создания остаётся открытой."), requirement="Остаток на счёте 10.") == []
+
+
+def test_a_twin_keeps_the_letter_of_a_name() -> None:
+    assert rc._twin("Анна создана в системе; карточка открыта на экране.") == "Карточка открыта на экране; Анна создана в системе."
 
 
 def test_state_keeps_a_clause_the_requirement_does_not_name() -> None:
@@ -139,16 +147,21 @@ def test_an_edit_of_a_text_error_is_a_catch() -> None:
     assert rc.outcome([_row("state", 1)], _answer(edits=[edit]))["caught"] == 1
 
 
+def test_one_machine_error_beside_five_text_ones_decides_nothing() -> None:
+    rows = [{**_row("boundary", 1), "field": "assertions"}, *(_row("outcome", n) for n in range(2, 7))]
+    assert rc.outcome(rows, _answer([_on(n, "BLOCKING") for n in range(2, 7)]))["status"] == "MOSTLY_CAUGHT"
+
+
 def test_missed_text_errors_make_the_review_weak_not_unreliable() -> None:
     found = rc.outcome([_row("outcome", n) for n in (1, 2, 3)], _answer())
     assert (found["status"], found["warning"]) == ("WEAK", "REVIEW_WEAK")
 
 
-def test_a_blocking_on_a_twin_is_a_false_alarm_and_rejects_no_case() -> None:
+def test_a_blocking_on_a_twin_is_counted_and_rejects_the_case() -> None:
     rows = [_row("number", 1), _row(rc.TWIN, 2, "TWIN-1")]
     finding = _on(2, "BLOCKING")
     assert rc.outcome(rows, _answer([finding]))["twins"] == {"seeded": 1, "blocking": 1}
-    assert rc.canary_finding(rows, finding, {"TC-2"})
+    assert not rc.canary_finding(rows, finding, {"TC-2"})
 
 
 def test_an_edit_of_a_twin_is_dropped() -> None:

@@ -708,6 +708,7 @@ def test_zero_hits_make_the_review_unreliable_in_the_report_and_the_status_and_n
 
 
 def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.review_canaries import CLASS_NAMES
     from tools.run_report import build_report
 
     run = _generated_run(tmp_path)
@@ -715,7 +716,7 @@ def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: p
     one, _two = _ids(run)
     done = _select(run, _answer(run, findings=[_finding("INFO", [one["steps"][0]["expectations"][0]["expectation_id"]])]))
     assert done["review_canaries"]["status"] == "WEAK" and "пропущено 1 из 2" in done["review_canaries"]["note"]
-    assert "assertion_removed" in done["review_canaries"]["note"]
+    assert CLASS_NAMES["assertion_removed"] in done["review_canaries"]["note"]
     report, _w = build_report(run["project"], run["run_root"].name)
     assert report["review_canaries"]["status"] == "WEAK" and "REVIEW_WEAK" in report["warnings"] and "REVIEW_UNRELIABLE" not in report["warnings"]
 
