@@ -355,6 +355,63 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
     }
 
 
+def _last_refusal(root: Path, events: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The last line of ``refusals.jsonl`` a ``COMMAND_REFUSED`` event of the journal confirms by the sha256 of the line (as ``run_report.refusals``
+    checks them: a line no event confirms is not believed); None without one."""
+    try:
+        lines = {"sha256:" + hashlib.sha256(line).hexdigest(): line for line in (root / "refusals.jsonl").read_bytes().split(b"\n") if line.strip()}
+    except OSError:
+        return None
+    for event in reversed(events):
+        line = lines.get(str(event.get("artifact_digest"))) if event.get("event_type") == "COMMAND_REFUSED" else None
+        try:
+            row = json.loads(line) if line is not None else None
+        except ValueError:
+            continue
+        if isinstance(row, Mapping) and isinstance(row.get("code"), str):
+            return row
+    return None
+
+
+def human_summary(acceptance: Mapping[str, Any], csv: str | None, present: bool) -> str:
+    """The outcome of the review of a set of cases in one line for a person (``human_summary`` of finish and status)."""
+    total, accepted = acceptance["generated"], acceptance["accepted"]
+    if acceptance["outcome"] == "REWORK":
+        why = (f"ревью отклонило {acceptance['removed']} из {total} (больше допустимой доли)" if acceptance.get("reason") == "OVER_SHARE"
+               else "замечание ревьюера относится ко всему набору")
+        return f"Кейсы требуют доработки: {why}, файл для Zephyr не создан."
+    whole = acceptance["outcome"] == "ACCEPTED_WHOLE"
+    head = f"Кейсы приняты ({accepted} из {total})" if whole else f"Кейсы приняты частично ({accepted} из {total}): {total - accepted} не прошли ревью и в файл не вошли"
+    if not present:
+        return f"{head}, но файла для Zephyr в прогоне нет" + (f": {csv}." if csv else ".")
+    rejected = "" if whole else f", отклонённые — {str(csv).removesuffix('.zephyr-scale.csv')}.REJECTED-CASES.html"
+    return f"{head}{',' if whole else ';'} файл для Zephyr готов: {csv}{rejected}."
+
+
+def _human_summary(project: Path, root: Path, attempt_id: str, manifest: Mapping[str, Any]) -> dict[str, str]:
+    """``human_summary`` of a run of cases only, from the same outcome the report draws; nothing before the verdict of the review."""
+    if manifest.get("policy_profile") != "cases-only-v1":
+        return {}
+    from tools.orchestrate_test_case_revision import acceptance_summary
+    from tools.pilot_state import read_effective_canonical_if_present
+    from tools.review_canaries import recorded_answer
+
+    try:
+        acceptance = acceptance_summary(root, attempt_id, recorded_answer(root, attempt_id))
+        effective = read_effective_canonical_if_present(root, attempt_id) if acceptance else None
+    except (KeyError, OSError, TypeError, ValueError):  # a line for a person never fails the command
+        return {}
+    if acceptance is None:
+        return {}
+    document = (effective or {}).get("document") or {}
+    csv = root / "published" / f"{document['document_id']}.r{document['revision']}.zephyr-scale.csv" if document else None
+    try:
+        shown = None if csv is None else csv.relative_to(Path(project).resolve()).as_posix()
+    except ValueError:
+        shown = str(csv)
+    return {"human_summary": human_summary(acceptance, shown, csv is not None and csv.is_file())}
+
+
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -386,7 +443,11 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         **extra,
     }
     if attempt is None:
-        result["stop_detail"] = "No attempt yet; an early scan failure may have no persisted cause."
+        last = _last_refusal(root, state["events"])
+        result["stop_detail"] = ("No attempt yet; an early scan failure may have no persisted cause." if last is None else
+                                 f"Попытки ещё нет; последний отказ этого прогона: {last['code']} ({last.get('command')}, {last.get('at')}).")
+        if last is not None and (said := human_for(last["code"])):
+            result["stop_human"] = said
         return result
     summary = _exclusion_summary(root, attempt)
     if summary is not None:
@@ -2096,6 +2157,7 @@ def cmd_finish(args: Any) -> int:
         **({"unreviewed_files": unreviewed} if unreviewed else {}),
         **_quarantine_summary(root, attempt_id),
         **_review_notes_summary(root, attempt_id),
+        **_human_summary(project, root, attempt_id, manifest),
         **_style_notes(project, root, attempt_id),
         **_report_mismatch(root, attempt_id),
         **_automation_split(root, attempt_id),
@@ -2151,6 +2213,7 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
     result = _durable_status(project, root, stage="status", **(_status_drift(project, root, run["manifest"], attempt) if open_run else {}))
     if attempt is not None:
         result.update(_review_notes_summary(root, str(attempt["attempt_id"])))
+        result.update(_human_summary(project, root, str(attempt["attempt_id"]), run["manifest"]))
         from tools.review_canaries import status_fields
 
         result.update(status_fields(root, str(attempt["attempt_id"]), result))  # the canaries of the review, REVIEW_UNRELIABLE

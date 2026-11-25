@@ -53,6 +53,32 @@ def row_ranges(rows: Sequence[int]) -> str:
     return ", ".join(str(first) if first == last else f"{first}–{last}" for first, last in parts)
 
 
+_DOUBT_SOURCE = re.compile(r"(\S+) \((.+):(\d+)\)")
+
+
+def _merged_doubts(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """The doubts of the marker with one question asked once: one requirement, one file, lines at most 3 apart and a like «что неясно»
+    (difflib ratio ≥ 0.6) are one item — the text of the lower line, every line in the source.  Anything else stays as it is."""
+    import difflib
+
+    kept: list[list[Any]] = []  # [row, (requirement, file) or None, lines]
+    for row in rows:
+        found = None if "mark" in row else _DOUBT_SOURCE.fullmatch(str(row.get("source", "")))
+        if found is None:
+            kept.append([row, None, []])
+            continue
+        key, line = (found.group(1), found.group(2)), int(found.group(3))
+        same = next((item for item in kept if item[1] == key and min(abs(line - other) for other in item[2]) <= 3
+                     and difflib.SequenceMatcher(None, str(item[0]["unclear"]), str(row["unclear"])).ratio() >= 0.6), None)
+        if same is None:
+            kept.append([row, key, [line]])
+            continue
+        if line < min(same[2]):
+            same[0] = row
+        same[2].append(line)
+    return [{**row, "source": f"{key[0]} ({key[1]}:{', '.join(map(str, sorted(lines)))})"} if key and len(lines) > 1 else row for row, key, lines in kept]
+
+
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
                       autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None,
                       unclear: Sequence[Mapping[str, Any]] = (), generated: Sequence[Mapping[str, Any]] = ()) -> str:
@@ -107,7 +133,7 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
         lines.append("")
     if unclear:  # the document's own unclear places and the doubts of the marker: a question each, the run does not stop
         lines += ["## Неясности в требованиях", ""]
-        for row in unclear:
+        for row in _merged_doubts(unclear):
             lines += ([f"- {row['source_requirement_id']}: в тексте требования отмечена неясность («{row['mark']}»): {row['text']}", "  - Вопрос: какое поведение требуется?" + (" Кейс на это требование не написан." if row.get("no_case") else "")]
                       if "mark" in row else [f"- Требование и источник: {row['source']}", f"  - Что неясно: {row['unclear']}", f"  - Вопрос: {row['question']}"])
         lines.append("")

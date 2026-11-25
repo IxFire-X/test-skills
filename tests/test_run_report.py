@@ -48,6 +48,45 @@ def test_a_disagreement_of_code_and_requirement_still_goes_to_the_rest() -> None
     assert note in analyst_questions([note]).split("## Прочее", 1)[1]
 
 
+LIMIT_49 = {"source": "SREQ-0014 (openspec/specs/visits/spec.md:49)", "question": "какую верхнюю границу брать для этого сценария?",
+            "unclear": "сценарий «Непустое описание в пределах длины» ограничен 255 символами, а изменение visit-description-500 поднимает предел до 500"}
+LIMIT_48 = {"source": "SREQ-0014 (openspec/specs/visits/spec.md:48)", "question": "какой предел действует для непустого описания после изменения?",
+            "unclear": "сценарий называет предел 255 символов, изменение visit-description-500 вводит предел 500"}
+
+
+def _unclear_items(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("- Требование и источник:")]
+
+
+def test_one_question_of_a_requirement_on_near_lines_is_asked_once() -> None:
+    from tools.run_report import analyst_questions
+
+    text = analyst_questions([], unclear=[LIMIT_49, LIMIT_48])
+    assert _unclear_items(text) == ["- Требование и источник: SREQ-0014 (openspec/specs/visits/spec.md:48, 49)"]
+    assert LIMIT_48["question"] in text and LIMIT_49["question"] not in text
+
+
+def test_questions_of_a_requirement_on_far_lines_stay_two() -> None:
+    from tools.run_report import analyst_questions
+
+    far = {**LIMIT_49, "source": "SREQ-0014 (openspec/specs/visits/spec.md:60)"}
+    assert len(_unclear_items(analyst_questions([], unclear=[far, LIMIT_48]))) == 2
+
+
+def test_questions_of_two_requirements_stay_two() -> None:
+    from tools.run_report import analyst_questions
+
+    other = {**LIMIT_49, "source": "SREQ-0015 (openspec/specs/visits/spec.md:49)"}
+    assert len(_unclear_items(analyst_questions([], unclear=[other, LIMIT_48]))) == 2
+
+
+def test_different_doubts_on_near_lines_stay_two() -> None:
+    from tools.run_report import analyst_questions
+
+    other = {**LIMIT_49, "unclear": "не сказано, какой код ответа вернуть при пустом описании"}
+    assert len(_unclear_items(analyst_questions([], unclear=[other, LIMIT_48]))) == 2
+
+
 def test_no_gaps_gives_a_single_line() -> None:
     from tools.run_report import analyst_questions
 
