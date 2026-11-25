@@ -177,6 +177,6 @@ def test_o12b_a_bare_value_error_has_its_code_and_a_document_not_in_utf8_says_ho
 
 def test_o12b_the_texts_name_run_left() -> None:
     skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    resume = skill[skill.index("## Resume и дрейф"):]
+    resume = skill[skill.index("## Resume and drift"):]
     assert "RUN_LEFT" in resume and "LEFT_BEFORE_REVIEW" in resume
     assert "LEFT_BEFORE_REVIEW" in (ROOT / "USAGE.md").read_text(encoding="utf-8")

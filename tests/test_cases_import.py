@@ -560,7 +560,7 @@ def _imported_sample() -> tuple[dict, dict]:
     import re
 
     text = (Path(__file__).parents[1] / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
-    blocks = re.findall(r"```json\n(.*?)\n```", text.split("## Импортированный кейс", 1)[1], re.S)
+    blocks = re.findall(r"```json\n(.*?)\n```", text.split("## An imported case", 1)[1], re.S)
     return json.loads(blocks[0]), json.loads(blocks[1])
 
 

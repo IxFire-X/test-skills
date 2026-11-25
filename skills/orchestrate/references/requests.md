@@ -1,10 +1,10 @@
-# Запрос человека → режим
+# Human request → mode
 
-- «…только ready…» — только `ready --profile cases-only-v1`, таблица человеку; `scan` не зови.
+- «…только ready…» — only `ready --profile cases-only-v1`, the table to the human; do not call `scan`.
 - «тест-кейсы по изменению OpenSpec <имя>» — `cases-only-v1`; «Код: <папка>» — `--target <папка>`.
-- «…в архиве: обнови кейсы из <csv>» — `cases-only-v1`, `--cases <csv> --docs openspec/specs --docs openspec/changes/archive/<дата>-<имя>` (папку найди по имени).
-- «по документу <путь>» — `--docs <путь>`; автотесты — по строке о поставке в `SKILL.md`.
+- «…в архиве: обнови кейсы из <csv>» — `cases-only-v1`, `--cases <csv> --docs openspec/specs --docs openspec/changes/archive/<date>-<name>` (find the folder by the name).
+- «по документу <путь>» — `--docs <путь>`; autotests — by the line about the delivery in `SKILL.md`.
 
-`--docs` изменения: `openspec/changes/<имя>` и `openspec/specs/<область>` каждой его дельты `specs/<область>`, у которой есть базовый `spec.md`; имени нет или подходят несколько — спроси человека.
-Прогон веди сам, в основной сессии; субагенту — только ревью в свежем контексте.
-Итог в конце: вердикт ревью, пробелы, полные пути к HTML, Markdown, JSON принятой редакции, отчёту ревью и папке прогона; ревью отклонило редакцию или файла нет — скажи прямо, черновик — «черновик».
+`--docs` of a change: `openspec/changes/<name>` and `openspec/specs/<area>` of each of its deltas `specs/<area>` that has a base `spec.md`; no name, or several fit — ask the human.
+Run the pipeline yourself, in the main session; a subagent gets only the review in a fresh context.
+The final answer: the review verdict, the gaps, the full paths to the HTML, Markdown and JSON of the accepted revision, to the review report and to the run folder; the review rejected the revision or a file is missing — say it plainly; a draft — «черновик».

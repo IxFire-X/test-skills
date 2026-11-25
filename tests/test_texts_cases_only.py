@@ -22,7 +22,7 @@ OLD_SKILL_BYTES = 61838  # skills/orchestrate/SKILL.md before PT: the agent at w
 # V4b: the same bytes of SKILL.md and README.md are in the delivery of mode B, so the one sentence about mode B is true in both: it names
 # the profile that `doctor` reports and, once, the file of mode B (the one exception to "the delivery names no file it does not carry").
 ALLOWED = (
-    "автотесты (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.",
+    "autotests (`local-pilot-v1`, mode B) are in the delivery of the profile `mode-b` (`doctor` names it): run them by `references/mode-b.md`; `cases-only` has none.",
     "Режим автотестов (режим Б) входит в поставку профиля `mode-b`; в поставку `cases-only` он не входит. Профиль называет `doctor`.",
     # V8-W3: HOW-TO-USE.md is the same in both deliveries; this is the one place that names the file of mode B, true with and without it
     "Если в папке пакета есть файл `HOW-TO-USE-MODE-B.md`, в вашей поставке есть и режим автотестов (режим Б): начните с этого файла; если файла нет, поставка — только для кейсов.",
@@ -93,7 +93,7 @@ def test_mode_b_text_and_its_roles_are_in_the_registry_and_not_in_the_cases_only
 
 
 ANCHORS = (
-    "`context_receipt` и digest-поля", "ставит код, не пиши их",
+    "`context_receipt` and the digest fields", "are put by the code, do not write them",
     "fragment-sample.md", "schemas/candidate-fragment.schema.json", "<run>/published",
     "evidence:", "`for_human`", "REVIEW_ONLY_CANARY_FIXES", "REVIEW_CANARY_MISMATCH", "REVIEW_UNRELIABLE",
     "details.self_review_scan", "`SCOPE_PENDING`",
@@ -207,8 +207,8 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
     schema = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
     mechanics = {"plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "diagnostics", "digest"}  # V6: the code puts them
     assert sorted(set(schema["required"]) - set(fragment) - mechanics) == [] and sorted(set(fragment) - set(schema["properties"])) == []
-    tokens = {"<ns>": "B1", "<SREQ-… этой пачки>": "SREQ-0001", "<SREQ-…>": "SREQ-0001", "<имя>": "batch_ids", "<имя операции>": "batch_ids",
-              "<adapter.id из read; нет его — одно имя раннера тестов проекта на весь прогон>": "project_native_junit"}
+    tokens = {"<ns>": "B1", "<SREQ-… of this batch>": "SREQ-0001", "<SREQ-…>": "SREQ-0001", "<name>": "batch_ids", "<operation name>": "batch_ids",
+              "<adapter.id from read; none there — one name of the project's test runner for the whole run>": "project_native_junit"}
 
     def fill(value):
         if isinstance(value, str):

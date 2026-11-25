@@ -1,93 +1,95 @@
 ---
 name: orchestrate
-description: Использовать, когда пользователь просит тест-кейсы приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
+description: Use when the user asks for test cases of an application from agreed requirements, a whole OpenSpec specification or a selected change with its related regression.
 permissions:
-  read: "файлы проекта по inventory с исключениями; --docs, --reference и --cases только внутри проекта"
-  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации: <run>/published"
-  network: "нет"
-  external_delivery: "нет"
-  dependencies: "пакет ничего не устанавливает; pip агент не запускает"
-  rollback: "удалить <project>/.pilot-runs/<run_id>/ и созданный <project>/.skillsrc"
+  read: "project files by inventory with exclusions; --docs, --reference and --cases only inside the project"
+  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc when created; publication directory: <run>/published"
+  network: "none"
+  external_delivery: "none"
+  dependencies: "the package installs nothing; the agent does not run pip"
+  rollback: "delete <project>/.pilot-runs/<run_id>/ and the created <project>/.skillsrc"
 ---
 
-# Оркестрация Трассы — тест-кейсы
+# Trassa orchestration — test cases
 
-Ты — controller в model-enabled CLI. Не запускай из Python модель и не передавай model credentials. Python tools проверяют и публикуют
-артефакты; сборку и тесты не запускают. Кейсы идут профилем `cases-only-v1`; автотесты (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.
+You are the controller in a model-enabled CLI. Do not launch the model from Python and do not pass model credentials. Python tools check and publish
+artifacts; they do not run the build or tests. Cases go with the profile `cases-only-v1`; autotests (`local-pilot-v1`, mode B) are in the delivery of the profile `mode-b` (`doctor` names it): run them by `references/mode-b.md`; `cases-only` has none.
+Talk to the human in Russian. Say the texts in «…» word for word; codes, keys and commands stay as they are.
 
-Запрос человека → режим: [requests.md](references/requests.md). Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `state` и `next` в `status`.
-До работы — `python -m tools.doctor --root <pack-root>`. tools вызывай с cwd пакета и абсолютным `--project`; функции пакета не импортируй.
-`prepare` и `submit` — `python -m tools.api <команда> --run-root <run> --stage <id>`; `scan`, `status`, `finish`, `report` — `python -m tools.run_pipeline <имя>` (ниже — целиком). Ответ — одна строка JSON: `status: ok` и `result`,
-`invalid` (код 1) или `error` (код 2: `code`, `message`, `fix`). Писать можно только в `<project>/.pilot-runs/`, `.skillsrc` и `<run>/published`.
-В `--model-id` пиши фактический ID модели твоей CLI. Clone, worktree, sandbox, dependency, CI/cron, commit, push и PR не создавай.
+Human request → mode: [requests.md](references/requests.md). This is a map of the stages. A command's arguments — `python -m tools.api <command> --help`; what to do next — `state` and `next` in `status`.
+Before work — `python -m tools.doctor --root <pack-root>`. Call tools with the package as cwd and an absolute `--project`; do not import the package's functions.
+`prepare` and `submit` — `python -m tools.api <command> --run-root <run> --stage <id>`; `scan`, `status`, `finish`, `report` — `python -m tools.run_pipeline <name>` (in full below). The answer is one line of JSON: `status: ok` and `result`,
+`invalid` (code 1) or `error` (code 2: `code`, `message`, `fix`). You may write only to `<project>/.pilot-runs/`, `.skillsrc` and `<run>/published`.
+In `--model-id` write the actual model ID of your CLI. Do not create a clone, worktree, sandbox, dependency, CI/cron, commit, push or PR.
 
-Вход шага не урезай и модель ради вместимости не меняй. `STEP_OVER_BUDGET`, `STEP_OUTPUT_LARGE`, `STEP_INPUT_UNRESOLVED` — не стоп: одна
-строка человеку (с `hint`), продолжай; ответ не дели и не переписывай. `MODEL_OUTPUT_TRUNCATED` — отказ: покажи человеку байты и подсказку, повтори стадию единственный раз по `fix`.
+Do not cut a step's input and do not switch the model to make it fit. `STEP_OVER_BUDGET`, `STEP_OUTPUT_LARGE`, `STEP_INPUT_UNRESOLVED` are not a stop: one
+line to the human (with `hint`), go on; do not split or rewrite the answer. `MODEL_OUTPUT_TRUNCATED` is a refusal: show the human the bytes and the hint, repeat the stage once only, by `fix`.
 
-## 0. Готовность
+## 0. Readiness
 
-`python -m tools.ready --project <abs> --docs <путь> [--docs …] --profile cases-only-v1 [--module <ID>]` только читает: покажи человеку таблицу, каждый `СТОП`
-исправь по его `fix` (команду установки зависимостей покажи человеку, сам не запускай); код 0 — можно начинать. Проект только с документами:
-один модуль `root` с корнем «.» и `stack.language: documents`, `.skillsrc` создаётся сам; режим только `cases-only-v1`, все шаги `manual_only`, итог `coverage: MANUAL_ONLY`, `accepted: false` — норма, не ошибка.
+`python -m tools.ready --project <abs> --docs <path> [--docs …] --profile cases-only-v1 [--module <ID>]` only reads: show the human the table, fix every `СТОП`
+by its `fix` (show the human the command that installs dependencies, do not run it yourself); code 0 — you may start. A project with documents only:
+one module `root` with the root `.` and `stack.language: documents`, `.skillsrc` is created by itself; the only mode is `cases-only-v1`, all steps `manual_only`, the outcome `coverage: MANUAL_ONLY`, `accepted: false` is the norm, not an error.
 
-## 1. Run и режим ревью
+## 1. Run and review mode
 
-Объём для OpenSpec — [openspec.md](references/openspec.md). Неопределённое требование остаётся в наборе; существенный пробел запрещает заявлять полный объём. `python -m tools.run_pipeline scan --project <abs> --docs <путь> [--docs …] --profile <профиль> [--module <ID>]` создаёт run (`run_id` — последняя строка вывода; файлы и события run руками не пиши).
-`SCAN_RUN_IN_PROGRESS` — продолжи по `fix`; `--new-run` — только по просьбе человека или если `fix` его называет. Незакрытый прогон, у которого файлы проекта изменились (дрейф), `scan` не продолжает: он начинает новый и называет прошлый в `abandoned_runs`.
-Документацию внешних зависимостей сам не ищи и в дерево проекта не сохраняй: бери то, что дал человек; не хватает — одна строка человеку.
+Scope for OpenSpec — [openspec.md](references/openspec.md). Each gap goes into `warnings` in four parts: the requirement and its source; the missing condition;
+the blocked checks; the question. An undefined requirement stays in the set; a substantial gap forbids claiming the full scope. `python -m tools.run_pipeline scan --project <abs> --docs <path> [--docs …] --profile <profile> [--module <ID>]` creates the run (`run_id` is the last line of the output; do not write the run's files and events by hand).
+`SCAN_RUN_IN_PROGRESS` — go on by `fix`; `--new-run` — only at the human's request or if `fix` names it. An open run whose project files changed (drift) is not continued by `scan`: it starts a new one and names the old one in `abandoned_runs`.
+Do not search for documentation of outside dependencies yourself and do not save it into the project tree: take what the human gave; if it is not enough — one line to the human.
 
-Ревью `INDEPENDENT`: свежий контекст обязателен (субагент или вызов без истории генерации). `SELF`: та же сессия, новую не требуем, независимым не называем. `review:isolation` в `ready` подсказывает, есть ли у CLI субагент.
-Если нет — перед первым ревью спроси человека дословно: «Ревьюер будет работать в той же сессии, без свежего контекста. Принять такой прогон с пометкой SELF?». После явного «да» — `prepare` ревью с `--fresh-context no --accept-self-review`
-(повторный scan не нужен; согласие одно на прогон, остальные ревью идут с `no` без флага). Без согласия отказ `INDEPENDENCE_UNVERIFIED`.
+`INDEPENDENT` review: a fresh context is required (a subagent or a call without the generation history). `SELF`: the same session, no new one is required, it is not called independent. `review:isolation` in `ready` hints whether the CLI has a subagent.
+If not — before the first review ask the human word for word: «Ревьюер будет работать в той же сессии, без свежего контекста. Принять такой прогон с пометкой SELF?». After an explicit «да» — `prepare` of the review with `--fresh-context no --accept-self-review`
+(no repeated scan is needed; one consent per run, the other reviews go with `no` without the flag). Without consent — the refusal `INDEPENDENCE_UNVERIFIED`.
 
-## 2. Модуль и контекст
+## 2. Module and context
 
-Модуль, `.skillsrc`, исключения, `--docs путь#Раздел`, повтор разметки — [scan.md](references/scan.md). Анализ неполон, пока обязательная зависимость не прочитана: область не расширяй самовольно, исключение файла по политике не доказывает его нерелевантность. Вход, зависимости и снимок после scan не меняются до закрытия попытки.
+Module, `.skillsrc`, exclusions, `--docs path#Section`, a repeat of the marking — [scan.md](references/scan.md). The analysis is incomplete while a required dependency is unread: do not widen the scope on your own; excluding a file by policy does not prove it irrelevant. The input, the dependencies and the snapshot after scan do not change until the attempt is closed.
 
-## 3. Canonical из пачек
+## 3. Canonical from batches
 
-Цикл каждой стадии модели: `python -m tools.api prepare --run-root <run> --stage <id>` печатает `read` — сводку файлов модели `files_summary` с `list_path` (один вызов размера
-на пачку; замер — `step_size`), `answer_slot` и `budget`; ответ модели — как есть в `answer_slot`; `python -m tools.api submit --run-root <run> --stage <id>` принимает его (`--dry-run` — только проверки; `--transport-attempts 2` —
-единственный повтор) и печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело. `<id>` с номером ревизии (`…:r1`) называет `status`. Роль стадии — `skills/<роль>/SKILL.md` (контракт и схема ответа — там): `context-marker`, `tc-generator`, `tc-reviewer`.
+The cycle of each model stage: `python -m tools.api prepare --run-root <run> --stage <id>` prints `read` — the summary of the model's files `files_summary` with `list_path` (one size call
+per batch; the measure — `step_size`), `answer_slot` and `budget`; the model's answer goes as is into `answer_slot`; `python -m tools.api submit --run-root <run> --stage <id>` accepts it (`--dry-run` — checks only; `--transport-attempts 2` —
+the only repeat) and prints the receipt (`result.path`, `content_digest`, `output_bytes`, `warning`), not the body. `<id>` with the revision number (`…:r1`) is named by `status`. The stage's role — `skills/<role>/SKILL.md` (the contract and the answer schema are there): `context-marker`, `tc-generator`, `tc-reviewer`.
 
-1. **Разметка.** `context-marker:baseline`, либо частями `:requirements`, затем `:batch-NNN`. Digest — `sha256` строки `list_path` (не `digest`; даёт и `build_context`; разбивка — для OpenSpec). Импорт — [import.md](references/import.md).
-2. **Пауза.** Пробелы без канала наблюдения, ожидаемого результата или доступа — `state: scope_pause` (`scope_gaps`). `prepare --stage scope` печатает пробелы и формы ответа.
-   Остановись: покажи человеку список, спроси «исключить или продолжать»; его слова — в `answer_slot`, затем `submit --stage scope`. Без ответа `submit --stage plan`
-   отказывает `SCOPE_PENDING`. Решение за человеком (исключить можно и без пробелов, до плана), другое — новый прогон; `scan --no-pause` просит человек, ты его не добавляешь.
-3. **План** (`--stage plan`). В `answer_slot` — `{"subject": "<название предмета проверки по-русски>"}` и ничего больше. `notes` и `context` вывода покажи человеку как есть.
-4. **Генератор.** Пачки по очереди. `prepare` получает `--model-id` и `--invocation-id` сессии, пишущей кейсы (от метки зависит независимость ревью); `prepare` один раз
-   печатает `nonce_note` — выполни как написано. **Фрагмент** — голый объект без конверта `artifacts`; образец —
-   [fragment-sample.md](references/fragment-sample.md), схема — `schemas/candidate-fragment.schema.json`; `context_receipt` и digest-поля ставит код, не пиши их. Пачка 2 и дальше: в `operation_capabilities` фрагмента — копии capabilities
-   прошлых пачек, которые он использует (из входа `prior_capabilities`, слово в слово). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Отказ — единственный повтор с `retry_prompt`.
-5. **Сборка.** Её делает `submit` последней пачки до записи ответа. `MANUAL_SHARE_HIGH` — скажи человеку: большинство шагов ручные, автотестов по ним не будет, контрольных ошибок ревью может не быть — смотри отчёт. Проверь
-   полноту по исходному документу; недоказанное — gap. Поля для человека — по-русски; условия работы над тестами (заглушки, режим запуска) в предусловия, шаги и ожидания не пишутся. Много номеров — разделы: [sections.md](references/sections.md).
+1. **Marking.** `context-marker:baseline`, or in parts `:requirements`, then `:batch-NNN`. Digest — the `sha256` of the `list_path` line (not `digest`; `build_context` gives it too; the split — for OpenSpec). Import — [import.md](references/import.md).
+2. **Pause.** Gaps without an observation channel, an expected result or access — `state: scope_pause` (`scope_gaps`). `prepare --stage scope` prints the gaps and the answer forms.
+   Stop: show the human the list, ask «исключить или продолжать»; the human's words go into `answer_slot`, then `submit --stage scope`. Without an answer `submit --stage plan`
+   refuses with `SCOPE_PENDING`. The decision is the human's (exclusion is possible without gaps too, before the plan), anything else is a new run; `scan --no-pause` is the human's request, you do not add it.
+3. **Plan** (`--stage plan`). In `answer_slot` — `{"subject": "<название предмета проверки по-русски>"}` and nothing more. Show the human `notes` and `context` of the output as is.
+4. **Generator.** Batches in turn. `prepare` gets `--model-id` and `--invocation-id` of the session that writes the cases (the independence of the review depends on the label); `prepare` prints
+   `nonce_note` once — do as it says. **The fragment** is a bare object without the `artifacts` envelope; the sample —
+   [fragment-sample.md](references/fragment-sample.md), the schema — `schemas/candidate-fragment.schema.json`; `context_receipt` and the digest fields are put by the code, do not write them. Batch 2 onward: the fragment's `operation_capabilities` carry copies of the capabilities
+   of past batches it uses (from the input `prior_capabilities`, word for word). The answer is a data file: build it in parts, case by case; write no scripts that import or call the package. A refusal — the only repeat, with `retry_prompt`.
+5. **Assembly.** It is done by `submit` of the last batch before the answer is written. `MANUAL_SHARE_HIGH` — tell the human: most steps are manual, there will be no autotests for them, the review may have no control errors — see the report. Check
+   the completeness against the source document; what is not proven is a gap. Fields for the human — in Russian; conditions of the work on tests (stubs, run mode) are not written into preconditions, steps and expectations. Many numbered items — sections: [sections.md](references/sections.md).
 
-## 4. Ревью
+## 4. Review
 
-1. `prepare --stage tc-reviewer:canonical --model-id <модель ревьюера> --invocation-id <метка ревьюера> --fresh-context yes|no` печатает `answer_slot`, `reviewer_view`, `for_human`. `yes` — метка обязательна
-   и не равна метке генератора; `no` — после согласия человека на SELF (§1).
-2. `tc-reviewer` в fresh invocation читает `reviewer_view` и пишет в `answer_slot`; файлы проекта сверх пакета — ключ `evidence: ["путь", …]` верхнего уровня (ключ вне схемы ответа: код вынимает его до проверки).
-   Карту канареек не читай и ревьюеру не показывай; роль, канарейки, бюджет — [review.md](references/review.md).
-3. `submit --stage tc-reviewer:canonical` кладёт набор в `<run>/published`. Ревью не довести до вердикта — `submit --abort REVIEW_CONTEXT_LIMIT` или `REVIEW_UNUSABLE`, затем `finish`.
+1. `prepare --stage tc-reviewer:canonical --model-id <reviewer model> --invocation-id <reviewer label> --fresh-context yes|no` prints `answer_slot`, `reviewer_view`, `for_human`. `yes` — the label is required
+   and differs from the generator's label; `no` — after the human's consent to SELF (§1).
+2. `tc-reviewer` in a fresh invocation reads `reviewer_view` and writes into `answer_slot`; project files beyond the package — the top-level key `evidence: ["path", …]` (a key outside the answer schema: the code takes it out before the check).
+   Do not read the canary map and do not show it to the reviewer; the role, canaries, budget — [review.md](references/review.md).
+3. `submit --stage tc-reviewer:canonical` puts the set into `<run>/published`. If the review cannot reach a verdict — `submit --abort REVIEW_CONTEXT_LIMIT` or `REVIEW_UNUSABLE`, then `finish`.
 
-По `outcome` ответа `submit` (его определяют BLOCKING к настоящим кейсам; замечание к контрольной ошибке кейс не отклоняет: «ТРЕБУЕТ ДОРАБОТКИ» при `ACCEPTED_WHOLE` возможен) скажи человеку: `ACCEPTED_WHOLE` — набор принят, `finish`. `PARTIAL` — принят частично: годные кейсы в наборе, отклонённые отдельно (`*.REJECTED-CASES.*`, в Zephyr не импортировать);
-если `status` называет `prepare tc-generator:rework-1` — один круг доработки (`tc-generator:rework-1`, затем `tc-reviewer:rework-1`, `--fresh-context` как у первого, при `no` без метки), `finish` до него не зови; не получается —
-`submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE`: набор выйдет без доработки, прогон идёт дальше. `REWORK` — отклонён целиком, `finish` закроет прогон без CSV. Без host isolation evidence ветку не принимай (`independence_unverified`).
+By the `outcome` of the `submit` answer (BLOCKING findings on the real cases decide it; a finding on a control error does not reject a case: «ТРЕБУЕТ ДОРАБОТКИ» with `ACCEPTED_WHOLE` is possible) tell the human: `ACCEPTED_WHOLE` — the set is accepted, `finish`. `PARTIAL` — accepted in part: the good cases are in the set, the rejected ones apart (`*.REJECTED-CASES.*`, do not import them into Zephyr);
+if `status` names `prepare tc-generator:rework-1` — one rework round (`tc-generator:rework-1`, then `tc-reviewer:rework-1`, `--fresh-context` as in the first, with `no` without a label), do not call `finish` before it; it does not work out —
+`submit --stage tc-generator:rework-1 --abort REWORK_UNUSABLE`: the set goes out without the rework, the run goes on. `REWORK` — rejected whole, `finish` closes the run without a CSV. Without host isolation evidence do not accept the branch (`independence_unverified`).
 
-## 5. Закрытие и отчёт
+## 5. Closing and report
 
-`python -m tools.run_pipeline finish --project <abs> --run <run_id>` проходит закрытие сам; `FINISH_FACT_UNDETERMINED` называет недостающее — сделай этот шаг. Цепочка
-не продолжается — `finish --abandon <код>` из `fix`. Результат — `verification=NOT_APPLICABLE`, `accepted=false`: в «только кейсах» это норма; человеку скажи `human_summary` как есть, «не принят» не говори. Итог с `FINALIZATION_INVALID` — прогон закрыт невалидным, `accepted=false`: передай человеку как есть, `finish` не повторяй и файлы не правь.
-Задан `projection.zephyr.template` — экспорт для Zephyr после закрытия: [import.md](references/import.md).
-В конце один раз `python -m tools.run_pipeline report --project <abs> --run <id>` — `report.md`, `report.json`, `questions-for-analyst.md`; назови пути. `review_notes` — число и путь одной строкой; кейсы не меняй, вердикт не пересматривай.
+`python -m tools.run_pipeline finish --project <abs> --run <run_id>` goes through the closing itself; `FINISH_FACT_UNDETERMINED` names what is missing — do that step. The chain
+does not go on — `finish --abandon <code>` from `fix`. The result — `verification=NOT_APPLICABLE`, `accepted=false`: in a cases-only run this is the norm; tell the human `human_summary` as is, do not say «не принят». Read every field; never make a PASS out of manual coverage. An outcome with `FINALIZATION_INVALID` — the run is closed invalid, `accepted=false`: pass it to the human as is, do not repeat `finish` and do not edit files.
+`projection.zephyr.template` is set — the export for Zephyr after the closing: [import.md](references/import.md).
+At the end, once, `python -m tools.run_pipeline report --project <abs> --run <id>` — `report.md`, `report.json`, `questions-for-analyst.md`; name the paths. `review_notes` — the number and the path in one line; do not change the cases, do not revise the verdict.
 
-## Resume и дрейф
+## Resume and drift
 
-Контекст занят больше чем наполовину — после завершённого шага попроси человека `/clear` и «продолжай test-skills <run_id>»; затем `python -m tools.run_pipeline status --project <abs> --run <run_id>`:
-продолжай с `state` и `next` (`waiting_for: model` — ответ на запрос из `pending_request_path`; `human` — жди); `recovery` — скажи человеку. Подтверждённое журналом не повторяй. `state: left` (`RUN_LEFT`) —
-`finish --abandon LEFT_BEFORE_REVIEW`, затем `scan_command`. `status: drift` — передай человеку `drift.changed` и `drift.fix`, файлы не правь, прогон сам не начинай. После `finish` с `next_run` — команда `next_run.command` как есть.
+The context is more than half full — after a finished step ask the human for `/clear` and «продолжай test-skills <run_id>»; then `python -m tools.run_pipeline status --project <abs> --run <run_id>`:
+go on from `state` and `next` (`waiting_for: model` — the answer to the request from `pending_request_path`; `human` — wait); `recovery` — tell the human. Do not repeat what the journal confirms. `state: left` (`RUN_LEFT`) —
+`finish --abandon LEFT_BEFORE_REVIEW`, then `scan_command`. `status: drift` — pass the human `drift.changed` and `drift.fix`, do not edit files, do not start a run yourself. After `finish` with `next_run` — the command `next_run.command` as is.
 
 ## Stop conditions
 
-Остановись без guess: invalid/unsupported version, ambiguous module, unsafe path, required invention, unavailable tool/model, schema/semantic/provenance failure, secret exposure,
-baseline drift, stale digest/readback, unproved reviewer isolation, выход за authorized scope. Сохрани factual partial evidence; `implemented_unverified` за verified readiness не выдавай.
+Stop without a guess: invalid/unsupported version, ambiguous module, unsafe path, required invention, unavailable tool/model, schema/semantic/provenance failure, secret exposure,
+baseline drift, stale digest/readback, unproved reviewer isolation, going beyond the authorized scope. Keep the factual partial evidence; do not pass `implemented_unverified` off as verified readiness.

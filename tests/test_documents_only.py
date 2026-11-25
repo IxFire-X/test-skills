@@ -122,9 +122,9 @@ def test_the_orchestrate_skill_describes_the_documents_mode_as_the_code_does() -
     """FaT-DS: the SKILL names the module, the profile, the refusal and the expected outcome — each one the code's own."""
     root = Path(__file__).resolve().parents[1]
     skill = (root / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    start = skill.index("Проект только с документами:")
+    start = skill.index("A project with documents only:")
     paragraph = skill[start:skill.index("\n\n", start)]
-    for fact in ("`root`", "«.»", "`stack.language: documents`", "`cases-only-v1`", "`manual_only`",
+    for fact in ("`root`", "the root `.`", "`stack.language: documents`", "`cases-only-v1`", "`manual_only`",
                  "`coverage: MANUAL_ONLY`", "`accepted: false`"):
         assert fact in paragraph, fact
     # PT: the refusal of local-pilot-v1 is mode B — its text is in the development build's reference, not in the delivered SKILL

@@ -1,22 +1,22 @@
-# Ревью: свежая сессия, субагент, канарейки, бюджет
+# Review: fresh session, subagent, canaries, budget
 
-Стадия — §4 `skills/orchestrate/SKILL.md`, согласие на ревью в той же сессии (SELF) — его §1; флаги — `python -m tools.api prepare --help`, `submit --help`.
+The stage — §4 of `skills/orchestrate/SKILL.md`, the consent to a review in the same session (SELF) — its §1; the flags — `python -m tools.api prepare --help`, `submit --help`.
 
-**Свежая сессия.** `--model-id` ревьюера — метка для отчёта, как у генератора; повтор `prepare` — с той же. `prepare --stage tc-reviewer:canonical` печатает `for_human` — инструкцию человеку (новая сессия или `/clear`, вставить «проведи ревью test-skills
-<run_id>», ответ ревьюера — файл в `answer_slot`): покажи как есть и жди файла, затем `submit`. Ревьюер — субагент (ниже): `for_human` человеку не показывай и файла не жди, субагент пишет ответ в `answer_slot` сам. Контрольные ошибки код вставил в вид ревьюера:
-карту канареек не читай и ревьюеру не показывай. Ревьюер кейсов называет в `codeword_seen` любое слово из задач генератора, что есть в его контексте (при SELF — слово любой пачки), иначе `null`; `submit` сообщает `review_canaries` и
-`codeword`. Отказ `REVIEW_ONLY_CANARY_FIXES` — правки держатся на контрольных ошибках: ревьюер оставляет их находками `INFO`; `REVIEW_CANARY_MISMATCH` — свои файлы не подставляй, повтори `prepare`. «Ревью слабое: пропущено N из M» и
-`REVIEW_UNRELIABLE` — человеку перечитать набор самому.
+**Fresh session.** The reviewer's `--model-id` is a label for the report, as for the generator; a repeated `prepare` — with the same one. `prepare --stage tc-reviewer:canonical` prints `for_human` — the instruction to the human (a new session or `/clear`, paste «проведи ревью test-skills
+<run_id>», the reviewer's answer is a file in `answer_slot`): show it as is and wait for the file, then `submit`. If the reviewer is a subagent (below): do not show `for_human` to the human and do not wait for a file, the subagent writes the answer into `answer_slot` itself. The code put the control errors into the reviewer's view:
+do not read the canary map and do not show it to the reviewer. The case reviewer names in `codeword_seen` any word from the generator's tasks that is in its context (with SELF — the word of any batch), otherwise `null`; `submit` reports `review_canaries` and
+`codeword`. The refusal `REVIEW_ONLY_CANARY_FIXES` — the edits rest on control errors: the reviewer leaves them as `INFO` findings; `REVIEW_CANARY_MISMATCH` — do not substitute your own files, repeat `prepare`. «Ревью слабое: пропущено N из M» and
+`REVIEW_UNRELIABLE` — tell the human to reread the set themself.
 
-**Ревьюер-субагент.** В задаче назови `answer_slot` и `reviewer_view` (вид кейсов) и разреши ему читать файлы проекта. Не давай: диалог и reasoning генератора, карту канареек,
-`nonce`, чужие прогоны. Команды пакета из роли ревьюера (кейсов — `python -m tools.review_edits`) субагенту разрешены: они только читают и печатают; других не давай (вид строит `prepare`). Файлы прогона общим запретом не закрывай: проверка происхождения обязательна; но `incoming/tc-generator-*` (вывод генератора) ему не давай. Файлы проекта сверх пакета — ключ `evidence: ["путь", …]`
-верхнего уровня файла ответа (пути из inventory попытки; не помещаются в бюджет — `REVIEW_CONTEXT_LIMIT`). Схема ответа этого ключа не перечисляет: код вынимает его до проверки схемой, ключ не убирай. Ключ — только в ревью кейсов (`tc-reviewer:canonical`); в ревью доработки и автотестов его нет, схема его отклонит. Файлов сверх пакета не читал — ключ не пиши: пустой список отклоняется.
+**Reviewer subagent.** In the task name `answer_slot` and `reviewer_view` (the view of the cases) and allow it to read the project files. Do not give it: the generator's dialogue and reasoning, the canary map,
+`nonce`, other runs. The package commands of the reviewer role (for cases — `python -m tools.review_edits`) are allowed to the subagent: they only read and print; give no others (`prepare` builds the view). Do not close the run files with a blanket ban: the provenance check is required; but do not give it `incoming/tc-generator-*` (the generator's output). Project files beyond the package — the top-level key `evidence: ["path", …]`
+of the answer file (paths from the attempt's inventory; they do not fit into the budget — `REVIEW_CONTEXT_LIMIT`). The answer schema does not list this key: the code takes it out before the schema check, do not remove the key. The key is only in the case review (`tc-reviewer:canonical`); the rework and autotest reviews have none, their schema rejects it. No files read beyond the package — do not write the key: an empty list is rejected.
 
-Одна logical stage invocation: `transport_attempts` 1 или 2; повтор — у каждой model stage, только при ошибке схемы или валидации ответа,
-вход проверь тем же `step_size`; третьей попытки нет — стоп. В сессии допустимы нуль и больше C-lite `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED`;
-запрещены per-batch/hierarchical reviewers, вторая сессия и больше одного authoritative verdict. Не хватает бюджета на evidence — `submit --abort REVIEW_CONTEXT_LIMIT`;
-ответ дважды не прошёл проверку, а сессия ждёт вердикта — то же с `REVIEW_UNUSABLE`; затем `finish`.
+One logical stage invocation: `transport_attempts` 1 or 2; a repeat — for each model stage, only on a schema or validation error of the answer,
+check the input with the same `step_size`; there is no third attempt — stop. In the session zero or more C-lite `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` are allowed;
+per-batch/hierarchical reviewers, a second session and more than one authoritative verdict are forbidden. The budget is not enough for the evidence — `submit --abort REVIEW_CONTEXT_LIMIT`;
+the answer failed the check twice and the session waits for a verdict — the same with `REVIEW_UNUSABLE`; then `finish`.
 
-**Исход и вердикт.** Исход (`ACCEPTED_WHOLE`/`PARTIAL`/`REWORK`) определяют BLOCKING-замечания к настоящим кейсам набора. Замечание к контрольной ошибке (канарейке) кейс не отклоняет, поэтому вердикт ревьюера «ТРЕБУЕТ ДОРАБОТКИ» при исходе `ACCEPTED_WHOLE` совместим: это не твоя ошибка и не повод повторять ревью.
+**Outcome and verdict.** The outcome (`ACCEPTED_WHOLE`/`PARTIAL`/`REWORK`) is decided by the BLOCKING findings on the real cases of the set. A finding on a control error (a canary) does not reject a case, so the reviewer's verdict «ТРЕБУЕТ ДОРАБОТКИ» with the outcome `ACCEPTED_WHOLE` is consistent: it is not your error and no reason to repeat the review.
 
-**SELF заранее.** Согласие человека на ревью в той же сессии можно дать до `prepare` ревью: `scan --accept-self-review` (в выводе — `details.self_review_scan`) или `review: {"self": true}` в `.skillsrc` (его ставит человек).
+**SELF in advance.** The human's consent to a review in the same session can be given before `prepare` of the review: `scan --accept-self-review` (in the output — `details.self_review_scan`) or `review: {"self": true}` in `.skillsrc` (the human sets it).

@@ -146,7 +146,7 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
         target = copy / f"sample-{name}.schema.json"
         target.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"schemas/sample-{name}.schema.json",
                                       "$ref": f"canonical-test-document.schema.json#/$defs/{definition}"}), encoding="utf-8")
-        return schema_diagnostics(json.loads(json.dumps(value, ensure_ascii=False).replace("<ns>", "B1").replace("<хвост case_id>", "B1-001")), target, tmp_path)
+        return schema_diagnostics(json.loads(json.dumps(value, ensure_ascii=False).replace("<ns>", "B1").replace("<case_id tail>", "B1-001")), target, tmp_path)
 
     assert valid("result", "capability_member", results[0]) == []
     assert [valid(f"assertion-{index}", "assertion", row) for index, row in enumerate(assertions)] == [[], [], []]
@@ -155,7 +155,7 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
     assert redirect["operator"] == "equals" and redirect["expected"]["kind"] == "step_output" and redirect["actual"]["name"] == "redirectId"
     assert field["operator"] == "equals" and field["expected"] == {"kind": "literal", "value": "telephone:typeMismatch"}
     text = SAMPLE.read_text(encoding="utf-8")
-    assert "BLOCKING" in text and "manual_only" in text and "автоматизации" not in text.split("## Три проверки", 1)[1].split("## Как собрать", 1)[0]
+    assert "BLOCKING" in text and "manual_only" in text and "automation" not in text.split("## Three checks", 1)[1].split("## How to build", 1)[0].replace("`automation_blockers`", "")
 
 
 # ---- before the verdict ----------------------------------------------------------------------------------------------------
@@ -186,7 +186,7 @@ def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_
 # ---- one wording about the agent's own scripts ---------------------------------------------------------------------------------
 
 def test_the_three_texts_say_the_same_about_scripts_and_none_contradicts() -> None:
-    sentence = "Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши."
+    sentence = "The answer is a data file: build it in parts, case by case; write no scripts that import or call the package."
     skill = " ".join((ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8").split())
     sample = " ".join(SAMPLE.read_text(encoding="utf-8").split())
     contract = " ".join((ROOT / "skills" / "tc-generator" / "references" / "case-generation-contract.md").read_text(encoding="utf-8").split())

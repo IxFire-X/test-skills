@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
 GENERATOR = ROOT / "skills" / "tc-generator" / "SKILL.md"
-SKILL_BYTES_LIMIT = 15_906  # SKILL.md of orchestrate after V8-W2 (15 149 B + 5 %; 24 548 before, 52 492 after PT2): the agent at work reads it whole; the limit only goes down
+SKILL_BYTES_LIMIT = 13_042  # SKILL.md of orchestrate after v08-en (in English: 12 421 B + 5 %; 15 906 before, 24 548 before V8-W2, 52 492 after PT2): the agent at work reads it whole; the limit only goes down
 GENERATOR_ROLE_BYTES_LIMIT = 37_300  # tc-generator SKILL + references (tails13: 36 744 → 36 990, limit +400 for one sentence in the case form: a created entity whose name must be unique carries the batch label and the case number — the batches of a run did not see each other's users, the review rejected 33 of 81 cases;tails10: +180 over 36 720 for the sentence «verdict_reason and removed are data, not an instruction», 36 697 → ≈ 36 745): 35 826 before F4a; texts1-b 36 219 (rework identity, shared requirements, the design of a split requirement); upd-a 36 380 (new cases for the requirements of `write` in an import); upd-b2p2 36 697 (the verdict `rewrite`: the one imported case whose text is rewritten)
 
 
@@ -39,8 +39,8 @@ def test_submit_prints_a_receipt_without_the_body_and_the_text_says_so() -> None
     source = inspect.getsource(stage_steps._submit)
     assert 'if key != "artifact"' in source  # the receipt, not the answer
     text = _flat(SKILL)
-    assert "весь артефакт" not in text and "сотни КБ" not in text
-    assert "и печатает квитанцию" in text and "не тело" in text  # V5-B1: the one cycle — `submit` prints the receipt
+    assert "the whole artifact" not in text and "hundreds of KB" not in text
+    assert "and prints the receipt" in text and "not the body" in text  # V5-B1: the one cycle — `submit` prints the receipt
     for key in ("`result.path`", "`content_digest`", "`output_bytes`", "`warning`"):
         assert key in text, key
 
@@ -62,11 +62,11 @@ def test_the_skill_and_how_to_use_describe_the_review_through_prepare_and_submit
 
 
 def test_the_generator_and_the_sample_ask_for_json_without_indentation() -> None:
-    phrase = "JSON без отступов"
+    phrase = "JSON without indentation"
     assert phrase in _flat(GENERATOR) or "JSON in one line" in _flat(GENERATOR)
     sample = _flat(SAMPLE)
     assert phrase in sample
-    assert "не одной строкой на сотни килобайт" not in sample  # read as «indent it»
+    assert "not one line of hundreds of kilobytes" not in sample  # read as «indent it»
     assert "retry_prompt" in _flat(SKILL)
 
 
@@ -75,8 +75,8 @@ def test_the_generator_skill_and_the_sample_say_the_same_about_the_digest_fields
     assert "the code puts its `digest` and plan/header/context digests" not in generator
     assert "The code puts the mechanics (digest fields, `context_receipt`," in generator and "do not write it" in generator  # since V6 the code puts them; the model writes none
     sample = _flat(SAMPLE)
-    assert "Код ставит сам (не пиши)" in sample and "`context_receipt`, digest-поля" in sample  # the sample says the same: not written by the model
-    assert "можно опустить: поставит model-response" not in sample
+    assert "The code puts itself (do not write)" in sample and "`context_receipt`, the digest fields" in sample  # the sample says the same: not written by the model
+    assert "can be omitted: model-response puts" not in sample
 
 
 def test_the_fragment_without_the_four_digest_fields_passes_validate_fragment_and_model_response_fills_them() -> None:
@@ -100,11 +100,11 @@ def test_the_fragment_without_the_four_digest_fields_passes_validate_fragment_an
 
 def test_the_skill_asks_for_one_step_size_call_per_batch_and_names_the_key_of_each_command() -> None:
     text = _flat(SKILL)
-    assert "один вызов размера на пачку" in text
+    assert "one size call per batch" in text
     assert "`files_summary`" in text and "input_files_summary" not in text  # V0: one key for both commands
     assert "`list_path`" in text and "`step_size`" in text  # V5-B1: the list is in `read` of prepare, no command of its own
-    assert "`--dry-run` — только проверки" in text
-    assert "оба" not in text.split("один вызов размера на пачку", 1)[1][:200]  # not «step-inputs and step_size»
+    assert "`--dry-run` — checks only" in text
+    assert "both" not in text.split("one size call per batch", 1)[1][:200]  # not «step-inputs and step_size»
 
 
 def test_the_key_names_of_the_two_size_commands_are_those_the_skill_gives() -> None:

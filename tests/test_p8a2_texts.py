@@ -54,11 +54,12 @@ def test_every_skill_declares_its_permissions_in_one_key_after_name_and_descript
 def test_the_declared_network_of_every_skill_is_none() -> None:
     for path in SKILLS:
         permissions = frontmatter(path)["permissions"]
+        assert permissions["network"] == "none" and permissions["external_delivery"] == "none", path
         if path.parent.name != "orchestrate":
-            assert permissions["network"] == "none" and permissions["external_delivery"] == "none" and permissions["dependencies"] == "none", path
+            assert permissions["dependencies"] == "none", path
         else:
-            assert permissions["network"] == "нет" and permissions["external_delivery"] == "нет" and "pip агент не запускает" in permissions["dependencies"]
-            assert "каталог публикации: <run>/published" in permissions["write"]
+            assert "the agent does not run pip" in permissions["dependencies"]
+            assert "publication directory: <run>/published" in permissions["write"]
 
 
 ROLE_BLOCK_LIMIT = 230  # bytes: a role file is counted whole into the step input (step_size), the campaign budget test has ~300 B of slack
@@ -77,8 +78,8 @@ def test_the_permissions_block_of_a_role_stays_small_because_the_whole_file_is_m
 
 def test_the_skill_does_not_send_the_agent_for_outside_documentation() -> None:
     text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    assert "retrieval" not in text and "выдержки" not in text and "узкие выдержк" not in text
-    assert "Документацию внешних зависимостей сам не ищи и в дерево проекта не сохраняй" in text
+    assert "retrieval" not in text and "excerpts" not in text
+    assert "Do not search for documentation of outside dependencies yourself and do not save it into the project tree" in text
 
 
 def test_a_secret_in_a_csv_gets_a_placeholder_not_an_environment_variable() -> None:

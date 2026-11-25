@@ -44,4 +44,4 @@ def test_every_cases_only_verb_of_next_is_named_in_the_map() -> None:
 
 def test_the_arguments_are_left_to_help_and_the_state_of_status() -> None:
     text = " ".join(_text().split())
-    assert "`python -m tools.api <команда> --help`" in text and "`state`" in text and "`next`" in text and "`next_step`" not in text.replace("`next_step` вывода", "")
+    assert "`python -m tools.api <command> --help`" in text and "`state`" in text and "`next`" in text and "`next_step`" not in text.replace("`next_step` of the output", "")

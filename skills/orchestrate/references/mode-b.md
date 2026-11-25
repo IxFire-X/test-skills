@@ -1,65 +1,65 @@
-# Режим Б — `local-pilot-v1` (в поставках с режимом Б)
+# Mode B — `local-pilot-v1` (in deliveries with mode B)
 
-Маршрут: готовность → кейсы и ревью → автотесты → `materialize` → запуск человеком → `ingest` → закрытие. Читай вместе с `SKILL.md`; роли — `tc-to-autotest` и `autotest-reviewer`.
-Профиль `local-pilot-v1` разрешает только явный запрос человека на полный pipeline в этом прогоне; папка, scan или запрос тест-кейсов его не разрешают. `accepted=true` — только после live PASS всех кейсов.
-Запрос «Напиши автотесты по кейсам изменения <имя> из <csv>» с разрешением писать в тестовый корень — это он: `ready` и `scan` с `--cases <csv> --profile local-pilot-v1`, без `--docs` (источник — кейсы команды, требования строит код из CSV).
+The route: readiness → cases and review → autotests → `materialize` → the run by the human → `ingest` → closing. Read it together with `SKILL.md`; the roles — `tc-to-autotest` and `autotest-reviewer`.
+The profile `local-pilot-v1` is allowed only by an explicit request of the human for the full pipeline in this run; a folder, a scan or a request for test cases does not allow it. `accepted=true` — only after a live PASS of all cases.
+The request «Напиши автотесты по кейсам изменения <имя> из <csv>» with the permission to write into the test root is this profile: `ready` and `scan` with `--cases <csv> --profile local-pilot-v1`, without `--docs` (the source is the team's cases, the code builds the requirements from the CSV).
 
-## 1. Готовность
+## 1. Readiness
 
-- Предупреждения блока «Нужно только для исполнения» не останавливают: скажи человеку один раз «сборка не готова: <message>; можно исправить сейчас (<fix>) до первой задачи модели, иначе этот прогон — только кейсы» и иди дальше.
-- Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сборщик из сети. Maven и wrapper автоматически не устанавливай. Переключение `.skillsrc` на системный `mvn` (`execution:skillsrc-switch`) — только командой из `fix`, с подтверждения человека.
-- `scan` вернул `requested_policy_profile: local-pilot-v1` и `policy_profile: cases-only-v1` — прогон понижен: передай человеку `execution_skipped.reason` и `fix`; после исправления сборки нужен новый прогон. Проект только с документами: `NO_BUILD_MODULE`.
-- Модуль только с тестами, приложение рядом: `ready` спросит `module:<id>:paths.context`; ответ — каталог приложения из `options` (пакет его только читает). Приложение пакет не поднимает: стенд поднимает человек до запуска команды из `materialize`,
-  адрес — в переменной окружения, имя которой стоит в `.skillsrc` у модуля (`service_url_env`); пакет стенд не опрашивает. Без неё прогон понижается до кейсов.
-- Поздно найденный undeclared execution input в baseline не добавляй: закрой ветку как `NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение — новый scan того же запроса.
+- Warnings of the block «Нужно только для исполнения» do not stop: tell the human once «сборка не готова: <message>; можно исправить сейчас (<fix>) до первой задачи модели, иначе этот прогон — только кейсы» and go on.
+- Do not create a wrapper (`mvnw`, `gradlew`): it downloads the build tool from the network. Do not install Maven or a wrapper automatically. Switching `.skillsrc` to the system `mvn` (`execution:skillsrc-switch`) — only by the command from `fix`, on the human's confirmation.
+- `scan` returned `requested_policy_profile: local-pilot-v1` and `policy_profile: cases-only-v1` — the run is downgraded: pass the human `execution_skipped.reason` and `fix`; after the build is fixed a new run is needed. A project with documents only: `NO_BUILD_MODULE`.
+- A module with tests only, the application next to it: `ready` asks `module:<id>:paths.context`; the answer is the application directory from `options` (the package only reads it). The package does not start the application: the human starts the stand before running the command from `materialize`,
+  the address is in an environment variable whose name stands in `.skillsrc` at the module (`service_url_env`); the package does not poll the stand. Without it the run is downgraded to cases.
+- Do not add an undeclared execution input found late to the baseline: close the branch as `NOT_RUNNABLE/BASELINE_INCOMPLETE`; the continuation is a new scan of the same request.
 
-## 2. Кейсы и ревью
+## 2. Cases and review
 
-Те же стадии, что в `SKILL.md`. Отказ ревью или abort до вердикта — автоматизацию не вызывай: закрой ветку через `finish` (`materialization=execution=NOT_APPLICABLE`, `accepted=false`). `existing-tests.md` в `read` пачки генератора — дай его генератору вместе со входами.
+The same stages as in `SKILL.md`. A refusal of the review or an abort before the verdict — do not call the automation: close the branch by `finish` (`materialization=execution=NOT_APPLICABLE`, `accepted=false`). `existing-tests.md` in `read` of a generator batch — give it to the generator together with the inputs.
 
-## 3. Автотесты
+## 3. Autotests
 
-Тем же циклом, что кейсы: `status` → `prepare --run-root <run> --stage <id>` → ответ в `answer_slot` → `submit` → `status`; `<id>` с номером ревизии (`tc-to-autotest:r1`) называет `status`.
+The same cycle as for cases: `status` → `prepare --run-root <run> --stage <id>` → the answer into `answer_slot` → `submit` → `status`; `<id>` with the revision number (`tc-to-autotest:r1`) is named by `status`.
 
-1. `prepare --stage tc-to-autotest:rN` печатает `read`, `answer_slot`, `budget`; в `read` — `java_level` (уровень Java модуля), `junit_params` (есть ли junit-jupiter-params для `param_group`) и `occupied_paths` (занятые пути — новые тесты называй иначе): передай их генератору; `files` содержит `pom.xml`/`build.gradle*` модуля (основание `файл сборки`) и файл `окружение тестов` (импорты тестов проекта) — передай их генератору и ревьюеру автотестов. В слот — полный артефакт: `source.document_id` и `source.revision` пишет модель — как в виде набора из `read`;
-   `source_digest`, `effective_bundle_receipt_digest`, `content_digest` и digest предшественника ставит `submit`. `submit --dry-run` проверяет ответ и совместимость с раннером модуля до записи; отказ ничего не пишет — исправь слот и повтори (`--transport-attempts 2` — единственный повтор).
-2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <метка>]`: граница, `REVIEW_REQUESTED` и запрос — один вызов (повтор довершает оборванное). `yes` — ревьюер отдельной сессией, `--invocation-id` — его метка: не метка генератора и,
-   для r2, не метка ревью r1. `no` — та же сессия, только после согласия человека на SELF (§1 `SKILL.md`), метку не называй. В выводе `read`, `answer_slot`, `for_human`, `generator_checks`. Digest-поля ответа ревьюера ставит `submit` до проверки схемой (она требует их в готовом документе) — ключи опусти; `codeword_seen` у ревьюера автотестов нет. Субагенту разреши `python -m tools.autotest_hints` из роли ревьюера: читает и печатает.
-   Разрешены initial + одна complete correction.
-3. После ревью `status` называет `materialize` (принято) или, после `AUTO_FIX_APPLIED` либо `ТРЕБУЕТ ДОРАБОТКИ` ревью r1, `prepare --stage tc-to-autotest:r2` — одна коррекция по замечаниям ревью r1, затем ревью r2 (метка и `--fresh-context` — п. 2); после ревью r2 и после `materialize` третьей ревизии нет. Не берёшься за r2 — `finish` закрывает попытку (`AUTOMATION_REJECTED`). Взял r2 и не довёл — `finish --abandon` с кодом из `fix`.
+1. `prepare --stage tc-to-autotest:rN` prints `read`, `answer_slot`, `budget`; in `read` — `java_level` (the Java level of the module), `junit_params` (whether junit-jupiter-params is there for `param_group`) and `occupied_paths` (occupied paths — name new tests otherwise): pass them to the generator; `files` holds `pom.xml`/`build.gradle*` of the module (the basis `файл сборки`) and the file `окружение тестов` (the imports of the project's tests) — pass them to the generator and to the autotest reviewer. Into the slot — the full artifact: `source.document_id` and `source.revision` are written by the model — as in the view of the set from `read`;
+   `source_digest`, `effective_bundle_receipt_digest`, `content_digest` and the predecessor's digest are put by `submit`. `submit --dry-run` checks the answer and its compatibility with the module's runner before writing; a refusal writes nothing — fix the slot and repeat (`--transport-attempts 2` — the only repeat).
+2. `prepare --stage autotest-reviewer:rN --fresh-context yes|no [--invocation-id <label>]`: the boundary, `REVIEW_REQUESTED` and the request are one call (a repeat completes what was cut off). `yes` — the reviewer is a separate session, `--invocation-id` is its label: not the generator's label and,
+   for r2, not the label of the r1 review. `no` — the same session, only after the human's consent to SELF (§1 of `SKILL.md`), name no label. The output has `read`, `answer_slot`, `for_human`, `generator_checks`. The digest fields of the reviewer's answer are put by `submit` before the schema check (it requires them in the finished document) — leave the keys out; the autotest reviewer has no `codeword_seen`. Allow the subagent `python -m tools.autotest_hints` from the reviewer role: it reads and prints.
+   Allowed: initial + one complete correction.
+3. After the review `status` names `materialize` (accepted) or, after `AUTO_FIX_APPLIED` or `ТРЕБУЕТ ДОРАБОТКИ` of the r1 review, `prepare --stage tc-to-autotest:r2` — one correction by the findings of the r1 review, then the r2 review (label and `--fresh-context` — item 2); after the r2 review and after `materialize` there is no third revision. You do not take up r2 — `finish` closes the attempt (`AUTOMATION_REJECTED`). You took r2 and did not finish it — `finish --abandon` with the code from `fix`.
 
 ## 4. `materialize`
 
-После принятого static review сразу вызывай `materialize` (нет принятого ревью — `EXECUTION_NOT_PREPARED`). Он сам публикует execution-inputs и материализует принятую автоматизацию в проект, строит закрытый запрос исполнения и печатает команду для **человека**.
-Команду из `materialize` сам не выполняй ни в какой форме (`command`, `command_text`, `command_text_powershell`). Покажи человеку `files_to_review`, `note`, `service_note` и обе формы команды как есть: `command_text` — для cmd и sh,
-`command_text_powershell` — для PowerShell. Путь с `% ^ " ! $` в команду не попадает (`COMMAND_NOT_PRINTABLE`, до записи тестов): проект переносят в другой каталог и начинают прогон заново (`scan --new-run`).
+After an accepted static review call `materialize` at once (no accepted review — `EXECUTION_NOT_PREPARED`). It publishes the execution-inputs itself and materializes the accepted automation into the project, builds the closed execution request and prints the command for the **human**.
+Do not run the command from `materialize` yourself in any form (`command`, `command_text`, `command_text_powershell`). Show the human `files_to_review`, `note`, `service_note` and both forms of the command as is: `command_text` — for cmd and sh,
+`command_text_powershell` — for PowerShell. A path with `% ^ " ! $` does not get into the command (`COMMAND_NOT_PRINTABLE`, before the tests are written): the project is moved to another directory and the run is started anew (`scan --new-run`).
 
-## 5. Запуск человеком и `ingest`
+## 5. The run by the human and `ingest`
 
-Сборку и тесты запускает человек напечатанной командой — один раз, точные reviewed targets; стенд поднимает человек. Maven `test` читает Surefire: проект требует Failsafe/integration-test lifecycle — этот маршрут недостаточен, сохрани блокер.
-Дождись слов человека, что он просмотрел файлы, запустил команду и где отчёты, — только тогда `ingest`. Тесты после `materialize` не правь (`INGEST_TESTS_CHANGED`; вернуть — `materialize --restore`) и после runtime `FAIL` не исправляй.
+The human runs the build and the tests with the printed command — once, the exact reviewed targets; the human starts the stand. Maven `test` reads Surefire: the project needs the Failsafe/integration-test lifecycle — this route is not enough, keep the blocker.
+Wait for the human's words that they reviewed the files, ran the command and where the reports are — only then `ingest`. Do not edit the tests after `materialize` (`INGEST_TESTS_CHANGED`; to restore — `materialize --restore`) and do not fix them after a runtime `FAIL`.
 
 ```powershell
 python -m tools.run_pipeline materialize --project "$project" --module "$moduleId" --run "$runId"
 python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId"
 ```
 
-`ingest` берёт отчёты по `report_location` из `materialize`: `--reports` не нужен, с ним — абсолютный путь в модуле или `<run>/incoming/`. Он сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. Прерванный `ingest` повторяют теми же отчётами.
-Нет отчёта — `UNKNOWN`; timeout точного теста по отчёту фреймворка — `FAIL`. После `EXECUTION_STARTED` прерывание автоматически не перезапускай; продолжение — новый scan.
+`ingest` takes the reports by `report_location` from `materialize`: `--reports` is not needed, with it — an absolute path in the module or `<run>/incoming/`. It checks the reports against the attempt and closes it; the build did not reach the tests — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. An interrupted `ingest` is repeated with the same reports.
+No report — `UNKNOWN`; a timeout of an exact test by the framework's report — `FAIL`. After `EXECUTION_STARTED` do not restart an interruption automatically; the continuation is a new scan.
 
-## 6. Закрытие
+## 6. Closing
 
-`ingest` сам проходит закрытие; повторный вызов возвращает тот же итог. `finish` не вовремя — `FINISH_FACT_UNDETERMINED` с недостающим: сделай этот шаг. Цепочка автоматизации не продолжается — `finish --abandon <код>` из `fix`. Итог с `FINALIZATION_INVALID` — прогон закрыт невалидным, `accepted=false`: передай как есть, `finish` не повторяй, файлы не правь.
-Частичная автоматизация (кейсы с блокерами канона ручные): `ingest` печатает `automation_split` — передай человеку его `summary` как есть; итог `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
+`ingest` goes through the closing itself; a repeated call returns the same outcome. `finish` at the wrong time — `FINISH_FACT_UNDETERMINED` with what is missing: do that step. The automation chain does not go on — `finish --abandon <code>` from `fix`. An outcome with `FINALIZATION_INVALID` — the run is closed invalid, `accepted=false`: pass it as is, do not repeat `finish`, do not edit files.
+Partial automation (cases with canon blockers are manual): `ingest` prints `automation_split` — pass the human its `summary` as is; the outcome is `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
 
-Судьба файлов (проверяет код): `PASS` — `RETAINED`; `FAIL` — находки: упавшие методы остаются активными и получают метку `test-skills-finding`, прошедшие остаются; упавшие не сопоставить — очистка с `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — очистка byte-identical файлов пакета;
-`UNKNOWN` — очистка запрещена. После `FAIL` покажи человеку список `quarantine` (файл, метод, ref, kind) и строку `quarantine_unresolved` как есть; метки не снимай, тесты не чини. `scan --disposition-policy cleanup` — только по просьбе человека.
-`style_checks_skipped` и `format_hint` передай человеку как есть; файлы не форматируй.
+The fate of the files (the code checks it): `PASS` — `RETAINED`; `FAIL` — findings: the failed methods stay active and get the mark `test-skills-finding`, the passed ones stay; failed ones that cannot be matched — a cleanup with `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — a cleanup of the byte-identical files of the package;
+`UNKNOWN` — cleanup is forbidden. After `FAIL` show the human the list `quarantine` (file, method, ref, kind) and the line `quarantine_unresolved` as is; do not remove the marks, do not fix the tests. `scan --disposition-policy cleanup` — only at the human's request.
+Pass `style_checks_skipped` and `format_hint` to the human as is; do not format the files.
 
-## 7. Итог прогона
+## 7. The outcome of the run
 
-В `report.md` стоит строка «Уровень автотестов: …» — `in-process` или `stand` (по `service_url_env`): передай её человеку как есть. Уровень выведен, а не задан (`TEST_LEVEL_DERIVED`) — скажи, что строка `test.level: <уровень>` в блоке `test` модуля `.skillsrc` делает его явным; файл правит человек.
+`report.md` has the line «Уровень автотестов: …» — `in-process` or `stand` (by `service_url_env`): pass it to the human as is. The level is derived, not set (`TEST_LEVEL_DERIVED`) — say that the line `test.level: <level>` in the block `test` of the module in `.skillsrc` makes it explicit; the human edits the file.
 
-## Что пишет режим Б и как это откатить
+## What mode B writes and how to roll it back
 
-Сверх `<project>/.pilot-runs/`: сгенерированные тесты в тестовый корень модуля (`materialize`), метки находок (`test-skills-finding`) после `FAIL` и `.skillsrc` — только переключением на системный `mvn` с подтверждения человека. Откат: `finish`/`ingest` по квитанциям убирают тесты и аннотации; изменённые после `materialize` файлы возвращает `materialize --restore`; каталог `<run>` удаляется целиком. Это заменяет для режима Б правило «код проекта не запускается»: тесты и сборку запускает человек.
+Beyond `<project>/.pilot-runs/`: generated tests in the module's test root (`materialize`), finding marks (`test-skills-finding`) after `FAIL` and `.skillsrc` — only by the switch to the system `mvn` on the human's confirmation. Rollback: `finish`/`ingest` remove the tests and annotations by the receipts; files changed after `materialize` are restored by `materialize --restore`; the directory `<run>` is deleted whole. For mode B this replaces the rule "the project's code is not run": the human runs the tests and the build.

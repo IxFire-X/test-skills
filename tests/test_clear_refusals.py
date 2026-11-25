@@ -79,4 +79,4 @@ def test_the_orchestrate_skill_names_the_directory_of_the_set_and_no_flag_for_it
     text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
     # V4: the set of the review goes to `<run>/published` by itself — the agent names no directory
     flat = " ".join(text.split())
-    assert "кладёт набор в `<run>/published`" in flat and "--output-dir" not in flat.split("## 4.", 1)[1].split("## 5.", 1)[0]
+    assert "puts the set into `<run>/published`" in flat and "--output-dir" not in flat.split("## 4.", 1)[1].split("## 5.", 1)[0]

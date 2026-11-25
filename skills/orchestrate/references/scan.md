@@ -1,17 +1,17 @@
-# Scan: модуль, `.skillsrc`, исключения, раздел документа, повтор разметки
+# Scan: module, `.skillsrc`, exclusions, a section of a document, a repeat of the marking
 
-Scan сам делает read-only inventory, исключает `.git`, зависимости, build outputs, binaries и файлы с возможными secrets, замораживает baseline (requirements,
-`.skillsrc`, source/config/fixture inputs, parent dependencies, module) и создаёт одну попытку. Тебе — выбрать exact module и передать `--docs`, `--module`, `--profile`.
-Контекст модели — все документы папки, не только `--docs` (при заданном `--docs` — кроме чужих живых изменений OpenSpec и неназванного архива).
+Scan itself makes the read-only inventory, excludes `.git`, dependencies, build outputs, binaries and files with possible secrets, freezes the baseline (requirements,
+`.skillsrc`, source/config/fixture inputs, parent dependencies, module) and creates one attempt. Yours — choose the exact module and pass `--docs`, `--module`, `--profile`.
+The model's context is all documents of the folder, not only `--docs` (with `--docs` given — except other live OpenSpec changes and an unnamed archive).
 
-- **Модуль.** Один exact module: автоматически — единственный или доказанно содержащий путь пользователя; иначе спроси человека и жди (scan без точного `--module` попытку не создаёт).
-  `--module` — ID из inventory или `.skillsrc`, не путь: корню соответствует `root`, остальные — путь папки (`api`, `services/core`); имена с точкой или не из латиницы — `root--<hex>`.
-  Документ требований может лежать вне модуля.
-- **`.skillsrc`.** Валидный существующий — authoritative; отсутствующий scan создаёт сам; drift значимых полей — одно подтверждение человека.
-- **Исключения.** После scan покажи человеку `exclusion_summary` (то же — в `status`): причины и `suspicious`. Это информация, не стоп; лишнее исключение возвращает `.skillsrc` `paths.include` (`hint`).
-- **`--docs путь#Раздел`** (Markdown): модель читает только вид `<run>/doc-sections/<имя>.md`; нет заголовка — `TASK_DOC_SECTION_MISSING` с перечнем; несколько разделов файла — несколько `--docs`; остальное — контекст.
-  Документ задачи всегда в контексте; `TASK_DOC_OUTSIDE_CONTEXT` — передай человеку `fix`.
-- **Повтор разметки и кейсов.** `reuse` в выводе scan называет прошлый прогон с теми же входами и `prepare … --reuse-from <run_id>` на стадию (разметка, `plan`, пачки, ревью): он сам отвечает её ответом того прогона,
-  `submit` не нужен; `--fresh-context` и `--invocation-id` с ним не давай — независимость ревью берётся из источника (SELF — с согласием человека); набор, принятый частично, берётся вместе с доработкой и её вторым кругом (строки `tc-generator:rework-1`, `tc-reviewer:rework-1`), если оба круга ответили; `cases.reason` — почему кейсы не берутся (тесты прошлого прогона и каталоги сборки не мешают разметке, но мешают плану и пачкам); в поставке с автотестами после кейсов идёт строка автотестов (принятые ревью r1 того прогона; их ревью делается заново), `automation.reason` — почему не берутся; ответы прошлых прогонов не копируй.
-- **Отказ или предупреждение — человеку.** Чини по `fix`, а человеку пересказывай поле `human` (фраза и действие), если оно есть; `message` ему не читай.
-- **`--target <путь>`.** `ready` и `scan` берут его одинаково: сужает контекст до пути; `ready` печатает готовую команду `scan` с ним (строка `review:isolation`). Человек назвал путь — подставь его в `scan`.
+- **Module.** One exact module: automatically — the only one or the one proven to contain the user's path; otherwise ask the human and wait (scan without an exact `--module` creates no attempt).
+  `--module` is an ID from the inventory or `.skillsrc`, not a path: the root is `root`, the others — the folder path (`api`, `services/core`); names with a dot or not in Latin letters — `root--<hex>`.
+  The requirements document may lie outside the module.
+- **`.skillsrc`.** A valid existing one is authoritative; a missing one scan creates itself; a drift of significant fields — one confirmation by the human.
+- **Exclusions.** After scan show the human `exclusion_summary` (the same — in `status`): the reasons and `suspicious`. This is information, not a stop; an unneeded exclusion is returned by `.skillsrc` `paths.include` (`hint`).
+- **`--docs path#Section`** (Markdown): the model reads only the view `<run>/doc-sections/<name>.md`; no such heading — `TASK_DOC_SECTION_MISSING` with the list; several sections of a file — several `--docs`; the rest is context.
+  The task document is always in the context; `TASK_DOC_OUTSIDE_CONTEXT` — pass the human the `fix`.
+- **A repeat of the marking and the cases.** `reuse` in the scan output names a past run with the same inputs and `prepare … --reuse-from <run_id>` per stage (marking, `plan`, batches, review): it answers the stage itself with that run's answer,
+  no `submit` is needed; do not give `--fresh-context` and `--invocation-id` with it — the independence of the review comes from the source (SELF — with the human's consent); a set accepted in part is taken together with the rework and its second round (the lines `tc-generator:rework-1`, `tc-reviewer:rework-1`), if both rounds answered; `cases.reason` — why the cases are not taken (tests of the past run and build directories do not hinder the marking, but hinder the plan and the batches); in a delivery with autotests the cases are followed by the autotest line (accepted by the r1 review of that run; their review is done anew), `automation.reason` — why they are not taken; do not copy the answers of past runs.
+- **A refusal or a warning — to the human.** Fix by `fix`, and retell the human the field `human` (the phrase and the action), if there is one; do not read `message` to the human.
+- **`--target <path>`.** `ready` and `scan` take it the same way: it narrows the context to the path; `ready` prints a ready `scan` command with it (the line `review:isolation`). The human named a path — put it into `scan`.

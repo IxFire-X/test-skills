@@ -107,8 +107,8 @@ def test_materialize_after_a_static_review_that_is_not_accepted_materializes_not
 def test_the_text_of_mode_b_says_materialize_right_after_the_static_review() -> None:
     # PT: the text of mode B (materialize, ingest, automation) is in the development build's reference, not in the delivered SKILL.md
     text = (PACK_ROOT / "skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
-    assert "materialize" in text and "ingest" in text and "exec сам" not in text
-    assert "exec сам" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
+    assert "materialize" in text and "ingest" in text and "exec yourself" not in text
+    assert "exec yourself" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(("local", "has_report", "kept"), [(True, False, False), (False, True, False), (True, True, True)])

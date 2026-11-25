@@ -212,7 +212,7 @@ def test_c1_two_batches_in_skill_order_spend_no_retry_on_batch_one() -> None:
     assert validate_canonical_document(candidate) == []
 
     skill = (Path(__file__).resolve().parents[1] / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    assert "Её делает `submit` последней пачки до записи ответа" in skill  # the assembly is a step of the last submit, before the answer is written
+    assert "It is done by `submit` of the last batch before the answer is written" in skill  # the assembly is a step of the last submit, before the answer is written
 
 
 # --------------------------------------------------------------------------------------

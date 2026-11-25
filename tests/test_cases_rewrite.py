@@ -263,4 +263,4 @@ def test_the_texts_name_the_label_of_an_obsolete_case_as_the_constant_has_it() -
     root = Path(__file__).resolve().parents[1]
     how_to = " ".join((root / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
     import_md = (root / "skills" / "orchestrate" / "references" / "import.md").read_text(encoding="utf-8")
-    assert f"метка `{OBSOLETE_LABEL}` в колонке Labels; снять её — вручную" in how_to and f"метку `{OBSOLETE_LABEL}` в `labels`" in import_md
+    assert f"метка `{OBSOLETE_LABEL}` в колонке Labels; снять её — вручную" in how_to and f"the label `{OBSOLETE_LABEL}` into `labels`" in import_md

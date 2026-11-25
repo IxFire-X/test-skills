@@ -1,31 +1,31 @@
-# Фрагмент генератора: структура и как собрать большой
+# The generator's fragment: structure and how to build a big one
 
-Ответ `tc-generator` — один JSON-файл, **голый фрагмент** (без конверта): объект по `schemas/candidate-fragment.schema.json`; кейсы в нём
-— по `schemas/canonical-test-document.schema.json`. Ниже — только форма. Значения в `<…>` берёшь из входов пачки (план, header, ответ
-разметки); механику код ставит сам (список под образцом кейса). Пиши JSON без отступов и лишних пробелов; перенос строки — только между кейсами.
+The `tc-generator` answer is one JSON file, a **bare fragment** (no envelope): an object by `schemas/candidate-fragment.schema.json`; the cases in it
+follow `schemas/canonical-test-document.schema.json`. Below is only the form. You take the values in `<…>` from the batch inputs (plan, header, the marking
+answer); the code puts the mechanics itself (the list under the case sample). Write JSON without indentation and extra spaces; a line break only between cases.
 
 ```json
 {
   "schema_version": "1.0.0",
   "status": "COMPLETE",
-  "batch_id": "<BATCH-… из плана>",
-  "namespace": "<B1, B2, … из плана>",
-  "owned_source_requirement_ids": ["<SREQ-… этой пачки>"],
+  "batch_id": "<BATCH-… from the plan>",
+  "namespace": "<B1, B2, … from the plan>",
+  "owned_source_requirement_ids": ["<SREQ-… of this batch>"],
   "requirements": [
-    { "requirement_id": "CREQ-<ns>-001", "text": "<условие, выведенное из источника>", "provenance": ["<путь:строка-строка>"] }
+    { "requirement_id": "CREQ-<ns>-001", "text": "<условие, выведенное из источника>", "provenance": ["<path:line-line>"] }
   ],
   "source_to_canonical_mappings": [
     { "source_requirement_id": "<SREQ-…>", "canonical_requirement_ids": ["CREQ-<ns>-001"] }
   ],
   "operation_capabilities": [
-    { "capability_id": "CAP-<ns>-<имя>", "action": "<имя операции>", "adapter": "<adapter.id из read; нет его — одно имя раннера тестов проекта на весь прогон>", "arguments": [],
-      "results": [ { "name": "count", "semantic_type": { "kind": "json", "type": "integer" } } ], "provenance": ["<фраза источника>"] }
+    { "capability_id": "CAP-<ns>-<name>", "action": "<operation name>", "adapter": "<adapter.id from read; none there — one name of the project's test runner for the whole run>", "arguments": [],
+      "results": [ { "name": "count", "semantic_type": { "kind": "json", "type": "integer" } } ], "provenance": ["<source phrase>"] }
   ],
-  "test_cases": [ "… кейсы, форма ниже …" ]
+  "test_cases": [ "… cases, the form below …" ]
 }
 ```
 
-Кейс (поля человека — по-русски, технические токены — как в схеме):
+A case (fields for the human — in Russian, technical tokens — as in the schema):
 
 ```json
 {
@@ -37,7 +37,7 @@
   "steps": [
     {
       "action": "<что сделать>", "test_data": "<данные>",
-      "operation": { "kind": "project_action", "capability_id": "CAP-<ns>-<имя>" },
+      "operation": { "kind": "project_action", "capability_id": "CAP-<ns>-<name>" },
       "inputs": [ { "target": { "location": "arg", "name": "owner_id" }, "source": { "kind": "literal", "value": 7 } } ],
       "outputs": [ { "source": { "kind": "project_result", "name": "count" } } ],
       "expectations": [
@@ -49,83 +49,83 @@
 }
 ```
 
-Второй кейс — тот же каркас с другим `case_id` и своими `requirement_ids`; у каждого шага свой `operation.capability_id` из `operation_capabilities`.
+The second case is the same frame with another `case_id` and its own `requirement_ids`; each step has its own `operation.capability_id` from `operation_capabilities`.
 
-**Код ставит сам (не пиши):** `display_order` (позиция, с 1); `step_id` = `STEP-<хвост case_id после TC->-<NN>` (`TC-B1-003`, шаг 2 → `STEP-B1-003-02`),
-`input_id` = `INPUT-<хвост>-<NN>-<k>`, `expectation_id` = `EXP-…-<NN>-<k>`, `assertion_id` = `ASSERT-…-<NN>-<k>-<j>`; `output_id` = `name` источника;
-`context_receipt`, digest-поля, `diagnostics`; `manual_only: false`, `manual_reason: null`, `automation_blockers: []`, `sensitive`; `semantic_type`, когда тип
-выводится: у входа — тип литерала, выхода `step_output` или аргумента capability; у выхода — тип результата capability (`http_status` — integer, `http_header` — string).
-Не выводится (`fixture`, `environment`, `secret_handle`, `http_body`) — пиши сам. Свой тип код не меняет: отличающийся от типа литерала отказывает проверка.
-За тобой: `case_id`, `requirement_ids`, `capability_id`, тексты, значения, `output_id` у `http_body`/`http_status`; ссылка `step_output` — полным id шага
-по этой схеме (`"step_id": "STEP-B1-003-02"`).
+**The code puts itself (do not write):** `display_order` (the position, from 1); `step_id` = `STEP-<case_id tail after TC->-<NN>` (`TC-B1-003`, step 2 → `STEP-B1-003-02`),
+`input_id` = `INPUT-<tail>-<NN>-<k>`, `expectation_id` = `EXP-…-<NN>-<k>`, `assertion_id` = `ASSERT-…-<NN>-<k>-<j>`; `output_id` = the `name` of the source;
+`context_receipt`, the digest fields, `diagnostics`; `manual_only: false`, `manual_reason: null`, `automation_blockers: []`, `sensitive`; `semantic_type` when the type
+can be derived: for an input — the type of the literal, of the `step_output` output or of the capability argument; for an output — the type of the capability result (`http_status` — integer, `http_header` — string).
+Cannot be derived (`fixture`, `environment`, `secret_handle`, `http_body`) — write it yourself. The code does not change your type: one that differs from the literal's type fails the check.
+Yours: `case_id`, `requirement_ids`, `capability_id`, texts, values, `output_id` for `http_body`/`http_status`; a `step_output` reference — by the full step id
+in this scheme (`"step_id": "STEP-B1-003-02"`).
 
-## Шаг HTTP (`operation.kind: "http"`)
+## An HTTP step (`operation.kind: "http"`)
 
-Два шага кейса: первый создаёт владельца и отдаёт `ownerId`, второй читает его. Идентификатор из ответа остаётся `integer`: вход `path` с таким типом допустим, URL строит код — тип выхода под путь не меняй.
-Тело ответа в `text` ожидания не пиши: `Пример тела:` код строит из утверждений `http_body` и выходов шага (лишнее убирает); корневой указатель и пропуск индекса массива — исключение, там один JSON-блок последним пишешь сам.
+Two steps of a case: the first creates an owner and returns `ownerId`, the second reads it. The identifier from the answer stays `integer`: a `path` input of that type is allowed, the code builds the URL — do not change the output type to suit the path.
+Do not write the response body into the `text` of an expectation: the code builds `Пример тела:` from the `http_body` assertions and the step outputs (and removes the extra); a root pointer and a skipped array index are the exception, there you write one JSON block yourself, last.
 
 ```json
 [
   { "action": "POST /api/owners", "test_data": "{\n  \"lastName\": \"Davis\"\n}",
-    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<фраза источника>"] }, "method": "POST", "path": "/api/owners" },
+    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<source phrase>"] }, "method": "POST", "path": "/api/owners" },
     "inputs": [ { "target": { "location": "body", "pointer": "/lastName" }, "source": { "kind": "literal", "value": "Davis" } } ],
-    "outputs": [ { "output_id": "ownerId", "source": { "kind": "http_body", "pointer": "/id" }, "semantic_type": { "kind": "json", "type": "integer" }, "type_provenance": ["<файл контракта: схема>"] } ],
+    "outputs": [ { "output_id": "ownerId", "source": { "kind": "http_body", "pointer": "/id" }, "semantic_type": { "kind": "json", "type": "integer" }, "type_provenance": ["<contract file: schema>"] } ],
     "expectations": [ { "text": "Владелец создан.\n\nHTTP 201 Created", "assertions": [ { "operator": "equals", "actual": { "kind": "http_status" }, "expected": { "kind": "literal", "value": 201 } } ] } ] },
   { "action": "GET /api/owners/{ownerId}", "test_data": "Тело запроса отсутствует.",
-    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<фраза источника>"] }, "method": "GET", "path": "/api/owners/{ownerId}" },
+    "operation": { "kind": "http", "binding_profile": "http-binding-v1", "base_url_source": { "kind": "environment", "name": "BASE_URL", "provenance": ["<source phrase>"] }, "method": "GET", "path": "/api/owners/{ownerId}" },
     "inputs": [ { "target": { "location": "path", "name": "ownerId" }, "source": { "kind": "step_output", "step_id": "STEP-B1-001-01", "output_id": "ownerId" } } ],
     "outputs": [],
     "expectations": [ { "text": "Владелец найден, фамилия Davis.\n\nHTTP 200 OK", "assertions": [
       { "operator": "equals", "actual": { "kind": "http_status" }, "expected": { "kind": "literal", "value": 200 } },
-      { "operator": "equals", "actual": { "kind": "http_body", "pointer": "/lastName", "semantic_type": { "kind": "json", "type": "string" }, "type_provenance": ["<файл контракта: схема>"] }, "expected": { "kind": "literal", "value": "Davis" } } ] } ] }
+      { "operator": "equals", "actual": { "kind": "http_body", "pointer": "/lastName", "semantic_type": { "kind": "json", "type": "string" }, "type_provenance": ["<contract file: schema>"] }, "expected": { "kind": "literal", "value": "Davis" } } ] } ] }
 ]
 ```
 
-## Три проверки, которые слабеют первыми
+## Three checks that weaken first
 
-Каждое ожидание — только то, что выражают операторы схемы (`equals`, `contains` — строка в строке, `greater_*`, `length_equals`, …) над
-выходами шага. Слабая замена (`greater_than`, «число дат») ревьюер возвращает как BLOCKING. Если проверку нельзя выразить так, не подменяй
-её слабой: оставь шаг `manual_only` с `manual_reason` или блокером (`automation_blockers`). Ручной шаг: `"manual_only": true, "manual_reason": "<почему>", "operation": null, "inputs": [], "outputs": []`
-и `"assertions": []` у ожиданий — схема требует эти ключи и у него.
+Each expectation is only what the schema operators express (`equals`, `contains` — a string in a string, `greater_*`, `length_equals`, …) over
+the step outputs. A weak replacement (`greater_than`, "the number of dates") the reviewer returns as BLOCKING. If a check cannot be expressed so, do not replace
+it with a weak one: leave the step `manual_only` with `manual_reason` or a blocker (`automation_blockers`). A manual step: `"manual_only": true, "manual_reason": "<почему>", "operation": null, "inputs": [], "outputs": []`
+and `"assertions": []` at the expectations — the schema requires these keys for it too.
 
-1. **«Ровно на N»** — capability сама считает разность и отдаёт её отдельным результатом `delta` (тип integer):
+1. **"Exactly by N"** — the capability itself computes the difference and returns it as a separate result `delta` (type integer):
 
 ```jsonl
 {"name": "delta", "semantic_type": {"kind": "json", "type": "integer"}}
 {"operator": "equals", "actual": {"kind": "project_result", "name": "delta"}, "expected": {"kind": "literal", "value": 1}}
 ```
 
-2. **Перенаправление** — шаг создания отдаёт `owner_id`, шаг отправки формы отдаёт `redirectId`; ожидание сверяет их, а не только «302»:
+2. **Redirect** — the create step returns `owner_id`, the form submit step returns `redirectId`; the expectation compares them, not only "302":
 
 ```jsonl
-{"operator": "equals", "actual": {"kind": "project_result", "name": "redirectId"}, "expected": {"kind": "step_output", "step_id": "STEP-<хвост case_id>-01", "output_id": "owner_id"}}
+{"operator": "equals", "actual": {"kind": "project_result", "name": "redirectId"}, "expected": {"kind": "step_output", "step_id": "STEP-<case_id tail>-01", "output_id": "owner_id"}}
 ```
 
-3. **Ошибка поля** — результат `telephoneError` (string) собирает пару «поле:код»; ожидание называет обе части:
+3. **Field error** — the result `telephoneError` (string) collects the pair "field:code"; the expectation names both parts:
 
 ```jsonl
 {"operator": "equals", "actual": {"kind": "project_result", "name": "telephoneError"}, "expected": {"kind": "literal", "value": "telephone:typeMismatch"}}
 ```
 
-Типы обеих сторон `equals` совместимы (integer с integer, string со string); `contains` — только строка в строке.
+The types of both sides of `equals` are compatible (integer with integer, string with string); `contains` — only a string in a string.
 
-## Три отказа, которые встречаются чаще всего
+## Three refusals that come most often
 
-1. **Пачка 2 и дальше: capabilities прошлых пачек.** Шаг, который вызывает capability из пачки 1, требует её описания в `operation_capabilities` этой же пачки: код берёт тип результата только оттуда.
-   Без копии отказ — ошибка схемы `semantic_type`. Скопируй capability из входа `prior_capabilities` слово в слово (другой байт — `BATCH_CAPABILITY_CONFLICT`): в `operation_capabilities` пачки 2 стоит
-   `{"capability_id": "CAP-B1-count", "action": "<имя операции>", "adapter": "<adapter.id из read; нет его — одно имя раннера тестов проекта на весь прогон>", "arguments": [], "results": [{"name": "count", "semantic_type": {"kind": "json", "type": "integer"}}], "provenance": ["<фраза источника>"]}` — как в пачке 1.
+1. **Batch 2 onward: capabilities of past batches.** A step that calls a capability from batch 1 needs its description in `operation_capabilities` of the same batch: the code takes the result type only from there.
+   Without the copy the refusal is a schema error of `semantic_type`. Copy the capability from the input `prior_capabilities` word for word (another byte — `BATCH_CAPABILITY_CONFLICT`): `operation_capabilities` of batch 2 has
+   `{"capability_id": "CAP-B1-count", "action": "<operation name>", "adapter": "<adapter.id from read; none there — one name of the project's test runner for the whole run>", "arguments": [], "results": [{"name": "count", "semantic_type": {"kind": "json", "type": "integer"}}], "provenance": ["<source phrase>"]}` — as in batch 1.
 
-2. **Ссылка на выход шага — только на шаг выше** (`SEMANTIC_FORWARD_STEP_OUTPUT`). Ожидание шага 2 может сослаться (в `expected`) на выход шага 1 — `{"kind": "step_output", "step_id": "STEP-B1-003-01", "output_id": "owner_id"}`; утверждение о выходе собственного шага — это `actual` вида `http_status`, `http_header`, `http_body` или `project_result`, не `step_output`.
+2. **A reference to a step output — only to a step above** (`SEMANTIC_FORWARD_STEP_OUTPUT`). An expectation of step 2 may refer (in `expected`) to the output of step 1 — `{"kind": "step_output", "step_id": "STEP-B1-003-01", "output_id": "owner_id"}`; an assertion about the output of its own step is an `actual` of the kind `http_status`, `http_header`, `http_body` or `project_result`, not `step_output`.
 
-3. **Группа вариантов `param_group`** (`SEMANTIC_PARAM_GROUP_MISMATCH`). Кейсы одной группы различаются только значениями литералов, `case_id`, названием, целью и текстами шагов; `requirement_ids`, `priority`, `categories`,
-   предусловия, `operation`, операторы, число шагов и ссылки между ними — одни и те же. Группа — кейсы с одним меняющимся параметром дизайна: в `design_refs` у каждого свой класс одного `parameter`, остальные `design_refs` равны
-   (`SEMANTIC_PARAM_GROUP_PARAMETER`). Группа — значения одного поля; меняются два поля — не группа.
+3. **A variant group `param_group`** (`SEMANTIC_PARAM_GROUP_MISMATCH`). Cases of one group differ only in literal values, `case_id`, title, objective and step texts; `requirement_ids`, `priority`, `categories`,
+   preconditions, `operation`, operators, the number of steps and the references between them are the same. A group is cases with one changing design parameter: in `design_refs` each has its own class of one `parameter`, the other `design_refs` are equal
+   (`SEMANTIC_PARAM_GROUP_PARAMETER`). A group is the values of one field; two fields change — not a group.
 
-Проекции входа: список `read` называет файлы `<run>/review-views/` (опись — `inventory-view-v1`, план пачек — `plan-view-v1` без строк требований: они в ответе разметки, `requirements[]` по `source_requirement_id`). Читай их, а не `inventories/` и `batch-plans/`.
+Input projections: the `read` list names files in `<run>/review-views/` (the inventory — `inventory-view-v1`, the batch plan — `plan-view-v1` without requirement lines: they are in the marking answer, `requirements[]` by `source_requirement_id`). Read them, not `inventories/` and `batch-plans/`.
 
-## Импортированный кейс (строка `imported` → кейс фрагмента)
+## An imported case (an `imported` row → a fragment case)
 
-Строка `imported` и её кейс (`SREQ-0003` строки отображён на `CREQ-B1-003`):
+An `imported` row and its case (the row's `SREQ-0003` is mapped to `CREQ-B1-003`):
 
 ```json
 {"row": 5, "key": "PC-T7", "source_requirement_ids": ["SREQ-0003"], "title": "Поиск", "objective": "Найти владельца", "preconditions": ["Есть Davis"], "priority": "HIGH", "management": {"status": "Approved", "folder": "/Owners", "components": [], "labels": ["smoke"], "owner": null, "estimated_time": null, "issues": [], "pages": [], "custom_fields": {"АС": "Petclinic"}}, "steps": [{"row": 5, "action": "Ввести Davis", "test_data": "Davis", "expectations": ["Найден 1"]}]}
@@ -139,13 +139,13 @@
             "expectations": [{"text": "Найден 1", "assertions": [{"operator": "equals", "actual": {"kind": "project_result", "name": "count"}, "expected": {"kind": "literal", "value": 1}}]}]}]}
 ```
 
-Из строки — как есть: `title`, `objective`, `preconditions`, `priority`, у шага `action`, `test_data`, тексты ожиданий; `management` те же поля, `key` → `external_keys.zephyr_scale`
-(пустой — `{}`), `issues`/`pages` → `external_links`. Твоё: `case_id`, `categories`, `requirement_ids`, `operation`, `inputs`, `outputs`, `assertions`.
+From the row — as is: `title`, `objective`, `preconditions`, `priority`, for a step `action`, `test_data`, the expectation texts; `management` the same fields, `key` → `external_keys.zephyr_scale`
+(empty — `{}`), `issues`/`pages` → `external_links`. Yours: `case_id`, `categories`, `requirement_ids`, `operation`, `inputs`, `outputs`, `assertions`.
 
-## Как собрать фрагмент на десятки кейсов
+## How to build a fragment of dozens of cases
 
-1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id шагов и проверок ставит код по схеме выше, `case_id` у тебя уникальны в пачке.
-2. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Дописывай в один файл, JSON без отступов; исходник `tools` ради формата не читай — форма выше и схемы достаточны.
-3. Положи файл в `answer_slot` стадии и проверь: `python -m tools.api submit --run-root <run> --stage tc-generator:<batch> --dry-run`;
-   отказ называет, что исправить. Исправленный файл — единственный повтор стадии; после `submit` ответ не меняется.
-4. Прими ответ тем же вызовом без `--dry-run`; последняя пачка сама проверяет сборку набора целиком, файлов кандидата не нужно.
+1. Make the list of cases (by the batch's requirements) and for each — steps, expectations, checks; the code puts the ids of steps and checks by the scheme above, your `case_id` are unique in the batch.
+2. The answer is a data file: build it in parts, case by case; write no scripts that import or call the package. Append to one file, JSON without indentation; do not read the `tools` source for the format — the form above and the schemas are enough.
+3. Put the file into the stage's `answer_slot` and check it: `python -m tools.api submit --run-root <run> --stage tc-generator:<batch> --dry-run`;
+   a refusal names what to fix. The fixed file is the only repeat of the stage; after `submit` the answer does not change.
+4. Accept the answer with the same call without `--dry-run`; the last batch itself checks the assembly of the whole set, no candidate files are needed.
