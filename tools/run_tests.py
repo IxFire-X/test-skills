@@ -885,7 +885,7 @@ def _testcase_status(item: ET.Element) -> str:
 def masked_failure_text(text: str) -> str:
     """A line of framework output that looks like a secret (the check the runner output gets) is ``<redacted>``: the text of a failure goes
     into the receipt, the report and the annotation of a quarantined method."""
-    from tools.pilot_state import canonical_runner_output
+    from tools.execution_journal import canonical_runner_output
 
     lead = re.match(r"ASSERT-[A-Za-z0-9_.:-]+", text)  # the label of the assertion is the reference of the quarantine mark, not free text
     head, rest = (lead.group(0), text[lead.end():]) if lead else ("", text)
@@ -1165,7 +1165,7 @@ def _durable_execution_artifacts(
     reports = _report_digest_evidence(snapshots, module)
     if not isinstance(run_root, Path) or not isinstance(attempt_id, str):
         return reports, []
-    from tools.pilot_state import _canonical_runner_output, publish_run_artifact_bytes
+    from tools.execution_journal import canonical_runner_output as _canonical_runner_output, publish_run_artifact_bytes
 
     artifacts: list[dict[str, str]] = []
     used_names: dict[str, int] = {}

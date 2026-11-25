@@ -291,8 +291,11 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
     effective = review_view.ensure_autotest_view(root.parents[1], root, pilot_state.derive_state(root))["document"]  # the generator's view: made again if it was changed (the reviewer reads the short form of it)
     boundary = boundary_of_revision(root, attempt_id, revision)
     if not boundary:
-        facts = pilot_state.automation_boundary_facts(root, attempt_id, revision, fresh_context=fresh, reviewer_invocation_id=label)
-        boundary = dict(pilot_state.open_automation_review_boundary(root, attempt_id, facts)["record"])
+        from tools import execution_gate
+
+        boundary_facts, open_boundary = execution_gate.from_mode_b("execution_journal", "automation_boundary_facts", "open_automation_review_boundary")
+        facts = boundary_facts(root, attempt_id, revision, fresh_context=fresh, reviewer_invocation_id=label)
+        boundary = dict(open_boundary(root, attempt_id, facts)["record"])
     if boundary["reviewer_invocation_id"] != label or boundary["host_isolation"]["fresh_context"] != fresh:
         raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью автотестов уже открыто с ревьюером {boundary['reviewer_invocation_id']} (fresh_context={boundary['host_isolation']['fresh_context']}); "
                             "fix: повтори prepare с теми же --invocation-id и --fresh-context или иди дальше: submit")

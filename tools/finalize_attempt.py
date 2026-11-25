@@ -592,7 +592,7 @@ def _durable_branch(
             raise FinalizationError("execution result does not bind the generated delta")
         try:
             if verification == "UNKNOWN":
-                pilot_state.record_execution_unknown(run_root, attempt_id, str(execution_record["digest"]))
+                execution_gate.from_mode_b("execution_journal", "record_execution_unknown")[0](run_root, attempt_id, str(execution_record["digest"]))
             pilot_state.validate_execution_event_branch(
                 pilot_state.derive_state(run_root)["events"], attempt_id, verification,
                 str(execution_record["digest"]),
@@ -608,7 +608,7 @@ def _durable_branch(
         if not isinstance(automation, Mapping) or not isinstance(autotest_review, Mapping):
             raise FinalizationError("durable execution trace sources are unavailable")
         try:
-            trace_pair = pilot_state.publish_execution_trace_pair(
+            trace_pair = execution_gate.from_mode_b("execution_journal", "publish_execution_trace_pair")[0](
                 run_root, attempt_id, automation, autotest_review,
             )
             trace_record = trace_pair["trace"]["record"]
@@ -1005,12 +1005,12 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
         if verification not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE"}:
             raise ValueError("execution receipt has no terminal verification")
         if verification == "UNKNOWN":
-            pilot_state.record_execution_unknown(run_root, attempt_id, str(execution_record["digest"]))
+            execution_gate.from_mode_b("execution_journal", "record_execution_unknown")[0](run_root, attempt_id, str(execution_record["digest"]))
         pilot_state.validate_execution_event_branch(
             pilot_state.derive_state(run_root)["events"], attempt_id, verification,
             str(execution_record["digest"]),
         )
-        trace_pair = pilot_state.publish_execution_trace_pair(
+        trace_pair = execution_gate.from_mode_b("execution_journal", "publish_execution_trace_pair")[0](
             run_root, attempt_id, automation_artifact, autotest_review,
         )
         audit = trace_pair["audit"]["record"]["payload"]

@@ -299,30 +299,6 @@ def _credential_like(value: str) -> bool:
     )
 
 
-def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
-    """Return the only publishable UTF-8 runner-output representation."""
-    from tools.project_inventory import URL_CREDENTIALS_TEXT, token_signature_rule
-
-    if not isinstance(text, str) or not text:
-        return b""
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines: list[str] = []
-    for line in normalized.splitlines(keepends=True):
-        content = line[:-1] if line.endswith("\n") else line
-        if token_signature_rule(content.encode("utf-8", errors="replace")) or _credential_like(content) or any(_credential_like(fragment) for fragment in content.split()) or URL_CREDENTIALS_TEXT.search(
-            content,
-        ):
-            line = "<redacted>" + ("\n" if line.endswith("\n") else "")
-        lines.append(line)
-    encoded = "".join(lines).encode("utf-8", errors="replace")
-    if len(encoded) <= limit:
-        return encoded
-    return encoded[-limit:].decode("utf-8", errors="ignore").encode("utf-8")
-
-
-canonical_runner_output = _canonical_runner_output  # the public name for the other modules of the package
-
-
 def _safe_model_label(value: Any) -> bool:
     if not isinstance(value, str) or _MODEL_LABEL.fullmatch(value) is None:
         return False
@@ -1397,65 +1373,6 @@ def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, cand
         raise ValueError(f"REVIEW_CANDIDATE_NOT_PUBLISHED: {candidate_digest} is not the published {source} candidate {published}")
     return _append_event(project, root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, batch_id=None,
                          artifact_digest=candidate_digest, stage_instance_id=stage_instance_id)
-
-
-def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) -> Mapping[str, Any]:
-    """Atomically reserve the one permitted project execution for an attempt."""
-    project, root = _run_root(run_root)
-    if not isinstance(request_digest, str) or not _DIGEST.fullmatch(request_digest):
-        raise ValueError("invalid execution request digest")
-    _manifest, authorization = _run_boundary(project, root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt["state"] == "TERMINAL":
-        raise ValueError("invalid execution attempt")
-    if attempt["policy_profile"] != "local-pilot-v1" or authorization.get("execution_requested") is not True:
-        raise ValueError("execution authorization is invalid")
-    if any(event["event_type"] == "EXECUTION_STARTED" and event.get("attempt_id") == attempt_id for event in state["events"]):
-        raise ValueError("execution already started")
-    return _append_event(
-        project,
-        root,
-        "EXECUTION_STARTED",
-        actor="controller",
-        attempt_id=attempt_id,
-        batch_id=None,
-        artifact_digest=request_digest,
-    )
-
-
-def record_execution_unknown(run_root: Path, attempt_id: str, execution_receipt_digest: str) -> Mapping[str, Any]:
-    """Bind the sole UNKNOWN marker to a read-back execution receipt and start."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt["state"] == "TERMINAL" or not _DIGEST.fullmatch(str(execution_receipt_digest)):
-        raise ValueError("invalid execution-unknown attempt")
-    try:
-        receipt = read_attempt_receipt(root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("execution-unknown receipt is unavailable") from error
-    starts = [
-        event for event in state["events"]
-        if event.get("attempt_id") == attempt_id and event.get("event_type") == "EXECUTION_STARTED"
-    ]
-    unknowns = [
-        event for event in state["events"]
-        if event.get("attempt_id") == attempt_id and event.get("event_type") == "EXECUTION_UNKNOWN"
-    ]
-    if (
-        receipt.get("digest") != execution_receipt_digest
-        or receipt.get("payload", {}).get("verdict") != "UNKNOWN"
-        or len(starts) != 1
-        or starts[0].get("artifact_digest") != receipt.get("execution_request_digest")
-        or len(unknowns) > 1
-        or unknowns and unknowns[0].get("artifact_digest") != execution_receipt_digest
-    ):
-        raise ValueError("execution-unknown evidence is invalid")
-    return _append_event(
-        project, root, "EXECUTION_UNKNOWN", actor="controller", attempt_id=attempt_id,
-        batch_id=None, artifact_digest=execution_receipt_digest,
-    )
 
 
 class ModulePathError(ValueError):
@@ -3982,81 +3899,6 @@ def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, di
     return {"created": created, "installed_identity": identity, "path": str(target.relative_to(root)).replace("\\", "/"), "digest": digest}
 
 
-def publish_execution_trace_pair(
-    run_root: Path,
-    attempt_id: str,
-    automation_artifact: Mapping[str, Any],
-    autotest_review: Mapping[str, Any],
-) -> Mapping[str, Any]:
-    """Build, persist, and read back the sole V5 execution trace and audit pair."""
-    automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
-    TraceBuildError, build_trace, trace_sha256 = execution_gate.from_mode_b("build_trace_document", "TraceBuildError", "build_trace", "trace_sha256")
-    (check,) = execution_gate.from_mode_b("trace_check", "check")
-
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt["state"] == "TERMINAL" or attempt.get("policy_profile") != "local-pilot-v1":
-        raise ValueError("invalid execution trace attempt")
-    try:
-        existing_trace = _read_attempt_receipt_with_state(
-            project, root, state, attempt_id, "execution-trace", "ARTIFACT_READ_BACK",
-        )
-        existing_audit = _read_attempt_receipt_with_state(
-            project, root, state, attempt_id, "trace-audit", "ARTIFACT_READ_BACK",
-        )
-    except (KeyError, TypeError, ValueError):
-        existing_trace = existing_audit = None
-    if existing_trace is not None and existing_audit is not None:
-        return {"trace": existing_trace, "audit": existing_audit}
-    for later_kind in ("disposition-plan", "disposition-receipt"):
-        try:
-            later_bytes = read_confined_bytes(project, root, _receipt_target(root, attempt_id, later_kind))
-        except OutputConfinementError as error:
-            raise ValueError("unsafe execution trace lifecycle path") from error
-        if later_bytes is not None:
-            raise ValueError("execution trace must precede dispositions")
-    try:
-        effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
-        delta = _phase5_generated_delta(project, root, state, attempt)
-        execution_record = _read_attempt_receipt_with_state(
-            project, root, state, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-        )["record"]
-        report = execution_record["payload"]
-        if (
-            automation_sha256(automation_artifact) != delta.get("automation_digest")
-            or autotest_review_sha256(autotest_review) != delta.get("review_digest")
-        ):
-            raise ValueError("trace sources do not bind the generated delta")
-        review_revision = autotest_review["artifacts"]["autotest_review"]["automation_revision"]
-        review_boundary = _read_attempt_receipt_with_state(
-            project, root, state, attempt_id, f"automation-review-boundary-r{review_revision}",
-            "ARTIFACT_READ_BACK",
-        )["record"]
-        trace = build_trace(
-            effective["document"], automation_artifact, autotest_review, report,
-            host_isolation_receipt=review_boundary, run_root=root, attempt_id=attempt_id,
-        )
-    except (KeyError, TypeError, ValueError, TraceBuildError) as error:
-        raise ValueError("authoritative execution trace cannot be built") from error
-    trace_receipt = publish_bound(root, attempt_id, "execution-trace", {
-        "effective_canonical_digest": effective["document_digest"],
-        "generated_delta_digest": delta["digest"],
-        "execution_receipt_digest": execution_record["digest"],
-        "automation_artifact": dict(automation_artifact),
-        "autotest_review": dict(autotest_review),
-        "trace_sha256": trace_sha256(trace),
-        "payload": trace,
-    })
-    audit = check(trace, require_execution=True, canonical=effective["document"])
-    audit_receipt = publish_bound(root, attempt_id, "trace-audit", {
-        "execution_trace_receipt_digest": trace_receipt["digest"],
-        "trace_sha256": trace_receipt["record"]["trace_sha256"],
-        "payload": audit,
-    })
-    return {"trace": trace_receipt, "audit": audit_receipt}
-
-
 def publish_effective_canonical(
     run_root: Path, attempt_id: str, document: Mapping[str, Any], effective_bundle_receipt: Mapping[str, Any], reviewer_session_digest: str,
 ) -> Mapping[str, Any]:
@@ -4080,49 +3922,6 @@ def publish_effective_canonical(
     if any(published["record"].get(key) != value.get(key) for key in value):
         raise ValueError("conflicting effective canonical selection")
     return {key: item for key, item in published.items() if key != "installed_identity"}
-
-
-def publish_execution_inputs(
-    run_root: Path,
-    attempt_id: str,
-    automation_artifact: Mapping[str, Any],
-    autotest_review: Mapping[str, Any],
-) -> Mapping[str, Any]:
-    """Persist exact reviewed execution/trace carriers before materialization."""
-    expected = {
-        "automation_artifact": dict(automation_artifact),
-        "autotest_review": dict(autotest_review),
-    }
-    try:
-        existing = read_attempt_receipt(
-            run_root, attempt_id, "execution-inputs", "ARTIFACT_READ_BACK",
-        )
-    except (KeyError, TypeError, ValueError):
-        existing = None
-    if existing is not None:
-        if any(existing["record"].get(key) != value for key, value in expected.items()):
-            raise ValueError("conflicting execution inputs receipt")
-        return {**existing, "created": False, "installed_identity": None}
-    project, root = _run_root(run_root)
-    try:
-        installed = read_confined_bytes(
-            project, root, _receipt_target(root, attempt_id, "execution-inputs"),
-        )
-    except OutputConfinementError as error:
-        raise ValueError("unsafe execution-inputs receipt path") from error
-    if installed is not None:
-        recovered = recover_execution_inputs_events(root, attempt_id)
-        if any(recovered["record"].get(key) != value for key, value in expected.items()):
-            raise ValueError("conflicting execution inputs receipt")
-        return {**recovered, "created": False, "installed_identity": None}
-    if _execution_inputs_frontier_closed(run_root, attempt_id):
-        raise ValueError("execution-inputs frontier is closed")
-    return publish_bound(
-        run_root,
-        attempt_id,
-        "execution-inputs",
-        expected,
-    )
 
 
 def _execution_inputs_frontier_closed(run_root: Path, attempt_id: str) -> bool:
@@ -4172,49 +3971,6 @@ def read_execution_inputs(
         if installed is None:
             raise error
         return recover_execution_inputs_events(root, attempt_id)["record"]
-
-
-def publish_resume_validation(
-    run_root: Path,
-    attempt_id: str,
-    reason_code: str,
-) -> Mapping[str, Any]:
-    """Freeze one controller-detected drift before terminal finalization."""
-    if reason_code not in {"BASELINE_DRIFT", "BASELINE_INCOMPLETE", "SKILLSRC_DRIFT"}:
-        raise ValueError("invalid resume validation reason")
-    _project, root = _run_root(run_root)
-    # ponytail: one controller owns a run; add run-wide arbitration only if
-    # concurrent CLI resume is ever made a supported product mode.
-    existing = read_resume_validation_if_present(root, attempt_id)
-    if existing is not None:
-        if existing.get("reason_code") != reason_code:
-            raise ValueError("conflicting resume validation reason")
-        return existing
-    if read_closure_artifact_if_present(
-        root, attempt_id, "finalization_receipt",
-    ) is not None:
-        raise ValueError("finalization receipt already froze resume validation")
-    pretrace = read_closure_artifact_if_present(
-        root, attempt_id, "pre_finalization_trace",
-    )
-    execution = read_attempt_receipt(
-        root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-    )["record"]
-    return publish_bound(
-        root,
-        attempt_id,
-        "resume-validation",
-        {
-            "baseline_digest": execution["baseline_digest"],
-            "execution_request_digest": execution["execution_request_digest"],
-            "execution_receipt_digest": execution["digest"],
-            "pre_finalization_trace_digest": (
-                pretrace.get("digest") if isinstance(pretrace, Mapping) else None
-            ),
-            "status": "DRIFTED",
-            "reason_code": reason_code,
-        },
-    )
 
 
 def read_resume_validation_if_present(
@@ -4358,29 +4114,6 @@ def recover_phase5_receipt_events(run_root: Path, attempt_id: str, kind: str) ->
     return _recover_attempt_receipt_events(run_root, attempt_id, kind)
 
 
-@closure_cached
-def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Persist/read back the controller-owned isolation boundary for one V5 revision."""
-    revision = facts.get("automation_revision")
-    if type(revision) is not int or revision not in {1, 2}:
-        raise ValueError("invalid automation review boundary revision")
-    state = derive_state(_run_root(run_root)[1])
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    run = read_run(run_root)
-    if attempt is None:
-        raise ValueError("unknown automation review boundary attempt")
-    if revision == 2:
-        # Revision two is a single pre-execution correction.  Durable ownership
-        # is the first materialization boundary, before a final delta can exist.
-        if _receipt_target(_run_root(run_root)[1], attempt_id, "materialization-ownership").exists():  # the file decides, not its events: a cut materialize leaves it without them
-            raise ValueError("automation revision two is forbidden after materialization")
-        if attempt["policy_profile"] != "local-pilot-v1" or run["authorization"].get("execution_requested") is not True:
-            raise ValueError("automation review boundary lacks local execution authorization")
-    kind = f"automation-review-boundary-r{revision}"
-    published = publish_bound(run_root, attempt_id, kind, facts)
-    return {key: item for key, item in published.items() if key != "installed_identity"}
-
-
 class IndependenceUnverified(ValueError):
     """The host states no fresh context in a run that admitted no SELF (``scan --accept-self-review`` or ``prepare --accept-self-review``)."""
 
@@ -4397,37 +4130,6 @@ def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None
             "на ревью в той же сессии, повтори prepare с --fresh-context no --accept-self-review; иначе вызови ревьюера отдельным "
             "субагентом без истории генерации и укажи --fresh-context yes"
         )
-
-
-@closure_cached
-def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *, fresh_context: bool, reviewer_invocation_id: str) -> dict[str, Any]:
-    """The facts of the boundary of the automation review for revision N from the journal; writes nothing.
-
-    The automation digest is the CANDIDATE_PUBLISHED of ``tc-to-autotest:rN``, the generator invocation its
-    MODEL_REQUESTED, the effective pair the read-back effective canonical. ``fresh_context`` and the reviewer
-    invocation are the host's statement; the code computes only ``distinct_invocations`` and the digest."""
-    if type(revision) is not int or revision not in {1, 2}:
-        raise ValueError("AUTOMATION_REVISION_INVALID: the automation revision is 1 or 2")
-    require_fresh_context_statement(run_root, fresh_context)
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    stage = f"tc-to-autotest:r{revision}"
-    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage]
-    requested = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
-    published = [event for event in events if event["event_type"] == "CANDIDATE_PUBLISHED"]
-    if len(requested) != 1 or len(published) != 1:
-        raise ValueError(f"AUTOMATION_RESPONSE_MISSING: {stage} has no recorded answer yet: prepare and submit --stage {stage} first")
-    generator = str(_read_model_request_with_state(project, root, state, attempt_id, stage, str(requested[0]["artifact_digest"]))["invocation_id"])
-    effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
-    reviewer = str(reviewer_invocation_id)
-    isolation = {"fresh_context": fresh_context, "distinct_invocations": fresh_context and generator != reviewer}  # a session that is not fresh is no independent one, whatever its label
-    isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    return {
-        "automation_digest": str(published[0]["artifact_digest"]), "automation_revision": revision,
-        "reviewer_session_id": f"autotest-review-{attempt_id}-r{revision}", "generator_invocation_id": generator,
-        "reviewer_invocation_id": reviewer, "role_policy": "autotest-static-reviewer-v1", "host_isolation": isolation,
-        "effective_canonical_digest": effective["document_digest"], "effective_bundle_receipt_digest": effective["effective_bundle_receipt_digest"],
-    }
 
 
 _GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}
@@ -5758,12 +5460,6 @@ def _fill_response_bindings(
     return value, filled
 
 
-def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bind one complete materialization receipt to the active attempt and read it back."""
-    publish_bound(run_root, attempt_id, "generated-delta", {"delta": dict(delta)})
-    return read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
-
-
 def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bind the digests of the canary map and of the reviewer's view to the attempt: the receipt and its event pair, marked with
     ``batch_id`` ``review-canaries-v1`` — whether canaries were seeded is read from these events, not from a file.  The same facts
@@ -5771,13 +5467,6 @@ def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str,
     from tools.review_canaries import BATCH_ID
 
     return publish_bound(run_root, attempt_id, "review-canaries", dict(facts), batch_id=BATCH_ID)
-
-
-def publish_phase5_receipt(run_root: Path, attempt_id: str, kind: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Persist/read back one fixed-slot Phase 5 receipt before its project effect."""
-    if kind not in {"materialization-ownership", "disposition-plan", "disposition-receipt"}:
-        raise ValueError("invalid phase5 receipt kind")
-    return publish_bound(run_root, attempt_id, kind, {"payload": dict(payload)})
 
 
 _RESULT_EVIDENCE_KEYS = {
@@ -6578,31 +6267,6 @@ def read_terminal_result(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     return result
 
 
-def publish_run_artifact_bytes(run_root: Path, attempt_id: str, relative_name: str, data: bytes) -> Mapping[str, Any]:
-    """Write/read back one run-scoped durable byte artifact under artifacts/<attempt>/."""
-    if not isinstance(data, (bytes, bytearray)):
-        raise ValueError("run artifact bytes are required")
-    if not isinstance(relative_name, str) or not relative_name or "\x00" in relative_name:
-        raise ValueError("invalid run artifact path")
-    relative = Path(relative_name)
-    if relative.is_absolute() or ".." in relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
-        raise ValueError("invalid run artifact path")
-    project, root = _run_root(run_root)
-    if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
-        raise ValueError("invalid run artifact attempt")
-    target = root / "artifacts" / attempt_id / relative
-    created = create_confined_bytes_exclusive(project, root, target, bytes(data))
-    readback = read_confined_bytes(project, root, target)
-    if readback != bytes(data):
-        raise ValueError("run artifact read-back mismatch")
-    digest = "sha256:" + hashlib.sha256(bytes(data)).hexdigest()
-    return {
-        "path": str(target.relative_to(root)).replace("\\", "/"),
-        "digest": digest,
-        "created": bool(created),
-    }
-
-
 def _scenario_observation_target(root: Path, attempt_id: str, scenario_id: str) -> Path:
     allowed = {
         "fresh-non-git", "tree-preservation", "waiting-for-model-resume",
@@ -7163,7 +6827,9 @@ published_generator_inputs, batch_ordinal, accepted_earlier_fragments, codeword_
 DIGEST = _DIGEST
 PACK_ROOT = _PACK_ROOT
 SCHEMA_ROOT = _SCHEMA_ROOT
+credential_like = _credential_like
 disposition_policy_at = _disposition_policy_at
+execution_inputs_frontier_closed = _execution_inputs_frontier_closed
 model_lifecycle_projection_with_state = _model_lifecycle_projection_with_state
 phase5_generated_delta = _phase5_generated_delta
 read_artifact = _read_artifact
@@ -7171,6 +6837,8 @@ read_attempt_receipt_with_state = _read_attempt_receipt_with_state
 read_effective_canonical_with_state = _read_effective_canonical_with_state
 read_model_request_with_state = _read_model_request_with_state
 read_model_stage_artifact_with_state = _read_model_stage_artifact_with_state
+receipt_target = _receipt_target
+run_boundary = _run_boundary
 safe_label = _safe_label
 sealed = _sealed
 self_review_accepted_at = _self_review_accepted_at

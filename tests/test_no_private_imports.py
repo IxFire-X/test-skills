@@ -98,7 +98,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("run_report", "run_pipeline", "_durable_status_facts"): 1,
     ("run_report", "review_view", "_reference_counts"): 1,
     ("run_report", "step_size", "_requirement_files"): 1,
-    ("run_tests", "pilot_state", "_canonical_runner_output"): 1,
     ("scope_pause", "pilot_state", "_generator_input"): 1,
     ("step_size", "pilot_state", "_model_request_target"): 1,
     ("assemble_sections", "run_pipeline", "_read_run_coordinate"): 2,

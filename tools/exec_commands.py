@@ -901,7 +901,8 @@ def _ingest_refusal(attempt_id: str, code: str, message: str, fix: str, **extra:
 def _publish_result_receipt(coordinates: Mapping[str, Any], report: Mapping[str, Any]) -> Mapping[str, Any]:
     """The result of the attempt as a receipt: a pure function of the report, installed with the events it lacks (the same bytes) or refused
     (other bytes) — never bound from what lies on the disk."""
-    from tools.pilot_state import derive_state, read_attempt_receipt, record_execution_unknown
+    from tools.execution_journal import record_execution_unknown
+    from tools.pilot_state import derive_state, read_attempt_receipt
 
     root, attempt_id = Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])
     try:
@@ -922,7 +923,8 @@ def _record_late_drift(coordinates: Mapping[str, Any], request: Any, report: Map
     """A result recorded by an ingest that was cut before the attempt was closed: if the project or the runtime moved since, that is said once
     (``resume-validation``) and the attempt closes as not accepted (BASELINE_DRIFT, SKILLSRC_DRIFT) — never as the PASS that was recorded.  Not
     asked again once the finalization was installed or the drift recorded; a rejection before the start (NOT_RUNNABLE) has nothing to hold."""
-    from tools.pilot_state import publish_resume_validation, read_closure_artifact_if_present, read_resume_validation_if_present
+    from tools.execution_journal import publish_resume_validation
+    from tools.pilot_state import read_closure_artifact_if_present, read_resume_validation_if_present
 
     root, attempt_id = Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])
     if report.get("verdict") == "NOT_RUNNABLE":
@@ -969,7 +971,8 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
     run (BUILD_FAILED, TESTS_NOT_STARTED — NOT_RUNNABLE, the files taken out again) or their result is lost (RESULT_UNAVAILABLE — UNKNOWN,
     the files kept)."""
     from tools.execution_adapters import request_digest
-    from tools.pilot_state import claim_execution_start, derive_state, read_effective_canonical
+    from tools.execution_journal import claim_execution_start
+    from tools.pilot_state import derive_state, read_effective_canonical
 
     root, attempt = Path(coordinates["run_root"]), coordinates["attempt"]
     attempt_id = str(attempt["attempt_id"])
@@ -1031,7 +1034,8 @@ def cmd_ingest(args: Any) -> int:
     """The reports of a run a human made of the printed command, held against the attempt — or the human's statement that there are none."""
     from tools.execution_adapters import request_digest
     from tools.exec_runner import ingest_reports, report_set_problems
-    from tools.pilot_state import claim_execution_start, read_attempt_receipt
+    from tools.execution_journal import claim_execution_start
+    from tools.pilot_state import read_attempt_receipt
     from tools.run_tests import validate_artifact_runner_compatibility
 
     project = Path(args.project).resolve()

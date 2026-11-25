@@ -421,7 +421,7 @@ def materialize_delta(
     effective = _effective_selection(run_root, attempt_id, canonical_document or {})
     _accepted_chain(automation, review, canonical_document or {}, run_root, attempt_id, automation_history, review_history)
     try:
-        from tools.pilot_state import publish_execution_inputs
+        from tools.execution_journal import publish_execution_inputs
 
         durable_inputs = publish_execution_inputs(run_root, attempt_id, automation, review)["record"]
     except (KeyError, TypeError, ValueError, OSError) as error:
@@ -488,7 +488,7 @@ def materialize_delta(
     ownership_created = False
     if ownership is None:
         try:
-            from tools.pilot_state import publish_phase5_receipt
+            from tools.execution_journal import publish_phase5_receipt
 
             published_ownership = publish_phase5_receipt(run_root, attempt_id, "materialization-ownership", intent)
             ownership, ownership_created = published_ownership["record"]["payload"], published_ownership["created"]
@@ -541,7 +541,7 @@ def materialize_delta(
         facts={"completion": "COMPLETE", "verification": None, "accepted": None},
     )
     try:
-        from tools.pilot_state import publish_generated_delta
+        from tools.execution_journal import publish_generated_delta
 
         receipt = publish_generated_delta(run_root, attempt_id, delta)
     except (ValueError, OSError) as error:
@@ -797,7 +797,8 @@ def apply_dispositions(
         base_plan_rows.append({
             key: row[key] for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")
         } | {"operation": operation, "requested_disposition": expected})
-    from tools.pilot_state import _sealed as _seal_receipt, publish_phase5_receipt, read_attempt_receipt
+    from tools.execution_journal import publish_phase5_receipt
+    from tools.pilot_state import _sealed as _seal_receipt, read_attempt_receipt
 
     execution_payload: Mapping[str, Any] = {}
     if verification in {"FAIL", "NOT_RUNNABLE"}:
