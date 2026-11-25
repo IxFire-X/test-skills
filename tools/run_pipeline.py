@@ -634,6 +634,9 @@ def _is_zephyr_csv(data: bytes) -> bool:
     return True
 
 
+UNMARKED_BASELINE = 'в базе области {area} нет размеченных требований: кейсы будут только по изменению, регресс области не построится'  # the warning of scan and the row of ready
+
+
 def expand_docs(project: Path, docs: list[str] | None) -> list[str]:
     """``--docs`` with each folder replaced by the files it stands for (``build_context.openspec_dir_files``), once at the start of a scan;
     every reader of the request then sees files.  The walk is of the one named folder: no link, no reparse point (checked before it is
@@ -1790,7 +1793,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
-    from tools.build_context import (RequirementConflict, openspec_applied, openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives,
+    from tools.build_context import (RequirementConflict, openspec_applied, openspec_unmarked_areas, openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives,
                                      openspec_unnamed_archive_areas, openspec_unnamed_areas, openspec_unselected)
     from tools.scan_rules import include_mode
 
@@ -1838,6 +1841,7 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     warnings += [f"имена дельты не найдены среди нынешних требований, их кейсы не судятся: {', '.join(gone[:5])}"] * bool(gone)
     warnings += [f"изменение {name}: уже вписано в спецификацию, требований: {count}; они берутся из изменения, как обычно" for name, count in sorted(applied.items())]
     warnings += removed  # a REMOVED whose name the specification lacks: gone already, or a name that does not match
+    warnings += [UNMARKED_BASELINE.format(area=area) for area in openspec_unmarked_areas([row for row in entries if not row.get("section")])]  # a prose spec.md: no regression of the area
     if skipped:
         names = sorted({path.split("/")[2] for path in skipped if not path.startswith("openspec/changes/archive/")})
         archive = sum(path.startswith("openspec/changes/archive/") for path in skipped)

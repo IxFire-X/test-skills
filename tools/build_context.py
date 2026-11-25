@@ -422,6 +422,7 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
     renames: list[tuple[tuple[str, str], str, str, str]] = []
     warnings: list[str] = []
     changes: set[str] = set()
+    based: set[str] = set()  # the areas whose spec.md is among the entries, with requirements or without
     for entry in sorted(entries, key=lambda row: row["path"]):
         path = entry["path"].replace("\\", "/")
         if path.startswith("openspec/changes/archive/"):
@@ -433,6 +434,8 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if entry["sha256"] != "sha256:" + hashlib.sha256(entry["content"].encode("utf-8")).hexdigest():
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"source digest does not match content: {path}")
         is_baseline, capability, change, delta_capability = match.groups()
+        if is_baseline:
+            based.add(capability)
         if change:
             changes.add(change)
         capability = capability or delta_capability
@@ -489,6 +492,8 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         have = baseline.get(key)
         if key in seen:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"repeats a requirement of this change ({operation}): {where}")
+        if operation == "MODIFIED" and have is None and key[0] in based and not any(area == key[0] for area, _name in baseline):  # the spec.md of the area is prose: no name to compare
+            raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED on an unmarked baseline: {where}; в spec.md области {key[0]} нет ни одного «### Requirement:»")
         if operation == "MODIFIED" and have is None:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}{_close(baseline, key)}")
         if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
@@ -511,6 +516,13 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if len({name for name, _ in row["scenarios"]}) != len(row["scenarios"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"duplicate scenario: {row['path']} — {row['name']}")
     return rows, warnings
+
+
+def openspec_unmarked_areas(entries: list[dict[str, str]]) -> list[str]:
+    """The areas a delta of ``entries`` changes whose spec.md (among ``entries``) has no «### Requirement:» — no requirement of the area comes from it, so the run has no regression of it."""
+    matched = [(match, entry["content"]) for entry in entries if (match := _OPENSPEC_PATH.fullmatch(entry["path"].replace("\\", "/")))]
+    bases = {match.group(2): text for match, text in matched if match.group(1)}
+    return sorted({match.group(4) for match, _text in matched if match.group(3) and match.group(4) in bases and not re.search(r"^### Requirement:", bases[match.group(4)], re.M)})
 
 
 def openspec_applied(entries: list[dict[str, str]]) -> tuple[dict[str, int], list[str]]:
