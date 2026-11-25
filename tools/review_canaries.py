@@ -302,7 +302,9 @@ def _text_options(cls: str, case: dict[str, Any], digest: str, texts: Mapping[st
             for value in sorted(set(_NUMBER.findall(data))):
                 if _has_number(linked, value):
                     shifted = _shift_number(data, value)
-                    row = _base(cls, case, step, None, None, "test_data", data, shifted, [str(int(value) + 1), value])
+                    # the place of a data error is the step with its expectations: a reviewer names the expectation the data break
+                    row = {**_base(cls, case, step, None, None, "test_data", data, shifted, [str(int(value) + 1), value]),
+                           "place_ids": [str(exp["expectation_id"]) for exp in step["expectations"]]}
 
                     def apply(step=step, shifted=shifted) -> None:
                         step["test_data"] = shifted
@@ -527,10 +529,12 @@ def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, stric
     the case and, in the text, a value of the canary.  A bare case ID in a general finding is not a hit.  *strict* — what a refusal
     may stand on: the ID of the step, expectation or assertion is in ``related_ids`` as a whole item **and** the text names the
     mutated or the original value (for ``assertion_removed``, whose view holds nothing to quote, the ID of the expectation or the
-    assertion — the step only when there is no expectation — is enough); a looser hit is for the statistics only."""
+    assertion — the step only when there is no expectation — is enough); a looser hit is for the statistics only.  A ``data`` error
+    sits in the step's test data: its place is the step with its expectations (``place_ids``), an ID of another step is still not it."""
     ids = {str(item) for item in finding.get("related_ids") or []}
     text = " ".join([str(finding.get("message", "")), *(str(item) for item in finding.get("evidence") or [])])
     specific = {str(canary[key]) for key in ("step_id", "expectation_id", "assertion_id") if canary.get(key)}
+    specific |= {str(item) for item in canary.get("place_ids") or []}
     named = any(_names(marker, text) for marker in canary.get("markers") or [])
     if strict:
         # a finding that names another step, expectation or assertion is not only about this canary (the prefixes are the ones of

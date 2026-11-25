@@ -160,3 +160,32 @@ def test_fewer_errors_than_the_size_asks_are_told() -> None:
     rows = rc.Seeded([_row("outcome", 1)])
     rows.wanted = 3
     assert rc.outcome(rows, _answer())["wanted"] == 3
+
+
+def _data_row() -> dict:
+    case = _case(1, "Имя принято.", data="имя из 30 букв A")
+    texts, literals = rc._linked(_doc(case))
+    return {"canary_id": "CAN-1", **rc._text_options("data", case, DIGEST, texts, literals)[0][0]}
+
+
+def _blocking(*ids: str) -> dict:
+    return {"severity": "BLOCKING", "related_ids": ["TC-1", *ids], "message": "Данные шага расходятся с требованием."}
+
+
+def test_a_blocking_on_data_with_an_expectation_of_its_step_is_a_catch_and_rejects_no_case() -> None:
+    finding = _blocking("STEP-1", "EXP-1")
+    assert rc.outcome([_data_row()], _answer([finding]))["caught"] == 1
+    assert rc.canary_finding([_data_row()], finding, {"TC-1"})
+
+
+def test_a_blocking_on_data_with_an_expectation_of_another_step_is_no_catch() -> None:
+    finding = _blocking("STEP-1", "EXP-9")
+    assert rc.outcome([_data_row()], _answer([finding]))["caught"] == 0
+    assert not rc.canary_finding([_data_row()], finding, {"TC-1"})
+
+
+def test_a_map_with_a_data_row_validates() -> None:
+    from tools.schema_validation import schema_diagnostics
+
+    value = json.loads(rc.map_bytes(DIGEST, [_data_row()]))
+    assert schema_diagnostics(value, ROOT / "schemas" / "review-canaries.schema.json", ROOT) == []
