@@ -274,8 +274,10 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
         # the requirements step of the marker in parts reads the requirement documents only
         return _requirement_files(project, root)
     if batch is not None and answer is not None:
-        # a part of the marker reads the requirements answer, not the documents again.
-        files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))
+        # a part of the marker reads the view of the requirements answer, not the documents again.
+        source = root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json")
+        view = _requirements_view(project, root, answer, source, True)
+        files.append(Path(view["path"]) if view else source)
     else:
         files.extend(_requirement_files(project, root))
     return list(dict.fromkeys(files))
@@ -320,6 +322,7 @@ class _Journal:
         self.sha256: dict[Path, str] = {}  # the sha256 of the bytes of each file of the context receipts (their content_digest)
         self.documents: dict[str, Path | None] = {}
         self.bundled: dict[str, Path] = {}
+        self.requirements_answer: str | None = None  # the answer of context-marker:requirements: a part reads its view
         attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
         from tools.pilot_state import frozen_baseline
 
@@ -340,6 +343,8 @@ class _Journal:
                 self.sha256.update({project_path(project, item["project_path"]): item["content_digest"] for item in receipt["files"]})
             elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
                 self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
+                if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == "context-marker:requirements":
+                    self.requirements_answer = digest
             elif event["event_type"] == "CANDIDATE_PUBLISHED":
                 self.documents[digest] = None
         for pattern in _RECEIPT_SLOTS:
@@ -521,6 +526,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
                     files.append({"digest": digest, "path": str(view), "bytes": len(numbers.encode("utf-8")), "basis": "номера"})
             if context and stage.startswith("tc-generator:"):
                 contexts.append(digest)
+        elif (stage.startswith("context-marker:batch-") and digest == journal.requirements_answer and len(paths := journal.files.get(digest, [])) == 1
+              and (view := _requirements_view(project, root, digest, paths[0], write_views)) is not None):
+            files.append(view)  # a part reads the view of the requirements answer, not the answer (R&D-12, variant A)
         elif len(paths := [path for path in journal.files.get(digest, []) if path.is_file()]) == 1:
             files.append({"digest": digest, "path": str(paths[0]), "bytes": paths[0].stat().st_size})
         elif paths:
@@ -583,6 +591,9 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
 
 INVENTORY_VIEW = "inventory-view-v1"
 PLAN_VIEW = "plan-view-v1"
+REQUIREMENTS_VIEW = "requirements-view-v1"
+REQUIREMENTS_REST = "provenance, digest и связи кейсов — в ответе шага требований; часть их не пишет: submit вставит требования сам"
+_AT = re.compile(r"^(\S+:\d+)(?: — |$)")  # the ``path:line`` a provenance mark starts with
 
 
 def inventory_view_path(root: Path, inventory_digest: str) -> Path:
@@ -619,6 +630,41 @@ def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
     rows = [{key: row[key] for key in ("source_requirement_id", "display_order") if key in row} for row in plan.get("source_requirements") or []]
     return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
                      "view": PLAN_VIEW, "texts": "тексты, provenance и digest требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[] по source_requirement_id"})
+
+
+def requirements_view_path(root: Path, answer_digest: str) -> Path:
+    return Path(root) / "marker-views" / (str(answer_digest).removeprefix("sha256:") + ".requirements-view.json")
+
+
+def requirements_view_bytes(answer: Mapping[str, Any], answer_digest: str) -> bytes:
+    """What a part of the marker reads of the requirements answer - per requirement its id, order, ``path:line`` and text.  The
+    provenance (in OpenSpec the whole block once more), the digests and the case links stay in the answer: a part does not write
+    the requirements, ``submit`` puts them in (``context_marker_merge.with_requirements``)."""
+    def at(row: Mapping[str, Any]) -> str | None:
+        return next((found.group(1) for mark in row.get("provenance") or [] if (found := _AT.match(str(mark)))), None)
+
+    rows = answer["artifacts"]["analytics_documentation"]["requirements"]
+    return _compact({"view": REQUIREMENTS_VIEW, "answer_digest": answer_digest, "columns": ["source_requirement_id", "display_order", "at", "text"],
+                     "requirements": [[row.get("source_requirement_id"), row.get("display_order"), at(row), row.get("text")] for row in rows],
+                     "rest": REQUIREMENTS_REST})
+
+
+def _requirements_view(project: Path, root: Path, digest: str, source: Path, write: bool) -> dict[str, Any] | None:
+    """The view of the requirements answer ``digest`` (its file ``source``) as a row of the files of a part: written with the request
+    (``write``), measured as it was written otherwise.  None - the answer itself stands: a part of a run before the view (its report
+    stays as it was) or a file that is not the answer's bytes."""
+    target = requirements_view_path(root, digest)
+    if not write and not target.is_file():
+        return None
+    try:
+        raw = source.read_bytes()
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+            return None
+        data = requirements_view_bytes(json.loads(raw.decode("utf-8")), digest)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    _write_view(project, root, target, data, write)
+    return {"digest": digest, "path": str(target), "bytes": len(data), "basis": REQUIREMENTS_VIEW}
 
 
 def _write_view(project: Path, root: Path, target: Path, data: bytes, write: bool) -> None:

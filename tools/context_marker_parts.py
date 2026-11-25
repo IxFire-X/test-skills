@@ -37,7 +37,7 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
-    from tools.step_size import role_files, step_budget
+    from tools.step_size import requirements_view_bytes, requirements_view_path, role_files, step_budget
 
     root = Path(root).resolve()
     project = root.parents[1]
@@ -68,14 +68,21 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         mode = "single"
     else:
         answer = responses.get("context-marker:requirements")
-        requirements_bytes = (pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)["byte_count"]
-                              if answer else documents)
+        requirements_bytes = documents
+        if answer:  # a part reads the view of the answer; a part asked before the view (none on the disk) read the answer
+            read = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)
+            view = len(requirements_view_bytes(read["artifact"], answer))
+            asked = {str(event.get("stage_instance_id")) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"}
+            old = not requirements_view_path(root, answer).is_file()
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
         if openspec or imported and not docs_run(root):  # code, not a model call: no prompt, no budget (an import with --docs: the model)
             parts[0].update(fits=True, hint=None, by_code=True)
         for receipt in receipts:
-            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
+            stage = f"context-marker:batch-{int(receipt['batch_index']):03d}"
+            if answer:
+                requirements_bytes = read["byte_count"] if old and stage in asked else view
+            part = step(stage, [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
                         "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                         + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else ""))

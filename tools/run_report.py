@@ -401,6 +401,8 @@ def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[st
             kind = "map"
         elif row.get("basis") == "plan-view-v1":
             kind = "plan_header"
+        elif row.get("basis") == "requirements-view-v1":  # what a part of the marker reads of the requirements answer
+            kind = "markup"
         elif str(target) in documents:
             kind = "documents"
         elif not target.is_relative_to(run):
