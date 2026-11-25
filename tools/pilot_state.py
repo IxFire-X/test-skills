@@ -3666,21 +3666,8 @@ def publish_attempt_receipt(
         _validate_factual_receipt(project, root, attempt, kind, value, state)
         receipt, created, installed_identity = _publish(project, root, target, {key: value for key, value in value.items() if key != "digest"}, "terminal result", return_created=True)
     else:
-        if kind == "execution-receipt":
-            if set(facts) != {"payload"} or not isinstance(facts.get("payload"), Mapping):
-                raise ValueError("invalid execution receipt")
-            try:
-                delta = _phase5_generated_delta(project, root, state, attempt)
-                execution = facts["payload"]["execution"]
-                request_digest_value = execution["request_digest"]
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError("invalid execution receipt") from error
-            facts = {
-                "baseline_digest": attempt["baseline_digest"],
-                "generated_delta_digest": delta["digest"],
-                "execution_request_digest": request_digest_value,
-                "payload": dict(facts["payload"]),
-            }
+        if kind == "execution-receipt":  # MODE_B_NOT_IN_PACKAGE in a delivery of cases
+            facts = execution_gate.from_mode_b("execution_journal", "execution_receipt_facts")[0](project, root, state, attempt, facts)
         value = {
             "schema_version": "1.0.0", "kind": kind, "run_id": attempt["run_id"],
             "attempt_id": attempt_id, "policy_profile": attempt["policy_profile"], **dict(facts),

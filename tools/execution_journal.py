@@ -1283,3 +1283,22 @@ def publish_run_artifact_bytes(run_root: Path, attempt_id: str, relative_name: s
         "digest": digest,
         "created": bool(created),
     }
+
+
+def execution_receipt_facts(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str, Any]:
+    """The facts of an ``execution-receipt`` as the journal keeps them (``pilot_state.publish_attempt_receipt`` through the gate): the
+    payload bound to the baseline of the attempt, its generated delta and the request of the execution."""
+    if set(facts) != {"payload"} or not isinstance(facts.get("payload"), Mapping):
+        raise ValueError("invalid execution receipt")
+    try:
+        delta = _phase5_generated_delta(project, root, state, attempt)
+        execution = facts["payload"]["execution"]
+        request_digest_value = execution["request_digest"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("invalid execution receipt") from error
+    return {
+        "baseline_digest": attempt["baseline_digest"],
+        "generated_delta_digest": delta["digest"],
+        "execution_request_digest": request_digest_value,
+        "payload": dict(facts["payload"]),
+    }
