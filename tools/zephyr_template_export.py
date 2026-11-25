@@ -21,7 +21,7 @@ from typing import Any, Mapping
 from tools import output_guard
 from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser
-from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _formula_safe
+from tools.test_case_projections import CUSTOM_KEYS as _CUSTOM_KEYS, HEADERS as _HEADERS, formula_safe as _formula_safe
 from tools.zephyr_csv import detect_delimiter
 
 TEMPLATE_LIMIT = 1024 * 1024

@@ -718,3 +718,17 @@ def restored_csv(rows: Sequence[Mapping[str, Any]]) -> bytes:
     output = io.StringIO(newline="")
     csv.writer(output, delimiter=",", quotechar='"', lineterminator="\r\n").writerows(records)
     return output.getvalue().encode("utf-8")
+
+
+# The public names of the CSV profiles and the shared parts of the CSV for the neighbours (publish_test_case_bundle, zephyr_csv,
+# zephyr_template_export): one place of the profiles; the neighbours bind them under their old private names.
+DEFAULT_PROFILE = _PROFILE
+PUBLISHABLE_PROFILES = _PUBLISHABLE_PROFILES
+CUSTOM_KEYS = _CUSTOM_KEYS
+HEADERS = _HEADERS
+PRIORITIES = _PRIORITIES
+formula_safe = _formula_safe
+reject_unknown_profile = _reject_unknown_profile
+render_html_preview_validated = _render_html_preview_validated
+render_markdown_validated = _render_markdown_validated
+render_zephyr_csv_validated = _render_zephyr_csv_validated

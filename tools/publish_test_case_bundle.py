@@ -17,20 +17,18 @@ from typing import Any, Sequence
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
 from tools.schema_validation import classify_version
 from tools.test_case_projections import (
-    _reject_unknown_profile as _reject_projection_profile,
-    _render_html_preview_validated,
-    _render_markdown_validated,
-    _render_zephyr_csv_validated,
+    DEFAULT_PROFILE as _PROFILE,
+    PUBLISHABLE_PROFILES as _CURRENT_PROFILES,
     escape_inline,
+    reject_unknown_profile as _reject_projection_profile,
+    render_html_preview_validated as _render_html_preview_validated,
+    render_markdown_validated as _render_markdown_validated,
+    render_zephyr_csv_validated as _render_zephyr_csv_validated,
     restored_csv,
     section_labels,
 )
 
 
-_PROFILE_V4 = "zephyr-scale-step-row-24-v4"
-_PROFILE_V5 = "zephyr-scale-step-row-24-v5"
-_PROFILE = _PROFILE_V5
-_CURRENT_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _ORDER = ("json", "preview", "csv", "markdown")
 _MESSAGES = {
     "OUTPUT_DIRECTORY_ERROR": "Output directory is unavailable.",

@@ -14,7 +14,7 @@ import io
 import re
 from typing import Any, Iterable
 
-from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _PRIORITIES
+from tools.test_case_projections import CUSTOM_KEYS as _CUSTOM_KEYS, HEADERS as _HEADERS, PRIORITIES as _PRIORITIES
 
 _STEP, _DATA, _EXPECTED = (
     "Test Script (Step-by-Step) - Step", "Test Script (Step-by-Step) - Test Data", "Test Script (Step-by-Step) - Expected Result")

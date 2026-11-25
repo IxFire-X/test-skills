@@ -83,10 +83,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("pilot_state", "run_pipeline", "_scan_command"): 1,
     ("pilot_state", "schema_validation", "_json_validation_key"): 1,
     ("pilot_state", "step_size", "_REQUEST_STAGES"): 1,
-    ("publish_test_case_bundle", "test_case_projections", "_reject_unknown_profile"): 1,
-    ("publish_test_case_bundle", "test_case_projections", "_render_html_preview_validated"): 1,
-    ("publish_test_case_bundle", "test_case_projections", "_render_markdown_validated"): 1,
-    ("publish_test_case_bundle", "test_case_projections", "_render_zephyr_csv_validated"): 1,
     ("ready", "run_pipeline", "_baseline_blockers"): 1,
     ("ready", "run_pipeline", "_exclusion_note"): 1,
     ("review_canaries", "pilot_state", "_receipt_target"): 1,
@@ -106,13 +102,7 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("scope_pause", "pilot_state", "_generator_input"): 1,
     ("step_size", "pilot_state", "_model_request_target"): 1,
     ("assemble_sections", "run_pipeline", "_read_run_coordinate"): 2,
-    ("zephyr_csv", "test_case_projections", "_CUSTOM_KEYS"): 1,
-    ("zephyr_csv", "test_case_projections", "_HEADERS"): 1,
-    ("zephyr_csv", "test_case_projections", "_PRIORITIES"): 1,
     ("zephyr_template_export", "run_pipeline", "_read_run_coordinate"): 1,
-    ("zephyr_template_export", "test_case_projections", "_CUSTOM_KEYS"): 1,
-    ("zephyr_template_export", "test_case_projections", "_HEADERS"): 1,
-    ("zephyr_template_export", "test_case_projections", "_formula_safe"): 1,
 }
 
 
