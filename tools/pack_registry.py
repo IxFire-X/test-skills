@@ -29,7 +29,7 @@ from tools.schema_validation import StrictJsonError, load_json_strict, schema_di
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
 # The files of the root a pack carries, so that the check covers them: the two documents generated from the contract, the texts a
 # human follows (README, HOW-TO-USE), what ``pip`` would read (``requirements*.txt``) and the example of ``.skillsrc``.
-ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "requirements.txt", "requirements-dev.txt",
+ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "QUICKSTART.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "requirements.txt", "requirements-dev.txt",
               ".skillsrc.example")
 RUNTIME_SUFFIXES = {".json", ".md", ".py"}
 PROFILES = ("universal", "mode-b", "cases-only")
@@ -47,7 +47,7 @@ CASES_ONLY_EXCLUDED_FILES = (
 )
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a
-# delivery of cases does not carry (PT).
+# delivery of cases does not carry.
 CASES_ONLY_EXCLUDED_PREFIXES = ("skills/tc-to-autotest/", "skills/autotest-reviewer/")
 
 # What the delivery of mode B leaves out: the tools of development.  ``ci_gate`` and ``release_manifest`` run ``git`` and write the

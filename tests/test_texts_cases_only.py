@@ -39,7 +39,7 @@ def _profile_texts() -> dict[str, str]:
     from tools import pack_registry
 
     paths = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only")
-    names = ["README.md", "HOW-TO-USE.md", *(path for path in paths if path.startswith("skills/") and path.endswith(".md"))]
+    names = ["README.md", "QUICKSTART.md", "HOW-TO-USE.md", *(path for path in paths if path.startswith("skills/") and path.endswith(".md"))]
     return {name: (ROOT / name).read_text(encoding="utf-8").replace("\r\n", "\n") for name in names}
 
 

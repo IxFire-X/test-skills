@@ -10,12 +10,12 @@ permissions:
   rollback: "удалить <project>/.pilot-runs/<run_id>/ и созданный <project>/.skillsrc"
 ---
 
-# Оркестрация Pipeline 4.0 — тест-кейсы
+# Оркестрация Трассы — тест-кейсы
 
 Ты — controller в model-enabled CLI. Не запускай из Python модель и не передавай model credentials. Python tools проверяют и публикуют
 артефакты; сборку и тесты не запускают. Кейсы идут профилем `cases-only-v1`; автотесты (`local-pilot-v1`, режим Б) входят в поставку профиля `mode-b` (его называет `doctor`): веди их по `references/mode-b.md`; в `cases-only` их нет.
 
-Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `state` и `next` в `status`.
+Запрос человека → режим: [requests.md](references/requests.md). Это карта стадий. Аргументы команды — `python -m tools.api <команда> --help`; что делать дальше — `state` и `next` в `status`.
 До работы — `python -m tools.doctor --root <pack-root>`. tools вызывай с cwd пакета и абсолютным `--project`; функции пакета не импортируй.
 `prepare` и `submit` — `python -m tools.api <команда> --run-root <run> --stage <id>`; `scan`, `status`, `finish`, `report` — `python -m tools.run_pipeline <имя>` (ниже — целиком). Ответ — одна строка JSON: `status: ok` и `result`,
 `invalid` (код 1) или `error` (код 2: `code`, `message`, `fix`). Писать можно только в `<project>/.pilot-runs/`, `.skillsrc` и `<run>/published`.
@@ -32,8 +32,7 @@ permissions:
 
 ## 1. Run и режим ревью
 
-Объём для OpenSpec — [openspec.md](references/openspec.md). Каждый пробел — в `warnings` с четырьмя частями: требование и источник; недостающее условие;
-заблокированные проверки; вопрос. Неопределённое требование остаётся в наборе; существенный пробел запрещает заявлять полный объём. `python -m tools.run_pipeline scan --project <abs> --docs <путь> [--docs …] --profile <профиль> [--module <ID>]` создаёт run (`run_id` — последняя строка вывода; файлы и события run руками не пиши).
+Объём для OpenSpec — [openspec.md](references/openspec.md). Неопределённое требование остаётся в наборе; существенный пробел запрещает заявлять полный объём. `python -m tools.run_pipeline scan --project <abs> --docs <путь> [--docs …] --profile <профиль> [--module <ID>]` создаёт run (`run_id` — последняя строка вывода; файлы и события run руками не пиши).
 `SCAN_RUN_IN_PROGRESS` — продолжи по `fix`; `--new-run` — только по просьбе человека или если `fix` его называет. Незакрытый прогон, у которого файлы проекта изменились (дрейф), `scan` не продолжает: он начинает новый и называет прошлый в `abandoned_runs`.
 Документацию внешних зависимостей сам не ищи и в дерево проекта не сохраняй: бери то, что дал человек; не хватает — одна строка человеку.
 
@@ -78,7 +77,7 @@ permissions:
 ## 5. Закрытие и отчёт
 
 `python -m tools.run_pipeline finish --project <abs> --run <run_id>` проходит закрытие сам; `FINISH_FACT_UNDETERMINED` называет недостающее — сделай этот шаг. Цепочка
-не продолжается — `finish --abandon <код>` из `fix`. Результат — `verification=NOT_APPLICABLE`, `accepted=false`; читай все поля, «PASS» из manual coverage не делай. Итог с `FINALIZATION_INVALID` — прогон закрыт невалидным, `accepted=false`: передай человеку как есть, `finish` не повторяй и файлы не правь.
+не продолжается — `finish --abandon <код>` из `fix`. Результат — `verification=NOT_APPLICABLE`, `accepted=false`: в «только кейсах» это норма; человеку скажи `human_summary` как есть, «не принят» не говори. Итог с `FINALIZATION_INVALID` — прогон закрыт невалидным, `accepted=false`: передай человеку как есть, `finish` не повторяй и файлы не правь.
 Задан `projection.zephyr.template` — экспорт для Zephyr после закрытия: [import.md](references/import.md).
 В конце один раз `python -m tools.run_pipeline report --project <abs> --run <id>` — `report.md`, `report.json`, `questions-for-analyst.md`; назови пути. `review_notes` — число и путь одной строкой; кейсы не меняй, вердикт не пересматривай.
 
