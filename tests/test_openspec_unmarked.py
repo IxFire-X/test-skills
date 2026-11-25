@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_openspec_applied import ADD, BASE, DELTA, DOCS, MODIFY, SEARCH, _entries, _project, _scan
+from tests.test_stage_steps import _junction
+from tests.test_task_docs_context import _write
 from tools import ready, run_pipeline
 from tools.build_context import RequirementConflict, openspec_applied
 from tools.fixes import human_for
@@ -54,3 +56,19 @@ def test_ready_warns_in_its_own_row_too(tmp_path: Path) -> None:
     report = ready.check(_project(tmp_path, PROSE, ADD + SEARCH), DOCS, "cases-only-v1", None)
     [row] = [row for row in report["checks"] if row["id"] == "openspec:unmarked"]
     assert row["level"] == "WARN" and "owners" in row["message"]
+
+
+def test_ready_gives_no_warning_row_beside_the_stop_of_a_modified(tmp_path: Path) -> None:
+    report = ready.check(_project(tmp_path, PROSE, MODIFY + SEARCH), DOCS, "cases-only-v1", None)
+    assert [row for row in report["checks"] if row["id"] == "openspec:unmarked"] == []
+
+
+def test_a_spec_behind_a_link_out_of_the_project_is_not_read(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "spec.md").write_text("## Requirements\n" + PROSE, encoding="utf-8")
+    project = tmp_path / "project"
+    _write(project, DELTA, ADD + SEARCH)
+    (project / "openspec" / "specs").mkdir(parents=True)
+    _junction(project / "openspec" / "specs" / "owners", outside)
+    assert ready.check_openspec_base(project, [BASE, "openspec/changes/add-search"]) == []

@@ -361,14 +361,22 @@ def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
 def check_openspec_base(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
     """An area a change of OpenSpec touches whose spec.md has no «### Requirement:» — the line scan warns with, before any model; a docs row says a document that does not read."""
     from tools.build_context import openspec_unmarked_areas
+    from tools.output_guard import OutputRefused, project_file
     from tools.run_pipeline import UNMARKED_BASELINE, expand_docs
 
     root = Path(project).resolve()
     try:
-        files = [path.replace("\\", "/") for path in expand_docs(root, list(docs))]
-        entries = [{"path": path, "content": (root / path).read_text(encoding="utf-8")} for path in files if path.startswith("openspec/")]
+        files = expand_docs(root, list(docs))
     except Exception:  # the docs rows and the context row say what does not read
         return []
+    entries = []
+    for rel in _docs_rels(root, files):  # inside the project only, as check_size reads; no link on the way (project_file), as scan reads
+        if not rel.startswith("openspec/"):
+            continue
+        try:
+            entries.append({"path": rel, "content": project_file(root, rel).read_text(encoding="utf-8")})
+        except (OSError, UnicodeDecodeError, OutputRefused):
+            continue
     return [_row("openspec:unmarked", CASES, "WARN", UNMARKED_BASELINE.format(area=area), "это не стоп; чтобы был регресс области, владелец базы размечает требования разделами `### Requirement:`")
             for area in openspec_unmarked_areas(entries)]
 
@@ -703,7 +711,8 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish: иначе status покажет дрейф (drift) "
                   "и предложит вернуть файлы или начать новый scan")
     rows.append(_row("run:freeze", CASES, "OK", freeze))
-    rows.extend(check_openspec_base(project, typed))
+    if not any(row["id"] == "context:openspec" and row["level"] == "STOP" for row in rows):  # beside the stop of a MODIFIED the warning only confuses
+        rows.extend(check_openspec_base(project, typed))
     rows.extend(check_size(project, typed, profile == "local-pilot-v1" and any(row["id"] == "execution:build" and row["level"] == "OK" for row in rows)))
     # a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     from tools.skillsrc_manifest import skillsrc_review_self
