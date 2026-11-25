@@ -770,141 +770,149 @@ def _check_phase5_receipt(project: Path, root: Path, attempt: Mapping[str, Any],
         raise ValueError(f"invalid {kind} receipt")
     from tools.schema_validation import schema_diagnostics
     if kind == "materialization-ownership":
-        files = payload.get("files")
-        test_root = payload.get("test_root")
-        seen: set[tuple[str, str]] = set()
-        invalid_file = not isinstance(files, list) or not isinstance(test_root, str)
-        if not invalid_file:
-            prefix = test_root.rstrip("/") + "/"
-            for row in files:
-                if not isinstance(row, Mapping) or not isinstance(row.get("file_id"), str) or not isinstance(row.get("path"), str):
-                    invalid_file = True
-                    break
-                path = row["path"].replace("\\", "/")
-                identity = (row["file_id"], path.casefold())
-                expected_ownership = "sha256:" + hashlib.sha256(json.dumps({"baseline": payload.get("baseline_digest"), "automation": payload.get("automation_digest"), "review": payload.get("review_digest"), "path": row["path"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-                if identity in seen or not path.startswith(prefix) or Path(path).is_absolute() or ".." in Path(path).parts or row.get("ownership_digest") != expected_ownership:
-                    invalid_file = True
-                    break
-                seen.add(identity)
-        try:
-            automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b(
-                "automation_validation", "automation_sha256", "autotest_review_sha256",
-            )
-
-            effective = _read_effective_canonical_with_state(
-                project, root, state, str(attempt["attempt_id"]),
-            )
-            execution_inputs = _read_attempt_receipt_with_state(
-                project, root, state, str(attempt["attempt_id"]),
-                "execution-inputs", "ARTIFACT_READ_BACK",
-            )["record"]
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("invalid materialization ownership receipt") from error
-        if schema_diagnostics(dict(payload), _SCHEMA_ROOT / "materialization-receipt.schema.json", _PACK_ROOT) or payload.get("baseline_digest") != attempt.get("baseline_digest") or payload.get("module") != attempt.get("module") or payload.get("effective_canonical_digest") != effective.get("document_digest") or payload.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest") or automation_sha256(execution_inputs["automation_artifact"]) != payload.get("automation_digest") or autotest_review_sha256(execution_inputs["autotest_review"]) != payload.get("review_digest") or invalid_file:
-            raise ValueError("invalid materialization ownership receipt")
+        _check_ownership(project, root, attempt, kind, receipt, state, payload, schema_diagnostics)
     else:
-        files = payload.get("files")
-        file_ids: set[str] = set()
-        folded_paths: set[str] = set()
-        invalid_file = not isinstance(files, list)
-        if not invalid_file:
-            for row in files:
-                if not isinstance(row, Mapping) or not isinstance(row.get("file_id"), str) or not isinstance(row.get("path"), str):
-                    invalid_file = True
-                    break
-                path = row["path"].replace("\\", "/")
-                if row["file_id"] in file_ids or path.casefold() in folded_paths or Path(path).is_absolute() or ".." in Path(path).parts:
-                    invalid_file = True
-                    break
-                file_ids.add(row["file_id"])
-                folded_paths.add(path.casefold())
-        expected_payload = _sealed({key: value for key, value in payload.items() if key != "digest"})
-        if schema_diagnostics(dict(payload), _SCHEMA_ROOT / "disposition-receipt.schema.json", _PACK_ROOT) or invalid_file or expected_payload != payload:
-            raise ValueError(f"invalid {kind} receipt")
-        delta = _phase5_generated_delta(project, root, state, attempt)
-        expected_rows = _phase5_disposition_rows(delta)
-        verification = payload.get("verification")
-        evidence = payload.get("execution_unknown_evidence_digest")
-        if payload.get("generated_delta_digest") != delta.get("digest") or payload.get("files") is None or verification not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"}:
-            raise ValueError(f"invalid {kind} receipt")
-        if (verification == "UNKNOWN") != isinstance(evidence, str) or (isinstance(evidence, str) and not _DIGEST.fullmatch(evidence)):
-            raise ValueError(f"invalid {kind} receipt")
-        rows = payload["files"]
-        GeneratedDeltaError, resolve_disposition_policy = execution_gate.from_mode_b(
-            "generated_delta", "GeneratedDeltaError", "resolve_disposition_policy",
+        _check_dispositions(project, root, attempt, kind, receipt, state, payload, schema_diagnostics)
+
+
+def _check_ownership(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], payload: Mapping[str, Any], schema_diagnostics: Any) -> None:  # materialization-ownership: the files the package wrote, each with its ownership digest
+    files = payload.get("files")
+    test_root = payload.get("test_root")
+    seen: set[tuple[str, str]] = set()
+    invalid_file = not isinstance(files, list) or not isinstance(test_root, str)
+    if not invalid_file:
+        prefix = test_root.rstrip("/") + "/"
+        for row in files:
+            if not isinstance(row, Mapping) or not isinstance(row.get("file_id"), str) or not isinstance(row.get("path"), str):
+                invalid_file = True
+                break
+            path = row["path"].replace("\\", "/")
+            identity = (row["file_id"], path.casefold())
+            expected_ownership = "sha256:" + hashlib.sha256(json.dumps({"baseline": payload.get("baseline_digest"), "automation": payload.get("automation_digest"), "review": payload.get("review_digest"), "path": row["path"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            if identity in seen or not path.startswith(prefix) or Path(path).is_absolute() or ".." in Path(path).parts or row.get("ownership_digest") != expected_ownership:
+                invalid_file = True
+                break
+            seen.add(identity)
+    try:
+        automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b(
+            "automation_validation", "automation_sha256", "autotest_review_sha256",
         )
 
-        quarantine = verification == "FAIL" and _disposition_policy_at(project, root) == "quarantine"
+        effective = _read_effective_canonical_with_state(
+            project, root, state, str(attempt["attempt_id"]),
+        )
+        execution_inputs = _read_attempt_receipt_with_state(
+            project, root, state, str(attempt["attempt_id"]),
+            "execution-inputs", "ARTIFACT_READ_BACK",
+        )["record"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("invalid materialization ownership receipt") from error
+    if schema_diagnostics(dict(payload), _SCHEMA_ROOT / "materialization-receipt.schema.json", _PACK_ROOT) or payload.get("baseline_digest") != attempt.get("baseline_digest") or payload.get("module") != attempt.get("module") or payload.get("effective_canonical_digest") != effective.get("document_digest") or payload.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest") or automation_sha256(execution_inputs["automation_artifact"]) != payload.get("automation_digest") or autotest_review_sha256(execution_inputs["autotest_review"]) != payload.get("review_digest") or invalid_file:
+        raise ValueError("invalid materialization ownership receipt")
 
-        if kind == "disposition-plan":
-            if payload.get("stage") != "disposition-plan" or len(rows) != len(expected_rows):
+
+def _check_dispositions(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], payload: Mapping[str, Any], schema_diagnostics: Any) -> None:  # disposition-plan, disposition-receipt: the plan of the dispositions and what was done
+    files = payload.get("files")
+    file_ids: set[str] = set()
+    folded_paths: set[str] = set()
+    invalid_file = not isinstance(files, list)
+    if not invalid_file:
+        for row in files:
+            if not isinstance(row, Mapping) or not isinstance(row.get("file_id"), str) or not isinstance(row.get("path"), str):
+                invalid_file = True
+                break
+            path = row["path"].replace("\\", "/")
+            if row["file_id"] in file_ids or path.casefold() in folded_paths or Path(path).is_absolute() or ".." in Path(path).parts:
+                invalid_file = True
+                break
+            file_ids.add(row["file_id"])
+            folded_paths.add(path.casefold())
+    expected_payload = _sealed({key: value for key, value in payload.items() if key != "digest"})
+    if schema_diagnostics(dict(payload), _SCHEMA_ROOT / "disposition-receipt.schema.json", _PACK_ROOT) or invalid_file or expected_payload != payload:
+        raise ValueError(f"invalid {kind} receipt")
+    delta = _phase5_generated_delta(project, root, state, attempt)
+    expected_rows = _phase5_disposition_rows(delta)
+    verification = payload.get("verification")
+    evidence = payload.get("execution_unknown_evidence_digest")
+    if payload.get("generated_delta_digest") != delta.get("digest") or payload.get("files") is None or verification not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"}:
+        raise ValueError(f"invalid {kind} receipt")
+    if (verification == "UNKNOWN") != isinstance(evidence, str) or (isinstance(evidence, str) and not _DIGEST.fullmatch(evidence)):
+        raise ValueError(f"invalid {kind} receipt")
+    rows = payload["files"]
+    GeneratedDeltaError, resolve_disposition_policy = execution_gate.from_mode_b(
+        "generated_delta", "GeneratedDeltaError", "resolve_disposition_policy",
+    )
+
+    quarantine = verification == "FAIL" and _disposition_policy_at(project, root) == "quarantine"
+
+    if kind == "disposition-plan":
+        if payload.get("stage") != "disposition-plan" or len(rows) != len(expected_rows):
+            raise ValueError("invalid disposition-plan receipt")
+        for actual, expected in zip(rows, expected_rows):
+            if not isinstance(actual, Mapping):
                 raise ValueError("invalid disposition-plan receipt")
-            for actual, expected in zip(rows, expected_rows):
-                if not isinstance(actual, Mapping):
-                    raise ValueError("invalid disposition-plan receipt")
-                try:
-                    operation, requested, _outcomes = resolve_disposition_policy(
-                        str(verification),
-                        str(expected.get("materialization")),
-                        retain_pass=verification == "PASS" and actual.get("requested_disposition") == "RETAINED",
-                        quarantine=quarantine,
-                    )
-                except GeneratedDeltaError as error:
-                    raise ValueError("invalid disposition-plan receipt") from error
-                relation = expected | {"operation": operation, "requested_disposition": requested}
-                quarantine_keys = {key for key in ("quarantine", "quarantined_digest", "quarantine_unresolved") if key in actual}
-                if (
-                    any(actual.get(key) != relation.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
-                    or actual.get("pre_effect_state") not in ({"NOT_APPLICABLE"} if operation == "NO_FILE" else {"EXACT", "MISSING", "DRIFT", "UNSAFE"})
-                    # a quarantine row is either unresolved or names its methods and their marked digest.
-                    or operation != "QUARANTINE_IF_EXACT" and quarantine_keys
-                    or operation == "QUARANTINE_IF_EXACT" and quarantine_keys not in ({"quarantine_unresolved"}, {"quarantine", "quarantined_digest"})
-                    or operation == "QUARANTINE_IF_EXACT" and "quarantine" in actual and (actual["quarantine"] == []) != (actual["quarantined_digest"] is None)
-                ):
-                    raise ValueError("invalid disposition-plan receipt")
-        else:
-            if payload.get("stage") != "dispositions":
+            try:
+                operation, requested, _outcomes = resolve_disposition_policy(
+                    str(verification),
+                    str(expected.get("materialization")),
+                    retain_pass=verification == "PASS" and actual.get("requested_disposition") == "RETAINED",
+                    quarantine=quarantine,
+                )
+            except GeneratedDeltaError as error:
+                raise ValueError("invalid disposition-plan receipt") from error
+            relation = expected | {"operation": operation, "requested_disposition": requested}
+            quarantine_keys = {key for key in ("quarantine", "quarantined_digest", "quarantine_unresolved") if key in actual}
+            if (
+                any(actual.get(key) != relation.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
+                or actual.get("pre_effect_state") not in ({"NOT_APPLICABLE"} if operation == "NO_FILE" else {"EXACT", "MISSING", "DRIFT", "UNSAFE"})
+                # a quarantine row is either unresolved or names its methods and their marked digest.
+                or operation != "QUARANTINE_IF_EXACT" and quarantine_keys
+                or operation == "QUARANTINE_IF_EXACT" and quarantine_keys not in ({"quarantine_unresolved"}, {"quarantine", "quarantined_digest"})
+                or operation == "QUARANTINE_IF_EXACT" and "quarantine" in actual and (actual["quarantine"] == []) != (actual["quarantined_digest"] is None)
+            ):
+                raise ValueError("invalid disposition-plan receipt")
+    else:
+        if payload.get("stage") != "dispositions":
+            raise ValueError("invalid disposition-receipt receipt")
+        try:
+            plan = _read_attempt_receipt_with_state(
+                project, root, state, str(attempt["attempt_id"]), "disposition-plan",
+                "ARTIFACT_READ_BACK",
+            )["record"]["payload"]
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("invalid disposition-receipt receipt") from error
+        if not isinstance(plan, Mapping) or payload.get("disposition_plan_digest") != plan.get("digest") or payload.get("generated_delta_digest") != plan.get("generated_delta_digest") or verification != plan.get("verification") or evidence != plan.get("execution_unknown_evidence_digest"):
+            raise ValueError("invalid disposition-receipt receipt")
+        plan_rows = plan.get("files")
+        if not isinstance(plan_rows, list) or len(rows) != len(plan_rows) or [
+            {key: row[key] for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")}
+            for row in rows
+        ] != expected_rows:
+            raise ValueError("invalid disposition-receipt receipt")
+        for final_row, plan_row in zip(rows, plan_rows):
+            if not isinstance(plan_row, Mapping) or any(final_row.get(key) != plan_row.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")):
                 raise ValueError("invalid disposition-receipt receipt")
             try:
-                plan = _read_attempt_receipt_with_state(
-                    project, root, state, str(attempt["attempt_id"]), "disposition-plan",
-                    "ARTIFACT_READ_BACK",
-                )["record"]["payload"]
-            except (KeyError, TypeError, ValueError) as error:
+                operation, requested, outcomes = resolve_disposition_policy(
+                    str(verification), str(plan_row.get("materialization")),
+                    retain_pass=verification == "PASS" and plan_row.get("requested_disposition") == "RETAINED",
+                    quarantine=quarantine,
+                )
+            except GeneratedDeltaError as error:
                 raise ValueError("invalid disposition-receipt receipt") from error
-            if not isinstance(plan, Mapping) or payload.get("disposition_plan_digest") != plan.get("digest") or payload.get("generated_delta_digest") != plan.get("generated_delta_digest") or verification != plan.get("verification") or evidence != plan.get("execution_unknown_evidence_digest"):
+            if plan_row.get("operation") != operation or plan_row.get("requested_disposition") != requested:
                 raise ValueError("invalid disposition-receipt receipt")
-            plan_rows = plan.get("files")
-            if not isinstance(plan_rows, list) or len(rows) != len(plan_rows) or [
-                {key: row[key] for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")}
-                for row in rows
-            ] != expected_rows:
+            legal = outcomes.get(str(plan_row.get("pre_effect_state")), frozenset())
+            if (final_row.get("disposition"), final_row.get("reason_code")) not in legal:
                 raise ValueError("invalid disposition-receipt receipt")
-            for final_row, plan_row in zip(rows, plan_rows):
-                if not isinstance(plan_row, Mapping) or any(final_row.get(key) != plan_row.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")):
-                    raise ValueError("invalid disposition-receipt receipt")
-                try:
-                    operation, requested, outcomes = resolve_disposition_policy(
-                        str(verification), str(plan_row.get("materialization")),
-                        retain_pass=verification == "PASS" and plan_row.get("requested_disposition") == "RETAINED",
-                        quarantine=quarantine,
-                    )
-                except GeneratedDeltaError as error:
-                    raise ValueError("invalid disposition-receipt receipt") from error
-                if plan_row.get("operation") != operation or plan_row.get("requested_disposition") != requested:
-                    raise ValueError("invalid disposition-receipt receipt")
-                legal = outcomes.get(str(plan_row.get("pre_effect_state")), frozenset())
-                if (final_row.get("disposition"), final_row.get("reason_code")) not in legal:
-                    raise ValueError("invalid disposition-receipt receipt")
-                if operation == "QUARANTINE_IF_EXACT" and not {
-                    "QUARANTINED": plan_row.get("quarantine") not in (None, [])
-                    and final_row.get("quarantine") == plan_row.get("quarantine")
-                    and final_row.get("quarantined_digest") == plan_row.get("quarantined_digest"),
-                    "RETAINED": plan_row.get("quarantine") == [],
-                    "CLEANED": plan_row.get("quarantine_unresolved") is True,
-                }.get(str(final_row.get("disposition")), True):
-                    raise ValueError("invalid disposition-receipt receipt")
+            if operation == "QUARANTINE_IF_EXACT" and not {
+                "QUARANTINED": plan_row.get("quarantine") not in (None, [])
+                and final_row.get("quarantine") == plan_row.get("quarantine")
+                and final_row.get("quarantined_digest") == plan_row.get("quarantined_digest"),
+                "RETAINED": plan_row.get("quarantine") == [],
+                "CLEANED": plan_row.get("quarantine_unresolved") is True,
+            }.get(str(final_row.get("disposition")), True):
+                raise ValueError("invalid disposition-receipt receipt")
 
 
 # a kind of mode B -> its check (``pilot_state._validate_factual_receipt`` through the gate)
