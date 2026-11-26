@@ -22,7 +22,8 @@ from tools import execution_gate, output_guard
 from tools.openspec_scope import PARTIAL, QUESTIONS, SCOPE_HEADS
 from tools.openspec_scope import question as openspec_question
 
-GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
+GUARANTEE = ("без кода, текста спеки и ответов модели; из кейсов — только строка предусловия, если её подготовка не удалась; "
+             "есть пути тестовых файлов, имена методов, коды "
              "и ID требований, кейсов, параметров и классов")
 CLOCK_NOTE = "время по часам машины, не проверяется"
 HUMAN_RESULT_NOTE = "результат запуска предоставлен человеком, пакет его не воспроизводил"
