@@ -369,7 +369,7 @@ def _events(project: Path, root: Path, repair: bool = False) -> list[dict[str, A
 
 
 def _checked_event_line(project: Path, root: Path, manifest: Mapping[str, Any], seq: int, line: bytes, previous: str | None) -> dict[str, Any]:
-    """One journal line against its copy in events/, its schema, seal, seq, run and chain link (as in _events_full)."""
+    """One journal line against its copy in events/, its schema, seal, seq, run and chain link (``_events`` and ``_events_full`` read each line through it)."""
     event_bytes = read_confined_bytes(project, root, root / "events" / f"{seq:010d}.json")
     if event_bytes != line:
         raise ValueError("invalid event journal")
@@ -436,22 +436,7 @@ def _events_full(project: Path, root: Path, repair: bool = False) -> list[dict[s
     previous: str | None = None
     result: list[dict[str, Any]] = []
     for seq, line in enumerate(lines, 1):
-        path = event_dir / f"{seq:010d}.json"
-        event_bytes = read_confined_bytes(project, root, path)
-        if event_bytes != line:
-            raise ValueError("invalid event journal")
-        event = _parse_json_bytes(line, "event journal")
-        _check_sealed(event, "event")
-        _validate_schema("event.schema.json", event)
-        if event.get("schema_version") != "1.0.0" or event.get("seq") != seq or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
-            raise ValueError("invalid event journal")
-        stamp = event.get("observed_at")
-        if not isinstance(stamp, str) or not stamp.endswith("Z"):
-            raise ValueError("invalid event journal")
-        try:
-            datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except ValueError as error:
-            raise ValueError("invalid event journal") from error
+        event = _checked_event_line(project, root, manifest, seq, line, previous)
         previous = event["digest"]
         result.append(event)
     if not result or result[0].get("event_type") != "RUN_CREATED" or result[0].get("seq") != 1 or result[0].get("artifact_digest") != manifest["digest"] or "attempt_id" in result[0] or "batch_id" in result[0] or sum(event["event_type"] == "RUN_CREATED" for event in result) != 1:
