@@ -95,7 +95,8 @@ def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:
 # ``zephyr-import.json`` that no journal event binds: ``output_guard.project_file`` before the digest is taken.
 PATH_FIELDS = {
     "batch_assembly.py": {"project_path"}, "cases_import.py": {"project_path"}, "existing_tests.py": {"project_path"},
-    "generated_delta.py": {"project_path"}, "orchestrate_test_case_revision.py": {"project_path"}, "pilot_state.py": {"project_path"},
+    "generated_delta.py": {"project_path"}, "model_inputs.py": {"project_path"},
+    "orchestrate_test_case_revision.py": {"project_path"}, "pilot_state.py": {"project_path"},
     "project_inventory.py": {"project_path"}, "ready.py": {"project_path"}, "run_pipeline.py": {"project_path"},
     "run_report.py": {"template_path"}, "scan_rules.py": {"project_path"}, "scenario_observations.py": {"project_path"},
     "step_size.py": {"project_path"},
