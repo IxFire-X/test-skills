@@ -309,3 +309,13 @@ def test_existing_tests_outcomes_of_a_call_with_quoted_names_without_commas_is_n
         BODY = 'attributeHasFieldErrors("x",' + ' "a" ' * 16 + "X"
         def run(): _outcomes(BODY)
     """, 0.5)
+
+
+def test_existing_tests_calls_with_unpaired_closing_brackets_are_linear() -> None:
+    """existing_tests._joined: a closing bracket without its pair took the depth below 0, and the scan of the expression ran to the end of the method
+    on every call — calls with ``]]`` cost n squared (2 000 calls, 28 KB: 5.7 s; 100 KB is minutes).  A closing bracket at depth 0 ends the expression."""
+    _time("""
+        from tools.existing_tests import _calls
+        BODY = 'get("/a" + x]]' * 7000
+        def run(): _calls(BODY)
+    """, 1.0)

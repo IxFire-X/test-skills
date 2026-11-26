@@ -1497,7 +1497,7 @@ def _coverage_lines(report: Mapping[str, Any]) -> list[str]:
     from tools.test_case_projections import escape_inline
 
     found = report.get("existing_coverage")
-    if not found or not (found.get("rows") or found.get("contracts")):
+    if not found or not (found.get("rows") or found.get("contracts") or found.get("unreadable_contracts")):
         return []
     lines = [COVERAGE_TITLE, "", COVERAGE_NOTE, ""]
     if found.get("rows"):
@@ -1509,6 +1509,8 @@ def _coverage_lines(report: Mapping[str, Any]) -> list[str]:
                     f"{_some(row['requirements'], 5) or '—'} |" for row in found["rows"]), ""]
     for table in found.get("contracts") or []:
         lines += _contract_lines(table)
+    for unread in found.get("unreadable_contracts") or []:  # the line approved by the user on 26.11 (v09/coverage-contract-plan.md §8)
+        lines += [f"### По контракту `{unread['path']}`", "", f"контракт не прочитан: {unread['reason']} — таблицы по нему нет", ""]
     return lines
 
 

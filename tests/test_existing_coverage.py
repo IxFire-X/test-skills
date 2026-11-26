@@ -149,6 +149,21 @@ def test_a_run_of_mode_b_whose_tests_name_the_linked_module_has_its_row(tmp_path
 CONTRACT = "openapi: 3.0.1\npaths:\n  /items/{itemId}:\n    get:\n      responses:\n        '200':\n          description: ok\n"
 
 
+def test_a_contract_in_the_test_data_is_not_the_project_contract(tmp_path: Path) -> None:
+    from tools.existing_tests import run_coverage
+
+    (tmp_path / "src" / "test" / "resources").mkdir(parents=True)
+    (tmp_path / "src" / "test" / "resources" / "openapi.yml").write_text(CONTRACT, encoding="utf-8")
+    assert run_coverage(*_run(tmp_path, with_tests=True), DOCUMENT_OF_PART0) is None  # a run of cases only: nothing else to show
+
+
+def test_an_unreadable_contract_is_said_under_its_heading() -> None:
+    from tools.run_report import _coverage_lines
+
+    lines = _coverage_lines({"existing_coverage": {"unreadable_contracts": [{"path": "api/openapi.yml", "reason": "табы в отступах"}]}})
+    assert lines[-4:] == ["### По контракту `api/openapi.yml`", "", "контракт не прочитан: табы в отступах — таблицы по нему нет", ""]  # approved on 26.11
+
+
 @pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
 def test_the_contract_table_is_in_both_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str) -> None:
     from tools import existing_tests

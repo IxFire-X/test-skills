@@ -49,6 +49,7 @@ _PY_TEST = re.compile(r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE)
 _PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import\s+(\([^)]*\)|[\w, ]+)|import\s+([\w., ]+))", re.MULTILINE)  # ``( … )`` over lines too
 _PY_DEFINED = re.compile(r"^(?:class|def|async\s+def)\s+([A-Za-z]\w*)", re.MULTILINE)  # the top level of a module: what a test imports by name
 _JVM = {".java", ".kt"}
+_TEST_DATA = {"test", "tests", "__tests__", "testdata", "test-data", "fixture", "fixtures", "node_modules"}  # a contract there is test data, not the project's
 _TESTED = {".java", ".kt", ".py"}
 
 
@@ -210,7 +211,7 @@ def _joined(body: str, at: int, path: str) -> str:
             at = literal.end()
             continue
         depth, start = 0, at
-        while at < len(body) and (depth or body[at] not in "+,)"):
+        while at < len(body) and (depth or body[at] not in "+,)]"):  # a closing bracket without its pair ends the expression: depth never below 0
             depth += (body[at] in "([") - (body[at] in ")]")
             at += 1
         if at == start:
@@ -549,7 +550,8 @@ def run_coverage(run_root: Path, attempt_id: str, document: Mapping[str, Any]) -
     unreadable: list[dict[str, str]] = []
     for row in rows:
         relative = str(row.get("project_path"))
-        if relative in own or not is_api_contract(project, relative):
+        if (row.get("kind") != "config" or relative in own or _TEST_DATA & {part.casefold() for part in Path(relative).parts}
+                or not is_api_contract(project, relative)):  # the head of a file is opened only for a config file outside the test data
             continue
         try:
             if int(row.get("size") or 0) > LIMIT:  # the limit before a byte is read
