@@ -781,7 +781,7 @@ def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[s
 
 
 def _missing(item: Mapping[str, Any], key: str) -> bool:
-    return item.get(key) in (None, "") if key in ("step_id", "input_id", "output_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
+    return item.get(key) in (None, "") if key in ("setup_id", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "display_order", "output_id") else key not in item
 
 
 _BODY_PLACEHOLDER = "<значение присутствующего поля>"
@@ -892,27 +892,19 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
         case_id = case.get("case_id")
         tail = case_id.removeprefix("TC-") if isinstance(case_id, str) else None
         outputs_by_step: dict[str, dict[str, Any]] = {}
-        for number, step in enumerate(case.get("steps") or [], start=1):
-            if not isinstance(step, dict):
-                continue
-            if tail is not None:
-                put(step, "step_id", f"STEP-{tail}-{number:02d}")
-            put(step, "display_order", number)
-            put(step, "manual_only", False)
-            if step.get("manual_only") is False:
-                put(step, "manual_reason", None)
-            put(step, "automation_blockers", [])
-            operation = step.get("operation")
+        outputs_by_setup: dict[str, dict[str, Any]] = {}
+
+        def fill_data(holder: dict[str, Any], numbered: str | None, kept: dict[str, Any]) -> None:
+            """The inputs and outputs of a step or a setup: their ids, orders, ``sensitive`` and the types the code can take."""
+            operation = holder.get("operation")
             capability = capabilities.get(operation.get("capability_id")) if isinstance(operation, dict) and operation.get("kind") == "project_action" else None
             arguments = {row.get("name"): row for row in (capability or {}).get("arguments") or [] if isinstance(row, dict)}
             results = {row.get("name"): row for row in (capability or {}).get("results") or [] if isinstance(row, dict)}
-            step_id = step.get("step_id") if isinstance(step.get("step_id"), str) else None
-            kept = outputs_by_step.setdefault(step_id, {}) if step_id is not None else {}
-            for position, item in enumerate(step.get("inputs") or [], start=1):
+            for position, item in enumerate(holder.get("inputs") or [], start=1):
                 if not isinstance(item, dict):
                     continue
-                if tail is not None:
-                    put(item, "input_id", f"INPUT-{tail}-{number:02d}-{position}")
+                if numbered is not None:
+                    put(item, "input_id", f"INPUT-{numbered}-{position}")
                 put(item, "display_order", position)
                 source, target = item.get("source"), item.get("target")
                 if isinstance(target, dict):
@@ -923,12 +915,14 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                         derived = json_type(source["value"])
                     elif source.get("kind") == "step_output":
                         derived = outputs_by_step.get(source.get("step_id"), {}).get(source.get("output_id"))
+                    elif source.get("kind") == "setup_output":
+                        derived = outputs_by_setup.get(source.get("setup_id"), {}).get(source.get("output_id"))
                     elif isinstance(target, dict) and target.get("location") == "arg":
                         derived = (arguments.get(target.get("name")) or {}).get("semantic_type")
                     if derived is not None:
                         item["semantic_type"] = deepcopy(derived)
                         counts["semantic_type"] = counts.get("semantic_type", 0) + 1
-            for position, item in enumerate(step.get("outputs") or [], start=1):
+            for position, item in enumerate(holder.get("outputs") or [], start=1):
                 if not isinstance(item, dict):
                     continue
                 source = item.get("source")
@@ -947,6 +941,28 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                         counts["semantic_type"] = counts.get("semantic_type", 0) + 1
                 if isinstance(item.get("output_id"), str) and isinstance(item.get("semantic_type"), dict):
                     kept[item["output_id"]] = item["semantic_type"]
+
+        for number, item in enumerate(case.get("setup") or [], start=1):  # 1.2.0: the setup of a case — its ids and orders as a step's
+            if not isinstance(item, dict):
+                continue
+            if tail is not None:
+                put(item, "setup_id", f"SETUP-{tail}-{number:02d}")
+            put(item, "display_order", number)
+            setup_id = item.get("setup_id") if isinstance(item.get("setup_id"), str) else None
+            fill_data(item, f"{tail}-S{number:02d}" if tail is not None else None, outputs_by_setup.setdefault(setup_id, {}) if setup_id is not None else {})
+        for number, step in enumerate(case.get("steps") or [], start=1):
+            if not isinstance(step, dict):
+                continue
+            if tail is not None:
+                put(step, "step_id", f"STEP-{tail}-{number:02d}")
+            put(step, "display_order", number)
+            put(step, "manual_only", False)
+            if step.get("manual_only") is False:
+                put(step, "manual_reason", None)
+            put(step, "automation_blockers", [])
+            operation = step.get("operation")
+            step_id = step.get("step_id") if isinstance(step.get("step_id"), str) else None
+            fill_data(step, f"{tail}-{number:02d}" if tail is not None else None, outputs_by_step.setdefault(step_id, {}) if step_id is not None else {})
             for e_position, expectation in enumerate(step.get("expectations") or [], start=1):
                 if not isinstance(expectation, dict):
                     continue
@@ -965,7 +981,7 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
                         if tail is not None:
                             put(assertion, "assertion_id", f"ASSERT-{tail}-{number:02d}-{e_position}-{a_position}")
                         put(assertion, "display_order", a_position)
-    order = ["diagnostics", "display_order", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "manual_only", "manual_reason",
+    order = ["diagnostics", "display_order", "setup_id", "step_id", "input_id", "output_id", "expectation_id", "assertion_id", "manual_only", "manual_reason",
              "automation_blockers", "sensitive", "semantic_type", "http_body_template", "http_body_replaced", "http_body_removed"]
     return value, [f"{name} ×{counts[name]}" for name in order if name in counts]
 
@@ -1239,6 +1255,12 @@ DOCUMENT_WIDE_CODES = frozenset({
 })
 
 
+def _setup_version(document: dict[str, Any]) -> None:
+    """1.2.0 is the canon of setup: a document with a case that has it takes that version; one without keeps the header's, and its bytes."""
+    if any(isinstance(case, dict) and "setup" in case for case in document["test_cases"]):
+        document["schema_version"] = "1.2.0"
+
+
 def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> list[dict[str, str]]:
     """The canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
     header, the batch's own source requirements, the capabilities of the earlier batches and this one, and this fragment,
@@ -1257,6 +1279,7 @@ def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str
     for name in ("requirements", "test_cases"):
         for index, item in enumerate(probe[name], start=1):
             item["display_order"] = index
+    _setup_version(probe)
     return [row for row in validate_canonical_document_all(probe) if row["code"] not in DOCUMENT_WIDE_CODES]
 
 
@@ -1398,6 +1421,7 @@ def _document(header: dict[str, Any], plan: dict[str, Any], ordered: list[dict[s
         "requirements": list(requirements.values()),
         "test_cases": list(cases.values()),
     })
+    _setup_version(document)
     for name in ("requirements", "test_cases"):
         for index, item in enumerate(document[name], start=1):
             item["display_order"] = index

@@ -228,6 +228,10 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNKNOWN_SOURCE_REQUIREMENT": "mapping ссылается на SREQ, которого нет в плане: возьми id из batch-plan.json",
     "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: step_id шага — STEP-<хвост case_id после TC->-<NN, номер шага в кейсе двумя цифрами> "
                                     "(STEP-B1-003-02 — шаг 2 кейса TC-B1-003), output_id — имя выхода этого шага; поправь ссылку или объяви выход",
+    "SEMANTIC_UNKNOWN_SETUP_OUTPUT": "setup_output берёт выход подготовки этого же кейса: setup_id — из его `setup`, output_id — имя её выхода",
+    "SEMANTIC_FORWARD_SETUP_OUTPUT": "подготовка берёт выход только той подготовки, что выше по порядку; выход шага ей недоступен — шаги идут после подготовки",
+    # --- the setup of a case (canonical 1.2.0): the words for the agent approved by the user on 25.11 ---
+    "SETUP_PRECONDITION_UNKNOWN": "Подготовка <SETUP-id> ссылается на предусловие <N>, а у кейса их <M>",
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
     # --- the paths the agent names (tools.output_guard) ---
@@ -236,7 +240,9 @@ FIXES: dict[str, str] = {
     "INPUT_OUTSIDE_PROJECT": "передай --run-root <run> (или --project) и файл внутри этого проекта; без них — файл внутри прогона <project>/.pilot-runs/<run_id>/",
     # --- the pause after the marker (tools.scope_pause) ---
     "AUTOMATION_ORPHAN_FILE": "каждый файл из generated_files несёт хотя бы один символ, связанный строкой implementation_relations с шагом или утверждением кейса; файл-помощник без такого символа не принимается — держи помощники внутри тестового класса, а лишний файл убери",
-    "AUTOMATION_RELATION_ORDER": "строки implementation_relations — в порядке документа кейсов: по кейсу, внутри кейса по шагу, у шага строка операции (operation) раньше строк проверок (assertion), затем по ожиданию и по проверке, при равенстве по file_id и symbol_id",
+    "AUTOMATION_MISSING_SETUP_COVERAGE": "Автотест не выполняет подготовку <SETUP-id> кейса <TC-id>: вызови помощник подготовки до первого шага, проверять её не нужно",
+    "AUTOMATION_SETUP_ASSERTED": "Подготовка <SETUP-id> кейса <TC-id> проверяется в автотесте: убери проверку, помощник сам падает, если подготовка не удалась",
+    "AUTOMATION_RELATION_ORDER": "строки implementation_relations — в порядке документа кейсов: по кейсу, внутри кейса сначала строки подготовки (setup) по её порядку, затем по шагу, у шага строка операции (operation) раньше строк проверок (assertion), затем по ожиданию и по проверке, при равенстве по file_id и symbol_id",
     "STAGE_NO_PLAN": "в журнале есть запрос пачки, а плана пачек в прогоне нет (прогон начат версией без опубликованного плана): покажи это человеку; прогон не продолжается — новый прогон тем же scan с --new-run",
     "SCOPE_MARKER_UNREADABLE": "ответ разметки есть в журнале, но его файл не читается или изменён (контекст дрейфовал): покажи это человеку; прогон не продолжается — новый прогон тем же scan с --new-run",
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
@@ -349,6 +355,9 @@ _NO_AUTOTESTS = "В этой поставке нет автотестов, то�
 _SELF_REVIEW = ("Ревью кейсов должен делать отдельный проверяющий (свежий субагент или новая сессия). Если его нет и вы согласны на проверку "
                 "в той же сессии, скажите агенту «принять ревью в той же сессии» — в отчёте это отметят.")
 HUMAN: dict[str, str] = {
+    "SETUP_PRECONDITION_UNKNOWN": "Подготовка данных не привязана к предусловию кейса",  # the setup of a case: approved by the user on 25.11
+    "AUTOMATION_MISSING_SETUP_COVERAGE": "Автотест пропускает подготовку данных из предусловия кейса",
+    "AUTOMATION_SETUP_ASSERTED": "Автотест проверяет подготовку данных, а не поведение",
     "SCOPE_PENDING": "Часть требований нечем проверить снаружи: у них нет видимого результата. Скажите агенту: исключить их из кейсов (и почему) или продолжать как есть.",
     "SCAN_RUN_IN_PROGRESS": "Для этих документов уже есть незаконченный прогон, новый не начат. Скажите агенту продолжить прежний — или начать новый, если прежний не нужен.",
     "FINISH_FACT_UNDETERMINED": "Прогон нельзя закрыть сейчас: не все его шаги закончены. Скажите агенту продолжить прогон — следующий шаг ему назовёт пакет.",

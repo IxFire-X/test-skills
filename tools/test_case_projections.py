@@ -254,6 +254,27 @@ def _overview(facts: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
     return [tuple(row[index] for index in keep) for row in (("№", "Название", "Папка", "Приоритет", "Требования"), *facts)]
 
 
+_SETUP_TAIL = " — готовит автотест"  # the tail of a precondition line an autotest prepares (mode B; approved by the user on 25.11)
+
+
+def _prepared(extras: dict[str, Any] | None, case: dict[str, Any]) -> set[str]:
+    """The precondition lines of *case* its setup prepares — only when the set is of mode B (``extras["setup_by_autotest"]``)."""
+    if not (extras or {}).get("setup_by_autotest"):
+        return set()
+    lines = case["preconditions"]
+    return {lines[item["precondition_index"]] for item in case.get("setup", []) if item["precondition_index"] < len(lines)}
+
+
+def _tailed(items: list[str], prepared: set[str]) -> list[str]:
+    return [item + _SETUP_TAIL if item in prepared else item for item in items]
+
+
+def _common_tailed(shown: list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]], common: list[str], extras: dict[str, Any] | None) -> list[str]:
+    """The common block: a line gets the tail only when every shown case prepares it — the block speaks for all of them."""
+    prepared = set.intersection(*(_prepared(extras, case) for case, _group, _rows in shown)) if shown and common else set()
+    return _tailed(common, prepared)
+
+
 def _common_preconditions(shown: list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]]) -> list[str]:
     """The preconditions word for word the same in every shown case, in a set of three cases or more."""
     cases = [case for case, _group, _rows in shown]
@@ -425,13 +446,13 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>" + html.escape(title, quote=True) + "</title>",
         "<style>body{font:16px/1.45 system-ui,sans-serif;margin:2rem;max-width:1200px}table{border-collapse:collapse;table-layout:fixed;width:100%;margin:1rem 0 2rem}th,td{border:1px solid #bbb;padding:.75rem;vertical-align:top;text-align:left;overflow-wrap:anywhere}th{background:#f3f3f3}pre{margin:.5rem 0;white-space:pre-wrap}p{margin:.5rem 0}code{font-family:ui-monospace,monospace}</style></head><body>",
         f"<h1>{html.escape(title, quote=True)}</h1><p><strong>Проект:</strong> {_html_text(metadata['project'])}<br><strong>Дата:</strong> {_html_text(metadata['date'])}</p><h2>Документация</h2>{docs}"
-        + ("<h2>Общие предусловия</h2><ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in common) + "</ul>" if common else "")
+        + ("<h2>Общие предусловия</h2><ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in _common_tailed(shown, common, extras)) + "</ul>" if common else "")
         + "<h2>Кейсы набора</h2><table><thead><tr>" + "".join(f"<th>{name}</th>" for name in table[0]) + "</tr></thead><tbody>"
         + "".join("<tr>" + "".join(f"<td>{_html_text(cell)}</td>" for cell in row) + "</tr>" for row in table[1:]) + "</tbody></table>",
     ]
     for case_number, (case, group, variants) in enumerate(shown, 1):
         start = len(rows)
-        own = [item for item in case["preconditions"] if item not in common]
+        own = _tailed([item for item in case["preconditions"] if item not in common], _prepared(extras, case))
         notes = "".join(f"<p><strong>{_html_text(label)}</strong> {_html_text(text)}</p>" for label, text in _notes(extras, case))
         rows.extend((
             f"<section><h2>ТК-{_number(extras, case_number, case, group)}. {_html_text(case['title'])}</h2><p><strong>Приоритет:</strong> {facts[case_number - 1][3]}. <strong>Требования:</strong> {_html_text(facts[case_number - 1][4])}</p>{notes}<p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
@@ -485,14 +506,14 @@ def _render_markdown_validated(document: dict[str, Any], profile: str, extras: d
         f"**Дата:** {escape_inline(metadata['date'])}",
     ]
     if common:
-        lines.extend(["", "**Общие предусловия:**", *("- " + escape_inline(item) for item in common)])
+        lines.extend(["", "**Общие предусловия:**", *("- " + escape_inline(item) for item in _common_tailed(shown, common, extras))])
     if current:
         table = _overview(facts)
         lines.extend(["", "**Кейсы набора**", "", "| " + " | ".join(table[0]) + " |", "|" + "---|" * len(table[0]),
                       *("| " + " | ".join(_readable_table_cell(cell) for cell in row) + " |" for row in table[1:])])
     for case_number, (case, group, variants) in enumerate(shown, 1):
         start = len(lines)
-        own = [item for item in case["preconditions"] if item not in common]
+        own = _tailed([item for item in case["preconditions"] if item not in common], _prepared(extras, case))
         lines.extend(["", "---", "", f"## ТК-{_number(extras, case_number, case, group)}. {escape_inline(case['title'])}", ""])
         if current:
             lines.extend([f"**Приоритет:** {facts[case_number - 1][3]}. **Требования:** {_readable_table_cell(facts[case_number - 1][4])}", ""])

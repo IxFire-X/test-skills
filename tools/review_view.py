@@ -66,6 +66,8 @@ def _value(value: Mapping[str, Any]) -> str:
         return _json(value.get("value"))
     if kind == "step_output":
         return f"{value.get('step_id')}.{value.get('output_id')}"
+    if kind == "setup_output":
+        return f"{value.get('setup_id')}.{value.get('output_id')}"
     if kind == "http_status":
         return "status"
     if kind == "http_body":
@@ -413,16 +415,32 @@ def autotest_facts(document: Mapping[str, Any]) -> dict[tuple[str, str, str], st
             for part, text in [("", _step_operation(step, True)), *((row["assertion_id"], _check(row, _short)) for item in step["expectations"] for row in item["assertions"])]}
 
 
+def _autotest_data(holder: Mapping[str, Any], short: bool) -> list[str]:
+    """The inputs and outputs of a step or of a setup, exactly."""
+    exact = _short if short else _exact
+    lines = []
+    for item in sorted(holder["inputs"], key=lambda row: row["display_order"]):
+        # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
+        secret = " (секрет)" if item["target"].get("sensitive") else ""
+        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {exact(item['source'])}")
+    return lines + [f"   Выход {row['output_id']} {_typed(row)}" + ("" if short and row["source"] == {"kind": "project_result", "name": row["output_id"]} else f" ← {_exact(row['source'])}")
+                    for row in sorted(holder["outputs"], key=lambda row: row["display_order"])]
+
+
+def _autotest_setup(case: Mapping[str, Any], short: bool) -> list[str]:
+    """1.2.0: the setup of a case — what the setup helper does before the first step; it checks nothing and throws ``SetupFailed`` with its id."""
+    lines = []
+    for item in sorted(case.get("setup", []), key=lambda row: row["display_order"]):
+        lines += [f"- Подготовка [{item['setup_id']}] к предусловию {item['precondition_index']} (до первого шага, без проверок)",
+                  f"   Операция: {_step_operation(item, short)}", *_autotest_data(item, short)]
+    return lines
+
+
 def _autotest_step(step: Mapping[str, Any], short: bool = False, moved: Collection[str] = ()) -> list[str]:
     exact = _short if short else _exact
     manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
     lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", *([] if "" in moved else [f"   Операция: {_step_operation(step, short)}"])]
-    for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
-        # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
-        secret = " (секрет)" if item["target"].get("sensitive") else ""
-        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {exact(item['source'])}")
-    lines += [f"   Выход {row['output_id']} {_typed(row)}" + ("" if short and row["source"] == {"kind": "project_result", "name": row["output_id"]} else f" ← {_exact(row['source'])}")
-              for row in sorted(step["outputs"], key=lambda row: row["display_order"])]
+    lines += _autotest_data(step, short)
     lines += [f"   Блокер автоматизации {blocker['blocker_id']} [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
               for blocker in step["automation_blockers"]]
     for expectation in sorted(step["expectations"], key=lambda row: row["display_order"]):
@@ -467,6 +485,7 @@ def _autotest(document: Mapping[str, Any], digest: str, short: bool = False, mov
         lines += ["", f"### {case['case_id']} {case['title']}", "", f"- требования {', '.join(case['requirement_ids'])}",
                   *([f"- param_group: {case['param_group']}"] if case.get("param_group") else []), f"- Цель: {case['objective']}"]
         lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+        lines += _autotest_setup(case, short)
         for step in sorted(case["steps"], key=lambda row: row["display_order"]):
             lines += _autotest_step(step, short, hidden.get((case["case_id"], step["step_id"]), ()))
     return lines
@@ -558,7 +577,10 @@ def _case_lines(case: Mapping[str, Any], actions: Mapping[str, str]) -> list[str
     if case.get("technique"):
         facts.append(f"техника {case['technique']}")
     lines = ["", "- " + "; ".join(facts), f"- Цель: {case['objective']}"]
-    lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+    for index, text in enumerate(case["preconditions"]):
+        lines.append(f"- Предусловие {index}: {text}")
+        lines += [f"  подготовка [{item['setup_id']}], без проверок: {_operation(item, actions).removeprefix('   Операция: ')}"
+                  for item in case.get("setup", []) if item["precondition_index"] == index]
     for step in case["steps"]:
         manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
         lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}",

@@ -310,13 +310,16 @@ _BLOCKER_PATHS = MappingProxyType({
     "UNSUPPORTED_ASSERTION_DIALECT": frozenset(),
     "UNCONFIRMED_TYPE": frozenset({"/inputs", "/outputs"}),
 })
-_VALUE_SOURCE_KINDS = frozenset({"literal", "step_output", "fixture", "environment", "secret_handle"})
+_VALUE_SOURCE_KINDS = frozenset({"literal", "step_output", "setup_output", "fixture", "environment", "secret_handle"})
+_SETUP_POSITION = -10**6  # 1.2.0: the place of setup i among the steps of its case — before the first step, in its own order
 
 
 @dataclass(frozen=True)
 class _CaseIndex:
     steps: MappingProxyType
     outputs: MappingProxyType
+    setups: MappingProxyType
+    setup_outputs: MappingProxyType
 
 
 @dataclass(frozen=True)
@@ -352,6 +355,7 @@ def _build_index(document: dict[str, Any], diagnostics: list[dict[str, str]]) ->
     global_steps: set[str] = set()
     global_expectations: set[str] = set()
     global_assertions: set[str] = set()
+    global_setups: set[str] = set()
     case_indexes: list[_CaseIndex] = []
     for cap_index, capability in enumerate(capabilities):
         pair = (capability["adapter"], capability["action"])
@@ -392,7 +396,19 @@ def _build_index(document: dict[str, Any], diagnostics: list[dict[str, str]]) ->
             for step_index, step in enumerate(steps)
             if step["step_id"] in unique_steps and unique_steps[step["step_id"]] is step
         }
-        case_indexes.append(_CaseIndex(MappingProxyType(indexed_steps), MappingProxyType(outputs)))
+        setups = case.get("setup", [])
+        _duplicate_ids(setups, "setup_id", ("test_cases", case_index, "setup"), diagnostics)
+        for setup_index, setup in enumerate(setups):
+            setup_path = ("test_cases", case_index, "setup", setup_index)
+            if setup["setup_id"] in global_setups:
+                diagnostics.append(_diagnostic(_pointer(*setup_path, "setup_id"), "SEMANTIC_DUPLICATE_ID", "setup_id must be document-global"))
+            global_setups.add(setup["setup_id"])
+            _duplicate_ids(setup["inputs"], "input_id", (*setup_path, "inputs"), diagnostics)
+            _duplicate_ids(setup["outputs"], "output_id", (*setup_path, "outputs"), diagnostics)
+        unique_setups = _unique_items(setups, "setup_id")
+        indexed_setups = {item["setup_id"]: (setup_index, item) for setup_index, item in enumerate(setups) if unique_setups.get(item["setup_id"]) is item}
+        setup_outputs = {setup_id: MappingProxyType(_unique_items(item["outputs"], "output_id")) for setup_id, item in unique_setups.items()}
+        case_indexes.append(_CaseIndex(MappingProxyType(indexed_steps), MappingProxyType(outputs), MappingProxyType(indexed_setups), MappingProxyType(setup_outputs)))
     return _DocumentIndex(MappingProxyType(_unique_items(requirements, "requirement_id")), MappingProxyType(_unique_items(capabilities, "capability_id")), tuple(cases), tuple(case_indexes))
 
 
@@ -427,12 +443,15 @@ def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, 
         return {"kind": "literal"}
     if value["kind"] == "step_output":
         return {**value, "step_id": positions.get(value["step_id"], value["step_id"])}
+    if value["kind"] == "setup_output":
+        return {**value, "setup_id": positions.get(value["setup_id"], value["setup_id"])}
     return value
 
 
 def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]:
     """The case without what its variants may differ in — literal values, human texts and document-global ids; of a group with an imported case also the fields each such case has of its own."""
     positions = {step["step_id"]: index for index, step in enumerate(case["steps"])}
+    positions.update({item["setup_id"]: index for index, item in enumerate(case.get("setup", []))})
     steps = []
     for step in case["steps"]:
         shape = {key: value for key, value in step.items() if key not in {"step_id", "action", "test_data"}}
@@ -446,7 +465,12 @@ def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]
             for assertion in expectation["assertions"]]} for expectation in step["expectations"]]
         steps.append(shape)
     free = _GROUP_FREE_CASE_FIELDS | _GROUP_IMPORTED_CASE_FIELDS if imported else _GROUP_FREE_CASE_FIELDS
-    return {**{key: value for key, value in case.items() if key not in free}, "steps": steps}
+    shape = {**{key: value for key, value in case.items() if key not in free}, "steps": steps}
+    if "setup" in case:  # 1.2.0: the setup of the members is one — the same operations, its ids and literal values aside
+        shape["setup"] = [{**{key: value for key, value in item.items() if key != "setup_id"},
+                           "inputs": [{**{key: value for key, value in row.items() if key != "input_id"}, "source": _group_value(row["source"], positions)} for row in item["inputs"]]}
+                          for item in case["setup"]]
+    return shape
 
 
 def _first_difference(left: Any, right: Any, path: tuple[object, ...] = ()) -> tuple[object, ...] | None:
@@ -611,11 +635,27 @@ def _resolve_step_output(index: _DocumentIndex, case_index: int, step_index: int
     return output["semantic_type"]
 
 
+def _resolve_setup_output(index: _DocumentIndex, case_index: int, position: int, source: dict[str, Any], source_path: tuple[object, ...], diagnostics: list[dict[str, str]]) -> dict[str, Any] | None:
+    """1.2.0: the type of an output of the case's setup; a step reads any of it, a setup only an earlier one."""
+    case = index.case_indexes[case_index]
+    referenced = case.setups.get(source["setup_id"])
+    output = case.setup_outputs.get(source["setup_id"], {}).get(source["output_id"])
+    if referenced is None or output is None:
+        diagnostics.append(_diagnostic(_pointer(*source_path), "SEMANTIC_UNKNOWN_SETUP_OUTPUT", "setup_output must reference an existing output of this case's setup"))
+        return None
+    if _SETUP_POSITION + referenced[0] >= position:
+        diagnostics.append(_diagnostic(_pointer(*source_path), "SEMANTIC_FORWARD_SETUP_OUTPUT", "setup_output of a setup must reference a strictly earlier setup"))
+        return None
+    return output["semantic_type"]
+
+
 def _source_type(index: _DocumentIndex, case_index: int, step_index: int, source: dict[str, Any], source_path: tuple[object, ...], diagnostics: list[dict[str, str]]) -> dict[str, Any] | None:
     if source["kind"] == "literal":
         return _json_type(source["value"])
     if source["kind"] == "step_output":
         return _resolve_step_output(index, case_index, step_index, source, source_path, diagnostics)
+    if source["kind"] == "setup_output":
+        return _resolve_setup_output(index, case_index, step_index, source, source_path, diagnostics)
     return source.get("semantic_type")
 
 
@@ -624,7 +664,7 @@ def _has_blocker_backed_http_input_omission(step: dict[str, Any], path_names: se
     if (
         operation is None
         or operation.get("kind") != "http"
-        or not any(item["field_path"] == "/inputs" for item in step["automation_blockers"])
+        or not any(item["field_path"] == "/inputs" for item in step.get("automation_blockers", ()))  # a setup has none
     ):
         return False
     placeholders = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_.-]*)\}", operation["path"]))
@@ -663,8 +703,10 @@ def _blocker_and_readiness(step: dict[str, Any], step_path: tuple[object, ...], 
             diagnostics.append(_diagnostic(_pointer(*step_path, "automation_blockers"), "SEMANTIC_SPURIOUS_BLOCKER", "blockers must identify an absent or unconfirmed technical element"))
 
 
-def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, step_index: int, step: dict[str, Any], diagnostics: list[dict[str, str]]) -> dict[str, Any] | None:
-    step_path = ("test_cases", case_index, "steps", step_index)
+def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, step_index: int, step: dict[str, Any], diagnostics: list[dict[str, str]],
+                                     path: tuple[object, ...] | None = None) -> dict[str, Any] | None:
+    """The bindings, targets and output contracts of a step — or of a setup (1.2.0: *path* is its own, *step_index* its place before the steps)."""
+    step_path = path or ("test_cases", case_index, "steps", step_index)
     operation = step["operation"]
     operation_kind = operation.get("kind") if operation else None
     capability = index.capabilities.get(operation["capability_id"]) if operation_kind == "project_action" else None
@@ -918,6 +960,12 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
     _metadata_secret_handle_hygiene(document, handles, diagnostics)
     for case_index, case in enumerate(index.cases):
         _secret_handle_hygiene(case, case_index, handles, diagnostics)
+        for setup_index, setup in enumerate(case.get("setup", [])):  # 1.2.0: a setup is an operation of its precondition line, checked as a step without expectations
+            setup_path = ("test_cases", case_index, "setup", setup_index)
+            if setup["precondition_index"] >= len(case["preconditions"]):
+                diagnostics.append(_diagnostic(_pointer(*setup_path, "precondition_index"), "SETUP_PRECONDITION_UNKNOWN",
+                                               f"Подготовка {setup['setup_id']} ссылается на предусловие {setup['precondition_index']}, а у кейса их {len(case['preconditions'])}"))
+            _data_flow_targets_and_contracts(index, case_index, _SETUP_POSITION + setup_index, setup, diagnostics, setup_path)
         for step_index, step in enumerate(case["steps"]):
             step_path = ("test_cases", case_index, "steps", step_index)
             for expectation_index, expectation in enumerate(step["expectations"]):
@@ -977,7 +1025,7 @@ def _remembered(kind: str, document: Any, compute):
 
 
 def validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]]:
-    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0 and 1.1.0."""
+    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0, 1.1.0 and 1.2.0."""
 
     def audit() -> list[dict[str, str]]:
         diagnostics = schema_diagnostics(document, _CANONICAL_DOCUMENT_SCHEMA, _ROOT)

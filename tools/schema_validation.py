@@ -374,6 +374,12 @@ def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
                 diagnostics.append(_semantic_error(_pointer(["test_cases", case_index, "categories"]), "CANONICAL_CATEGORY_ORDER", "categories must follow V3 precedence"))
         steps = case.get("steps")
         diagnostics.extend(_display_order_diagnostics(steps, ["test_cases", case_index, "steps"]))
+        setup = case.get("setup")  # 1.2.0: the setup of a case is ordered as its steps are, with its inputs and outputs
+        diagnostics.extend(_display_order_diagnostics(setup, ["test_cases", case_index, "setup"]))
+        for setup_index, item in enumerate(setup if isinstance(setup, list) else []):
+            if isinstance(item, dict):
+                diagnostics.extend(_display_order_diagnostics(item.get("inputs"), ["test_cases", case_index, "setup", setup_index, "inputs"]))
+                diagnostics.extend(_display_order_diagnostics(item.get("outputs"), ["test_cases", case_index, "setup", setup_index, "outputs"]))
         for step_index, step in enumerate(steps if isinstance(steps, list) else []):
             if not isinstance(step, dict):
                 continue

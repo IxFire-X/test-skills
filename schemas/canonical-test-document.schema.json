@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "content_locale", "document_id", "revision", "parent_sha256", "metadata", "operation_capabilities", "source_requirements", "requirements", "source_to_canonical_mappings", "test_cases"],
   "properties": {
-    "schema_version": {"enum": ["1.0.0", "1.1.0"], "description": "FaT-PT: 1.1.0 adds the optional test_case.param_group; 1.0.0 documents stay valid."},
+    "schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0"], "description": "FaT-PT: 1.1.0 adds the optional test_case.param_group; 1.2.0 adds the optional test_case.setup; 1.0.0 and 1.1.0 documents stay valid."},
     "content_locale": {"const": "ru-RU"},
     "document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$", "maxLength": 102},
     "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
@@ -18,7 +18,8 @@
     "source_to_canonical_mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source_to_canonical_mapping"}},
     "test_cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/test_case"}}
   },
-  "allOf": [{"if": {"properties": {"test_cases": {"contains": {"required": ["param_group"]}}}, "required": ["test_cases"]}, "then": {"properties": {"schema_version": {"const": "1.1.0"}}}}],
+  "allOf": [{"if": {"properties": {"test_cases": {"contains": {"required": ["param_group"]}}}, "required": ["test_cases"]}, "then": {"properties": {"schema_version": {"enum": ["1.1.0", "1.2.0"]}}}},
+            {"if": {"properties": {"test_cases": {"contains": {"required": ["setup"]}}}, "required": ["test_cases"]}, "then": {"properties": {"schema_version": {"const": "1.2.0"}}}}],
   "$defs": {
     "nonempty": {"type": "string", "minLength": 1, "pattern": "\\S"},
     "id_suffix": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]+$"},
@@ -110,6 +111,7 @@
       "oneOf": [
         {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "literal"}, "value": {"$ref": "#/$defs/json_value"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "step_id", "output_id"], "properties": {"kind": {"const": "step_output"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "setup_id", "output_id"], "properties": {"kind": {"const": "setup_output"}, "setup_id": {"type": "string", "pattern": "^SETUP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"enum": ["fixture", "environment"]}, "name": {"$ref": "#/$defs/nonempty"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "handle", "safe_label"], "properties": {"kind": {"const": "secret_handle"}, "handle": {"$ref": "#/$defs/nonempty"}, "safe_label": {"$ref": "#/$defs/nonempty"}}}
       ]
@@ -146,6 +148,7 @@
       "oneOf": [
         {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "literal"}, "value": {"$ref": "#/$defs/json_value"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "step_id", "output_id"], "properties": {"kind": {"const": "step_output"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "setup_id", "output_id"], "properties": {"kind": {"const": "setup_output"}, "setup_id": {"type": "string", "pattern": "^SETUP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "name", "semantic_type", "type_provenance"], "properties": {"kind": {"enum": ["fixture", "environment"]}, "name": {"$ref": "#/$defs/nonempty"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "handle", "safe_label", "semantic_type", "type_provenance"], "properties": {"kind": {"const": "secret_handle"}, "handle": {"$ref": "#/$defs/nonempty"}, "safe_label": {"$ref": "#/$defs/nonempty"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "dialect", "pattern"], "properties": {"kind": {"const": "regex"}, "dialect": {"const": "portable-regex-v1"}, "pattern": {"$ref": "#/$defs/nonempty"}}},
@@ -170,9 +173,14 @@
         {"if": {"properties": {"manual_only": {"const": false}, "automation_blockers": {"maxItems": 0}}, "required": ["manual_only", "automation_blockers"]}, "then": {"properties": {"manual_reason": {"const": null}, "operation": {"not": {"type": "null"}}, "expectations": {"items": {"properties": {"assertions": {"minItems": 1}}}}}}}
       ]
     },
+    "setup_operation": {
+      "description": "1.2.0: machine setup of a case — an operation without expectations or assertions, bound to its line of preconditions (0-based); it runs before the first step.",
+      "type": "object", "additionalProperties": false, "required": ["setup_id", "display_order", "precondition_index", "operation", "inputs", "outputs"],
+      "properties": {"setup_id": {"type": "string", "pattern": "^SETUP-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "precondition_index": {"type": "integer", "minimum": 0}, "operation": {"$ref": "#/$defs/operation"}, "inputs": {"type": "array", "items": {"$ref": "#/$defs/input"}}, "outputs": {"type": "array", "items": {"$ref": "#/$defs/output"}}}
+    },
     "test_case": {
       "type": "object", "additionalProperties": false, "required": ["case_id", "display_order", "requirement_ids", "title", "objective", "categories", "priority", "preconditions", "management", "steps"],
-      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}}, "title": {"$ref": "#/$defs/nonempty"}, "objective": {"$ref": "#/$defs/nonempty"}, "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]}}, "priority": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]}, "preconditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "management": {"$ref": "#/$defs/management"}, "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}, "technique": {"enum": ["EP", "BVA", "DT", "PAIRWISE", "OTHER"]}, "param_group": {"description": "FaT-PT: cases of one group differ only in the values of one design parameter; shown together, kept one per variant.", "type": "string", "pattern": "^PG-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "design_refs": {"type": "array", "items": {"$ref": "#/$defs/design_ref"}}}
+      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}}, "title": {"$ref": "#/$defs/nonempty"}, "objective": {"$ref": "#/$defs/nonempty"}, "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]}}, "priority": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]}, "preconditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "management": {"$ref": "#/$defs/management"}, "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}, "setup": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/setup_operation"}}, "technique": {"enum": ["EP", "BVA", "DT", "PAIRWISE", "OTHER"]}, "param_group": {"description": "FaT-PT: cases of one group differ only in the values of one design parameter; shown together, kept one per variant.", "type": "string", "pattern": "^PG-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "design_refs": {"type": "array", "items": {"$ref": "#/$defs/design_ref"}}}
     }
   }
 }
