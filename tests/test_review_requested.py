@@ -55,8 +55,9 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
     return restored(tmp_path, key, lambda project: build_generated_run(project.parent, self_review, generated, header, requirements))[1]
 
 
-def _called_by_the_build() -> dict[tuple[Any, str], Any]:
-    """The functions build_generated_run calls by name, as their modules hold them now."""
+def _places_of_the_build() -> list[tuple[Any, str]]:
+    """Where build_generated_run takes the functions it calls by name, and the module that defines each one (pilot_state serves
+    derive_state of run_journal: a patch there reaches the build too)."""
     import tests.test_batch_assembly as batch
     import tests.test_reviewer_protocol as protocol
     from tools import batch_assembly, pilot_state, project_inventory
@@ -65,7 +66,17 @@ def _called_by_the_build() -> dict[tuple[Any, str], Any]:
               pilot_state: ("derive_state", "publish_context_selection", "publish_model_request", "publish_model_stage_artifact",
                             "publish_generator_input", "publish_prior_capabilities"),
               project_inventory: ("read_execution_baseline", "read_inventory_receipt", "select_context_batches")}
-    return {(module, name): getattr(module, name) for module, names in called.items() for name in names}
+    places = [(module, name) for module, names in called.items() for name in names]
+    homes = [(sys.modules[getattr(module, name).__module__], name) for module, name in places]
+    return list(dict.fromkeys(places + homes))
+
+
+_PLACES = _places_of_the_build()  # read before any test patched them
+
+
+def _called_by_the_build() -> dict[tuple[Any, str], Any]:
+    """The functions of the build, as their places hold them now."""
+    return {place: getattr(*place) for place in _PLACES}
 
 
 _AS_IMPORTED = _called_by_the_build()  # before any test patched them

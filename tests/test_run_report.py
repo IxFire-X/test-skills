@@ -525,7 +525,8 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
 def test_the_review_verdict_of_the_report_says_whether_the_set_is_published(tmp_path: Path) -> None:
     from tools.run_report import build_report, render_markdown
 
-    report = build_report(tmp_path, _finished_run(tmp_path).name)[0]
+    run_root = _finished_run(tmp_path)
+    report = build_report(run_root.parents[1], run_root.name)[0]
     for verdict, said in (("ACCEPTED", "ACCEPTED (набор опубликован)"), ("REJECTED", "REJECTED (набор не опубликован)")):
         report["counts"]["review_verdict"] = verdict
         assert f"- review_verdict: {said}" + chr(10) in render_markdown(report)

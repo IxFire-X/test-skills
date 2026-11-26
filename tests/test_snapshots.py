@@ -70,6 +70,15 @@ def test_a_test_that_patched_a_function_of_the_build_gets_a_build_of_its_own(tmp
     assert _generated_run(tmp_path)["project"] == tmp_path / "project"
 
 
+def test_a_patch_in_the_module_that_defines_a_function_of_the_build_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_review_requested import _build_is_patched
+    from tools import run_journal
+
+    real = run_journal.derive_state
+    monkeypatch.setattr(run_journal, "derive_state", lambda *args, **kwargs: real(*args, **kwargs))
+    assert _build_is_patched()
+
+
 def test_a_test_that_patched_anything_before_the_review_gets_a_review_of_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_rework_stage import _reviewed
 
