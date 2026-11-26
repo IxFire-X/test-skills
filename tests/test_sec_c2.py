@@ -97,7 +97,8 @@ PATH_FIELDS = {
     "batch_assembly.py": {"project_path"}, "cases_import.py": {"project_path"}, "existing_tests.py": {"project_path"},
     "generated_delta.py": {"project_path"}, "orchestrate_test_case_revision.py": {"project_path"}, "pilot_state.py": {"project_path"},
     "project_inventory.py": {"project_path"}, "ready.py": {"project_path"}, "run_pipeline.py": {"project_path"},
-    "run_report.py": {"template_path"}, "scan_rules.py": {"project_path"}, "step_size.py": {"project_path"},
+    "run_report.py": {"template_path"}, "scan_rules.py": {"project_path"}, "scenario_observations.py": {"project_path"},
+    "step_size.py": {"project_path"},
 }
 _FIELD_NAMES = {"template_path", "project_path"}
 
