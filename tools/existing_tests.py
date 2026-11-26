@@ -195,6 +195,41 @@ def _python_defined(project: Path, inventory: Mapping[str, Any], in_context: set
 
 
 _CAPITALIZED = re.compile(r"\b[A-Z]\w*\b")
+_PLUS = re.compile(r"\s*\+\s*")
+_LITERAL = re.compile(r'"([^"\\\n]*)"')
+
+
+def _joined(body: str, at: int, path: str) -> str:
+    """The path of a call built with ``+``: a literal as it is, an expression as ``{}`` (``"/owners/" + ownerId`` is ``/owners/{}``)."""
+    parts = [path]
+    while (plus := _PLUS.match(body, at)) is not None:
+        at = plus.end()
+        literal = _LITERAL.match(body, at)
+        if literal is not None:
+            parts.append(literal.group(1))
+            at = literal.end()
+            continue
+        depth, start = 0, at
+        while at < len(body) and (depth or body[at] not in "+,)"):
+            depth += (body[at] in "([") - (body[at] in ")]")
+            at += 1
+        if at == start:
+            break
+        parts.append("{}")
+    return "".join(parts)
+
+
+def _calls(body: str) -> tuple[tuple[str, tuple[str, ...], frozenset[str]], ...]:
+    """Each HTTP call of a test method with what is checked after it, up to the next call: ``(endpoint, outcomes, status codes)`` — a
+    MockMvc chain, a Python ``response = client.get(…)`` and then ``assert response.status_code``; not every check of the method to every call."""
+    found = [(match.start(), match.group(1).upper(), _joined(body, match.end(), match.group(2))) for match in _HTTP_CALL.finditer(body)]
+    result = []
+    for index, (at, verb, called) in enumerate(found):
+        segment = body[at:found[index + 1][0] if index + 1 < len(found) else len(body)]
+        codes = frozenset(str(value) for named, number, constant, code, python_code in _STATUS.findall(segment)
+                          if (value := number or code or python_code or _NAMED_STATUS.get(named or constant)))
+        result.append((f"{verb} {_normal_path(called)}", tuple(_outcomes(segment)), codes))
+    return tuple(result)
 
 
 def _parsed_tests(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], list[tuple[str, str, bool, frozenset[str], tuple]]]:
@@ -225,7 +260,7 @@ def _parsed_tests(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str
         names = frozenset(_CAPITALIZED.findall(_without_comments(text)) if jvm else _python_names(text))
         files.append((relative, Path(relative).stem, jvm, names, tuple(
             (name, tuple(_outcomes(body)), frozenset(f"{verb.upper()} {_normal_path(found)}" for verb, found in _HTTP_CALL.findall(body)),
-             frozenset(_CAPITALIZED.findall(body)) if jvm else frozenset()) for name, body in methods)))
+             frozenset(_CAPITALIZED.findall(body)) if jvm else frozenset(), _calls(body)) for name, body in methods)))
     result = (own_files(project, inventory)[0], files)
     if kept is not None and key is not None:
         kept[key] = result
@@ -247,10 +282,27 @@ def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterab
         if relative in own and relative not in in_context:  # an own test the model reads (the human put it in paths.include) is in the map
             continue
         named = names if jvm else names | {module for name in names for module in defined.get(name, ())}
-        for name, outcomes, endpoints, body in methods:
+        for name, outcomes, endpoints, body, _calls_of_method in methods:
             for key in endpoints | ((named if file_level or not jvm else body) & sources):
                 result.setdefault(key, {}).setdefault(test_class, {})[name] = list(outcomes)
     return result
+
+
+def call_pairs(project: Path, inventory: Mapping[str, Any]) -> dict[str, dict[str, set]]:
+    """``{endpoint: {"tests": {(test class, method)}, "outcomes": {…}, "codes": {…}}}`` of the project's own tests (not those the package
+    wrote), each check given to the call it follows (``_calls``), from the one reading of the tests — the report's one rule for an endpoint."""
+    own, files = _parsed_tests(project, inventory)
+    pairs: dict[str, dict[str, set]] = {}
+    for relative, test_class, _jvm, _names, methods in files:
+        if relative in own:
+            continue
+        for name, _outcomes_of_method, _endpoints, _body, calls in methods:
+            for endpoint, outcomes, codes in calls:
+                row = pairs.setdefault(endpoint, {"tests": set(), "outcomes": set(), "codes": set()})
+                row["tests"].add((test_class, name))
+                row["outcomes"].update(outcomes)
+                row["codes"].update(codes)
+    return pairs
 
 
 def render_map(value: Mapping[str, Mapping[str, Mapping[str, list[str]]]]) -> bytes:
@@ -419,24 +471,53 @@ def linked_code(document: Mapping[str, Any], sources: Iterable[str]) -> dict[str
     return linked
 
 
-def coverage(document: Mapping[str, Any], value: Mapping[str, Mapping[str, Mapping[str, list[str]]]], linked: Mapping[str, set[str]]) -> dict[str, Any]:
-    """The rows of «Покрытие существующими тестами»: per class (the name of the file, as the map keys it) or endpoint of ``linked`` the
-    test methods that name it, their outcomes and the requirements; and the requirements none of whose classes and endpoints a test names.
-    The rows without a test first."""
+def coverage(document: Mapping[str, Any], value: Mapping[str, Mapping[str, Mapping[str, list[str]]]], linked: Mapping[str, set[str]],
+             calls: Mapping[str, Mapping[str, set]]) -> dict[str, Any]:
+    """The rows of «Покрытие существующими тестами»: per class (the name of the file, as the map keys it) the test methods that name it and
+    their outcomes, per endpoint the test methods that call it and what they check after the call (``call_pairs``), and the requirements;
+    and the requirements none of whose classes and endpoints a test names.  The rows without a test first."""
     order = {str(row.get("requirement_id")): index for index, row in enumerate(document.get("requirements") or [])}
     ordered = lambda ids: sorted(ids, key=lambda item: (order.get(item, len(order)), item))  # noqa: E731
-    found: dict[str, tuple[dict[tuple[str, str], list[str]], set[str]]] = {}
+    found: dict[str, tuple[set, set, set]] = {}
     for key, requirements in linked.items():
-        shown = key if " " in key else Path(key).stem
-        named = [classes for test_key, classes in value.items() if _same_endpoint(key, test_key)] if " " in key else [value.get(shown) or {}]
-        methods, owners = found.setdefault(shown, ({}, set()))
-        methods.update({(test_class, name): items for classes in named for test_class, rows in classes.items() for name, items in rows.items()})
+        if " " in key:
+            shown, rows = key, [row for test_key, row in calls.items() if _same_endpoint(key, test_key)]
+            tests, outcomes = {test for row in rows for test in row["tests"]}, {item for row in rows for item in row["outcomes"]}
+        else:
+            shown, classes = Path(key).stem, value.get(Path(key).stem) or {}
+            tests = {(test_class, name) for test_class, methods in classes.items() for name in methods}
+            outcomes = {item for methods in classes.values() for items in methods.values() for item in items}
+        named, checked, owners = found.setdefault(shown, (set(), set(), set()))
+        named.update(tests)
+        checked.update(outcomes)
         owners.update(requirements)
-    rows = [{"key": key, "tests": len(methods), "outcomes": sorted({item for items in methods.values() for item in items})[:OUTCOMES],
-             "requirements": ordered(owners)} for key, (methods, owners) in found.items()]
+    rows = [{"key": key, "tests": len(named), "outcomes": sorted(checked)[:OUTCOMES], "requirements": ordered(owners)} for key, (named, checked, owners) in found.items()]
     named_owners = {item for row in rows if row["tests"] for item in row["requirements"]}
     every = {item for row in rows for item in row["requirements"]}
     return {"rows": sorted(rows, key=lambda row: (row["tests"] > 0, row["key"])), "linked": len(every), "unnamed": ordered(every - named_owners)}
+
+
+def _documented(code: str, documented: Iterable[str]) -> bool:
+    """A code a test checks is in the contract: the same code, its class (``2XX``) or ``default``."""
+    return any(item == code or (item.upper().endswith("XX") and item[0] == code[0]) or item.lower() == "default" for item in documented)
+
+
+def contract_table(project_path: str, endpoints: Mapping[tuple[str, str], list[str]], unread: list[str], calls: Mapping[str, Mapping[str, set]]) -> dict[str, Any]:
+    """«По контракту»: per endpoint of the contract its codes, the ones the project's tests check, the codes they check that it does not
+    document, and how many tests call it; and the three numbers over the table.  Paths and codes of the contract only."""
+    rows = []
+    for (method, written), codes in endpoints.items():
+        key = f"{method} {_normal_path(written)}"
+        matched = [row for test_key, row in calls.items() if _same_endpoint(key, test_key)]
+        tested = {code for row in matched for code in row["codes"]}
+        explicit = [code for code in codes if code.lower() != "default"]
+        checked = [code for code in codes if any(not _documented(found, explicit) if code.lower() == "default" else _documented(found, [code]) for found in tested)]
+        rows.append({"endpoint": f"{method} {written}", "codes": list(codes), "checked": checked,
+                     "extra": sorted(code for code in tested if not _documented(code, codes)), "tests": len({test for row in matched for test in row["tests"]})})
+    rows.sort(key=lambda row: (row["tests"] > 0, not row["extra"], row["endpoint"]))  # without a test, then those the tests disagree with, then by name
+    return {"path": project_path, "rows": rows, "endpoints": len(rows), "untested": sum(not row["tests"] for row in rows),
+            "pairs": sum(len(row["codes"]) for row in rows), "checked_pairs": sum(len(row["checked"]) for row in rows),
+            "extra": sum(bool(row["extra"]) for row in rows), "unread": len(unread)}
 
 
 def _profile(root: Path) -> str:
@@ -446,26 +527,45 @@ def _profile(root: Path) -> str:
 
 
 def run_coverage(run_root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
-    """``coverage`` of the run's accepted cases against the project's own tests (not those the package wrote), from the inventory the run
-    froze; None for a run of cases only (the user, 26.11: only mode B — its steps have operations), and when the project has no tests of its
-    own or no case links a class or an endpoint."""
+    """«Покрытие существующими тестами» of a run against the project's own tests (not those the package wrote), from the inventory the run
+    froze: the tables of the API contracts of the project (both profiles), and in a run of mode B the classes and endpoints of its accepted
+    cases (the user, 26.11: a run of cases only has no operations to link).  None when the project has no tests of its own or nothing to show."""
     from tools import pilot_state
+    from tools.api_contract import LIMIT, ContractUnreadable, is_api_contract, read_contract
     from tools.execution_gate import CASES_ONLY
 
     root = Path(run_root).resolve()
-    if _profile(root) == CASES_ONLY:
-        return None
     project = root.parent.parent
     receipts = pilot_state.context_receipts(root, attempt_id, pilot_state.derive_state(root))
     if not receipts:
         return None
     inventory = pilot_state.frozen_inventory(project, root, str(receipts[0]["inventory_digest"]))
-    files = [(str(row.get("project_path")), row.get("kind")) for row in inventory.get("files") or []]
-    own = own_files(project, inventory)[0]
-    if not any(kind == "test" and Path(path).suffix in _TESTED and path not in own for path, kind in files):
+    rows = inventory.get("files") or []
+    own, _files = _parsed_tests(project, inventory)
+    if not any(row.get("kind") == "test" and Path(str(row.get("project_path"))).suffix in _TESTED and str(row.get("project_path")) not in own for row in rows):
         return None
-    linked = linked_code(document, [path for path, kind in files if kind == "source" and Path(path).suffix in _TESTED])
-    return coverage(document, build_map(project, inventory, [key for key in linked if " " not in key], file_level=True), linked) if linked else None
+    calls = call_pairs(project, inventory)
+    contracts: list[dict[str, Any]] = []
+    unreadable: list[dict[str, str]] = []
+    for row in rows:
+        relative = str(row.get("project_path"))
+        if relative in own or not is_api_contract(project, relative):
+            continue
+        try:
+            if int(row.get("size") or 0) > LIMIT:  # the limit before a byte is read
+                raise ContractUnreadable(f"больше {LIMIT // (1024 * 1024)} МБ")
+            if (data := held_bytes(project, row)) is not None:
+                contracts.append(contract_table(relative, *read_contract(data), calls))
+        except ContractUnreadable as error:
+            unreadable.append({"path": relative, "reason": str(error)})
+    found: dict[str, Any] = {}
+    if _profile(root) != CASES_ONLY:  # the one check of the profile: the link to the requirements is mode B only
+        linked = linked_code(document, [str(row.get("project_path")) for row in rows if row.get("kind") == "source" and Path(str(row.get("project_path"))).suffix in _TESTED])
+        if linked:
+            found.update(coverage(document, build_map(project, inventory, [key for key in linked if " " not in key], file_level=True), linked, calls))
+    found.update({"contracts": contracts} if contracts else {})
+    found.update({"unreadable_contracts": unreadable} if unreadable else {})
+    return found or None
 
 
 def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]], root: Path | None = None) -> dict[str, Any]:

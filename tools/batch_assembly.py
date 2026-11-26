@@ -508,33 +508,20 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     return plan
 
 
-_API_CONTRACT = re.compile(rb"(?m)^(?:[ \t{]*\"(?:openapi|swagger)\"|(?:openapi|swagger))[ \t]*:[ \t]*[\"']?[0-9]")  # YAML — the key at the line start; JSON — quoted, maybe indented
-
-
-def _is_api_contract(project: Path, project_path: str) -> bool:
-    from tools.output_guard import project_file
-
-    if not project_path.lower().endswith((".yml", ".yaml", ".json")):
-        return False
-    try:
-        with project_file(project, project_path).open("rb") as handle:
-            return _API_CONTRACT.search(handle.read(4096)) is not None
-    except (OSError, ValueError):
-        return False
-
-
 def pick_context(project: Path, receipts: Sequence[Mapping[str, Any]], taken: int, requirements: Sequence[Mapping[str, Any]],
                  sources: Sequence[str]) -> tuple[list[str], list[str], int] | None:
     """``(files, the files the marker named that did not fit, how many it named)`` the generator reads instead of every file of the first ``taken`` receipts: the same
     bytes, the API contract first, then the documents the requirements cite, the files the marker's sources name (the most cited first), the rest by
     path; a file that does not fit is skipped.  None where every wanted file is read already (a small project, a marker that named nothing)."""
+    from tools.api_contract import is_api_contract
+
     sizes = {row["project_path"]: int(row["size"]) for receipt in receipts for row in receipt["files"]}
     today = {row["project_path"] for receipt in receipts[:taken] for row in receipt["files"]}
     cited = Counter(re.sub(r":\d+(?:-\d+)?$", "", words[0]) for words in (str(source).split(None, 1) for source in sources) if words)  # a source: «path:line — text»
     cited = Counter({path: count for path, count in cited.items() if path in sizes})
     docs = {found.group(1) if (found := re.match(r"(.+?):(\d+)", str(item))) else str(item) for row in requirements for item in row["provenance"]}  # «path:line — text»; no line: the whole text
     named = set(cited) | {path for receipt in receipts[:1] for path in receipt.get("referenced") or ()}  # the files the marker named and the templates the code of --target names
-    group = {path: 0 if _is_api_contract(project, path) else 1 if path in docs else 2 if path in named else 3 for path in sizes}
+    group = {path: 0 if is_api_contract(project, path) else 1 if path in docs else 2 if path in named else 3 for path in sizes}
     if all(path in today for path in sizes if group[path] < 3):
         return None
     room, chosen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken]), []

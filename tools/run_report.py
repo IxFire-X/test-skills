@@ -681,8 +681,9 @@ def existing_repeats(root: Path, attempt_id: str, document: Mapping[str, Any]) -
 
 @_document_hint
 def existing_coverage(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
-    """«Покрытие существующими тестами»: the classes and endpoints the accepted cases check, named by the project's own tests or not —
-    names, counts and IDs only; None in a run of cases only (its steps have no operations) and when the project has no tests of its own."""
+    """«Покрытие существующими тестами»: the tables of the project's API contracts against its own tests (both profiles), and in a run of
+    mode B the classes and endpoints the accepted cases check — names, paths, codes, counts and IDs only; None when the project has no tests
+    of its own or nothing to show."""
     from tools.existing_tests import run_coverage
 
     return run_coverage(root, attempt_id, document)
@@ -1461,26 +1462,54 @@ COVERAGE_TITLE = "## Покрытие существующими тестами 
 COVERAGE_NOTE = ("Оценка по тексту тестов проекта, тесты не запускались. «Назван тестами» — класс или адрес прямо упомянут в тесте; "
                  "класс может проверяться и косвенно, через другой класс.")
 COVERAGE_COLUMNS = "| Класс или адрес | Тестов, прямо называющих | Проверяемые исходы | Связанные требования |"
+CONTRACT_COLUMNS = "| Адрес | Коды ответа в контракте | Проверены тестами проекта | Тестов |"
+CONTRACT_ROWS = 100
 
 
 def _some(items: list[str], shown: int) -> str:
     return ", ".join(items[:shown]) + (f" и ещё {len(items) - shown}" if len(items) > shown else "")
 
 
+def _contract_lines(table: Mapping[str, Any]) -> list[str]:
+    """«По контракту»: the texts approved by the user on 26.11 (v09/coverage-contract-plan.md §2); the rows without a test, then those the
+    tests disagree with, then by name, at most ``CONTRACT_ROWS``."""
+    from tools.publish_test_case_bundle import plural
+    from tools.test_case_projections import escape_inline
+
+    rows, unread, extra = table["rows"], table["unread"], table["extra"]
+    cell = lambda row: (", ".join(row["checked"]) or "—") + (f" (тесты ждут {', '.join(row['extra'])} — не из контракта)" if row["extra"] else "")  # noqa: E731
+    address = lambda row: escape_inline("`" + row["endpoint"] + "`")  # noqa: E731
+    rest = len(rows) - CONTRACT_ROWS
+    return [f"### По контракту `{table['path']}`", "",
+            f"адресов без единого теста: {table['untested']} из {table['endpoints']}", "",
+            f"проверенных пар «адрес + код ответа»: {table['checked_pairs']} из {table['pairs']}", "",
+            f"тесты ждут код ответа, которого нет в контракте: {extra} {plural(extra, 'адрес', 'адреса', 'адресов')}", "",
+            *([f"в контракте не прочитано: {unread} {plural(unread, 'место', 'места', 'мест')} ($ref на весь путь, ответы в одну строку) — "
+               "эти адреса в таблице без кодов", ""] if unread else []),
+            CONTRACT_COLUMNS, "|---|---|---|---|",
+            *(f"| {address(row)} | {', '.join(row['codes']) or '—'} | "
+              f"{escape_inline(cell(row))} | {row['tests']} |" for row in rows[:CONTRACT_ROWS]),
+            *([f"ещё {rest} {plural(rest, 'адрес', 'адреса', 'адресов')}"] if rest > 0 else []), ""]
+
+
 def _coverage_lines(report: Mapping[str, Any]) -> list[str]:
-    """«Покрытие существующими тестами»: the texts approved by the user on 26.11 (v09/coverage-map-plan.md §2)."""
+    """«Покрытие существующими тестами»: the texts approved by the user on 26.11 (v09/coverage-map-plan.md §2, v09/coverage-contract-plan.md §2)."""
     from tools.test_case_projections import escape_inline
 
     found = report.get("existing_coverage")
-    if not found or not found["rows"]:
+    if not found or not (found.get("rows") or found.get("contracts")):
         return []
-    unnamed = found["unnamed"]
-    return [COVERAGE_TITLE, "", COVERAGE_NOTE, "",
-            f"требований, у которых ни один связанный класс не назван тестами: {len(unnamed)} из {found['linked']}"
-            + (f" ({_some(unnamed, 10)})" if unnamed else ""), "",
-            COVERAGE_COLUMNS, "|---|---|---|---|",
-            *(f"| {escape_inline(row['key'])} | {row['tests'] or '—'} | {escape_inline(', '.join(row['outcomes'])) or '—'} | "
-              f"{_some(row['requirements'], 5) or '—'} |" for row in found["rows"]), ""]
+    lines = [COVERAGE_TITLE, "", COVERAGE_NOTE, ""]
+    if found.get("rows"):
+        unnamed = found["unnamed"]
+        lines += [f"требований, у которых ни один связанный класс не назван тестами: {len(unnamed)} из {found['linked']}"
+                  + (f" ({_some(unnamed, 10)})" if unnamed else ""), "",
+                  COVERAGE_COLUMNS, "|---|---|---|---|",
+                  *(f"| {escape_inline(row['key'])} | {row['tests'] or '—'} | {escape_inline(', '.join(row['outcomes'])) or '—'} | "
+                    f"{_some(row['requirements'], 5) or '—'} |" for row in found["rows"]), ""]
+    for table in found.get("contracts") or []:
+        lines += _contract_lines(table)
+    return lines
 
 
 def _warning_line(code: str, report: Mapping[str, Any]) -> str:

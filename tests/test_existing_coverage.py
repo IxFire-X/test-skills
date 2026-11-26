@@ -39,7 +39,7 @@ def test_a_requirement_whose_classes_no_test_names_is_counted() -> None:
 
     value = {"Owner": {"OwnerTests": {"createsOwner": ["201"]}}}
     linked = {"src/Owner.java": {"CREQ-1"}, "src/Pet.java": {"CREQ-2"}, "src/Visit.java": {"CREQ-1"}}
-    found = coverage(DOCUMENT, value, linked)
+    found = coverage(DOCUMENT, value, linked, {})
     assert (found["linked"], found["unnamed"], [row["key"] for row in found["rows"]]) == (2, ["CREQ-2"], ["Pet", "Visit", "Owner"])
 
 
@@ -58,12 +58,48 @@ def test_the_data_of_a_literal_path_is_a_template() -> None:
     assert linked_code({"test_cases": [_case("CREQ-1", {"inputs": inputs})]}, []) == {"DELETE /api/profiles/{}/follow": {"CREQ-1"}}
 
 
+def _called(test: str, *codes: str) -> dict:
+    return {"tests": {("Tests", test)}, "outcomes": set(codes), "codes": set(codes)}
+
+
 def test_a_literal_route_beside_the_endpoint_does_not_name_it() -> None:
     from tools.existing_tests import coverage
 
-    value = {"GET /articles/feed": {"ArticleTests": {"readsFeed": ["200"]}}, "GET /vets": {"VetTests": {"listsVets": ["200"]}}}
+    calls = {"GET /articles/feed": _called("readsFeed", "200"), "GET /vets": _called("listsVets", "200")}
     linked = {"GET /api/articles/{}": {"CREQ-1"}, "GET /owners/{}": {"CREQ-2"}}
-    assert coverage(DOCUMENT, value, linked)["unnamed"] == ["CREQ-1", "CREQ-2"]
+    assert coverage(DOCUMENT, {}, linked, calls)["unnamed"] == ["CREQ-1", "CREQ-2"]
+
+
+def test_a_check_belongs_to_the_call_it_follows() -> None:
+    from tools.existing_tests import _calls
+
+    body = ('mockMvc.perform(put("/api/pets/3")).andExpect(status().isNoContent());\n'
+            'mockMvc.perform(get("/api/pets/3")).andExpect(status().isOk());')
+    assert [(endpoint, set(codes)) for endpoint, _outcomes, codes in _calls(body)] == [("PUT /api/pets/{}", {"204"}), ("GET /api/pets/{}", {"200"})]
+
+
+def test_a_python_status_after_its_call_belongs_to_it() -> None:
+    from tools.existing_tests import _calls
+
+    body = 'def test_missing(client):\n    response = client.get("/items/17")\n    assert response.status_code == 404\n'
+    assert [(endpoint, set(codes)) for endpoint, _outcomes, codes in _calls(body)] == [("GET /items/{}", {"404"})]
+
+
+def test_a_path_built_with_plus_is_a_template() -> None:
+    from tools.existing_tests import _calls
+
+    body = 'mockMvc.perform(put("/api/owners/" + ownerId + "/pets/" + pet.getId()).content(json));'
+    assert [endpoint for endpoint, _outcomes, _codes in _calls(body)] == ["PUT /api/owners/{}/pets/{}"]
+
+
+def test_the_contract_table_counts_and_orders_its_rows() -> None:
+    from tools.existing_tests import contract_table
+
+    endpoints = {("GET", "/items/{itemId}"): ["200", "404"], ("DELETE", "/items/{itemId}"): ["200"], ("GET", "/oops"): ["200"]}
+    calls = {"GET /api/items/{}": {"tests": {("T", "a"), ("T", "b")}, "outcomes": {"200"}, "codes": {"200"}}, "DELETE /api/items/{}": _called("c", "204")}
+    table = contract_table("openapi.yml", endpoints, [], calls)
+    assert ([row["endpoint"] for row in table["rows"]], table["untested"], table["checked_pairs"], table["pairs"], table["extra"]) == (
+        ["GET /oops", "DELETE /items/{itemId}", "GET /items/{itemId}"], 1, 1, 4, 1)
 
 
 def test_for_the_report_a_class_the_test_file_names_at_its_head_is_named_by_its_tests(tmp_path: Path) -> None:
@@ -89,7 +125,7 @@ def _run(tmp_path: Path, with_tests: bool) -> tuple[Path, str]:
 DOCUMENT_OF_PART0 = {"operation_capabilities": [{"capability_id": "CAP-X", "provenance": ["src/part0.py — X"]}], "test_cases": [_case("CREQ-1", _action("CAP-X"))]}
 
 
-def test_a_run_of_cases_only_has_no_section(tmp_path: Path) -> None:
+def test_a_run_of_cases_only_without_a_contract_has_no_section(tmp_path: Path) -> None:
     from tools.existing_tests import run_coverage
 
     assert run_coverage(*_run(tmp_path, with_tests=True), DOCUMENT_OF_PART0) is None
@@ -108,6 +144,45 @@ def test_a_run_of_mode_b_whose_tests_name_the_linked_module_has_its_row(tmp_path
     monkeypatch.setattr(existing_tests, "_profile", lambda _root: "local-pilot-v1")
     assert existing_tests.run_coverage(*_run(tmp_path, with_tests=True), DOCUMENT_OF_PART0) == {
         "rows": [{"key": "part0", "tests": 1, "outcomes": [], "requirements": ["CREQ-1"]}], "linked": 1, "unnamed": []}
+
+
+CONTRACT = "openapi: 3.0.1\npaths:\n  /items/{itemId}:\n    get:\n      responses:\n        '200':\n          description: ok\n"
+
+
+@pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
+def test_the_contract_table_is_in_both_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str) -> None:
+    from tools import existing_tests
+
+    (tmp_path / "openapi.yml").write_text(CONTRACT, encoding="utf-8")  # in the project before its scan
+    monkeypatch.setattr(existing_tests, "_profile", lambda _root: profile)
+    found = existing_tests.run_coverage(*_run(tmp_path, with_tests=True), DOCUMENT_OF_PART0)
+    assert ([table["path"] for table in found["contracts"]], "rows" in found) == (["openapi.yml"], profile == "local-pilot-v1")
+
+
+def test_the_contract_part_says_the_approved_texts() -> None:
+    from tools.run_report import _contract_lines
+
+    table = {"path": "src/main/resources/openapi.yml", "endpoints": 2, "untested": 1, "pairs": 5, "checked_pairs": 1, "extra": 1, "unread": 1,
+             "rows": [{"endpoint": "GET /oops", "codes": ["200", "304"], "checked": [], "extra": [], "tests": 0},
+                      {"endpoint": "DELETE /owners/{ownerId}", "codes": ["200", "404", "500"], "checked": ["404"], "extra": ["204"], "tests": 2}]}
+    assert _contract_lines(table) == [
+        "### По контракту `src/main/resources/openapi.yml`", "",
+        "адресов без единого теста: 1 из 2", "",
+        "проверенных пар «адрес + код ответа»: 1 из 5", "",
+        "тесты ждут код ответа, которого нет в контракте: 1 адрес", "",
+        "в контракте не прочитано: 1 место ($ref на весь путь, ответы в одну строку) — эти адреса в таблице без кодов", "",
+        "| Адрес | Коды ответа в контракте | Проверены тестами проекта | Тестов |", "|---|---|---|---|",
+        "| `GET /oops` | 200, 304 | — | 0 |",
+        "| `DELETE /owners/{ownerId}` | 200, 404, 500 | 404 (тесты ждут 204 — не из контракта) | 2 |", ""]
+
+
+def test_a_big_contract_shows_a_hundred_rows_and_names_the_rest() -> None:
+    from tools.run_report import _contract_lines
+
+    rows = [{"endpoint": f"GET /items{index}", "codes": ["200"], "checked": ["200"], "extra": [], "tests": 1} for index in range(102)]
+    table = {"path": "openapi.yml", "endpoints": 102, "untested": 0, "pairs": 102, "checked_pairs": 102, "extra": 0, "unread": 0, "rows": rows}
+    lines = _contract_lines(table)
+    assert (sum(line.startswith("| `GET") for line in lines), lines[-2]) == (100, "ещё 2 адреса")
 
 
 def test_the_section_says_the_approved_texts() -> None:
