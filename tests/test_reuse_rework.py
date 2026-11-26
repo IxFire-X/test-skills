@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,17 +42,27 @@ class _Out:
 
 
 def _shared(tmp_path_factory: pytest.TempPathFactory, name: str, **kwargs) -> dict:
-    """A source for the tests of the module that only read it (building one takes minutes)."""
+    """A source for the tests of the module that only read it (building one takes minutes), and a copy of it as it was built."""
+    home = tmp_path_factory.mktemp(name)
     out, patch = _Out(), pytest.MonkeyPatch()
     with contextlib.redirect_stdout(out.buffer):
-        run = _source(tmp_path_factory.mktemp(name), patch, out, **kwargs)
+        run = _source(home, patch, out, **kwargs)
     patch.undo()
-    return run
+    shutil.copytree(home, home.with_name(home.name + "-built"))
+    return {**run, "home": home}
 
 
 @pytest.fixture(scope="module")
 def accepted(tmp_path_factory: pytest.TempPathFactory) -> dict:
     return _shared(tmp_path_factory, "accepted")
+
+
+@pytest.fixture
+def own(accepted: dict) -> dict:
+    """``accepted`` as it was built, laid back at its own path: no run another test of the module made in its project (the search offers the newest run)."""
+    shutil.rmtree(accepted["home"])
+    shutil.copytree(accepted["home"].with_name(accepted["home"].name + "-built"), accepted["home"])
+    return accepted
 
 
 @pytest.fixture(scope="module")
@@ -152,10 +163,10 @@ def test_a_damaged_answer_of_the_second_round_is_refused_and_the_journal_of_the_
         target.write_bytes(data)
 
 
-def test_a_damaged_receipt_of_the_rework_gives_the_marker_and_makes_the_cases_invalid_and_the_scan_names_it(accepted: dict) -> None:
+def test_a_damaged_receipt_of_the_rework_gives_the_marker_and_makes_the_cases_invalid_and_the_scan_names_it(own: dict) -> None:
     from tests.test_reuse_cases import _scanned
 
-    src = accepted
+    src = own
     run = _follow(src)  # the marker does not need the receipt of the rework (tails13)
     target = pilot_state._receipt_target(src["run_root"], src["attempt_id"], "rework-round")
     data = target.read_bytes()
