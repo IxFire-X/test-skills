@@ -38,7 +38,7 @@ A module whose context does not fit one call is marked in parts (`status` names 
   RENAMES, and every unlinked row when it REMOVES one; no `verdict` elsewhere. An archived delta gives names, never
   requirements. In doubt: `fits` with the doubt in `reason`.
 - `context-marker:batch-NNN` — the requirements view (`requirements-view-v1`: id, order, `path:line` and text of each
-  requirement of the requirements step) and the files of one context batch. Write only the code
+  requirement of the requirements step) and the map of one context batch (`*.code-map.md`: each file by path, code as declarations with line numbers). Write only the code
   observations of this batch in `sources` and `warnings`: code puts the requirements of the requirements step into the part. A requirement whose code is not in this batch is the warning
   `часть N — код для <требование> не найден`, not a requirement gap; the task document met in a batch is not rewritten.
 - the merge into `context-marker:baseline` is done by code (`merge`), not by a model call.
@@ -47,7 +47,7 @@ With one context batch the marker stays one call, as below.
 
 ## Procedure
 
-1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
+1. Read only authorized inputs: the `read` list, and whole the files of your code map the requirements touch — cite `path:line` of those. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
 2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
    Порядок: `display_order` и номера `SREQ-NNNN` — требования одного документа подряд (документы — в порядке ответа), внутри документа по номеру строки из provenance `путь:строка` как числу (`…md:4` раньше `…md:12`); иначе `submit` отклонит ответ (`SOURCE_REQUIREMENT_ORDER`).
    Not OpenSpec: in a document with numbers a requirement is a numbered statement (`D01.`), and a paragraph without a number (introduction, data, working conditions; the list of numbers is among your files) is context — a behaviour only it states goes to `warnings`; without numbers each checkable statement; in document line order; headings are not requirements; `build_context` is for OpenSpec or `requirements.id_pattern` only; take from it just the file's sha256 `digest`, not its split.

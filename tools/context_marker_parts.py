@@ -38,7 +38,7 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
-    from tools.step_size import requirements_view_bytes, requirements_view_path, role_files, step_budget
+    from tools.step_size import code_map_bytes, code_map_path, requirements_view_bytes, requirements_view_path, role_files, step_budget
 
     root = Path(root).resolve()
     project = project_of(root)
@@ -55,6 +55,14 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     role = sum(path.stat().st_size for path in role_files("context-marker"))
     documents = sum((project / row["path"]).stat().st_size for row in baseline["requirements"].get("docs", []))
 
+    asked = {str(event.get("stage_instance_id")) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"}
+
+    def batch(stage: str, receipt: Mapping[str, Any]) -> int:
+        """The code a marker step reads of its receipt: the map (hybrid C); a step asked with no map on the disk read the files whole."""
+        if stage in asked and not code_map_path(root, receipt["digest"]).is_file():
+            return int(receipt["byte_count"])
+        return len(code_map_bytes(project, root, attempt_id, str(receipt["digest"])))
+
     def step(stage: str, inputs: list[Any], sizes: dict[str, int], over_hint: str) -> dict[str, Any]:
         total = sum(sizes.values())
         return {"stage": stage, "input_digests": inputs, "bytes": {**sizes, "total": total}, "fits": total <= budget,
@@ -64,7 +72,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     openspec = pilot_state.openspec_marker_by_code(root)  # so are those of OpenSpec files alone: the model never copies them
     if len(receipts) <= 1 and not imported and not openspec:
         parts = [step("context-marker:baseline", [*head, *(receipt["digest"] for receipt in receipts)],
-                      {"batch": sum(int(receipt["byte_count"]) for receipt in receipts), "requirements": documents, "role": role},
+                      {"batch": sum(batch("context-marker:baseline", receipt) for receipt in receipts), "requirements": documents, "role": role},
                       "вход разметки больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")]
         mode = "single"
     else:
@@ -73,7 +81,6 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         if answer:  # a part reads the view of the answer; a part asked before the view (none on the disk) read the answer
             read = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)
             view = len(requirements_view_bytes(read["artifact"], answer))
-            asked = {str(event.get("stage_instance_id")) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"}
             old = not requirements_view_path(root, answer).is_file()
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
@@ -84,7 +91,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
             if answer:
                 requirements_bytes = read["byte_count"] if old and stage in asked else view
             part = step(stage, [baseline["inventory_digest"], receipt["digest"], answer],  # no documents digest in a part
-                        {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
+                        {"batch": batch(stage, receipt), "requirements": requirements_bytes, "role": role},
                         "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                         + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else ""))
             if answer is None:  # no digest list with a null in it before the requirements answer

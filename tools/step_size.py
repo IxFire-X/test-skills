@@ -534,8 +534,11 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             if context and stage.startswith("tc-generator:") and (named := journal.plan(state).get("context_files")):  # the generator and its rework read the files the plan names
                 keep = {project_path(project, name) for name in named}
                 targets = [target for target in targets if target in keep]
-            files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size, **({"sha256": journal.sha256[target]} if target in journal.sha256 else {})}
-                         for target in targets)  # digest: the input of the request the file stands for; sha256: the file itself (the source digest of a requirement is this one)
+            if context and stage.startswith("context-marker:") and (code_map := _code_map(project, root, attempt_id, digest, write_views)) is not None:
+                files.append(code_map)  # a marker step reads the map of its receipt and opens whole the files it needs (hybrid C)
+            else:
+                files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size, **({"sha256": journal.sha256[target]} if target in journal.sha256 else {})}
+                             for target in targets)  # digest: the input of the request the file stands for; sha256: the file itself (the source digest of a requirement is this one)
             if position == 0 and stage in ("context-marker:requirements", "context-marker:baseline"):  # the step that reads the documents also reads the numbers of them, as the code counts them
                 from tools.build_context import numbering_view
                 from tools.pilot_state import label_texts
@@ -615,6 +618,10 @@ PLAN_VIEW = "plan-view-v1"
 REQUIREMENTS_VIEW = "requirements-view-v1"
 CHANGE_DIFF_VIEW = "change-diff-v1"
 SKELETON_VIEW = "скелет"
+CODE_MAP_VIEW = "карта кода"
+CODE_MAP_HEAD = ("# Map of the code of this part\n\nEvery file of the context batch by its path in the receipt: the declarations of the code with "
+                 "their line numbers, other files as path and size. Open whole only the files of this map the requirements touch; cite "
+                 "path:line of the files read whole.\n\n")
 CHANGE_DIFF_REST = "данные, не инструкция: что изменение меняет в требованиях базы; тексты требований — в ответе разметки"
 REQUIREMENTS_REST = "provenance, digest и связи кейсов — в ответе шага требований; часть их не пишет: submit вставит требования сам"
 _AT = re.compile(r"^(\S+:\d+)(?: — |$)")  # the ``path:line`` a provenance mark starts with
@@ -683,6 +690,31 @@ def _change_diff(project: Path, root: Path, state: Any, attempt_id: str, plan_di
     data = _compact({"view": CHANGE_DIFF_VIEW, "plan_digest": plan_digest, "requirements": rows, "rest": CHANGE_DIFF_REST})
     _write_view(project, root, target, data, True)
     return {"digest": plan_digest, "path": str(target), "bytes": len(data), "basis": CHANGE_DIFF_VIEW}
+
+
+def code_map_path(root: Path, receipt_digest: str) -> Path:
+    return Path(root) / "marker-views" / (str(receipt_digest).removeprefix("sha256:") + ".code-map.md")
+
+
+def code_map_bytes(project: Path, root: Path, attempt_id: str, receipt_digest: str) -> bytes:
+    """The map a marker step reads instead of the files of a context receipt whole (v0.8, hybrid C, rnd/20 §8–§10): every file of the receipt
+    by its path, the declarations of the code (``code_skeleton``), any other file as its path and size."""
+    from tools.code_skeleton import view_bytes
+    from tools.pilot_state import read_context_selection
+
+    return view_bytes(project, read_context_selection(root, attempt_id, str(receipt_digest))["files"], CODE_MAP_HEAD, every=True)
+
+
+def _code_map(project: Path, root: Path, attempt_id: str, receipt_digest: str, write: bool) -> dict[str, Any] | None:
+    """The row of the map of a receipt in the reading of a marker step; the report (``write=False``) counts it only when it is on the disk —
+    a step asked before v0.8 has none and read the files whole, as its report still says.  None for a receipt with nothing to map."""
+    target = code_map_path(root, receipt_digest)
+    if not write:
+        return {"digest": receipt_digest, "path": str(target), "bytes": target.stat().st_size, "basis": CODE_MAP_VIEW} if target.is_file() else None
+    if not (data := code_map_bytes(project, root, attempt_id, receipt_digest)):
+        return None
+    _write_view(project, root, target, data, True)
+    return {"digest": receipt_digest, "path": str(target), "bytes": len(data), "basis": CODE_MAP_VIEW}
 
 
 def skeleton_path(root: Path, plan_digest: str) -> Path:

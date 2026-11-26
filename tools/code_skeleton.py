@@ -118,9 +118,9 @@ def skeleton_files(receipts: Iterable[Mapping[str, Any]], whole: Iterable[str]) 
     return [rows[path] for path in sorted(rows) if path not in read and Path(path).suffix.lower() in CODE and not generated(path)]
 
 
-def _part(project: Path, row: Mapping[str, Any]) -> str | None:
-    """«## path» and «N: line» of a code file as the scan saw it, «## path (N B)» for a language without a reading; None for a generated
-    file, one with nothing declared, one the guard refuses (outside the project, a link on the way) or one that does not read back."""
+def _part(project: Path, row: Mapping[str, Any], every: bool) -> str | None:
+    """«## path» and «N: line» of a code file as the scan saw it, «## path (N B)» for a language without a reading (with ``every``, a file
+    with nothing declared too); None for a generated file, one the guard refuses (outside the project, a link) or that does not read back."""
     from tools.existing_tests import held_bytes
     from tools.output_guard import OutputRefused, project_file
 
@@ -133,18 +133,18 @@ def _part(project: Path, row: Mapping[str, Any]) -> str | None:
         return None
     if lines := skeleton(text, suffix):
         return f"## {path}\n" + "".join(f"{number}: {line}\n" for number, line in lines)
-    return None if suffix in LANGUAGES or suffix == ".py" else f"## {path} ({len(data)} B)\n"
+    return None if (suffix in LANGUAGES or suffix == ".py") and not every else f"## {path} ({len(data)} B)\n"
 
 
-def view_bytes(project: Path, rows: Iterable[Mapping[str, Any]]) -> bytes:
-    """The skeleton view of the code files ``rows``: the head, then their parts in path order; none — empty bytes.  Inside one ``closure_cache``
-    (a command: the plan picks the files up to three times) a file is read and parsed once for its digest of the scan."""
+def view_bytes(project: Path, rows: Iterable[Mapping[str, Any]], head: str = HEAD, every: bool = False) -> bytes:
+    """The view of the files ``rows`` (the skeleton of the generator; with ``every`` the map of a marker part, each file listed): ``head``, then
+    the parts in path order; none — empty bytes.  Inside one ``closure_cache`` (a command) a file is read and parsed once for its digest."""
     from tools.run_store import CLOSURE_CACHE
 
     kept, parts, base = CLOSURE_CACHE.get(), [], str(Path(project).resolve())
     for row in sorted(rows, key=lambda item: str(item["project_path"])):
-        key = ("code-skeleton", base, str(row["project_path"]), str(row.get("content_digest")))
-        part = kept[key] if kept is not None and key in kept else _part(project, row)
+        key = ("code-skeleton", base, str(row["project_path"]), str(row.get("content_digest")), every)
+        part = kept[key] if kept is not None and key in kept else _part(project, row, every)
         (kept if kept is not None else {})[key] = part
         parts += [part] if part else []
-    return (HEAD + "\n".join(parts)).encode("utf-8") if parts else b""
+    return (head + "\n".join(parts)).encode("utf-8") if parts else b""
