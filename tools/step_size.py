@@ -249,7 +249,15 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
 
 
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:
-    """The input files of ``stage`` as the journal knows them before the call (context-marker only)."""
+    """The input files of ``stage`` as the journal knows them before the call (context-marker only); the view of a part not asked yet
+    has no file — its bytes are the second value of ``journal_inputs``."""
+    return journal_inputs(project, run_id, stage, batch)[0]
+
+
+def journal_inputs(project: Path, run_id: str, stage: str, batch: int | None) -> tuple[list[Path], int]:
+    """The input files of ``stage`` as the journal knows them before the call (context-marker only), and the bytes it reads beyond them:
+    the view of the requirements answer of a part not asked yet, measured in memory.  A measurement writes no view: on the disk a view
+    is the sign that a part was asked with it (``context_marker_parts.plan``, status and report read the run so)."""
     if stage not in {"context-marker", "context-marker:requirements"}:
         raise ValueError("the journal knows the input of context-marker only; give --files for other steps")
     from tools.pilot_state import derive_state, read_context_selection
@@ -272,15 +280,22 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
     if stage == "context-marker:requirements":
         # the requirements step of the marker in parts reads the requirement documents only
-        return _requirement_files(project, root)
+        return _requirement_files(project, root), 0
+    held = 0
     if batch is not None and answer is not None:
         # a part of the marker reads the view of the requirements answer, not the documents again.
         source = root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json")
-        view = _requirements_view(project, root, answer, source, True)
-        files.append(Path(view["path"]) if view else source)
+        target = requirements_view_path(root, answer)
+        data = _requirements_view_data(project, root, answer, source)
+        if data is None:
+            files.append(source)  # not the answer's bytes: the answer itself stands
+        elif target.is_file() and target.read_bytes() == data:
+            files.append(target)  # the view the request of the part wrote
+        else:
+            held = len(data)  # not asked yet (or a view an agent changed, which the request rewrites): its bytes, no file
     else:
         files.extend(_requirement_files(project, root))
-    return list(dict.fromkeys(files))
+    return list(dict.fromkeys(files)), held
 
 
 def _compact(value: Any) -> bytes:
@@ -656,15 +671,25 @@ def _requirements_view(project: Path, root: Path, digest: str, source: Path, wri
     target = requirements_view_path(root, digest)
     if not write and not target.is_file():
         return None
-    try:
-        raw = source.read_bytes()
-        if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
-            return None
-        data = requirements_view_bytes(json.loads(raw.decode("utf-8")), digest)
-    except (OSError, ValueError, KeyError, TypeError):
+    data = _requirements_view_data(project, root, digest, source)
+    if data is None:
         return None
     _write_view(project, root, target, data, write)
     return {"digest": digest, "path": str(target), "bytes": len(data), "basis": REQUIREMENTS_VIEW}
+
+
+def _requirements_view_data(project: Path, root: Path, digest: str, source: Path) -> bytes | None:
+    """The bytes of the view of the requirements answer ``digest`` from its file ``source``, read through the core like any file of the
+    run; None — unreadable, refused by the core, or not the answer's bytes (its sha256)."""
+    from tools.confined_output import read_confined_bytes
+
+    try:
+        raw = read_confined_bytes(project, root, source)
+        if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+            return None
+        return requirements_view_bytes(json.loads(raw.decode("utf-8")), digest)
+    except (OSError, ValueError, KeyError, TypeError):  # ValueError: not JSON, or the core refused the path
+        return None
 
 
 def _write_view(project: Path, root: Path, target: Path, data: bytes, write: bool) -> None:
@@ -877,7 +902,7 @@ def main(argv: list[str] | None = None) -> int:
     project = Path(args.project).resolve()
     try:
         files = [input_file(item, project, base=project) for item in args.files]  # inside the project, checked before it is measured
-        requested = None
+        requested, held = None, 0
         stage_role = args.stage.split(":", 1)[0] if args.stage else None
         if args.stage and stage_role not in _STAGE_ROLES and stage_role not in _REQUEST_STAGES:
             raise ValueError(f"unknown --stage: {args.stage}")
@@ -889,7 +914,8 @@ def main(argv: list[str] | None = None) -> int:
                 requested = request_files(project / ".pilot-runs" / args.run, args.stage)
                 files += [Path(row["path"]) for row in requested["files"]]
             elif args.stage:
-                files += journal_files(project, args.run, args.stage, args.batch)
+                found, held = journal_inputs(project, args.run, args.stage, args.batch)
+                files += found
         role = args.role or stage_role
         budget = args.budget_bytes
         if budget is None and args.run:  # the budget of the .skillsrc the run froze
@@ -900,7 +926,7 @@ def main(argv: list[str] | None = None) -> int:
             if state["attempts"]:
                 budget = step_budget(project, run_limits(project, run_root, state, str(state["attempts"][-1]["attempt_id"]))[0])
         report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=budget,
-                         extra_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
+                         extra_bytes=(sum(row["bytes"] for row in requested["bindings"]) if requested else 0) + held)
         if requested is not None:
             report.update(files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],
                           input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
