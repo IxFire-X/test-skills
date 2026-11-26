@@ -18,17 +18,37 @@ from tools import pilot_state, stage_steps
 STAGE = "tc-generator:rework-1"
 
 
-def _reviewed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rounds: int = 1, findings=None, verdict: str = "ТРЕБУЕТ ДОРАБОТКИ") -> tuple[dict, dict]:
-    """The first review of the two-case fixture: the first case rejected by a blocking finding beside the canaries; the select's printed answer."""
-    from tools import orchestrate_test_case_revision as orchestrate
+def _reviewed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rounds: int = 1, findings=None, verdict: str = "ТРЕБУЕТ ДОРАБОТКИ",
+              answered: pytest.CaptureFixture[str] | None = None) -> tuple[dict, dict]:
+    """The first review of the two-case fixture: the first case rejected by a blocking finding beside the canaries; the select's printed answer.
+    *answered*: the generator of the rework has answered too (``test_rework_review._answered``)."""
+    from tests.snapshots import restored
+    from tests.test_review_canaries import _fake_seed
+    from tests.test_review_requested import _build_is_patched, build_generated_run
+    from tools import orchestrate_test_case_revision as orchestrate, review_canaries
 
+    # C4: the review is built once per test process and restored, unless the test patched anything before (the review reads too much
+    # to list) or brings its own findings; the patches of the review itself are set on every call
+    clean = findings is None and not monkeypatch._setattr and not monkeypatch._setitem and not _build_is_patched()
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: rounds)
-    run = _generated_run(tmp_path)
+    if clean:
+        monkeypatch.setattr(review_canaries, "seed", _fake_seed)
+        key = f"reviewed-{rounds}-{verdict}" + ("-answered" if answered else "")
+        return restored(tmp_path, key, lambda project: _review(build_generated_run(project.parent), monkeypatch, None, verdict, answered))[1]
+    return _review(_generated_run(tmp_path), monkeypatch, findings, verdict, answered)
+
+
+def _review(run: dict, monkeypatch: pytest.MonkeyPatch, findings, verdict: str, answered: pytest.CaptureFixture[str] | None) -> tuple[dict, dict]:
     _open(run, monkeypatch)
     one, _two = _ids(run)
     findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.")] if findings is None else findings(run)
-    return run, _select(run, _answer(run, verdict, findings=findings))
+    done = _select(run, _answer(run, verdict, findings=findings))
+    if answered is not None:
+        from tests.test_rework_review import _answered
+
+        _answered(run, answered)
+    return run, done
 
 
 def _reworked(run: dict, **change) -> dict:

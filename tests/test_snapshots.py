@@ -68,3 +68,10 @@ def test_a_test_that_patched_a_function_of_the_build_gets_a_build_of_its_own(tmp
     real = protocol._new_run
     monkeypatch.setattr(protocol, "_new_run", lambda project: real(project))
     assert _generated_run(tmp_path)["project"] == tmp_path / "project"
+
+
+def test_a_test_that_patched_anything_before_the_review_gets_a_review_of_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_rework_stage import _reviewed
+
+    monkeypatch.setenv("C4_ANY_PATCH", "1")
+    assert not _reviewed(tmp_path, monkeypatch)[0]["project"].parent.name.startswith("reviewed-")

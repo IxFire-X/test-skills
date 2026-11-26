@@ -37,9 +37,7 @@ def _answer(run: dict, verdict: str = "ПРИНЯТО", *findings: dict, **artif
 
 
 def _ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> dict:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    _answered(run, capsys)
-    return run
+    return _reviewed(tmp_path, monkeypatch, answered=capsys)[0]
 
 
 def test_status_names_the_review_of_the_rework_after_the_answer_and_finish_after_the_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
