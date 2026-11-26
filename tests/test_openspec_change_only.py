@@ -212,3 +212,51 @@ def test_how_to_use_has_the_approved_paragraphs_of_the_change_only() -> None:  #
                    "В прогоне только по изменению такое требование не берётся, а прогон идёт дальше",
                    "Повтор требования — остановка всегда.", "даже до кода; хватит `--docs openspec/changes/<имя>`"):
         assert needle in text, needle
+
+
+LINKED_DELTA = ("## ADDED Requirements\n### Requirement: Search\nFind an owner by «телефон».\n#### Scenario: Ok\n- WHEN typed\n- THEN listed\n"
+                "## MODIFIED Requirements\n### Requirement: Lookup\nLook an owner up by «телефон».\n#### Scenario: Ok\n- WHEN typed\n- THEN shown\n")
+TEXT_7 = "ADDED «Search» связан с неприменённым MODIFIED «Lookup»: его кейсы написаны по нынешнему тексту базы. Верно ли это?"
+
+
+def _requirements_by_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> tuple[int, str, Path, str]:
+    """A change only whose healthy ADDED is a neighbour of a MODIFIED the base lacks (the stand S4 of 26.11): the scan, then the step the code answers."""
+    from tools import api
+
+    project = _project(tmp_path)
+    _write(project, DELTA, LINKED_DELTA)
+    scan = _scan(project, monkeypatch, CHANGE)
+    code = api.main(["prepare", "--run-root", scan["run_root"], "--stage", "context-marker:requirements"])
+    return code, capsys.readouterr().out, Path(scan["run_root"]), scan["attempt_id"]
+
+
+def test_an_added_beside_a_modified_not_applied_lets_the_code_write_the_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _root, _attempt = _requirements_by_code(tmp_path, monkeypatch, capsys)
+    assert code == 0, out  # was MODEL_STAGE_ARTIFACT_INVALID: the line of trap 2 had no « — » the schema of the marker asks for
+
+
+def test_the_question_of_a_linked_line_with_its_place_is_text_7() -> None:
+    assert question(f"{DELTA}:7 — {TEXT_7}") == f"- {TEXT_7}"
+
+
+def test_the_analyst_is_asked_texts_6_and_7_from_the_answer_of_the_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.run_report import analyst_questions
+
+    _code, _out, root, attempt_id = _requirements_by_code(tmp_path, monkeypatch, capsys)
+    said = analyst_questions(_answer_of(root, attempt_id)["warnings"])
+    assert f"- {TEXT_7}" in said and "- MODIFIED «Lookup» (" in said and "Кейсы на него не написаны" in said
+
+
+def test_an_answer_of_the_code_the_schema_refuses_sends_no_one_to_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                           capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    from tools import build_context
+
+    real = build_context.scope_lines
+    monkeypatch.setattr(build_context, "scope_lines", lambda *args, **kwargs: [*real(*args, **kwargs), "a line without the dash"])
+    code, out, _root, _attempt = _requirements_by_code(tmp_path, monkeypatch, capsys)
+    refused = json.loads(out)
+    assert (code, refused["code"]) == (2, "MODEL_STAGE_ARTIFACT_INVALID") and "собрал код" in refused["fix"] and "retry_prompt" not in refused["fix"], refused
+

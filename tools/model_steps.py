@@ -42,6 +42,7 @@ from tools.pilot_state import (  # the names of the journal these bodies read (�
     validate_schema as _validate_schema,
 )
 from tools.model_records import (  # the names of the records of a step these bodies read (П1 of the cut of v0.8)
+    ModelStageArtifactInvalid,
     context_marker_parts as _context_marker_parts,
     context_marker_receipt_digests as _context_marker_receipt_digests,
     context_marker_snapshots as _context_marker_snapshots,
@@ -150,6 +151,10 @@ def openspec_marker_by_code(run_root: Path) -> bool:
     return bool(named) and all(path.startswith("openspec/") for path in named) and any(OPENSPEC_PATH.fullmatch(path) for path in named)
 
 
+CODE_ANSWER_FIX = ("ответ собрал код пакета из файлов OpenSpec, а не модель — повтор ответа модели его не исправит: это дефект пакета; "
+                   "покажи человеку это сообщение и сохрани папку прогона для разработчиков пакета")
+
+
 def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Answer ``context-marker:requirements`` of such a run by code: the rows ``build_context`` composes from the receipts, no model call; again on an answered step changes nothing."""
     from tools.build_context import build_context
@@ -166,7 +171,10 @@ def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str
     built = build_context(project, docs_snapshot=_context_marker_snapshots(project, root, state, attempt, stage, head, _published_context_receipts(state, attempt_id, stage)))
     artifact = {"schema_version": built["schema_version"], "stage": "context-marker", "warnings": built["warnings"],
                 "artifacts": {"analytics_documentation": built["artifacts"]["analytics_documentation"], "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}}}
-    check_model_stage_artifact(stage, artifact)  # before the request is written: a refusal leaves no orphan request behind
+    try:  # before the request is written: a refusal leaves no orphan request behind
+        check_model_stage_artifact(stage, artifact)
+    except ModelStageArtifactInvalid as error:  # the code wrote this answer: no answer of a model mends it
+        raise ModelStageArtifactInvalid(str(error).split("; fix: ", 1)[0] + "; fix: " + CODE_ANSWER_FIX) from None
     publish_code_step_request(run_root, attempt_id, stage, model_id=OPENSPEC_MODEL_ID, invocation_id=f"openspec-{attempt_id[:12]}", input_digests=head)
     return publish_model_stage_artifact(run_root, attempt_id, stage, artifact)
 

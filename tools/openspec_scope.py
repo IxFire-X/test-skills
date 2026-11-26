@@ -14,7 +14,8 @@ from typing import Iterable, Sequence
 
 SCOPE_HEADS = ("Объём OpenSpec:", "Проверьте регресс:", "Объём неполный:", "Не применено:")
 SCOPE, NEIGHBOURS, PARTIAL, DISPUTED = SCOPE_HEADS
-LINKED = re.compile(r"^ADDED «.+» связан с неприменённым MODIFIED «.+»: его кейсы написаны по нынешнему тексту базы\. Верно ли это\?$")
+# text 7 of 25.11 with the place of the MODIFIED in front: a warning of the marker is «… — …» by its schema (inline_provenance_string)
+LINKED = re.compile(r"^(?:.+?:\d+ — )?(ADDED «.+» связан с неприменённым MODIFIED «.+»: его кейсы написаны по нынешнему тексту базы\. Верно ли это\?)$")
 QUESTIONS = "## Требования изменения, которые не применились"
 THRESHOLD = 0.3
 MOST = 5  # neighbours of one requirement of the change
@@ -103,9 +104,9 @@ def lines(change: str, areas: Sequence[str], applied: Sequence[tuple[str, str, s
         close = ", ".join(f"{area}/«{other}»" for _score, area, other in neighbours(weights, text, others, impact))
         found.append(f"{DISPUTED} {operation} «{name}» ({path}:{line}) — {cause}" + (f"; смежные с ним: {close}" if close else ""))
     for operation, _area, name, text in applied:
-        for _operation, _other_area, other, other_text, *_rest in disputed:
+        for _operation, _other_area, other, other_text, other_path, other_line, _cause in disputed:
             if operation == "ADDED" and _operation == "MODIFIED" and weights.score(text, other_text) >= THRESHOLD:
-                found.append(f"ADDED «{name}» связан с неприменённым MODIFIED «{other}»: его кейсы написаны по нынешнему тексту базы. Верно ли это?")
+                found.append(f"{other_path}:{other_line} — ADDED «{name}» связан с неприменённым MODIFIED «{other}»: его кейсы написаны по нынешнему тексту базы. Верно ли это?")
     return found
 
 
@@ -120,8 +121,8 @@ _DISPUTED_LINE = re.compile(r"^Не применено: (ADDED|MODIFIED) «(.+)�
 
 def question(line: str) -> str | None:
     """The question to the analyst (text 6 of 25.11) of a line «Не применено: …»; the line of text 7 as it is; None for any other line."""
-    if LINKED.fullmatch(line):
-        return f"- {line}"
+    if (linked := LINKED.fullmatch(line)) is not None:
+        return f"- {linked.group(1)}"
     match = _DISPUTED_LINE.fullmatch(line)
     if match is None:
         return None
