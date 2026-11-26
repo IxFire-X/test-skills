@@ -243,7 +243,7 @@ def _scan(args: Any) -> int:
                 _print(_run_in_progress(project, open_root, request))
                 return 2
             # the scan of this run stopped before its last context batch — the same scan finishes it
-            outcome = _resume_scan(project, args, request, open_root, [*abandoned, *cut_runs])
+            outcome = _resume_scan(project, args, open_root, [*abandoned, *cut_runs])
             if isinstance(outcome, int):
                 return outcome
             skipped_runs.append(open_root)
@@ -317,7 +317,7 @@ def _scan(args: Any) -> int:
     return 0
 
 
-def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root: Path, abandoned: Sequence[str]) -> int | str:
+def _resume_scan(project: Path, args: Any, run_root: Path, abandoned: Sequence[str]) -> int | str:
     """The repeat of a scan finishes the run it cut.  The frozen inventory and baseline of the run are read from the
     journal, the batches are made again from the request, the ones the run has must be the same (by digest), the missing ones are
     written.  Returns the exit code of the scan, or why the run cannot be finished: it is then left as it is and a new one is made."""
@@ -422,7 +422,7 @@ _INTERRUPTED_FIX = ("приём отчётов начался, но квитан
                     "`ingest --no-reports --reason RESULT_UNAVAILABLE` — он закроет попытку")
 
 
-def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
+def _leave(root: Path, attempt_id: str) -> dict[str, Any]:
     """The mark «оставлен» of a run stopped before the canonical review — the attempt is not closed;
     only the same-request check of scan skips the run. A decision of the run, so a file and its pair of events
     (``bind_bytes``, batch ``left-v1``): written once, a repeat only finishes the events; a file of other bytes is RECEIPT_FILE_UNBOUND."""
@@ -445,7 +445,7 @@ def _before_canonical_review(root: Path, attempt_id: str) -> bool:
     return False
 
 
-def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: str) -> dict[str, Any]:
+def _closed_before_review(project: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     """The honest answer and the next run — this run stays as it is, --new-run starts another."""
     request = manifest.get("scan_request")
     command = (_scan_command(project, request, extra=("--new-run",)) if isinstance(request, Mapping)
@@ -536,8 +536,8 @@ def cmd_finish(args: Any) -> int:
         if not _before_canonical_review(root, attempt_id):
             raise HostStop("ABANDON_NOT_NEEDED", "попытка уже дошла до ревью кейсов: LEFT_BEFORE_REVIEW только до него",
                            _exact_fix("python -m tools.run_pipeline finish --project <project> --run <run_id>", project, root, attempt_id))
-        closed = _closed_before_review(project, run["manifest"], "прогон оставлен")
-        _print({"status": "ok", "stage": "finish", "run_id": run["manifest"]["run_id"], "left": _leave(project, root, attempt_id),
+        closed = _closed_before_review(project, run["manifest"])
+        _print({"status": "ok", "stage": "finish", "run_id": run["manifest"]["run_id"], "left": _leave(root, attempt_id),
                 "message": "прогон оставлен до ревью кейсов; простой scan того же запроса начнёт новый", "next_run": closed["next_run"]})
         return 0
     from tools.orchestrate_test_case_revision import close_pending_rework, published_dir
@@ -559,7 +559,7 @@ def cmd_finish(args: Any) -> int:
                   else finalize_durable_branch_attempt(root, attempt_id, abandon))
     except FinalizationError as error:
         if not executed and str(error).startswith("FINISH_FACT_UNDETERMINED") and _before_canonical_review(root, attempt_id):
-            _print(_closed_before_review(project, run["manifest"], str(error)))
+            _print(_closed_before_review(project, run["manifest"]))
             return 2
         code = str(error).split(":", 1)[0] if str(error).startswith(("FINISH_", "ABANDON_")) else "FINALIZATION"
         fix = getattr(error, "fix", None) or (_INTERRUPTED_FIX if executed and not _execution_receipt_bound(root, attempt_id) else None)

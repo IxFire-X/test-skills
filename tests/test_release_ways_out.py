@@ -160,7 +160,7 @@ def test_o12b_the_mark_hides_only_its_own_attempt(tmp_path: Path, monkeypatch: p
     (root / LEFT_MARK).unlink()
     from tools.run_pipeline import _leave
 
-    _leave(Path(first["project"]) if "project" in first else project, root, first["attempt_id"])  # the one writer: the file and its pair of events
+    _leave(root, first["attempt_id"])  # the one writer: the file and its pair of events
     assert left_attempt(root) == first["attempt_id"] and _left_mark(root)
 
 

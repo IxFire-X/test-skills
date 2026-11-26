@@ -43,7 +43,7 @@ SPECIFIC = {
     ("finalize_attempt.py", "code"): "an abandon code of a closed table",
     ("model_steps.py", "cause"): "an abandon code of the closed table of spent_abandon",
     ("stage_steps.py", "cause"): "an abandon code of the closed table of spent_abandon",
-    ("run_pipeline.py", "abandon"): "an abandon code of the closed table of spent_abandon, from the status of a stage",
+    ("run_scan.py", "abandon"): "an abandon code of the closed table of spent_abandon, from the status of a stage",
     ("skillsrc_manifest.py", "python"): "set from printed() or the literal template on the lines above",
     ("skillsrc_manifest.py", "where"): "set from printed() or the literal template on the lines above",
 }

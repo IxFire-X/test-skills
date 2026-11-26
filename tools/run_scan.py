@@ -156,7 +156,7 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
 
 
 def _next_command(project: Path, run_root: Path, step: Mapping[str, Any], abandon: str | None = None) -> str | None:
-    """The command of ``next`` to copy as it is: prepare and submit live in ``tools.api``, finish and report in this module."""
+    """The command of ``next`` to copy as it is: prepare and submit live in ``tools.api``, finish and report in ``tools.run_pipeline``."""
     verb, stage = step.get("verb"), step.get("stage")
     if verb in ("prepare", "submit") and stage:
         return f"{printed(sys.executable)} -m tools.api {verb} --run-root {printed(run_root)} --stage {printed(stage)}"
