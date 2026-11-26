@@ -9,8 +9,10 @@ import pytest
 
 from tests.test_batch_plan import _evidence, _requirements
 from tests.test_marker_parts import _run
+from tools import code_skeleton
 from tools.batch_assembly import pick_context, plan_batches
-from tools.code_skeleton import LINE_LIMIT, file_parts, generated, skeleton, skeleton_files, view_bytes
+from tools.code_skeleton import HEAD, LINE_LIMIT, generated, skeleton, skeleton_files, view_bytes
+from tools.pilot_state import closure_cache
 from tools.step_size import _skeleton
 
 OWNER = """package org.example.owner;
@@ -120,7 +122,39 @@ def test_generated_code_is_no_part_of_the_skeleton() -> None:
 
 def test_a_code_file_of_a_language_without_a_reading_is_its_path_and_size(tmp_path: Path) -> None:
     row = _file(tmp_path, "cmd/main.go", "package main\n\nfunc main() {}\n")
-    assert file_parts(tmp_path, [row]) == {"cmd/main.go": f"## cmd/main.go ({row['size']} Б)\n"}
+    assert view_bytes(tmp_path, [row]) == f"{HEAD}## cmd/main.go ({row['size']} B)\n".encode("utf-8")
+
+
+REPOSITORY = """package org.example.owner;
+
+public interface OwnerRepository extends JpaRepository<Owner, Integer> {
+
+    Page<Owner> findByLastNameStartingWith(String lastName, Pageable pageable);
+
+    Optional<Owner> findById(Integer id);
+}
+"""
+
+
+def test_the_methods_of_a_spring_data_repository_are_in_the_skeleton() -> None:  # PQ1 r2: OwnerRepository was its head alone
+    assert [number for number, _line in skeleton(REPOSITORY, ".java")] == [1, 3, 5, 7]
+
+
+def test_a_call_at_the_file_level_is_no_declaration() -> None:
+    assert skeleton("init();\nfunction run() {\n}\n", ".ts") == [(2, "function run() {")]
+
+
+def test_a_file_the_guard_refuses_is_left_out(tmp_path: Path) -> None:
+    assert view_bytes(tmp_path, [{"project_path": "../Owner.java", "size": 1, "content_digest": "sha256:" + "0" * 64}]) == b""
+
+
+def test_one_command_parses_a_file_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # the plan picks up to three times
+    row, calls = _file(tmp_path, "src/Owner.java", OWNER), []
+    monkeypatch.setattr(code_skeleton, "skeleton", lambda text, suffix: calls.append(suffix) or [(1, "class Owner {")])
+    with closure_cache():
+        view_bytes(tmp_path, [row])
+        view_bytes(tmp_path, [row])
+    assert calls == [".java"]
 
 
 def _file(project: Path, relative: str, text: str) -> dict:
