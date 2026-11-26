@@ -2,11 +2,13 @@
 and the cycle of the review (``prepare`` / ``submit`` of ``tc-reviewer:canonical``): the session, the evidence and the budget."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,8 +43,44 @@ def _journal(run_root: Path) -> bytes:
 
 def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
                    requirements: list | None = None) -> dict:
-    """A run with the context, the marker and two generator answers published (as test_reviewer_protocol does);
-    *header*, *requirements* — another canonical header and source requirements (PG1: 1.1.0 for param_group, no Russian)."""
+    """The run of build_generated_run, built once per test process for these arguments and restored in its own project folder
+    (tests/snapshots.py): use ``run["project"]``, not ``tmp_path / "project"``.  Where a test patched a function the build calls (another
+    project, other fragments, a spy on the requests) it gets a build of its own; a patch deeper than these, or of a value, needs
+    build_generated_run."""
+    from tests.snapshots import restored
+
+    if _build_is_patched():
+        return build_generated_run(tmp_path, self_review, generated, header, requirements)
+    key = "generated-run-" + hashlib.sha256(json.dumps([self_review, generated, header, requirements], sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return restored(tmp_path, key, lambda project: build_generated_run(project.parent, self_review, generated, header, requirements))[1]
+
+
+def _called_by_the_build() -> dict[tuple[Any, str], Any]:
+    """The functions build_generated_run calls by name, as their modules hold them now."""
+    import tests.test_batch_assembly as batch
+    import tests.test_reviewer_protocol as protocol
+    from tools import batch_assembly, pilot_state, project_inventory
+
+    called = {batch: ("_fragment", "_header", "_plan"), protocol: ("_new_run", "_session"), batch_assembly: ("assemble_candidate",),
+              pilot_state: ("derive_state", "publish_context_selection", "publish_model_request", "publish_model_stage_artifact",
+                            "publish_generator_input", "publish_prior_capabilities"),
+              project_inventory: ("read_execution_baseline", "read_inventory_receipt", "select_context_batches")}
+    return {(module, name): getattr(module, name) for module, names in called.items() for name in names}
+
+
+_AS_IMPORTED = _called_by_the_build()  # before any test patched them
+
+
+def _build_is_patched() -> bool:
+    """A function the build calls is not the one of the import, or is a lambda or a local function put there."""
+    return any(function is not _AS_IMPORTED[place] or (function.__module__, function.__qualname__) != (place[0].__name__, place[1])
+               for place, function in _called_by_the_build().items())
+
+
+def build_generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
+                        requirements: list | None = None) -> dict:
+    """A run in ``tmp_path / "project"`` with the context, the marker and two generator answers published (as test_reviewer_protocol
+    does); *header*, *requirements* — another canonical header and source requirements (PG1: 1.1.0 for param_group, no Russian)."""
     from tests.test_batch_assembly import _fragment, _header, _plan
     from tests.test_reviewer_protocol import _new_run, _session
     from tools.pilot_state import derive_state, publish_context_selection, publish_model_request, publish_model_stage_artifact

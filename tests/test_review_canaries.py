@@ -649,7 +649,7 @@ def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_atte
     assert pilot_state._automation_inputs(project, root, pilot_state.derive_state(root), run["attempt_id"], "tc-to-autotest:r1")[0][0] == document_sha256(effective)
     from tools.run_report import build_report
 
-    acceptance = build_report(tmp_path / "project", run["run_root"].name)[0]["acceptance"]  # the verdict as given, the outcome the code drew, the numbers — codes, no texts
+    acceptance = build_report(run["project"], run["run_root"].name)[0]["acceptance"]  # the verdict as given, the outcome the code drew, the numbers — codes, no texts
     assert (acceptance["verdict_given"], acceptance["outcome"], acceptance["generated"], acceptance["accepted"], acceptance["rejected_by_findings"]) == ("ТРЕБУЕТ ДОРАБОТКИ", "PARTIAL", 2, 1, 1)
     assert acceptance["rejected_cases"][0]["codes"] == ["REVIEW_NOTE"] and "Нет проверки состояния." not in json.dumps(acceptance, ensure_ascii=False)
 
@@ -667,7 +667,7 @@ def test_a_free_text_code_of_a_blocking_finding_does_not_reach_the_report(tmp_pa
     phrase = "Требование REQ-7 нарушено: ожидание не проверяет баланс счёта клиента"
     findings = [*_boundary_and_removed(run), _finding("BLOCKING", [one["case_id"]], "Нет проверки состояния.", code=phrase)]
     assert _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=findings))["status"] == "EFFECTIVE_SELECTED"
-    report = build_report(tmp_path / "project", run["run_root"].name)[0]
+    report = build_report(run["project"], run["run_root"].name)[0]
     assert report["acceptance"]["rejected_cases"][0]["codes"] == ["OTHER"]
     assert "баланс счёта" not in json.dumps(report, ensure_ascii=False) and "баланс счёта" not in render_markdown(report)
 

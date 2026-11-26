@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 from tests.helpers import submit_stage
-from tests.test_review_requested import _generated_run
+from tests.test_review_requested import build_generated_run
 
 
 def _events(run_root: Path) -> list[dict]:
@@ -46,7 +46,7 @@ def _report(run: dict) -> dict:
 
 
 def test_a_refusal_is_an_event_bound_to_its_line(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     _refuse(run)
     refused = [row for row in _events(run["run_root"]) if row["event_type"] == "COMMAND_REFUSED"]
     [row] = _rows(run["run_root"])
@@ -58,7 +58,7 @@ def test_a_refusal_is_an_event_bound_to_its_line(tmp_path: Path) -> None:
 def test_the_event_passes_the_schema_and_the_journal_is_still_valid(tmp_path: Path) -> None:
     from tools import pilot_state
 
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     _refuse(run, 3)
     state = pilot_state.derive_state(run["run_root"])  # the chain, the copies, the schema of every event
     assert sum(row["event_type"] == "COMMAND_REFUSED" for row in state["events"]) == 3
@@ -66,7 +66,7 @@ def test_the_event_passes_the_schema_and_the_journal_is_still_valid(tmp_path: Pa
 
 
 def test_the_report_counts_the_events_and_not_an_editable_file(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     _refuse(run, 3)
     assert _report(run)["refusals"]["total"] == 3
     (run["run_root"] / "refusals.jsonl").write_bytes(b"")  # the agent «cleans» its refusals
@@ -76,7 +76,7 @@ def test_the_report_counts_the_events_and_not_an_editable_file(tmp_path: Path) -
 
 
 def test_a_planted_line_without_an_event_is_not_counted_and_is_named(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     _refuse(run)
     with (run["run_root"] / "refusals.jsonl").open("ab") as handle:
         handle.write(json.dumps({"at": "2026-01-01T00:00:00.000000Z", "command": "x", "code": "PLANTED", "stage": None, "batch": None},
@@ -87,7 +87,7 @@ def test_a_planted_line_without_an_event_is_not_counted_and_is_named(tmp_path: P
 
 
 def test_the_basis_says_the_journal(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     _refuse(run)
     report = _report(run)
     assert "журнал" in report["refusals"]["basis"] and "не подтверждено" not in report["refusals"]["basis"]
@@ -97,7 +97,7 @@ def test_the_basis_says_the_journal(tmp_path: Path) -> None:
 
 
 def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_stays(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     copy = run["run_root"] / "events" / "0000000003.json"
     copy.write_bytes(copy.read_bytes() + b" ")  # the journal no longer passes its checks
     before = _raw(run["run_root"])
@@ -109,7 +109,7 @@ def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_sta
 def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
     from tests.test_review_two_commands import _cycle
 
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     before = _raw(run["run_root"])
     code, refused = _cycle("submit", run, "--dry-run")  # no prepare yet: a refusal
     assert code == 2
@@ -122,7 +122,7 @@ def test_the_events_between_the_others_change_no_reader_of_the_order(tmp_path: P
     from tools.run_pipeline import main
 
     def flow(root: Path, refusals: bool) -> tuple[dict, dict, list]:
-        run = _generated_run(root)
+        run = build_generated_run(root)
         if refusals:
             _refuse(run)
         assert _open(run)[0] == 0

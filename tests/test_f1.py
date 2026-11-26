@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.helpers import answer_stage, submit_stage
-from tests.test_review_requested import _generated_run, _put
+from tests.test_review_requested import build_generated_run, _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
 
 
@@ -109,7 +109,7 @@ def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path
     from tools import step_size
 
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
-    run = _generated_run(tmp_path, generated=False)
+    run = build_generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
     code, answered = answer_stage(run["run_root"], stage, fragment)
     assert code == 0 and answered["result"]["warning"] == "STEP_OUTPUT_LARGE" and answered["result"]["output_basis"] == "raw", answered
@@ -128,7 +128,7 @@ def test_a_large_answer_carries_the_phrase_for_the_tester_beside_the_warning(tmp
     from tools.fixes import human_for
 
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
-    run = _generated_run(tmp_path, generated=False)
+    run = build_generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
     _code, answered = answer_stage(run["run_root"], stage, fragment)
     assert answered["result"]["warning"] == "STEP_OUTPUT_LARGE" and answered["result"]["human"] == human_for("STEP_OUTPUT_LARGE")

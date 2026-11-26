@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_review_open_recovery import _crash_once
-from tests.test_review_requested import _generated_run, _journal, _put
+from tests.test_review_requested import build_generated_run, _generated_run, _journal, _put
 from tests.journal_helpers import assert_refused_once, refusal_log
 from tests.test_review_two_commands import _autofix, _cycle, _open, _select_verdict, _shape, _verdict
 
@@ -85,7 +85,7 @@ def _opened(tmp_path: Path) -> dict:
 
 @pytest.mark.parametrize("point", ["ledger-file-written", "ledger-published"])
 def test_prepare_cut_between_the_ledger_file_and_its_events(tmp_path: Path, monkeypatch, point: str) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     with monkeypatch.context() as broken:
         _crash_event(broken, "ARTIFACT_PUBLISHED" if point == "ledger-file-written" else "ARTIFACT_READ_BACK", LEDGER)
         code, first = _open(run)
@@ -94,7 +94,7 @@ def test_prepare_cut_between_the_ledger_file_and_its_events(tmp_path: Path, monk
     assert len(list(ledgers.glob("*.json"))) == 1  # the cut left the file
     code, again = _open(run)
     assert code == 0 and again["result"]["answer_slot"], f"{point}: {again}"
-    other = _generated_run(tmp_path / "plain")
+    other = build_generated_run(tmp_path / "plain")
     assert _open(other)[0] == 0
     assert _shape(run["run_root"]) == _shape(other["run_root"]), point  # the shape leaves COMMAND_REFUSED out; the cut call's refusal is stated here
     assert refusal_log(run["run_root"]) == [("prepare", first["code"])] and refusal_log(other["run_root"]) == [], refusal_log(run["run_root"])

@@ -177,7 +177,7 @@ def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_
     from tools.run_report import build_report, render_markdown
 
     run = _generated_run(tmp_path)
-    report = build_report(tmp_path / "project", Path(run["run_root"]).name)[0]
+    report = build_report(run["project"], Path(run["run_root"]).name)[0]
     counts = report["counts"]
     assert counts["cases"] and counts["canonical_requirements"] and counts["canon_basis"] == "кандидат r1, не принят", counts
     assert "кандидат r1, не принят" in render_markdown(report)
@@ -212,7 +212,7 @@ def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: 
 
 @pytest.mark.slow
 def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _generated_run
+    from tests.test_review_requested import build_generated_run
     from tests.test_review_two_commands import _open, _select_verdict, _verdict
     from tools import orchestrate_test_case_revision as orchestrate
     from tools.pilot_state import effective_canonical_or_reason
@@ -220,7 +220,7 @@ def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet(monkeypatch: pyte
 
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # with the rework on, one case of two sent back (50 %) waits for the rework: no verdict is closed yet
     with tempfile.TemporaryDirectory() as directory:
-        run = _generated_run(Path(directory))
+        run = build_generated_run(Path(directory))
         assert _open(run)[0] == 0 and _select_verdict(run, _verdict(run, "ТРЕБУЕТ ДОРАБОТКИ"))[0] == 0
         answer = effective_canonical_or_reason(run["run_root"], run["attempt_id"])
         assert answer["effective"] is None, answer

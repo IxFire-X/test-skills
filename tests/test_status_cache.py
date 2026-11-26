@@ -39,13 +39,20 @@ def test_status_derives_once_validates_the_manifest_once_and_starts_no_process(
     counts: collections.Counter = collections.Counter()
     derive, schema_valid, validator = pilot_state._derive_state, pilot_state._artifact_schema_valid, pilot_state._artifact_validator
 
+    inside: list[bool] = []
+
     def counted_schema_valid(schema_text: str, serialized: str) -> bool:
         counts.update(["manifest"] if schema_text == manifest_schema else [])
-        return schema_valid(schema_text, serialized)
+        inside.append(True)
+        try:
+            return schema_valid(schema_text, serialized)
+        finally:
+            inside.pop()
 
     def counted_validator(schema_text: str):
-        # the path of a document over 64 KB (the Petclinic manifest) — no lru cache behind it
-        counts.update(["manifest"] if schema_text == manifest_schema else [])
+        # the path of a document over 64 KB (the Petclinic manifest) — no lru cache behind it; a miss of the lru cache
+        # of _artifact_schema_valid also calls it, and that is the same check
+        counts.update(["manifest"] if schema_text == manifest_schema and not inside else [])
         return validator(schema_text)
 
     def no_process(*args, **kwargs):

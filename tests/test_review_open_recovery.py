@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests.journal_helpers import assert_refused_in_order
-from tests.test_review_requested import _generated_run, _journal
+from tests.test_review_requested import build_generated_run, _generated_run, _journal
 from tests.test_review_two_commands import _cycle, _open, _select_verdict, _shape, _verdict
 
 
@@ -66,7 +66,7 @@ def _crash_points(monkeypatch, point: str) -> None:
 @pytest.mark.parametrize("point", ["canary-files-written", "canary-receipt-written", "canary-published", "boundary-published", "boundary-read-back",
                                    "ledger", "model-request"])
 def test_prepare_cut_short_is_finished_by_the_same_call(tmp_path: Path, monkeypatch, point: str) -> None:
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     with monkeypatch.context() as broken:
         _crash_points(broken, point)
         code, first = _open(run)
@@ -74,7 +74,7 @@ def test_prepare_cut_short_is_finished_by_the_same_call(tmp_path: Path, monkeypa
     code, again = _open(run)
     assert code == 0 and again["result"]["answer_slot"], f"{point}: {again}"
     # nothing twice: the shape of the journal is the one of an opening that was never cut
-    other = _generated_run(tmp_path / "plain")
+    other = build_generated_run(tmp_path / "plain")
     assert _open(other)[0] == 0
     assert _shape(run["run_root"]) == _shape(other["run_root"]), point
     code, selected = _select_verdict(run, _verdict(run))

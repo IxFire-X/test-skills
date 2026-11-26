@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _generated_run, _journal, _put, _review_answer
+from tests.test_review_requested import build_generated_run, _generated_run, _journal, _put, _review_answer
 from tests.journal_helpers import assert_refused_once
 
 STAGE = "tc-reviewer:canonical"
@@ -132,14 +132,14 @@ def test_prepare_without_the_fresh_context_statement_is_refused_before_it_writes
 
 
 def test_a_run_that_admitted_self_review_opens_with_fresh_context_no(tmp_path: Path) -> None:
-    run = _generated_run(tmp_path, self_review=True)
+    run = build_generated_run(tmp_path, self_review=True)
     code, opened = _open(run, fresh="no")
     assert code == 0, opened
     assert _boundary(run)["host_isolation"]["fresh_context"] is False
     code, selected = _select_verdict(run, _verdict(run))
     assert code == 0 and selected["result"]["status"] == "EFFECTIVE_SELECTED", selected
     # the host that does say yes keeps its word
-    other = _generated_run(tmp_path / "other", self_review=True)
+    other = build_generated_run(tmp_path / "other", self_review=True)
     assert _open(other, fresh="yes")[0] == 0
     assert _boundary(other)["host_isolation"]["fresh_context"] is True
     assert _boundary(other)["host_isolation"]["evidence_digest"] != _boundary(run)["host_isolation"]["evidence_digest"]  # the statement is part of the evidence
@@ -278,7 +278,7 @@ def test_prepare_publishes_the_candidate_of_an_answer_with_a_mixed_order(tmp_pat
         return fragment
 
     monkeypatch.setattr(test_batch_assembly, "_fragment", mixed)
-    run = _generated_run(tmp_path)
+    run = build_generated_run(tmp_path)
     code, opened = _open(run)
     assert code == 0 and opened["status"] == "ok", opened
     assert _shape(run["run_root"])[-1][0] == "MODEL_REQUESTED"
