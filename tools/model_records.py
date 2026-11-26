@@ -194,7 +194,7 @@ def openspec_snapshots(project: Path, root: Path, state: Mapping[str, Any], atte
 def _named_docs(project: Path, root: Path) -> list[str]:
     """The files ``--docs`` named, as the project's own paths (from the root, forward slashes) however they were typed."""
     from tools.doc_sections import resolve_spec
-    from tools.run_pipeline import relative_to_project
+    from tools.run_scan import relative_to_project
 
     return [relative_to_project(project.resolve(), resolve_spec(project, doc)[0]) for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []]
 

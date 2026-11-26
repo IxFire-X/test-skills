@@ -207,7 +207,7 @@ def large_document(project: Path, documents: Mapping[str, str], named: Mapping[s
             f"оценка вида ревью {total * REVIEW_PER_NUMBER} Б при {total} номерах: такой объём ревью на прошлых прогонах проверялся слабее (190 КБ — контрольные ошибки 3 из 3, 325 КБ — 1 из 3)")
     if len(runs) < 2:
         return bool(over), head, OPENSPEC_ADVICE if openspec else None
-    from tools.run_pipeline import printed_or
+    from tools.run_scan import printed_or
 
     def argument(path: str, title: str | None) -> str:  # a heading the shell would read otherwise (a quote…) is not printed: the advice says so
         return "--docs " + printed_or(f"{path}#{title}" if title else path, f'"{path}#…" (заголовок «{title}» с символом, который оболочка читает иначе: набери аргумент сам)')

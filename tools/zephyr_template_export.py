@@ -215,7 +215,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
         return {"status": "skipped", "reason": "NO_TEMPLATE"}
     template = read_template(project, relative)
     from tools.canonical_document import document_sha256
-    from tools.run_pipeline import _read_run_coordinate
+    from tools.run_pipeline import read_run_coordinate as _read_run_coordinate
 
     root, _run, state = _read_run_coordinate(project, run_id)
     try:  # the cases are a file of the bundle this run published: <run>/published, judged by its text and place before it is opened

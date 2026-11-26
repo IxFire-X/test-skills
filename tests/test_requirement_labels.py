@@ -58,9 +58,9 @@ def test_far_fewer_requirements_than_labels_of_a_plain_document_are_refused(tmp_
 
 
 def test_the_same_refusal_stands_at_the_requirements_step_of_a_marker_in_parts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import run_pipeline
+    from tools import run_scan
 
-    monkeypatch.setattr(run_pipeline, "_SCAN_CONTEXT_BYTE_BUDGET", 4000)
+    monkeypatch.setattr(run_scan, "_SCAN_CONTEXT_BYTE_BUDGET", 4000)
     project = _project(tmp_path, LETTERS, big=True)
     scan = _scan(project, monkeypatch, [DOC])
     code, out = _marker(project, scan, 3, capsys, "context-marker:requirements")
@@ -163,9 +163,9 @@ def test_a_requirement_per_number_gives_neither_a_warning_nor_a_key_in_the_repor
 
 
 def test_the_warning_is_in_the_submit_of_the_requirements_step_of_a_marker_in_parts_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import run_pipeline
+    from tools import run_scan
 
-    monkeypatch.setattr(run_pipeline, "_SCAN_CONTEXT_BYTE_BUDGET", 4000)
+    monkeypatch.setattr(run_scan, "_SCAN_CONTEXT_BYTE_BUDGET", 4000)
     project = _project(tmp_path, NUMBERED, big=True)
     scan = _scan(project, monkeypatch, [DOC])
     code, out = _marker(project, scan, 9, capsys, "context-marker:requirements")

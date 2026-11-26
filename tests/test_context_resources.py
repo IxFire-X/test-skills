@@ -12,7 +12,7 @@ from tests.test_context_batches import _requirements, three  # noqa: F401 — th
 from tests.test_first_run import _write
 from tools.project_inventory import build_inventory, select_context_batches
 from tools.ready import check_context
-from tools.run_pipeline import context_preview
+from tools.run_scan import context_preview
 
 VIEW = 'def show():\n    return render("owners/detail")\n'
 DETAIL, LIST_ = "templates/owners/detail.html", "templates/owners/list.html"

@@ -313,7 +313,7 @@ def reviewer_session_start(
     reviewer invocation are the host's statement; the generator invocation is the one of the first batch's
     ``MODEL_REQUESTED``; the code computes ``distinct_invocations``, the evidence digest and the budget."""
     from tools.pilot_state import derive_state, read_model_request, require_fresh_context_statement
-    from tools.run_pipeline import _scan_context_budget
+    from tools.run_scan import scan_context_budget as _scan_context_budget
 
     require_fresh_context_statement(Path(run_root), fresh_context)
     package = reviewer_package_binding(

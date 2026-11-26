@@ -62,7 +62,7 @@ def test_status_of_a_left_run_names_the_scan_finish_printed_and_says_the_attempt
 
 def test_a_planted_mark_without_events_leaves_nothing_and_the_same_command_binds_it(tmp_path: Path, capsys, monkeypatch) -> None:
     from tools.pilot_state import LEFT_MARK, left_attempt
-    from tools.run_pipeline import _left_mark
+    from tools.run_scan import _left_mark
 
     project, first, root = _left_run(tmp_path, monkeypatch)
     (root / LEFT_MARK).write_bytes(_left_bytes(first["attempt_id"]))

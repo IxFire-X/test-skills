@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_task_docs_context import _context_paths, _write
-from tools import api, run_pipeline
+from tools import api, run_pipeline, run_scan
 from tools.build_context import build_context
 from tools.pilot_state import read_run
 
@@ -194,7 +194,7 @@ def test_a_path_that_is_not_there_is_named_missing_with_the_nearest_names(tmp_pa
 
 def test_a_link_given_as_a_file_keeps_the_fix_about_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project(tmp_path)
-    monkeypatch.setattr(run_pipeline, "_is_reparse", lambda path: path.name == "spec.md")
+    monkeypatch.setattr(run_scan, "_is_reparse", lambda path: path.name == "spec.md")
     stop = _scan(project, monkeypatch, [BASE], expect=2)
     assert stop["reason"] == "SNAPSHOT_DOCS" and "reparse point" in stop["detail"] and "junction" in stop["fix"]
 
@@ -300,7 +300,7 @@ def test_the_named_files_count_in_the_total_beside_a_folder(tmp_path: Path, monk
 
 def test_the_root_of_the_project_as_a_folder_is_refused_without_a_walk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project(tmp_path)
-    monkeypatch.setattr(run_pipeline.os, "walk", lambda *_args, **_kw: pytest.fail("the project is walked"))
+    monkeypatch.setattr(run_scan.os, "walk", lambda *_args, **_kw: pytest.fail("the project is walked"))
     stop = _scan(project, monkeypatch, ["."], expect=2)
     assert stop["reason"] == "SNAPSHOT_DOCS"
 

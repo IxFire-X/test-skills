@@ -59,7 +59,7 @@ from tools.effective_canonical import (  # the names of the effective canonical 
 def _named_sections(project: Path, root: Path) -> dict[str, list[str]]:
     """path → the headings ``--docs`` names of the file (none: the whole file), the paths as ``_named_docs`` gives them."""
     from tools.doc_sections import resolve_spec
-    from tools.run_pipeline import relative_to_project
+    from tools.run_scan import relative_to_project
 
     named: dict[str, list[str]] = {}
     for doc in (read_run(root)["manifest"].get("scan_request") or {}).get("docs") or []:
@@ -442,7 +442,7 @@ _STAGE_EXAMPLES = "context-marker:baseline, tc-generator:BATCH-<id>, tc-reviewer
 def _new_run_fix(root: Path) -> str:
     """The scan of this run's request with --new-run, as other refusals of a closed attempt give it."""
     try:
-        from tools.run_pipeline import _scan_command
+        from tools.run_scan import scan_command as _scan_command
 
         request = read_run(root)["manifest"].get("scan_request")
         if isinstance(request, Mapping):
@@ -1144,7 +1144,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     from tools.batch_assembly import plan_batches_for_project
     from tools.cases_import import cases_path, run_skeleton
     from tools.doc_sections import resolve_spec
-    from tools.run_pipeline import relative_to_project
+    from tools.run_scan import relative_to_project
     from tools.scope_pause import check_plan
     from tools.step_size import require_generator_context_all
 

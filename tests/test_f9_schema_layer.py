@@ -122,7 +122,7 @@ def _limits_project(folder, limits: str):
 
 @pytest.mark.parametrize("whole,as_float", [("2000", "2000.0"), ("2000", "2e3"), ("262144", "262144.0"), ("128000", "128000.0"), ("1024", "1.024e3")])
 def test_a_limit_written_as_a_whole_float_behaves_as_the_same_integer(tmp_path, whole: str, as_float: str) -> None:
-    from tools import run_pipeline, step_size
+    from tools import run_scan, step_size
 
     first, second = tmp_path / "int", tmp_path / "float"
     first.mkdir()
@@ -130,7 +130,7 @@ def test_a_limit_written_as_a_whole_float_behaves_as_the_same_integer(tmp_path, 
     template = '{"step_window_bytes":%s,"step_input_bytes":%s,"context_batch_bytes":%s,"step_output_warn_bytes":%s}'
     _limits_project(first, template % ((whole,) * 4))
     _limits_project(second, template % ((as_float,) * 4))
-    read = lambda project: (step_size.step_window(project), step_size.step_budget(project), run_pipeline._scan_context_budget({}, project),  # noqa: E731
+    read = lambda project: (step_size.step_window(project), step_size.step_budget(project), run_scan._scan_context_budget({}, project),  # noqa: E731
                             step_size.output_warning(project, 10**9))
     assert read(first) == read(second)
     assert step_size.step_window(second) == int(whole)
@@ -164,10 +164,10 @@ def test_whole_limit_is_nothing_for_what_is_not_a_whole_number(value) -> None:
 
 @pytest.mark.parametrize("limits", ['{"step_input_bytes":1.5}', '{"step_input_bytes":true}', '{"step_window_bytes":"2000"}', '{"context_batch_bytes":2000.25}'])
 def test_a_limit_that_is_not_a_whole_number_is_refused_by_the_skillsrc_not_replaced_by_the_default(tmp_path, limits: str) -> None:
-    from tools import run_pipeline, step_size
+    from tools import run_scan, step_size
     from tools.skillsrc_manifest import SkillsrcError
 
     project = _limits_project(tmp_path, limits)
     with pytest.raises(SkillsrcError) as caught:
-        step_size.step_window(project), step_size.step_budget(project), run_pipeline._scan_context_budget({}, project)
+        step_size.step_window(project), step_size.step_budget(project), run_scan._scan_context_budget({}, project)
     assert "schema validation" in str(caught.value)  # the key and the fix in this text are F5's (8.10), not this package's

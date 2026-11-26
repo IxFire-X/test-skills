@@ -147,7 +147,7 @@ def test_o12b_the_mark_hides_only_its_own_attempt(tmp_path: Path, monkeypatch: p
     from tests.test_first_run import _python_project
     from tests.test_scan_guard import _scan
     from tools.pilot_state import LEFT_MARK, left_attempt
-    from tools.run_pipeline import _left_mark
+    from tools.run_scan import _left_mark
 
     project = _python_project(tmp_path, runtime=False)
     code, first = _scan(project, monkeypatch)

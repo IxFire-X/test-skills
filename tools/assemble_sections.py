@@ -79,7 +79,7 @@ def _facts(project: Path, run_id: str) -> dict[str, Any]:
     """What one run says by its journal: its ``--docs``, the CSV of its accepted set — read where the publication was and compared with what its receipt stands for — or why it has none."""
     from tools import pilot_state as pilot
     from tools.orchestrate_test_case_revision import published_csv
-    from tools.run_pipeline import _read_run_coordinate
+    from tools.run_pipeline import read_run_coordinate as _read_run_coordinate
 
     try:
         root, _run, state = _read_run_coordinate(project, run_id)
@@ -142,7 +142,7 @@ def _leaves(project: Path, doc: str) -> tuple[str, list[tuple[str | None, int, i
 def _covers(project: Path, fact: Mapping[str, Any], rel: str, text: str, first: int, last: int) -> bool:
     """Whether a run's ``--docs`` named the file whole or a section that holds the lines *first*–*last*."""
     from tools.doc_sections import SectionMissing, find_section, resolve_spec
-    from tools.run_pipeline import relative_to_project
+    from tools.run_scan import relative_to_project
 
     for doc in fact["docs"]:
         try:
@@ -191,7 +191,7 @@ def where(project: Path, doc: str) -> dict[str, Any]:
 def assemble(project: Path, run_ids: list[str], *, doc: str | None = None) -> dict[str, Any]:
     """The one CSV of the runs (the runs of a document's sections when *run_ids* is empty), written below the last run, and its summary."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
-    from tools.run_pipeline import _read_run_coordinate
+    from tools.run_pipeline import read_run_coordinate as _read_run_coordinate
 
     project = project.resolve()
     where_found = where(project, doc) if doc else None

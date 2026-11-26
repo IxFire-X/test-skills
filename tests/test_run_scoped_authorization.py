@@ -89,6 +89,7 @@ def test_doctor_marks_company_runner_non_core_and_no_language_broadly_verified()
 def test_local_core_closure_has_no_company_runner_import_dependency() -> None:
     for relative in (
         "tools/run_pipeline.py",
+        "tools/run_scan.py",
         "tools/build_trace_document.py",
         "tools/orchestrate_test_case_revision.py",
     ):

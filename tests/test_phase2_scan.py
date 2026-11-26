@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from tools import run_pipeline
+from tools import run_pipeline, run_scan
 from tools.init_skillsrc import _payload
 from tools import exec_commands
 
@@ -117,7 +117,7 @@ def test_scan_target_narrows_only_context_and_never_executes(tmp_path: Path, mon
 def test_scan_rejects_an_oversized_context_file_without_silent_truncation(tmp_path: Path, monkeypatch) -> None:
     project, module = _project(tmp_path)
     source = module / "src"
-    (source / "large.py").write_bytes(b"x" * (run_pipeline._SCAN_CONTEXT_BYTE_BUDGET + 1))
+    (source / "large.py").write_bytes(b"x" * (run_scan._SCAN_CONTEXT_BYTE_BUDGET + 1))
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
 

@@ -9,7 +9,7 @@ import pytest
 
 def test_a_unc_path_in_the_journal_is_not_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import output_guard  # noqa: F401  (its import resolves a path: before the patch)
-    from tools.run_pipeline import relative_to_project
+    from tools.run_scan import relative_to_project
 
     def touched(*_args: object) -> Path:
         raise AssertionError("resolve() reached for a share")

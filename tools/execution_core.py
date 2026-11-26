@@ -49,11 +49,11 @@ from tools.run_facts import (
 )
 from tools.run_pipeline import (
     automation_split_fields,
-    baseline_check,
     drift_report,
     print_payload,
     read_run_coordinate,
 )
+from tools.run_scan import baseline_check
 
 # closure — the closing of the attempt
 from tools.finalize_attempt import accepted_unprepared

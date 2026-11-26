@@ -242,10 +242,10 @@ def test_a_rejection_is_completed_the_same_way_and_has_no_effective_set(tmp_path
 def test_evidence_beyond_the_budget_is_refused_as_context_limit_and_the_abort_closes_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_cut_review import _evidence_verdict
     from tests.test_review_two_commands import _cycle, _open, _select_verdict
-    from tools import run_pipeline
+    from tools import run_scan
 
     run = _generated_run(tmp_path)
-    monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project: 0)  # the budget is exactly the package: no room for evidence
+    monkeypatch.setattr(run_scan, "_scan_context_budget", lambda _inventory, project: 0)  # the budget is exactly the package: no room for evidence
     assert _open(run)[0] == 0
     code, refused = _select_verdict(run, _evidence_verdict(run, "src/extra.py"))
     assert code == 2 and refused["code"] == "REVIEW_CONTEXT_LIMIT", refused
@@ -257,10 +257,10 @@ def test_evidence_beyond_the_budget_is_refused_as_context_limit_and_the_abort_cl
 
 def test_a_budget_below_the_package_is_refused_at_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_review_two_commands import _open
-    from tools import run_pipeline
+    from tools import run_scan
 
     run = _generated_run(tmp_path)
-    monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project: -1)
+    monkeypatch.setattr(run_scan, "_scan_context_budget", lambda _inventory, project: -1)
     before = _journal(run["run_root"])
     code, refused = _open(run)
     assert code == 2 and refused["code"] == "REVIEW_CONTEXT_LIMIT" and "smaller than the review package" in refused["message"] and refused["fix"], refused
@@ -269,13 +269,13 @@ def test_a_budget_below_the_package_is_refused_at_prepare(tmp_path: Path, monkey
 
 def test_the_reserve_of_the_budget_is_the_projects_context_batch_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_review_two_commands import _ledger, _open
-    from tools import run_pipeline
+    from tools import run_scan
 
     budgets = []
     for index, reserve in enumerate((4096, 8192)):
         run = _generated_run(tmp_path / str(index))
         asked = []
-        monkeypatch.setattr(run_pipeline, "_scan_context_budget", lambda _inventory, project, asked=asked, reserve=reserve: asked.append(project) or reserve)
+        monkeypatch.setattr(run_scan, "_scan_context_budget", lambda _inventory, project, asked=asked, reserve=reserve: asked.append(project) or reserve)
         assert _open(run)[0] == 0
         assert asked == [run["project"].resolve()], asked  # .skillsrc limits.context_batch_bytes of this project
         budgets.append(_ledger(run)["context_budget_bytes"])

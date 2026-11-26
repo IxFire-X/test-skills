@@ -366,7 +366,7 @@ def check_openspec_base(project: Path, docs: Sequence[str], paths: Sequence[str]
     from tools.build_context import RequirementConflict, openspec_applied, openspec_change_only, openspec_selected_changes, openspec_unmarked_areas, openspec_unnamed_baseline
     from tools.openspec_scope import DISPUTED, NEIGHBOURS, PARTIAL, SCOPE
     from tools.output_guard import OutputRefused, project_file
-    from tools.run_pipeline import UNMARKED_BASELINE, expand_docs
+    from tools.run_scan import UNMARKED_BASELINE, expand_docs
     from tools.scan_rules import include_mode
 
     root = Path(project).resolve()
@@ -457,7 +457,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     """What will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
     from tools.cases_scope import ScopeSourceError
     from tools.project_inventory import ContextStop, skipped_summary
-    from tools.run_pipeline import HostStop, context_preview, scope_fix
+    from tools.run_scan import HostStop, context_preview, scope_fix
 
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()
@@ -495,7 +495,7 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
     """A document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
     from tools.project_inventory import outside_task_documents
-    from tools.run_pipeline import _exclusion_note, task_doc_fix
+    from tools.run_scan import exclusion_note as _exclusion_note, task_doc_fix
 
     root = Path(project).resolve()
     paths = {str(item["project_path"]) for item in inventory["files"]}
@@ -520,7 +520,7 @@ def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequen
 
 def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     """Whether the module can be built and tested by the package: ``{"ready", "reason", "fix"}`` (only reads)."""
-    from tools.run_pipeline import printed_or
+    from tools.run_scan import printed_or
 
     root = Path(project).resolve()
     module_root = root / str(module.get("root") or ".")
@@ -724,7 +724,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                 rows.extend(style_rows(project, selected))
                 rows.extend(java_level_rows(project, selected))
                 # the baseline refusals the scan would meet, the same code; cases are not blocked by them.
-                from tools.run_pipeline import _baseline_blockers
+                from tools.run_scan import scan_baseline_blockers as _baseline_blockers
 
                 for blocker in _baseline_blockers(project, selected):
                     rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "WARN",

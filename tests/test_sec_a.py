@@ -111,14 +111,14 @@ def test_an_api_json_input_without_a_run_is_read_only_inside_a_run(tmp_path: Pat
 
 @pytest.mark.parametrize("token", ["docs/ТЗ.md#Раздел 3 — Требования", "#Шаг 1 – вход", "#Модуль «Оплата»", "ТЗ №5.md", "#Что нового?"])
 def test_russian_typography_of_a_heading_prints_in_double_quotes(token: str) -> None:
-    from tools.run_pipeline import command_token
+    from tools.run_scan import command_token
 
     assert command_token(token) == f'"{token}"'
 
 
 @pytest.mark.parametrize("token", ["#Модуль “Оплата”", "#Важно!"])
 def test_a_typographic_quote_or_an_exclamation_mark_is_not_printed(token: str) -> None:
-    from tools.run_pipeline import command_token
+    from tools.run_scan import command_token
 
     with pytest.raises(HostStop) as refused:
         command_token(token)

@@ -520,7 +520,7 @@ def test_an_unreadable_decision_file_after_the_plan_does_not_hide_the_plans_scop
 
 
 def test_status_names_a_decision_file_that_differs_from_the_plan(tmp_path: Path) -> None:
-    from tools.run_pipeline import _scope_mismatch
+    from tools.run_scan import _scope_mismatch
 
     root, attempt_id, _plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
     assert _scope_mismatch(root, attempt_id) is None

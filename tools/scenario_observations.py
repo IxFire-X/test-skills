@@ -67,7 +67,7 @@ def _owned_project_paths(root: Path, attempt: Mapping[str, Any]) -> set[str]:
 
 def _project_tree_states(project: Path, root: Path, attempt: Mapping[str, Any], inventory: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """``(before, after)`` — the frozen inventory of the attempt, and the inventory rebuilt now, both without the files the pipeline
-    owns.  The same rebuild as ``run_pipeline._baseline_check`` (the same arguments), so what ``status`` calls a drift is what is compared."""
+    owns.  The same rebuild as ``run_scan._baseline_check`` (the same arguments), so what ``status`` calls a drift is what is compared."""
     from tools.project_inventory import baseline_external_input_paths, build_inventory
 
     owned = _owned_project_paths(root, attempt)

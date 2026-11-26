@@ -95,7 +95,7 @@ def test_the_table_of_identifiers_and_exceptions_has_no_dead_row() -> None:
 
 
 def test_command_token_is_the_white_list_the_schema_of_a_module_id_says() -> None:
-    from tools.run_pipeline import command_token
+    from tools.run_scan import command_token
 
     schema = json.loads((ROOT / "schemas" / "skillsrc.schema.json").read_text(encoding="utf-8"))
     pattern = re.compile(schema["$defs"]["module"]["properties"]["id"]["pattern"])
@@ -160,7 +160,7 @@ def test_a_reuse_source_whose_artifact_no_shell_takes_is_not_offered(tmp_path: P
 
 def test_the_venv_fix_of_ready_prints_the_directory_quoted_or_as_a_template(tmp_path: Path) -> None:
     from tools import ready
-    from tools.run_pipeline import command_token
+    from tools.run_scan import command_token
 
     module = {"id": "m", "root": ".", "stack": {"language": "python", "build_tool": "pip"},
               "test": {"adapter_id": "pytest:selected-symbols-v1", "interpreter": ".venv/bin/python", "build_profile": "default", "adapter_parameters": {}}}

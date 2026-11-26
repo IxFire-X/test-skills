@@ -1,5 +1,5 @@
 """The facts of a run: what its journal and receipts say, read only — the one computation that status, finish, the report and the
-execution commands show (v0.8, C1).  Nothing here prints, runs a step or names the next command: that is ``run_pipeline``
+execution commands show (v0.8, C1).  Nothing here prints, runs a step or names the next command: that is ``run_scan``
 (``_durable_status``) and ``tools.stages``."""
 
 from __future__ import annotations

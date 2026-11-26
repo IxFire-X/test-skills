@@ -57,7 +57,7 @@ def test_next_run_of_an_import_keeps_the_csv_and_makes_an_import_run(tmp_path: P
 
 def test_a_request_without_cases_keeps_its_old_key(tmp_path: Path) -> None:
     """Journals written before FaT-CK have no `cases`: their key is the one of a request without --cases."""
-    from tools.run_pipeline import _request_key
+    from tools.run_scan import _request_key
 
     old = {"module": "m", "docs": ["d.md"], "target": None, "profile": "cases-only-v1", "accept_self_review": False,
            "disposition_policy": None}

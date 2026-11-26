@@ -279,11 +279,11 @@ def _project_with_limits(folder: Path, limits: str) -> Path:
 
 
 def test_control_skillsrc_integer_limits_are_read() -> None:
-    from tools import run_pipeline, step_size
+    from tools import run_scan, step_size
 
     with tempfile.TemporaryDirectory() as folder:
         project = _project_with_limits(Path(folder), '{"step_window_bytes":0,"step_input_bytes":2000,"context_batch_bytes":3000}')
-        assert (step_size.step_window(project), step_size.step_budget(project), run_pipeline._scan_context_budget({}, project)) == (0, 2000, 3000)
+        assert (step_size.step_window(project), step_size.step_budget(project), run_scan._scan_context_budget({}, project)) == (0, 2000, 3000)
 
 
 @pytest.mark.parametrize("limits,reader,expected", [
@@ -307,13 +307,13 @@ def test_skillsrc_limit_written_as_a_float_is_honoured_or_refused_never_silently
 
 
 def test_skillsrc_context_batch_bytes_written_as_a_float_is_honoured_or_refused() -> None:
-    from tools import run_pipeline
+    from tools import run_scan
     from tools.skillsrc_manifest import SkillsrcError
 
     with tempfile.TemporaryDirectory() as folder:
         project = _project_with_limits(Path(folder), '{"context_batch_bytes":4096.0}')
         try:
-            got = run_pipeline._scan_context_budget({}, project)
+            got = run_scan._scan_context_budget({}, project)
         except SkillsrcError:
             return
         assert got == 4096, got

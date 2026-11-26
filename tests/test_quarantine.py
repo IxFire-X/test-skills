@@ -428,7 +428,7 @@ def _skillsrc(policy: str) -> dict:
 def test_scan_reads_skillsrc_once_and_the_flag_wins(tmp_path: Path, skillsrc: str | None, flag: str | None, expected: str | None) -> None:
     from types import SimpleNamespace
 
-    from tools.run_pipeline import _scan_disposition_policy
+    from tools.run_scan import _scan_disposition_policy
 
     if skillsrc is not None:  # FaT-B: a valid .skillsrc (load_skillsrc checks the schema), here in JSON
         (tmp_path / ".skillsrc").write_text(json.dumps(_skillsrc(skillsrc)), encoding="utf-8")
@@ -438,7 +438,7 @@ def test_scan_reads_skillsrc_once_and_the_flag_wins(tmp_path: Path, skillsrc: st
 def test_scan_does_not_read_the_policy_from_an_older_yaml_skillsrc(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from tools.run_pipeline import _scan_disposition_policy
+    from tools.run_scan import _scan_disposition_policy
 
     (tmp_path / ".skillsrc").write_text('schema_version: "5.0.0"\ndisposition_policy: cleanup\n', encoding="utf-8")
     assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) is None

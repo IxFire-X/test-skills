@@ -85,7 +85,7 @@ def _project_with_sections(tmp_path: Path) -> Path:
 
 def test_the_entry_of_a_section_holds_only_the_section_and_binds_it(tmp_path: Path) -> None:
     from tools.build_context import build_context
-    from tools.run_pipeline import _docs_entries, _docs_projection
+    from tools.run_scan import _docs_entries, _docs_projection
 
     project = _project_with_sections(tmp_path)
     whole, = _docs_entries(project, [DOCS])

@@ -84,7 +84,7 @@
     {"path": "report.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},
     {"path": "report.json", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},
     {"path": "questions-for-analyst.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_report:write_report"},
-    {"path": "doc-sections/<name>.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_pipeline:_write_section_views", "note": "the view of one `path#Section` of a document"},
+    {"path": "doc-sections/<name>.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_scan:_write_section_views", "note": "the view of one `path#Section` of a document"},
     {"path": "review-views/<sha>.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.review_view:main"},
     {"path": "review-views/<sha>.existing-tests.md", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.existing_tests:SUFFIX"},
     {"path": "<output-dir>/<bundle>.zephyr-import.csv", "event": "none", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.zephyr_template_export:export_import_csv"},

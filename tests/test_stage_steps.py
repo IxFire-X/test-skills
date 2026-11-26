@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_marker_parts import _marker, _requirements, _run
-from tools import api, pilot_state, run_pipeline, stage_steps
+from tools import api, pilot_state, run_pipeline, run_scan, stage_steps
 
 
 def _call(capsys: pytest.CaptureFixture[str], command: str, root: Path, stage: str, *extra: str) -> tuple[int, dict]:
@@ -192,7 +192,7 @@ def test_status_next_command_for_prepare_and_submit_names_the_api_module(tmp_pat
 def test_status_next_command_for_finish_and_report_names_run_pipeline_with_project_and_run() -> None:
     project, root = Path("/p"), Path("/p/.pilot-runs/r1")
     for verb in ("finish", "report"):
-        assert run_pipeline._next_command(project, root, {"verb": verb, "stage": None}) == f'"{sys.executable}" -m tools.run_pipeline {verb} --project "{project}" --run "r1"'
+        assert run_scan._next_command(project, root, {"verb": verb, "stage": None}) == f'"{sys.executable}" -m tools.run_pipeline {verb} --project "{project}" --run "r1"'
 
 
 def test_status_has_no_next_command_when_the_step_could_not_be_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,7 +207,7 @@ def test_status_has_no_next_command_when_the_step_could_not_be_named(tmp_path: P
 
 
 def test_status_has_no_next_command_while_the_next_step_is_the_humans() -> None:
-    assert run_pipeline._next_command(Path("/p"), Path("/p/.pilot-runs/r1"), {"verb": None, "stage": None}) is None
+    assert run_scan._next_command(Path("/p"), Path("/p/.pilot-runs/r1"), {"verb": None, "stage": None}) is None
 
 
 def test_a_stage_the_table_does_not_know_is_refused_with_the_way(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

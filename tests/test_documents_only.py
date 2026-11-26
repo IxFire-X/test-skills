@@ -130,6 +130,6 @@ def test_the_orchestrate_skill_describes_the_documents_mode_as_the_code_does() -
     # PT: the refusal of local-pilot-v1 is mode B — its text is in the development build's reference, not in the delivered SKILL
     assert "`NO_BUILD_MODULE`" in (root / "skills" / "orchestrate" / "references" / "mode-b.md").read_text(encoding="utf-8")
     discover = (root / "tools" / "discover_project.py").read_text(encoding="utf-8")
-    pipeline = (root / "tools" / "run_pipeline.py").read_text(encoding="utf-8")
+    pipeline = (root / "tools" / "run_scan.py").read_text(encoding="utf-8")
     assert '"id": "root", "root": ".", "stack": {"language": "documents"}' in discover
     assert 'HostStop("NO_BUILD_MODULE"' in pipeline

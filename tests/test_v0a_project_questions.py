@@ -87,7 +87,7 @@ def test_the_stop_of_ready_prints_the_format_of_the_answers_and_the_command(tmp_
 
 
 def test_the_scan_does_not_call_an_answered_framework_a_default(tmp_path: Path) -> None:
-    from tools.run_pipeline import _skillsrc_defaults
+    from tools.run_scan import _skillsrc_defaults
 
     folder = _module(tmp_path, "")
     (folder / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "1"\n', encoding="utf-8")

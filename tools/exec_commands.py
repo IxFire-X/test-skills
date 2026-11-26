@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.json_cli import one_closure as _one_closure
-from tools.run_pipeline import HostStop, command_token
+from tools.run_scan import HostStop, command_token
 from tools.execution_core import (
     automation_split_fields as _automation_split,
     baseline_check as _baseline_check,

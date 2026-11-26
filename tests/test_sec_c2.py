@@ -98,7 +98,7 @@ PATH_FIELDS = {
     "generated_delta.py": {"project_path"}, "model_inputs.py": {"project_path"}, "model_records.py": {"project_path"},
     "orchestrate_test_case_revision.py": {"project_path"},
     "project_inventory.py": {"project_path"}, "ready.py": {"project_path"}, "run_pipeline.py": {"project_path"},
-    "run_report.py": {"template_path"}, "run_store.py": {"project_path"}, "scan_rules.py": {"project_path"}, "scenario_observations.py": {"project_path"},
+    "run_report.py": {"template_path"}, "run_scan.py": {"project_path"}, "run_store.py": {"project_path"}, "scan_rules.py": {"project_path"}, "scenario_observations.py": {"project_path"},
     "step_size.py": {"project_path"},
 }
 _FIELD_NAMES = {"template_path", "project_path"}

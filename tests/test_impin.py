@@ -52,7 +52,7 @@ def test_the_requirements_step_of_an_import_with_documents_still_reads_the_csv(t
 
 def test_ready_leaves_the_csv_of_cases_out_of_the_context_as_scan_does(tmp_path: Path) -> None:
     from tools.project_inventory import build_inventory
-    from tools.run_pipeline import context_preview
+    from tools.run_scan import context_preview
 
     project = _project(tmp_path)
     inventory = build_inventory(project, project)

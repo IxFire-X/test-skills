@@ -138,12 +138,12 @@ def test_prepare_of_the_automation_prints_the_java_level_and_the_junit_params(tm
 def _scan_after(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change) -> dict:
     """``scan`` of a module with one source file that ``change`` takes away between the inventory and the filter of the context."""
     from tests.test_phase2_scan import _args, _project
-    from tools import run_pipeline
+    from tools import run_pipeline, run_scan
 
     project, module = _project(tmp_path)
     (module / "src" / "unit.py").write_text("VALUE = 1\n", encoding="utf-8")
-    original = run_pipeline.context_filter
-    monkeypatch.setattr(run_pipeline, "context_filter", lambda *args, **kwargs: (change(module / "src" / "unit.py"), original(*args, **kwargs))[1])
+    original = run_scan.context_filter
+    monkeypatch.setattr(run_scan, "context_filter", lambda *args, **kwargs: (change(module / "src" / "unit.py"), original(*args, **kwargs))[1])
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
     assert run_pipeline.cmd_scan(_args(project, "src/unit.py")) == 2

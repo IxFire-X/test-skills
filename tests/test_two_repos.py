@@ -125,7 +125,7 @@ def test_a_change_of_the_neighbour_after_the_scan_is_baseline_drift_named_by_pat
 
 
 def test_without_a_stand_address_a_local_pilot_request_is_lowered_to_cases(tmp_path: Path) -> None:
-    from tools.run_pipeline import _execution_skipped
+    from tools.run_scan import _execution_skipped
 
     root = _stand(tmp_path)
     _declare(root, ["app"])

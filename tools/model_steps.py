@@ -636,7 +636,7 @@ def _publish_model_stage_artifact(
     )
     reuse = request.get("reuse")
     if isinstance(reuse, Mapping) and not _is_source_answer(root, reuse, stage_instance_id, value, content_digest):  # a reused answer is not changed
-        from tools.run_pipeline import printed_or
+        from tools.run_scan import printed_or
 
         source = _model_stage_artifact_target(_run_root(Path(root).parent / str(reuse["run_id"]))[1], str(reuse["attempt_id"]), str(reuse["response_digest"]))
         raise ModelReuseMismatch(
