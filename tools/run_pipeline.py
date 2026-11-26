@@ -167,7 +167,7 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
             request = None
         cut = _scan_cut(Path(run_root), request if isinstance(request, Mapping) else None)
         left = _left_mark(Path(run_root)) is not None  # a left run goes nowhere; the plain scan of its request starts anew
-        if result.get("next_expected_artifact") == "generator fragments":
+        if result.get("after_marker"):
             scope = _scope_pause(Path(run_root), str(result["attempt_id"]))
         if cut is not None and not left:  # nothing goes on from half a context
             result["scan_incomplete"] = f"scan оборван: записано {cut}; повтори тот же scan (scan_command) — он достроит недостающее в этом прогоне"
@@ -192,7 +192,7 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         except (OSError, KeyError, TypeError, ValueError):  # a plan that cannot be made leaves the verb of the table
             pass
         bare = result["next"] is table
-    for gone in ("next_expected_artifact", "last_confirmed_stage"):  # the state says it
+    for gone in ("next_step", "after_marker", "last_confirmed_stage"):  # the state says it
         result.pop(gone, None)
     if not bare and (command := _next_command(project, Path(run_root), result["next"], result.get("abandon"))):
         result["next_command"] = command

@@ -11,6 +11,8 @@ from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
 from tools.fixes import human_for
+from tools.stages import (AUTOMATION, AUTOMATION_REVIEW, CLOSURE, DRIFT, GENERATOR, HUMAN_RUN, MARKER, MATERIALIZE, REVIEW, REVIEW_ANSWER, SCAN,
+                          answer_of)
 
 
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -223,7 +225,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         "attempt_state": attempt.get("state") if attempt else None,
         "event_count": len(state["events"]),
         "last_confirmed_stage": "run-created",
-        "next_expected_artifact": "module selection, inventory and profile baseline",
+        "next_step": SCAN,
         "stop_reason": None,
         "evidence_path": str(root / "run-manifest.json"),
         "policy_profile": run["manifest"]["policy_profile"],
@@ -248,9 +250,9 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     events = [row for row in state["events"] if row.get("attempt_id") == attempt_id]
     confirmed: list[tuple[int, dict[str, Any]]] = []
 
-    def record(digest: str, label: str, next_artifact: str | None, path: str, **facts: Any) -> None:
+    def record(digest: str, label: str, next_artifact: tuple[str, str | None], path: str, **facts: Any) -> None:
         sequence = max((row["seq"] for row in state["events"] if row.get("artifact_digest") == digest and row.get("attempt_id") in (None, attempt_id)), default=0)
-        confirmed.append((sequence, {"last_confirmed_stage": label, "next_expected_artifact": next_artifact, "evidence_path": str(root / path), **facts}))
+        confirmed.append((sequence, {"last_confirmed_stage": label, "next_step": next_artifact, "evidence_path": str(root / path), **facts}))
 
     def unreadable(path: str) -> None:
         result["evidence_errors"].append({"code": "EVIDENCE_UNVERIFIED", "path": str(root / path)})
@@ -271,7 +273,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             unreadable(marker_path)
     if attempt["state"] == "TERMINAL":
         terminal = pilot.read_terminal_result(root, attempt_id)
-        result.update(last_confirmed_stage="terminal", next_expected_artifact=None,
+        result.update(last_confirmed_stage="terminal", next_step=None,
                       evidence_path=str(root / "terminal-results" / f"{attempt_id}.json"),
                       stop_reason=terminal.get("reason_code"))
         result.update({key: terminal[key] for key in ("completion", "verification", "coverage", "accepted")})
@@ -282,7 +284,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         baseline = read_execution_baseline(Path(project), root, root / baseline_path)
         if baseline["digest"] != attempt["baseline_digest"]:
             raise ValueError("baseline digest mismatch")
-        record(baseline["digest"], "baseline", "authorized context", baseline_path)
+        record(baseline["digest"], "baseline", SCAN, baseline_path)
     except (OSError, KeyError, TypeError, ValueError):
         unreadable(baseline_path)
     contexts = [row for row in events if row["event_type"] == "CONTEXT_SELECTED"]
@@ -291,7 +293,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         path = f"context-selections/{attempt_id}/{context['artifact_digest'][7:]}.json"
         try:
             pilot.read_context_selection(root, attempt_id, context["artifact_digest"])
-            record(context["artifact_digest"], "authorized-context", "context-marker response", path)
+            record(context["artifact_digest"], "authorized-context", MARKER, path)
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
     if responses:
@@ -301,23 +303,23 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         try:
             publication = model_outputs.get(digest) or pilot.read_model_stage_artifact(root, attempt_id, stage_id, digest)
             next_artifact = {
-                "context-marker": "generator fragments", "tc-generator": "remaining fragments or assembled candidate",
-                "tc-reviewer": "reviewer ledger and effective selection or negative closure",
-                "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization",
+                "context-marker": GENERATOR, "tc-generator": GENERATOR, "tc-reviewer": REVIEW_ANSWER, "tc-to-autotest": AUTOMATION_REVIEW,
+                "autotest-reviewer": MATERIALIZE,
             }[stage_id.split(":", 1)[0]]
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
-                next_artifact = "context-marker parts merge"  # the remaining parts, then the merge by code
+                next_artifact = MARKER  # the remaining parts, then the merge by code
             if stage_id == "tc-generator:rework-1":
-                next_artifact = "rework answered"  # nobody reviews the rework before V7b: finish publishes r2
+                next_artifact = REVIEW  # nobody reviews the rework before V7b: finish publishes r2
             elif stage_id.startswith("tc-generator:") and _batches_all_answered(root, attempt_id, responses):
-                next_artifact = "canonical reviewer package and boundary"  # the last answer assembled the candidate; prepare of the review publishes it from the journal
+                next_artifact = REVIEW  # the last answer assembled the candidate; prepare of the review publishes it from the journal
             if stage_id.startswith("autotest-reviewer:"):
                 from tools.finalize_attempt import automation_next, correction_offered
 
                 outcome = automation_next(root, attempt_id)[0]
-                next_artifact = ("review disposition and materialization" if outcome == "ACCEPTED"
-                                 else "automation revision" if outcome == "PENDING" or correction_offered(root, attempt_id) else "automation refused")
-            record(digest, stage_id, next_artifact, publication["path"])
+                next_artifact = (MATERIALIZE if outcome == "ACCEPTED"
+                                 else AUTOMATION if outcome == "PENDING" or correction_offered(root, attempt_id) else CLOSURE)
+            marker_done = stage_id.startswith("context-marker:") and next_artifact == GENERATOR  # the plan may wait for the human here (scope pause)
+            record(digest, stage_id, next_artifact, publication["path"], **({"after_marker": True} if marker_done else {}))
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
     assembly = next((row for row in reversed(events) if row["event_type"] == "CANDIDATE_PUBLISHED" and row.get("stage_instance_id") == "assembly"), None)
@@ -326,7 +328,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         # reviewer evidence. Do not claim to have reread an unknown bundle here.
         confirmed.append((assembly["seq"], {
             "last_confirmed_stage": "assembly-publication-event",
-            "next_expected_artifact": "canonical reviewer package and boundary",
+            "next_step": REVIEW,
             "evidence_path": str(root / "events" / f"{assembly['seq']:010d}.json"),
         }))
     ledger_events = [row for row in events if row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") == "reviewer-ledger-v1"]
@@ -337,20 +339,20 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         try:
             ledger = pilot.read_reviewer_session_ledger(root, attempt_id, digest)
             lifecycle = pilot.reviewer_lifecycle_projection(ledger)
-            next_artifact = "reviewer evidence or verdict" if lifecycle["waiting"] else "effective canonical"
+            next_artifact = REVIEW_ANSWER
             if lifecycle["pre_verdict_abort"] or lifecycle["authoritative_verdict"] == "REJECTED":
-                next_artifact, aborted = "negative branch trace and finalization", lifecycle["pre_verdict_abort"]
+                next_artifact, aborted = CLOSURE, lifecycle["pre_verdict_abort"]
             record(digest, "canonical-review:" + ledger["status"], next_artifact, path, stop_reason=lifecycle["abort_reason"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
     named_receipts = 0
     # These readers are read-only; the similarly named recovery helpers may write events.
     for kind, next_artifact in (
-        ("rework-round", "rework fragment"),
-        ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
-        ("execution-inputs", "materialization"), ("generated-delta", "materialization command"),
-        ("materialization-command", "human run report"), ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
-        ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or new scan"),
+        ("rework-round", GENERATOR),
+        ("effective-canonical", CLOSURE if attempt["policy_profile"] == "cases-only-v1" else AUTOMATION),
+        ("execution-inputs", MATERIALIZE), ("generated-delta", MATERIALIZE),
+        ("materialization-command", HUMAN_RUN), ("execution-receipt", CLOSURE), ("execution-trace", CLOSURE),
+        ("disposition-receipt", CLOSURE), ("resume-validation", DRIFT),
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
         if kind == "rework-round" and not pilot.rework_round_bound(state, attempt_id):
@@ -367,7 +369,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             receipt = pilot._read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")
             value, facts = receipt["record"], {}
             if kind == "generated-delta" and value["delta"]["facts"]["completion"] != "COMPLETE":
-                next_artifact, facts["stop_reason"] = "disposition and finalization", "MATERIALIZATION_INCOMPLETE"
+                next_artifact, facts["stop_reason"] = CLOSURE, "MATERIALIZATION_INCOMPLETE"
             if kind == "execution-receipt":
                 facts["verification"] = value["payload"]["verdict"]
                 facts["execution_diagnostics"] = value["payload"].get("diagnostics", [])
@@ -390,7 +392,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
                 named_receipts += 1
         for digest in lost[named_receipts:]:
             result["evidence_errors"].append({"code": "EVIDENCE_UNVERIFIED", "path": f"{root}: квитанция {digest} из журнала без файла"})
-    for kind, next_artifact in (("pre_finalization_trace", "finalization receipt"), ("finalization_receipt", "terminal result and trace"), ("terminal_trace", "terminal event")):
+    for kind, next_artifact in (("pre_finalization_trace", CLOSURE), ("finalization_receipt", CLOSURE), ("terminal_trace", CLOSURE)):
         path = root / "closure" / attempt_id / f"{kind}.json"
         if not path.exists():
             continue
@@ -411,11 +413,13 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         path = f"model-requests/{attempt_id}/{request['artifact_digest'][7:]}.json"
         try:
             pilot.read_model_request(root, attempt_id, request["stage_instance_id"], request["artifact_digest"])
-            result.update(next_expected_artifact=request["stage_instance_id"] + " response", pending_request_path=str(root / path))
+            result.pop("after_marker", None)
+            result.update(next_step=answer_of(request["stage_instance_id"]), pending_request_path=str(root / path))
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
     if result["evidence_errors"]:
-        result.update(stop_reason="EVIDENCE_UNVERIFIED", next_expected_artifact="validated inputs or new scan")
+        result.pop("after_marker", None)
+        result.update(stop_reason="EVIDENCE_UNVERIFIED", next_step=DRIFT)
     elif attempt["state"] == "WAITING_FOR_INPUT" and result["stop_reason"] is None:
         result["stop_detail"] = "WAITING_FOR_INPUT has no persisted cause; consult the originating request."
     return result
