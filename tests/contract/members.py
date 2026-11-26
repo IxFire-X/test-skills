@@ -8,11 +8,12 @@ GROUPS = {
     "counters, registry, manifest": ("test_schema_engine", "test_schema_engine_differential", "test_contract_registry", "test_release_manifest",
                                      "test_pack_profile", "test_dead_modules_removed", "test_projection_drift", "test_ci_gate", "test_no_private_imports", "test_p8b_git"),
     "budgets of the roles": ("test_review_view", "test_skeleton_budget", "test_p8a2_texts", "test_texts_cases_only", "test_fat3", "test_test_design",
-                             "test_context_batches", "test_existing_tests"),
+                             "test_context_batches", "test_existing_tests", "test_text_canaries"),
     "form of the CLI": ("test_api_cli", "test_api_error_fields", "test_stages", "test_output_raw", "test_pf1", "test_diagnostics_at_once", "test_run_lock"),
     "classes of the security review": ("test_sec_a", "test_secb", "test_sec_c1", "test_sec_c2"),
     "texts": ("test_cases_import", "test_clear_refusals", "test_documents_only", "test_exec_prepares", "test_generator_skill_operators",
-              "test_isolation_contract", "test_partial_automation", "test_pt2", "test_quality_hints", "test_release_ways_out", "test_abandon_closure"),
+              "test_isolation_contract", "test_partial_automation", "test_pt2", "test_quality_hints", "test_release_ways_out", "test_abandon_closure",
+              "test_failure_groups"),
 }
 MEMBERS = tuple(name for group in GROUPS.values() for name in group)
 
@@ -32,4 +33,5 @@ SLOW = (
     "test_abandon_closure::test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names",  # 34
     "test_p8b_git::test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it",  # 65
     "test_p8b_git::test_a_copy_of_the_mode_b_delivery_finalizes_and_publishes_the_observation_without_the_maintainer_files",  # 40
+    "test_failure_groups::test_report_keeps_the_method_lines",  # 100 (26.11, the machine loaded; a whole run is built, as test_quality_hints)
 )

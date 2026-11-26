@@ -106,6 +106,7 @@ def test_failure_texts_of_another_automation_are_none() -> None:
     assert failure_texts(execution, _automation()) == {}
 
 
+@pytest.mark.slow
 def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
     import difflib
 
