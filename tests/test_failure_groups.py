@@ -180,17 +180,16 @@ def test_the_block_of_the_causes() -> None:
     assert _cause_lines(_report(groups, 5)) == ["Причины:", "- 5 — ответ 403 вместо ожидаемого 201 (5); тесты: m0, m1, m2 и ещё 2", ""]
 
 
-@pytest.mark.slow
-def test_the_summary_tells_the_causes(tmp_path: Path) -> None:
-    from tests.test_run_report import _finished_run
-    from tools.run_report import build_report, render_markdown
+def test_the_summary_tells_the_causes() -> None:
+    from tools.run_report import _acceptance_lines
 
-    report = build_report(tmp_path, _finished_run(tmp_path).name)[0]
     groups = _grouped(*["expected: 201 but was: 403"] * 6, "boom", "bang", checks=STATUS_CHECK)
-    summary = render_markdown({**report, **_report(groups, 8)}).split("## Итог", 1)[1].split("\n## ", 1)[0]
+    report = {**_report(groups, 8), "acceptance": {"generated": 2, "accepted": 2, "removed": 0, "outcome": "ACCEPTED_WHOLE"},
+              "counts": {"automation": 1, "execution": "FAIL"}, "execution_stats": {"total": 10, "passed": 2, "failed": 8, "errors": 0}}
+    summary = _acceptance_lines(report)
     assert ("**Одна причина у 6 из 8 упавших автотестов: ответ 403 вместо ожидаемого 201 (6).** Скорее всего это одно расхождение "
-            "окружения или адреса, а не 6 дефектов — разберите её первой.") in summary.splitlines()
-    assert ", причин: 3" in summary
+            "окружения или адреса, а не 6 дефектов — разберите её первой.") in summary
+    assert "упали 8 из 10 методов, причин: 3" in summary[2]
 
 
 @pytest.mark.slow
