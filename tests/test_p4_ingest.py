@@ -18,6 +18,8 @@ import pytest
 
 from tests.test_exec_prepares import _has, _project
 from tools import exec_commands
+from tools.execution_adapters import GRADLE, MAVEN, ExecutionRequest, command_for
+from tools.run_pipeline import build_parser
 
 REPORT = "test-results/pytest.xml"
 
@@ -87,8 +89,6 @@ def attempt(tmp_path: Path):
 
 
 def test_the_command_of_a_maven_module_of_a_reactor_names_the_module_and_carries_the_word() -> None:
-    from tools.execution_adapters import MAVEN, ExecutionRequest, command_for
-
     selectors = ("org.demo.AppTest#works", "org.demo.AppTest#fails")
     reports, argv = command_for(MAVEN, "/p/mvnw", "default", selectors)
     request = ExecutionRequest(MAVEN, "/p/mvnw", argv, "/p/services/api", selectors, 600, reports, ("PROJECT_NATIVE_ENV",), "default", ())
@@ -102,8 +102,6 @@ def test_the_command_of_a_maven_module_of_a_reactor_names_the_module_and_carries
 
 
 def test_gradle_has_no_word_to_carry_and_says_so() -> None:
-    from tools.execution_adapters import GRADLE, ExecutionRequest, command_for
-
     reports, argv = command_for(GRADLE, "/p/gradlew", "default", ("a.B#c",))
     request = ExecutionRequest(GRADLE, "/p/gradlew", argv, "/p", ("a.B#c",), 600, reports, ("PROJECT_NATIVE_ENV",), "default", ())
     assert exec_commands._challenge(request, "x") == {"kind": "not_available", "name": None, "value": None}
@@ -307,8 +305,6 @@ def test_missing_reports_fix_says_where_they_are_looked_for_and_that_reports_is_
 
 
 def test_the_commands_are_in_the_parser_and_exec_still_parses_so_that_it_can_answer(tmp_path: Path) -> None:
-    from tools.run_pipeline import build_parser
-
     parser = build_parser()
     for command in ("materialize", "ingest", "exec"):
         assert parser.parse_args([command, "--project", str(tmp_path), "--run", "RUN-x"]).command == command

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ import pytest
 from tests.test_first_run import _python_project, _write
 from tests.test_phase2_scan import _args
 from tools import run_pipeline
+from tools.project_inventory import ContextSelectionError, build_inventory, context_filter
+from tools.ready import check
 
 MODULE = "services/api"
 DOCS = "services/api/docs/feature.md"
@@ -128,8 +131,6 @@ def test_old_projects_keep_their_receipts_unchanged(tmp_path: Path, monkeypatch:
 
 
 def test_ready_shows_the_same_skip_as_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     _write(project, f"{MODULE}/static/app.min.js", "var a=1;\n")
     _write(project, f"{MODULE}/static/fonts/x.woff2", "font\n")
@@ -141,8 +142,6 @@ def test_ready_shows_the_same_skip_as_scan(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_ready_stops_on_a_source_larger_than_the_batch(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     _write(project, f"{MODULE}/src/Big.java", "class Big {\n" + "  int a = 1;\n" * (BIG // 13 + 1) + "}\n")
     report = check(project, [DOCS], profile="cases-only-v1")
@@ -152,9 +151,6 @@ def test_ready_stops_on_a_source_larger_than_the_batch(tmp_path: Path) -> None:
 
 def test_the_filter_reads_a_context_file_with_the_same_checks_as_the_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A file replaced by a link after the inventory is refused before a byte outside the project is read."""
-    import os
-
-    from tools.project_inventory import ContextSelectionError, build_inventory, context_filter
 
     project = _project(tmp_path)
     target = _write(project, f"{MODULE}/static/page.css", "a{color:red}\n")

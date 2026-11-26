@@ -14,11 +14,26 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests.test_review_requested import _generated_run
+from tools import canonical_document, finalize_attempt, orchestrate_test_case_revision as orchestrate, pilot_state
+from tools import review_canaries, stage_steps
+from tools.canonical_document import document_sha256
+from tools.orchestrate_test_case_revision import _PROFILE, journal_assembly, publish_command
+from tools.orchestrate_test_case_revision import publish_unreviewed_candidate
+from tools.pilot_state import publish_attempt_receipt, publish_model_stage_artifact, read_attempt_receipt
+from tools.review_canaries import CLASSES, CLASS_NAMES, _options, canary_count, finding_hits, map_bytes, outcome, seed
+from tools.review_edits import apply_edits
+from tools.review_view import render
+from tools.revision_selection import review_outcome
+from tools.run_pipeline import _status_result
+from tools.run_report import _canary_lines, _warning_line, build_report, render_markdown
+from tools.schema_validation import schema_diagnostics
 
 STATUS_TEXT = "Результат"
 
@@ -108,8 +123,6 @@ def _example() -> dict:
 
 
 def test_seed_is_deterministic_leaves_the_candidate_and_puts_the_removed_assertion_first() -> None:
-    from tools.review_canaries import seed
-
     document = _example()
     before = json.dumps(document, sort_keys=True)
     mutated, canaries = seed(document)
@@ -127,11 +140,7 @@ def test_seed_is_deterministic_leaves_the_candidate_and_puts_the_removed_asserti
 
 
 def test_seed_classes_are_the_four_and_each_row_validates_against_the_schema() -> None:
-    from tools.review_canaries import CLASSES, map_bytes, seed
-    from tools.schema_validation import schema_diagnostics
-
     document = _example()
-    from tools.canonical_document import document_sha256
 
     _mutated, canaries = seed(document)
     assert {row["class"] for row in canaries} <= set(CLASSES)
@@ -141,8 +150,6 @@ def test_seed_classes_are_the_four_and_each_row_validates_against_the_schema() -
 
 
 def test_every_class_has_material_in_a_candidate_with_checks() -> None:
-    from tools.review_canaries import CLASSES, _options
-
     document = _example()
     case = next(case for case in document["test_cases"] if any(len(exp["assertions"]) >= 2 for step in case["steps"] for exp in step["expectations"]))
     found = {cls: bool(_options(cls, copy.deepcopy(case), "sha256:" + "0" * 64)) for cls in CLASSES}
@@ -150,8 +157,6 @@ def test_every_class_has_material_in_a_candidate_with_checks() -> None:
 
 
 def test_a_small_candidate_gets_fewer_and_a_single_case_none() -> None:
-    from tools.review_canaries import seed
-
     document = _example()
     one = copy.deepcopy(document)
     one["test_cases"] = one["test_cases"][:1]
@@ -163,8 +168,6 @@ def test_a_small_candidate_gets_fewer_and_a_single_case_none() -> None:
 
 @pytest.mark.parametrize(("cases", "wanted"), [(0, 0), (1, 0), (2, 1), (4, 3), (9, 3), (10, 4), (64, 8), (212, 15), (5000, 15)])
 def test_the_number_of_canaries_grows_with_the_set_from_three_to_fifteen(cases: int, wanted: int) -> None:
-    from tools.review_canaries import canary_count
-
     assert canary_count(cases) == wanted
 
 
@@ -179,10 +182,6 @@ def _clone(document: dict, times: int) -> dict:
 
 
 def test_a_set_of_212_cases_gets_fifteen_canaries_mostly_omissions_and_the_map_is_valid() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_canaries import map_bytes, seed
-    from tools.schema_validation import schema_diagnostics
-
     document = _clone(_example(), 4)
     document["test_cases"] = document["test_cases"][:212]
     _mutated, canaries = seed(document)
@@ -194,9 +193,6 @@ def test_a_set_of_212_cases_gets_fifteen_canaries_mostly_omissions_and_the_map_i
 
 
 def test_the_canaries_do_not_make_the_view_bigger_by_a_tenth() -> None:
-    from tools.review_canaries import seed
-    from tools.review_view import render
-
     document = _example()
     mutated, canaries = seed(document)
     assert len(canaries) == 8 and len(render(mutated, basis=document)) <= 1.10 * len(render(document))
@@ -204,7 +200,6 @@ def test_the_canaries_do_not_make_the_view_bigger_by_a_tenth() -> None:
 
 def test_a_case_of_a_parameter_group_is_never_mutated(monkeypatch: pytest.MonkeyPatch) -> None:
     import tools.review_view  # noqa: F401  (imported before the patch: it binds param_groups at import)
-    from tools import canonical_document, review_canaries
 
     document = _example()
     grouped = [case for case in document["test_cases"][:-2]]
@@ -214,10 +209,6 @@ def test_a_case_of_a_parameter_group_is_never_mutated(monkeypatch: pytest.Monkey
 
 
 def test_the_view_shows_the_control_errors_with_the_header_and_hints_of_the_real_candidate() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_canaries import seed
-    from tools.review_view import render
-
     document = _example()
     mutated, canaries = seed(document)
     plain, with_canaries = render(document).decode("utf-8"), render(mutated, basis=document).decode("utf-8")
@@ -242,10 +233,6 @@ def _case_block(view: str, case_id: str, expectation_id: str) -> str:
 # --------------------------------------------------------------------------------------
 
 def test_review_open_seeds_the_view_binds_it_and_leaves_the_canon_and_the_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-    from tools.canonical_document import document_sha256
-    from tools.pilot_state import read_attempt_receipt
-
     run = _generated_run(tmp_path)
     opened = _open(run, monkeypatch)
     assert opened["canaries"]["seeded"] == 2 and "CAN-" not in json.dumps(opened, ensure_ascii=False)  # classes and cases are not printed
@@ -280,10 +267,6 @@ def test_the_same_open_again_changes_nothing(tmp_path: Path, monkeypatch: pytest
 
 
 def test_the_view_command_writes_the_view_with_canaries_for_the_assembled_candidate(tmp_path: Path) -> None:
-    import subprocess
-    import sys
-
-    from tools.orchestrate_test_case_revision import publish_unreviewed_candidate
 
     root = Path(__file__).resolve().parents[1]
     run = _generated_run(tmp_path)
@@ -348,8 +331,6 @@ def _canaries(run: dict) -> list[dict]:
 
 
 def test_a_finding_that_names_the_mutated_element_is_a_hit_of_any_severity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     one, two = _ids(run)
@@ -365,8 +346,6 @@ def test_a_finding_that_names_the_mutated_element_is_a_hit_of_any_severity(tmp_p
 @pytest.mark.parametrize(("hits", "status", "note"), [
     (0, "UNRELIABLE", "REVIEW_UNRELIABLE"), (1, "WEAK", "пропущено 2 из 3"), (2, "WEAK", "пропущено 1 из 3"), (3, "ALL_CAUGHT", "поймано 3 из 3")])
 def test_the_soft_threshold_of_three(hits: int, status: str, note: str) -> None:
-    from tools.review_canaries import outcome
-
     canaries = [{"canary_id": f"CAN-{n}", "class": cls, "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
                  "field": "assertions", "original": "a", "mutated": "", "markers": []}
                 for n, cls in ((1, "assertion_removed"), (2, "boundary"), (3, "status"))]
@@ -383,8 +362,6 @@ def test_the_soft_threshold_of_three(hits: int, status: str, note: str) -> None:
 
 @pytest.mark.parametrize(("hits", "status"), [(15, "ALL_CAUGHT"), (12, "MOSTLY_CAUGHT"), (11, "MOSTLY_CAUGHT"), (10, "WEAK"), (5, "WEAK"), (4, "UNRELIABLE"), (0, "UNRELIABLE")])
 def test_the_threshold_of_fifteen_is_a_share_not_one_miss(hits: int, status: str) -> None:
-    from tools.review_canaries import CLASSES, outcome
-
     canaries = [{"canary_id": f"CAN-{n}", "class": CLASSES[n % 4], "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
                  "field": "assertions", "original": "a", "mutated": "", "markers": []} for n in range(1, 16)]
     answer = {"artifacts": {"validation_report": {"findings": [_finding("INFO", [f"EXP-{n}"]) for n in range(1, hits + 1)]}}}
@@ -393,8 +370,6 @@ def test_the_threshold_of_fifteen_is_a_share_not_one_miss(hits: int, status: str
 
 
 def test_the_outcome_counts_the_caught_by_kind_of_error() -> None:
-    from tools.review_canaries import outcome
-
     canaries = [{"canary_id": f"CAN-{n}", "class": cls, "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
                  "field": "assertions", "original": "a", "mutated": "", "markers": []} for n, cls in ((1, "boundary"), (2, "state_check_removed"), (3, "state_check_removed"), (4, "status"))]
     answer = {"artifacts": {"validation_report": {"findings": [_finding("INFO", ["EXP-1"]), _finding("INFO", ["EXP-2"]), _finding("INFO", ["EXP-4"])]}}}
@@ -402,8 +377,6 @@ def test_the_outcome_counts_the_caught_by_kind_of_error() -> None:
 
 
 def test_the_outcome_counts_the_blocking_findings_that_stand_on_canaries() -> None:
-    from tools.review_canaries import outcome
-
     canaries = [{"canary_id": f"CAN-{n}", "class": "assertion_removed", "case_id": f"TC-{n}", "step_id": f"STEP-{n}", "expectation_id": f"EXP-{n}", "assertion_id": None,
                  "field": "assertions", "original": "a", "mutated": "", "markers": []} for n in (1, 2)]
     findings = [_finding("BLOCKING", ["TC-1", "EXP-1"]), _finding("BLOCKING", ["TC-2", "EXP-2"]), _finding("BLOCKING", ["TC-3", "EXP-3"]), _finding("WARNING", ["TC-1", "EXP-1"])]
@@ -411,8 +384,6 @@ def test_the_outcome_counts_the_blocking_findings_that_stand_on_canaries() -> No
 
 
 def test_the_report_says_how_many_blocking_findings_were_on_canaries_and_that_they_reject_no_case() -> None:
-    from tools.run_report import _canary_lines
-
     line = "- блокирующих замечаний ревьюера к контрольным ошибкам: 5 — они кейсы не отклоняют (отклоняют только замечания к настоящим кейсам)"
     base = {"status": "ALL_CAUGHT", "seeded": 10, "caught": 10, "note": "n"}
     assert line in "\n".join(_canary_lines({"review_canaries": {**base, "blocking": 5}}))
@@ -420,16 +391,12 @@ def test_the_report_says_how_many_blocking_findings_were_on_canaries_and_that_th
 
 
 def test_the_warning_of_an_unreliable_review_names_how_many_control_errors_were_caught() -> None:
-    from tools.run_report import _warning_line
-
     line = _warning_line("REVIEW_UNRELIABLE", {"review_canaries": {"seeded": 8, "caught": 2}})
     assert "поймано 2 из 8" in line and "ни одна" not in line
     assert "пропущено 3 из 8" in _warning_line("REVIEW_WEAK", {"review_canaries": {"seeded": 8, "caught": 5}})
 
 
 def test_the_report_shows_the_catch_by_kind_and_the_model_of_the_reviewer() -> None:
-    from tools.run_report import _canary_lines
-
     canaries = {"status": "MOSTLY_CAUGHT", "seeded": 15, "caught": 12, "missed_classes": ["state_check_removed"], "note": "n",
                 "by_class": {"boundary": {"seeded": 5, "caught": 5}, "state_check_removed": {"seeded": 5, "caught": 2}}}
     text = "\n".join(_canary_lines({"review_canaries": canaries, "review_model": "haiku-5-5"}))
@@ -438,9 +405,6 @@ def test_the_report_shows_the_catch_by_kind_and_the_model_of_the_reviewer() -> N
 
 @pytest.mark.parametrize(("label", "shown"), [("haiku-5-5", "haiku-5-5"), ("vendor/haiku-5-5", None), ("h" * 100, None)])  # prepare lets a label of 256 signs with a slash in; the report takes the narrower identifier only
 def test_the_report_names_the_model_the_reviewer_was_given_as_an_identifier_or_not_at_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, shown: str | None) -> None:
-    from tools import review_canaries, stage_steps
-    from tools.run_report import build_report
-
     run = _generated_run(tmp_path)
     monkeypatch.setattr(review_canaries, "seed", _fake_seed)
     stage_steps.prepare(run["run_root"], "tc-reviewer:canonical", model_id=label, invocation_id="reviewer-subagent-1", fresh_context=True)
@@ -457,8 +421,6 @@ def test_the_role_asks_for_the_model_label_at_the_step_of_the_review() -> None:
 
 
 def test_a_copy_of_the_response_code_in_the_body_is_not_removed_as_a_control_error() -> None:
-    from tools.review_canaries import _options
-
     def assertion(kind: str, value: int, **actual: str) -> dict:
         return {"assertion_id": f"ASSERT-{kind}-{actual.get('pointer', '')}", "operator": "equals", "actual": {"kind": kind, **actual}, "expected": {"kind": "literal", "value": value}}
 
@@ -472,8 +434,6 @@ def test_a_copy_of_the_response_code_in_the_body_is_not_removed_as_a_control_err
 
 
 def test_fifteen_canaries_are_bound_by_the_receipt_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     def many(document):
         work, rows = _fake_seed(document)
         return work, [{**rows[n % 2], "canary_id": f"CAN-{n + 1}"} for n in range(15)]
@@ -485,9 +445,6 @@ def test_fifteen_canaries_are_bound_by_the_receipt_and_read_back(tmp_path: Path,
 
 
 def test_a_vague_blocking_finding_on_a_canary_case_rejects_the_case_at_three_and_at_eight_canaries() -> None:
-    from tools.review_canaries import seed
-    from tools.revision_selection import review_outcome
-
     document = _example()
     _mutated, canaries = seed(document)
     case_id = canaries[0]["case_id"]
@@ -500,9 +457,6 @@ def test_a_vague_blocking_finding_on_a_canary_case_rejects_the_case_at_three_and
 
 
 def test_vague_blocking_findings_on_every_canary_case_are_held_by_the_share_limit() -> None:
-    from tools.review_canaries import seed
-    from tools.revision_selection import review_outcome
-
     document = _example()
     _mutated, canaries = seed(document)
     wide = {"findings": [{"severity": "BLOCKING", "code": "REVIEW_NOTE", "message": "Ошибка.", "evidence": [], "related_ids": [row["case_id"]]} for row in canaries]}
@@ -526,9 +480,6 @@ def _correction(identifier: str) -> dict:
 
 
 def test_an_edit_with_the_mutated_text_is_dropped_and_the_canon_keeps_the_original(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_edits import apply_edits
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     candidate = _candidate(run)
@@ -587,8 +538,6 @@ def test_a_rework_that_stands_on_canaries_alone_accepts_the_whole_set(tmp_path: 
 def test_an_accepting_ledger_with_no_effective_canonical_does_not_close_the_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The answer goes back whole (a blocking finding names no case: ledger REJECTED, no effective canonical).  A ledger that said ACCEPTED instead
     would have to come with an effective canonical; without it ``finish`` refuses (FINISH_FACT_UNDETERMINED) and the attempt stays open."""
-    from tools import finalize_attempt, pilot_state
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     done = _select(run, _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", ["CREQ-batch-a-001"], "Требование не покрыто.")]))
@@ -607,8 +556,6 @@ def _acceptance(run: dict):
 
 def test_the_report_says_nothing_of_acceptance_before_the_review_is_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The answer is recorded before ``select``: until the ledger has its verdict (and, for an accepting one, the effective canonical) there is no «Итог»."""
-    from tools.pilot_state import publish_model_stage_artifact
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     publish_model_stage_artifact(run["run_root"], run["attempt_id"], "tc-reviewer:canonical", _answer(run, "ПРИНЯТО"))
@@ -618,8 +565,6 @@ def test_the_report_says_nothing_of_acceptance_before_the_review_is_closed(tmp_p
 
 
 def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_attempt_is_partially_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import finalize_attempt, orchestrate_test_case_revision as orchestrate, pilot_state
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # one case of the two of the fixture
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # this test is the publication of the subtraction at the select; the rework is in test_rework_*
     run = _generated_run(tmp_path)
@@ -656,9 +601,6 @@ def test_a_real_blocking_finding_beside_canaries_takes_its_case_out_and_the_atte
 
 def test_a_free_text_code_of_a_blocking_finding_does_not_reach_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The code of a finding is the model's text (the schema asks only for a non-empty string): the report that leaves the perimeter holds it as a code or as OTHER."""
-    from tools import orchestrate_test_case_revision as orchestrate
-    from tools.run_report import build_report, render_markdown
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
     run = _generated_run(tmp_path)
@@ -689,9 +631,6 @@ def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_pa
 # --------------------------------------------------------------------------------------
 
 def test_zero_hits_make_the_review_unreliable_in_the_report_and_the_status_and_not_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_pipeline import _status_result
-    from tools.run_report import build_report, render_markdown
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     done = _select(run, _answer(run))  # ПРИНЯТО, no finding: the verdict stands
@@ -708,9 +647,6 @@ def test_zero_hits_make_the_review_unreliable_in_the_report_and_the_status_and_n
 
 
 def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.review_canaries import CLASS_NAMES
-    from tools.run_report import build_report
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     one, _two = _ids(run)
@@ -726,8 +662,6 @@ def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: p
 # --------------------------------------------------------------------------------------
 
 def test_the_receipt_events_are_marked_and_a_run_without_them_is_not_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     run = _generated_run(tmp_path)
     assert review_canaries.verify(*_flags(run)) is None  # no event of the receipt: not seeded, nothing to read
     _open(run, monkeypatch)
@@ -736,10 +670,6 @@ def test_the_receipt_events_are_marked_and_a_run_without_them_is_not_seeded(tmp_
 
 
 def test_a_deleted_receipt_file_is_a_mismatch_in_report_and_status_even_before_the_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-    from tools.run_pipeline import _status_result
-    from tools.run_report import build_report
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     _forge(run, "receipt-deleted")
@@ -754,8 +684,6 @@ def test_a_deleted_receipt_file_is_a_mismatch_in_report_and_status_even_before_t
 
 
 def test_any_failure_to_read_the_canaries_of_a_seeded_run_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
 
@@ -773,8 +701,6 @@ def _canary(**overrides) -> dict:
 
 
 def test_ids_are_compared_whole_s1_is_not_s10() -> None:
-    from tools.review_canaries import finding_hits
-
     other = {"severity": "WARNING", "code": "X", "message": "В STEP-S10 называется 6.", "evidence": ["STEP-S10"], "related_ids": ["STEP-S10", "EXP-S10"]}
     assert not finding_hits(_canary(), other) and not finding_hits(_canary(), other, strict=True)
     own = {**other, "message": "В STEP-S1 называется 6.", "related_ids": ["STEP-S1"]}
@@ -782,8 +708,6 @@ def test_ids_are_compared_whole_s1_is_not_s10() -> None:
 
 
 def test_a_strict_hit_needs_the_id_in_related_ids_and_the_value_in_the_text() -> None:
-    from tools.review_canaries import finding_hits
-
     about_else = {"severity": "BLOCKING", "code": "X", "message": "Нет кейса на требование.", "evidence": ["REQ"], "related_ids": ["STEP-S1"]}
     assert finding_hits(_canary(), about_else) and not finding_hits(_canary(), about_else, strict=True)  # statistics only
     by_text = {**about_else, "message": "В STEP-S1 называется 6.", "related_ids": ["TC-S"]}
@@ -805,12 +729,6 @@ def test_a_real_blocking_finding_in_the_step_of_a_canary_about_something_else_ma
 def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_canaries_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The files agree with each other (count 0, an empty map, a view without control errors) and the journal has no event of them:
     prepare of the review does not take them for a cut-short seeding — they are not what the seeding of the journal's candidate gives."""
-    from tools import review_canaries
-    from tools.canonical_document import document_sha256
-    from tools.orchestrate_test_case_revision import _PROFILE, journal_assembly, publish_command
-    from tools.pilot_state import publish_attempt_receipt
-    from tools.review_view import render
-
     run = _generated_run(tmp_path)
     candidate = journal_assembly(*_flags(run))[0]
     publish_command(candidate, run["run_root"] / "published", _PROFILE, run_root=run["run_root"], attempt_id=run["attempt_id"])

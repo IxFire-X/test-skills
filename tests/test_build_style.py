@@ -17,8 +17,17 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.p4_flow import run_the_build
 from tests.test_execution_adapters import _module
+from tests.test_finish import _project
 from tests.test_first_run import _write
+from tools import execution_adapters, ready
+from tools.execution_adapters import GRADLE, MAVEN, MAVEN_STYLE_SKIPS, PYTEST, build_request, command_for
+from tools.execution_adapters import project_style_checks, style_notes
+from tools.init_skillsrc import _payload
+from tools.ready import style_rows
+from tools.run_pipeline import cmd_finish
+from tools.run_tests import _request_report_path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAIN = "http" + "://"  # kept split so this file does not trip the guard below
@@ -54,9 +63,6 @@ APP_POM = """<project><modelVersion>4.0.0</modelVersion><parent><groupId>x</grou
 @pytest.mark.parametrize(("adapter_id", "runtime"), [("maven-wrapper:selected-symbols-v1", "mvnw"), ("maven:selected-symbols-v1", None)])
 def test_maven_runs_in_batch_mode_and_skips_only_the_closed_style_checks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                          adapter_id: str, runtime: str | None) -> None:
-    from tools import execution_adapters
-    from tools.execution_adapters import MAVEN_STYLE_SKIPS, build_request
-
     if runtime is None:
         module = _module(tmp_path, "maven-wrapper:selected-symbols-v1", "mvnw")
         executable = str((tmp_path / "mvnw").resolve())
@@ -72,8 +78,6 @@ def test_maven_runs_in_batch_mode_and_skips_only_the_closed_style_checks(tmp_pat
 
 
 def test_gradle_reruns_only_the_test_task(tmp_path: Path) -> None:
-    from tools.execution_adapters import GRADLE, build_request
-
     request = build_request(GRADLE, _module(tmp_path, GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
     assert request.argv == (str((tmp_path / "gradlew").resolve()), "cleanTest", "test", "--no-build-cache", "-Pprofile=default",
                             "--tests", "pkg.SampleTest.works")
@@ -81,9 +85,6 @@ def test_gradle_reruns_only_the_test_task(tmp_path: Path) -> None:
 
 
 def test_the_receipt_policy_refuses_any_other_flag_set(tmp_path: Path) -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, build_request
-    from tools.run_tests import _request_report_path
-
     maven = build_request(MAVEN, _module(tmp_path / "m", MAVEN, "mvnw"), [{"selector": "pkg.SampleTest#works"}])
     assert _request_report_path(maven) == (tmp_path / "m").resolve() / "target/surefire-reports"
     without_skip = tuple(token for token in maven.argv if token != "-Dcheckstyle.skip=true")
@@ -109,8 +110,6 @@ def _multi_module(tmp_path: Path) -> Path:
 
 
 def test_style_checks_are_read_from_the_module_pom_and_its_parents(tmp_path: Path) -> None:
-    from tools.execution_adapters import project_style_checks
-
     project = _multi_module(tmp_path)
     assert project_style_checks(project, project / "app") == ("spring-javaformat", "checkstyle", "nohttp", "apache-rat")
     assert project_style_checks(project, project) == ("apache-rat",)
@@ -123,8 +122,6 @@ def test_style_checks_are_read_from_the_module_pom_and_its_parents(tmp_path: Pat
 
 
 def test_style_notes_name_the_skipped_checks_and_the_format_command() -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST, style_notes
-
     notes = style_notes(MAVEN, "/p/mvnw", ("spring-javaformat", "checkstyle", "nohttp"), ("src/test/java/x/GenTests.java",))
     assert notes["style_checks_skipped"] == ("проверки стиля проекта при запуске тестов пакета пропущены: "
                                              "spring-javaformat, checkstyle, nohttp")
@@ -159,8 +156,6 @@ def _petclinic_like(tmp_path: Path) -> tuple[Path, dict]:
 
 
 def test_ready_names_the_style_checks_and_the_exclusions_for_the_project_build(tmp_path: Path) -> None:
-    from tools.ready import style_rows
-
     project, module = _petclinic_like(tmp_path)
     rows = {row["id"]: row for row in style_rows(project, module)}
     style = rows["execution:style"]
@@ -181,12 +176,9 @@ def test_ready_names_the_style_checks_and_the_exclusions_for_the_project_build(t
 def test_ready_makes_no_probe_of_the_build_and_starts_no_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """P4b: ``ready`` used to run the project's validate phase offline (``execution:build-probe``); the package starts no process now, so
     the row is gone for every build, and the style row — read from the poms — stays."""
-    from tools import ready
-
     project, module = _petclinic_like(tmp_path)
     _write(project, "docs/feature.md", "Требование.\n")
     _write(project, "src/main/java/x/App.java", "package x;\npublic class App {}\n")
-    from tools.init_skillsrc import _payload
 
     (project / ".skillsrc").write_bytes(_payload({
         "schema_version": "5.0.0", "version": "3.0", "project": {"name": "petclinic"},
@@ -209,11 +201,6 @@ def test_ready_makes_no_probe_of_the_build_and_starts_no_process(tmp_path: Path,
 
 def test_ingest_and_finish_hint_to_format_the_files_left_in_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                         capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import run_the_build
-    from tests.test_finish import _project
-    from tools import execution_adapters
-    from tools.run_pipeline import cmd_finish
-
     project, run_root, _attempt_id, _values = _project(tmp_path)
     seen: list[tuple] = []
 
@@ -267,8 +254,6 @@ _M2 = Path.home() / ".m2" / "repository"
                     or not (_M2 / "org/junit/jupiter/junit-jupiter/5.10.2").is_dir(),
                     reason="needs TEST_SKILLS_JAVA_HOME, mvn and the plugins in ~/.m2 (offline)")
 def test_real_maven_skips_spring_javaformat_only_in_the_selected_tests_run(tmp_path: Path) -> None:
-    from tools.execution_adapters import command_for
-
     project = tmp_path / "real"
     pinned = "".join(f"<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>{name}</artifactId><version>{version}</version></plugin>"
                      for name, version in (("maven-compiler-plugin", "3.13.0"), ("maven-surefire-plugin", "3.5.2"),

@@ -7,7 +7,10 @@ import json
 
 import pytest
 
+from tools import api, run_pipeline
 from tools.fixes import fix_for
+from tools.json_cli import error_fields
+from tools.pilot_state import ModelResponseDigestMismatch
 
 pytestmark = pytest.mark.contract
 
@@ -22,14 +25,10 @@ pytestmark = pytest.mark.contract
     (KeyError("missing"), {"code": "KeyError", "message": "'missing'"}),
 ])
 def test_the_code_is_the_error_s_own_then_its_prefix_then_its_type(error: Exception, fields: dict) -> None:
-    from tools.json_cli import error_fields
-
     assert error_fields(error) == fields
 
 
 def test_an_error_s_own_code_and_fix_win() -> None:
-    from tools.json_cli import error_fields
-
     class Refusal(ValueError):
         code = "OWN_CODE"
         fix = "own fix"
@@ -56,8 +55,6 @@ def test_api_prints_the_prefixed_code_of_a_pilot_state_refusal(monkeypatch: pyte
 
 
 def test_api_gives_the_fix_tail_as_its_own_field_too(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.pilot_state import ModelResponseDigestMismatch
-
     error = ModelResponseDigestMismatch("MODEL_RESPONSE_DIGEST_MISMATCH: tc-generator:BATCH-a: /plan_digest: дан x, ожидается y — "
                                         "журнал; fix: это ошибка ответа — исправь поля")
     _code, output = _api(monkeypatch, capsys, error)
@@ -75,8 +72,6 @@ def test_a_plain_error_keeps_its_type_as_before(monkeypatch: pytest.MonkeyPatch,
 def test_run_pipeline_answers_json_instead_of_a_traceback(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
                                                           error: Exception) -> None:
     """FaT-F1: KeyError, TypeError and OSError of a run_pipeline command are a JSON refusal with exit 2, never a traceback."""
-    from tools import run_pipeline
-
     def refuse(_args):
         raise error
 
@@ -89,16 +84,12 @@ def test_run_pipeline_answers_json_instead_of_a_traceback(monkeypatch: pytest.Mo
 
 
 def test_an_os_error_without_a_file_has_no_empty_tail() -> None:
-    from tools.json_cli import error_fields
-
     assert error_fields(OSError(5, "Input/output error"))["message"] == "OSError: Input/output error"
 
 
 @pytest.mark.parametrize("error", [BrokenPipeError(), OSError(22, "Invalid argument")], ids=["posix", "windows"])
 def test_a_reader_that_went_away_leaves_no_traceback_and_the_refusal_is_still_returned(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
     """``submit … | head -c N``: the pipe closes under the refusal that is being printed — the error of the write was a traceback after the JSON."""
-    from tools import api
-
     class Gone:
         def write(self, _text: str) -> int:
             raise error

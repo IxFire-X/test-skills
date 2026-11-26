@@ -12,6 +12,13 @@ import re
 
 import pytest
 
+from tools import project_inventory
+from tools.batch_assembly import _SectionIndex, _section_of
+from tools.canonical_document import _NO_JSON, _trailing_json as canonical
+from tools.doc_sections import headings
+from tools.project_inventory import _TOKEN_SIGNATURES
+from tools.test_case_projections import _trailing_json as projected
+
 PIECES = ["{", "[", "}", "]", '"a"', '"', ":", ",", "1", "-1.5", "true", "null", "NaN", "x", "\n", "\n", " ", " ", "\t", "\x0b", "\x0c", "\xa0", " ", "\r\n", "\r",
           '{"a": 1}', "[1, 2]", '{"a": [1, {"b": null}]}', "\\", "é"]
 
@@ -81,9 +88,6 @@ def test_the_trailing_json_of_a_projected_field_is_the_one_found_before() -> Non
     '{"a": 1}\xa0', 'text {"a": 1}', ' {"a": 1}', '{"a": 1}\n\n{"a"', 'x\n{"a": 1}\n{"b"', '[1, 2]\n[3',
 ])
 def test_the_hand_made_texts_give_the_answer_of_before(text: str) -> None:
-    from tools.canonical_document import _NO_JSON, _trailing_json as canonical
-    from tools.test_case_projections import _trailing_json as projected
-
     new = canonical(text)
     assert (None if new is _NO_JSON else new) == _old_canonical_trailing_json(text)
     assert projected(text) == _old_projection_trailing_json(text)
@@ -113,8 +117,6 @@ def _old_section_of(text: str, documents: dict[str, str]):
 
 
 def test_the_section_of_a_requirement_is_the_one_found_before() -> None:
-    from tools.batch_assembly import _SectionIndex, _section_of
-
     words = ["alpha", "beta", "gamma", "delta", "login", "owner", "visit", "pet", "must", "returns", "an", "error"]
     randomizer = random.Random(20261107)
     found = 0
@@ -147,8 +149,6 @@ def _old_heading_title(line: str):
 
 
 def test_a_heading_is_cut_as_before() -> None:
-    from tools.doc_sections import headings
-
     pieces = ["#", "##", "###", "#######", " ", "  ", "\t", "Title", "a", "b c", "#", "##", " ##", " ", "é", "x#", "`", "~"]
     randomizer = random.Random(20261108)
     seen = 0
@@ -179,8 +179,6 @@ def _byte_texts(seed: int, count: int, pieces: list[bytes], longest: int = 22):
 
 
 def test_the_jwt_rule_finds_what_it_found() -> None:
-    from tools.project_inventory import _TOKEN_SIGNATURES
-
     new = dict(_TOKEN_SIGNATURES)["jwt-v1"]
     pieces = [b"eyJ", b"eyJa", b"-", b"-", b".", b".", b"a", b"b_", b"Z9", b" ", b"\n", b"x", b"Bearer ", b"eyJ.", b"\xc3\xa9", b'"']
     hits = 0
@@ -193,8 +191,6 @@ def test_the_jwt_rule_finds_what_it_found() -> None:
 
 @pytest.mark.parametrize("name,old_name", [("_PASSWORD_LINE", "_OLD_LINE"), ("_PASSWORD_JSON", "_OLD_JSON")])
 def test_the_password_rules_of_config_files_find_what_they_found(name: str, old_name: str) -> None:
-    from tools import project_inventory
-
     new, old = getattr(project_inventory, name), globals()[old_name]
     pieces = [b"password", b"pwd", b"secret", b"passwd", b"Pass", b"a", b".", b"-", b"_", b":", b"=", b" ", b"\t", b"\n", b'"', b"'", b"- ", b"x", b"\\", b"\\\"",
               b"${X}", b"true", b"s3cret", b",", b"{", b"}", b'"password"', b'"pwd"', b'"secret"', b': "', b':"', b'x"']
@@ -208,8 +204,6 @@ def test_the_password_rules_of_config_files_find_what_they_found(name: str, old_
 
 def test_the_xml_password_rules_find_what_they_found_in_well_formed_tags() -> None:
     """The tag is read up to its «>» and not over a «<» (the one change); the texts here have no «<» inside a tag, so the answers must be the old ones."""
-    from tools import project_inventory
-
     randomizer = random.Random(20261111)
     words = [b"password", b"pwd", b"secret", b"name", b"key", b"value", b"x", b"bean", b"a-b", b"Password1"]
 

@@ -6,15 +6,19 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_f1 import _pipeline
+from tests.test_skillsrc_human_keys import _project as _configured_project
+from tests.test_stage_steps import _answer, _generator, _junction
+from tests.test_v06_fix10 import _spine_run
+from tests.test_v06_fix13 import _link
 from tools import pilot_state
+from tools.init_skillsrc import ensure_skillsrc
 from tools.project_inventory import InventoryError, read_exclusion_receipt, read_execution_baseline, read_inventory_receipt
 
 READERS = [(read_inventory_receipt, "inventories", "inventory"), (read_exclusion_receipt, "exclusions", "exclusions"), (read_execution_baseline, "baselines", "baseline")]
 
 
 def _frozen(tmp_path: Path) -> tuple[Path, dict]:
-    from tests.test_v06_fix10 import _spine_run
-
     root, _inventory, baseline = _spine_run(tmp_path)
     return root, pilot_state.freeze_phase_two_inputs(root, tmp_path, tmp_path, baseline)
 
@@ -28,8 +32,6 @@ def test_a_receipt_is_read_below_the_run_root(tmp_path: Path, reader, folder: st
 
 @pytest.mark.parametrize(("reader", "folder", "key"), READERS)
 def test_a_run_root_that_is_a_junction_is_no_place_to_read_a_receipt_from(tmp_path: Path, reader, folder: str, key: str) -> None:
-    from tests.test_stage_steps import _junction
-
     root, frozen = _frozen(tmp_path)
     link = root.parent / "link"
     _junction(link, root)
@@ -39,8 +41,6 @@ def test_a_run_root_that_is_a_junction_is_no_place_to_read_a_receipt_from(tmp_pa
 
 @pytest.mark.parametrize(("reader", "folder", "key"), READERS)
 def test_a_receipt_folder_that_is_a_junction_to_a_copy_outside_the_run_is_no_receipt(tmp_path: Path, reader, folder: str, key: str) -> None:
-    from tests.test_stage_steps import _junction
-
     root, frozen = _frozen(tmp_path)
     outside = tmp_path / "outside"
     shutil.copytree(root / folder, outside)
@@ -58,10 +58,6 @@ def test_a_receipt_that_is_not_there_is_unreadable(tmp_path: Path, reader, folde
 
 
 def test_init_says_why_a_dangling_link_in_the_place_of_skillsrc_is_not_written(tmp_path: Path) -> None:
-    from tests.test_skillsrc_human_keys import _project as _configured_project
-    from tests.test_v06_fix13 import _link
-    from tools.init_skillsrc import ensure_skillsrc
-
     project = _configured_project(tmp_path)
     (tmp_path / "gone").write_text("x", encoding="utf-8")
     _link(project / ".skillsrc", tmp_path / "gone")
@@ -74,8 +70,6 @@ def test_init_says_why_a_dangling_link_in_the_place_of_skillsrc_is_not_written(t
 
 def _through_a_junction(tmp_path: Path) -> tuple[dict, dict]:
     """A run made at the plain path and the same run named through ``via``, a junction to the folder that holds the project."""
-    from tests.test_stage_steps import _generator, _junction
-
     (tmp_path / "real").mkdir()
     run = _generator(tmp_path / "real")
     via = tmp_path / "via"
@@ -84,8 +78,6 @@ def _through_a_junction(tmp_path: Path) -> tuple[dict, dict]:
 
 
 def test_the_steps_of_a_run_named_through_a_junction_above_the_project_answer_as_before(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_stage_steps import _answer
-
     _run, named = _through_a_junction(tmp_path)
     assert _answer(capsys, named, 0)[0] == 0
     code, out = _answer(capsys, named, 1)  # the last batch: the candidate reads the inventory of the run for the share of the manual steps
@@ -94,8 +86,6 @@ def test_the_steps_of_a_run_named_through_a_junction_above_the_project_answer_as
 
 
 def test_the_status_of_a_project_named_through_a_junction_above_it_says_what_it_said_before(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_f1 import _pipeline
-
     run, named = _through_a_junction(tmp_path)
     plain_root, via_root = Path(run["root"]), Path(named["root"])
     code, plain = _pipeline(capsys, ["status", "--project", str(plain_root.parents[1]), "--run", plain_root.name])

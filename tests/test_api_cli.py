@@ -70,8 +70,6 @@ def test_the_docs_tell_no_python_imports_of_the_package() -> None:
 
 
 def test_every_api_command_is_registered_and_answers_json_on_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import api
-
     assert set(api.COMMANDS) == {"prepare", "submit", "validate-canonical"}  # V5-B3: the cycle of the agent and the check of a candidate
     for name in api.COMMANDS:
         with pytest.raises(SystemExit) as stop:
@@ -94,8 +92,6 @@ def _marker_run(tmp_path: Path):
 
 
 def _marker_value() -> dict:
-    from tests.test_marker_parts import _marker
-
     return _marker(["src/part0.py — наблюдение «ёлка» ∑"], ["пробел — нет ожидаемого результата"])
 
 
@@ -108,8 +104,6 @@ def _reversed(value):
 
 
 def test_prepare_and_submit_match_the_direct_calls(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state, stage_steps
-
     direct_root, direct_attempt, direct_digests = _marker_run(tmp_path / "direct")
     pilot_state.publish_model_request(direct_root, direct_attempt, "context-marker:baseline", model_id="m", invocation_id="inv",
                                       input_digests=direct_digests)
@@ -132,11 +126,14 @@ def test_prepare_and_submit_match_the_direct_calls(tmp_path: Path, capsys: pytes
 
 
 from tests.journal_helpers import assert_refused_once, refusal_log, state_minus_refusals
+from tests.test_automation_revision_budget import automated_document
+from tests.test_marker_parts import _marker
+from tools import api, batch_assembly, pilot_state, stage_steps
+from tools.api import plain
+from tools.canonical_document import validate_canonical_document
 
 
 def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import stage_steps
-
     root, attempt_id, _digests = _marker_run(tmp_path)
     assert _api(["prepare", "--run-root", str(root), "--stage", "context-marker:baseline"], capsys)[0] == 0
     before, seen = state_minus_refusals(root), refusal_log(root)
@@ -149,8 +146,6 @@ def test_a_non_strict_answer_is_refused_before_the_function(tmp_path: Path, caps
 
 def test_the_removed_digest_commands_are_gone_everywhere() -> None:
     """FaT-DG: the two old digest commands are gone."""
-    from tools import api
-
     removed = ("with" + "-digest", "publish" + "-artifact")
     assert not set(removed) & set(api.COMMANDS)
     offenders = [str(path.relative_to(ROOT)) for path in [*DOCS, *sorted((ROOT / "tests").glob("*.py"))]
@@ -163,8 +158,6 @@ def test_the_removed_digest_commands_are_gone_everywhere() -> None:
 # --------------------------------------------------------------------------------------
 
 def test_a_validator_with_diagnostics_is_invalid_with_the_same_list(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tools.canonical_document import validate_canonical_document
 
     from tests.test_output_guard import _run
 
@@ -181,8 +174,6 @@ def test_a_validator_with_diagnostics_is_invalid_with_the_same_list(tmp_path: Pa
 
 
 def test_results_are_plain_json(tmp_path: Path) -> None:
-    from tools.api import plain
-
     value = plain({"bytes": b"ab", "pair": ("a", 1), "path": Path("x") / "y", "map": {("a", "b"): {"k": 1}}})
     assert value["bytes"] == {"bytes": 2, "sha256": "sha256:fb8e20fc2e4c3f248c60c39bd652f3c1347298bb977b8b4d5903b85055620603"}
     assert value["pair"] == ["a", 1] and value["path"] == str(Path("x") / "y")
@@ -202,7 +193,6 @@ def test_each_command_calls_exactly_one_package_function() -> None:
     assert {"stage_steps", "canonical_document"} <= modules
     assert not {"automation_validation", "run_tests", "execution_gate", "pilot_state"} & modules
     handlers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name.startswith("_cmd_")]
-    from tools import api
 
     assert len(handlers) == len(api.COMMANDS)
     for handler in handlers:
@@ -213,8 +203,6 @@ def test_each_command_calls_exactly_one_package_function() -> None:
 
 
 def test_with_digest_is_public_and_the_old_name_is_the_same_function() -> None:
-    from tools import batch_assembly
-
     assert batch_assembly._with_digest is batch_assembly.with_digest
 
 

@@ -4,13 +4,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tools.pack_registry import PROFILES, profile_paths
+from tools.step_size import role_files
+
 ROOT = Path(__file__).resolve().parents[1]
 REWORK = ROOT / "skills" / "tc-generator" / "rework.md"
 
 
 def test_the_text_of_the_rework_fits_its_limit_and_no_batch_reads_it() -> None:
-    from tools.step_size import role_files
-
     assert REWORK.stat().st_size <= 3000
     assert REWORK not in role_files("tc-generator")
 
@@ -28,8 +29,6 @@ def test_the_text_of_the_rework_tells_no_one_to_build_install_or_call_the_networ
 
 
 def test_the_file_is_in_every_delivery_profile() -> None:
-    from tools.pack_registry import PROFILES, profile_paths
-
     assert all("skills/tc-generator/rework.md" in profile_paths(["skills/tc-generator/rework.md"], profile) for profile in PROFILES)
 
 
@@ -39,9 +38,6 @@ def test_the_role_of_the_reviewer_says_a_blocking_finding_names_its_cases() -> N
 
 
 def test_the_text_of_the_second_round_fits_its_limit_names_the_form_and_no_role_reads_it_by_default() -> None:
-    from tools.pack_registry import PROFILES, profile_paths
-    from tools.step_size import role_files
-
     path = ROOT / "skills" / "tc-reviewer" / "rework.md"
     text = path.read_text(encoding="utf-8")
     assert path.stat().st_size <= 2000 and path not in role_files("tc-reviewer")

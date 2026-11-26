@@ -8,8 +8,14 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shutil
 from pathlib import Path
 from typing import Any
+
+from tests import test_review_requested as base, test_review_requested as rr
+from tests.test_batch_journal import _run
+from tests.test_cut_review import _evidence_verdict
+from tests.test_review_two_commands import _candidate_file, _slot, _verdict
 
 REFUSAL_KEYS = {"status", "command", "code", "message", "fix"}
 
@@ -52,8 +58,6 @@ class Observed:
 @contextlib.contextmanager
 def recording(monkeypatch):
     """Patch the one subprocess function of ``test_review_requested`` so that ``tools.api`` runs here and is noted."""
-    from tests import test_review_requested as base
-
     original = base._cmd
     observed = Observed()
 
@@ -70,12 +74,6 @@ def recording(monkeypatch):
 
 def drive(tmp_path: Path, monkeypatch) -> Observed:
     """The commands reachable by the helpers of the existing tests, in four runs."""
-    import shutil
-
-    from tests import test_review_requested as rr
-    from tests.test_batch_journal import _run
-    from tests.test_cut_review import _evidence_verdict
-    from tests.test_review_two_commands import _candidate_file, _slot, _verdict
 
     with recording(monkeypatch) as observed:
         # (1) a run whose marker is answered: both verbs say so

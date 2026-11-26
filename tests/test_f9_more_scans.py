@@ -6,6 +6,10 @@ import re
 
 import pytest
 
+from tools.execution_adapters import _strip_gradle_comments, _strip_xml_comments
+from tools.existing_tests import _FIELD_ERRORS
+from tools.project_inventory import URL_CREDENTIALS_TEXT, URL_USERINFO_TEXT
+
 _OLD_URL_CREDENTIALS = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
 _OLD_URL_USERINFO = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@")
 _OLD_SECRET_VALUE = re.compile(r"(?i)((?:password|passwd|pwd|token|secret)[\w.-]*['\"]?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;)]+)")
@@ -23,8 +27,6 @@ def _texts(seed: int, count: int, pieces: list[str], longest: int = 18):
 
 
 def test_the_url_credentials_and_user_info_forms_find_what_the_old_ones_found() -> None:
-    from tools.project_inventory import URL_CREDENTIALS_TEXT, URL_USERINFO_TEXT
-
     pieces = ["http", "https", "ftp", "a", "Z", "1", "+", ".", "-", "://", "://", ":", "@", "/", "u", "pw", " ", "\n", "x-y", "é", "?", "=", "git+ssh", "https://u:p@", "ftp://user:pw@", "a://b:c@h"]
     hits = 0
     for text in _texts(20261112, 40000, pieces):
@@ -36,8 +38,6 @@ def test_the_url_credentials_and_user_info_forms_find_what_the_old_ones_found() 
 
 
 def test_the_xml_comments_go_as_before() -> None:
-    from tools.execution_adapters import _strip_xml_comments
-
     pieces = ["<!--", "-->", "<!---->", "<", "!", "--", ">", "a", "\n", " ", "<a>", "</a>"]
     hits = 0
     for text in _texts(20261114, 40000, pieces, 14):
@@ -48,8 +48,6 @@ def test_the_xml_comments_go_as_before() -> None:
 
 
 def test_the_gradle_comments_go_as_before() -> None:
-    from tools.execution_adapters import _strip_gradle_comments
-
     pieces = ["//", "/*", "*/", "/", "*", "///", "/**/", ":", "\"", "'", "http:", "a", "b c", "\n", " ", "x=1", "\r", "\n\n"]
     hits = 0
     for text in _texts(20261115, 60000, pieces, 14):
@@ -60,8 +58,6 @@ def test_the_gradle_comments_go_as_before() -> None:
 
 
 def test_the_field_errors_of_a_call_are_the_names_of_before() -> None:
-    from tools.existing_tests import _FIELD_ERRORS
-
     pieces = ["attributeHasFieldErrors", "attributeHasFieldErrorsCode", "(", ")", "\"model\"", "\"a\"", "\"b1\"", ",", " ", "\n", "\t", "x", "\"", ".", ";",
               "attributeHasFieldErrors(\"m\",", "attributeHasFieldErrors(\"m\", \"a\",", "attributeHasFieldErrorsCode(\"m\",", " \"f\"", " \"g\",", ")"]
     hits = 0
@@ -80,8 +76,6 @@ def test_the_field_errors_of_a_call_are_the_names_of_before() -> None:
     "model().attributeHasFieldErrorsCode(\"owner\", \"firstName\", \"required\")",
 ])
 def test_a_call_of_the_real_shapes_still_gives_its_names(text: str) -> None:
-    from tools.existing_tests import _FIELD_ERRORS
-
     def names(pattern) -> list[list[str]]:
         return [re.findall(r"\"(\w+)\"", first or code) for first, code in pattern.findall(text)]
 

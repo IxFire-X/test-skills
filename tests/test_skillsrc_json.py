@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from tests.test_skillsrc_authority import _patch_discovery
 from tools import init_skillsrc
-from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, parse_skillsrc_bytes
+from tools.ready import check_skillsrc, legacy_yaml_keys
+from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "projects" / "python-pytest" / ".skillsrc"
@@ -46,8 +50,6 @@ def test_init_skillsrc_writes_a_json_object_with_the_same_name() -> None:
 
 
 def test_init_skillsrc_creates_dot_skillsrc_in_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_skillsrc_authority import _patch_discovery
-
     _patch_discovery(monkeypatch)
     receipt = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
     assert receipt["status"] == "created" and receipt["skillsrc_path"] == ".skillsrc"
@@ -75,8 +77,6 @@ def test_anything_but_a_json_object_is_refused_with_a_clear_code(payload: bytes)
 
 
 def test_ready_prints_the_keys_of_an_older_yaml_skillsrc_without_parsing_it(tmp_path: Path) -> None:
-    from tools.ready import check_skillsrc, legacy_yaml_keys
-
     (tmp_path / ".skillsrc").write_text(YAML_SKILLSRC, encoding="utf-8")
     lines = legacy_yaml_keys(tmp_path)
     assert lines is not None
@@ -92,8 +92,6 @@ def test_ready_prints_the_keys_of_an_older_yaml_skillsrc_without_parsing_it(tmp_
 
 
 def test_ready_does_not_call_a_json_skillsrc_old(tmp_path: Path) -> None:
-    from tools.ready import legacy_yaml_keys
-
     assert legacy_yaml_keys(tmp_path) is None
     (tmp_path / ".skillsrc").write_bytes(FIXTURE.read_bytes())
     assert legacy_yaml_keys(tmp_path) is None
@@ -122,17 +120,12 @@ def _yaml_project(tmp_path: Path, text: str = YAML_SKILLSRC) -> Path:
 
 
 def _cli(*args: str) -> tuple[int, dict]:
-    import subprocess
-    import sys
-
     done = subprocess.run([sys.executable, "-m", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                           env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
     return done.returncode, json.loads(done.stdout)
 
 
 def test_load_skillsrc_of_an_older_yaml_one_carries_the_russian_text_and_fix_of_ready(tmp_path: Path) -> None:
-    from tools.ready import check_skillsrc
-
     project = _yaml_project(tmp_path)
     row = check_skillsrc(project)[0]
     with pytest.raises(SkillsrcError) as caught:
@@ -179,8 +172,6 @@ def test_a_truly_broken_json_skillsrc_is_refused_with_its_cause_and_a_fix(tmp_pa
 
 
 def test_the_v2_feature_sources_reach_the_module_only_when_there_are_some() -> None:
-    from tools.skillsrc_manifest import normalize_skillsrc
-
     plain = {"version": "2.0", "project": {"language": "python"}}
     assert "feature_sources" not in normalize_skillsrc(plain)["modules"][0]
     declared = normalize_skillsrc({**plain, "sdd": {"requirements": "docs/r.md"}})["modules"][0]

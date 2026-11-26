@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from tests.test_reuse_cases import REVIEW, _all, _follow, _journal, _new, _reuse, _scanned, _source, accepted  # noqa: F401  (the fixture)
-from tests.test_review_canaries import _acceptance, _answer, _fake_seed, _select
+from tests.test_review_canaries import _acceptance, _answer, _fake_seed, _finding, _ids, _select
 from tests.test_review_requested import _generated_run
 from tests.test_reuse_rework import accepted as reworked  # noqa: F401  (the fixture: the first review sent a case back, the rework and its second round accepted it)
-from tools import api, pilot_state, stage_steps
+from tools import api, orchestrate_test_case_revision as orchestrate, pilot_state, review_canaries, run_report, stage_steps
 from tools.json_cli import error_envelope
 
 MARKER = "context-marker:baseline"
@@ -152,8 +152,6 @@ def test_the_marker_of_a_source_with_a_damaged_batch_is_taken_and_the_batch_is_n
 # ---- 6: the line about the date names a run only for a stage whose input is the plan -----------------------------------------------------
 
 def _note(monkeypatch: pytest.MonkeyPatch, *stages: str) -> str | None:
-    from tools import run_report
-
     monkeypatch.setattr(pilot_state, "read_attempt_receipt", lambda *args, **kwargs: {"record": {"header": {"metadata": {"date": "2026-01-01"}}}})
     calls = [{"stage": stage, "by": "reuse", "reused_from": f"{index}" * 32} for index, stage in enumerate(stages, start=1)]
     return run_report._header_date_note(Path("."), "a", [{"observed_at": "2026-02-02T00:00:00Z"}], calls)
@@ -184,8 +182,6 @@ def test_a_stage_outside_the_list_is_refused_by_prepare_and_nothing_is_written(a
 @pytest.fixture(scope="module")
 def caught(tmp_path_factory: pytest.TempPathFactory) -> dict:
     """The cycle of the agent with a real seeding: the one BLOCKING finding stands on the place of the control error (case, step, expectation), no real case is rejected."""
-    from tools import review_canaries
-
     run = _generated_run(tmp_path_factory.mktemp("caught"))
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(review_canaries, "seed", _fake_seed)  # the two cases of the fixture seed nothing of their own
@@ -198,8 +194,6 @@ def caught(tmp_path_factory: pytest.TempPathFactory) -> dict:
 
 @pytest.fixture
 def seeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     monkeypatch.setattr(review_canaries, "seed", _fake_seed)  # a pure function of the candidate: the new run seeds what the source did
 
 
@@ -226,9 +220,6 @@ def test_the_new_run_ends_as_the_source_did_with_the_same_control_errors(caught:
 
 
 def test_a_source_that_rejected_a_real_case_gives_its_marker_and_the_scan_names_the_outcome_for_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import orchestrate_test_case_revision as orchestrate, review_canaries
-    from tests.test_review_canaries import _finding, _ids
-
     monkeypatch.setattr(review_canaries, "seed", _fake_seed)
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # one case of the two of the fixture goes out: PARTIAL
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # and goes back nowhere
@@ -339,8 +330,6 @@ def test_the_files_of_the_project_are_compared_once_for_the_first_refusal_only(t
 
 def test_a_finding_addressed_to_the_step_of_a_removed_check_is_the_canary_s_and_the_source_is_taken(tmp_path: Path) -> None:
     """The form V8-W7 allows: the case and the step of the canary in ``related_ids``, the id of its expectation in ``evidence`` (the second canary of ``_fake_seed`` removes a check)."""
-    from tools import review_canaries
-
     src = _generated_run(tmp_path)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(review_canaries, "seed", _fake_seed)

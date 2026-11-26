@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -17,8 +18,9 @@ from tests.test_first_run import _fake_mvn, _java_project
 from tests.test_f5_first_run import _project, _ready, _row, _scan
 from tests.test_phase2_scan import _skillsrc
 from tools.init_skillsrc import _payload, ensure_skillsrc
-from tools import skillsrc_manifest
-from tools.skillsrc_manifest import SkillsrcError, parse_skillsrc_bytes
+from tools import execution_gate, skillsrc_manifest
+from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, parse_skillsrc_bytes
+from tools.run_report import build_report, render_markdown
 
 
 def _document(**module_extra) -> dict:
@@ -37,8 +39,6 @@ def _document(**module_extra) -> dict:
 # --- executable: the name, not the path of this machine -------------------------------------------------------------
 
 def test_init_writes_the_name_mvn_and_the_level_of_a_module_without_a_stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.skillsrc_manifest import load_skillsrc
-
     project = _java_project(tmp_path)
     _fake_mvn(tmp_path, monkeypatch)
     assert ensure_skillsrc(project, {}, True)["status"] == "created"
@@ -48,8 +48,6 @@ def test_init_writes_the_name_mvn_and_the_level_of_a_module_without_a_stand(tmp_
 
 
 def test_a_repeated_init_keeps_an_old_absolute_path_and_a_missing_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.skillsrc_manifest import load_skillsrc
-
     project = _java_project(tmp_path)
     launcher = _fake_mvn(tmp_path, monkeypatch)
     ensure_skillsrc(project, {}, True)
@@ -63,8 +61,6 @@ def test_a_repeated_init_keeps_an_old_absolute_path_and_a_missing_level(tmp_path
 
 
 def test_a_repeated_init_keeps_the_declared_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.skillsrc_manifest import load_skillsrc
-
     project = _java_project(tmp_path)
     _fake_mvn(tmp_path, monkeypatch)
     ensure_skillsrc(project, {}, True)
@@ -178,8 +174,6 @@ def test_the_report_says_a_derived_level_and_what_to_write(tmp_path: Path, monke
 
 
 def test_the_report_does_not_confirm_a_level_of_a_changed_skillsrc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_report import build_report, render_markdown
-
     project, module_id, doc = _project(tmp_path, "svc")
     payload = _scan(project, monkeypatch, "--docs", doc, "--module", module_id, expect=0)
     document = json.loads((project / ".skillsrc").read_bytes())
@@ -191,10 +185,6 @@ def test_the_report_does_not_confirm_a_level_of_a_changed_skillsrc(tmp_path: Pat
 
 
 def test_the_delivery_without_execution_speaks_of_no_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from unittest import mock
-
-    from tools import execution_gate
-    from tools.run_report import build_report, render_markdown
 
     project, module_id, doc = _project(tmp_path, "svc")
     with mock.patch.object(execution_gate, "execution_available", lambda: False):  # (_scan undoes monkeypatch, so a context here)
@@ -207,8 +197,6 @@ def test_the_delivery_without_execution_speaks_of_no_level(tmp_path: Path, monke
 
 def test_an_inventory_planted_in_the_run_folder_does_not_name_a_level_of_a_changed_skillsrc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The source of the level is the journal-bound baseline, not a file of the run folder an agent could write."""
-    from tools.run_report import build_report, render_markdown
-
     project, module_id, doc = _project(tmp_path, "svc")
     payload = _scan(project, monkeypatch, "--docs", doc, "--module", module_id, expect=0)
     run_root = Path(payload["run_root"])

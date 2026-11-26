@@ -2,17 +2,23 @@ from pathlib import Path
 
 import pytest
 
+import tools.generated_delta as generated_delta
+from tests.helpers import build_phase_two_baseline
+from tests.spine_helpers import run_phase_one_spine
+from tests.test_automation_revision_budget import automated_document, automation as automation_artifact, host_evidence
+from tests.test_automation_revision_budget import review as review_artifact
 from tests.test_generated_delta import _add_second_file, _inputs
+from tools.generated_delta import GeneratedDeltaError, _delta, _file_row, _reviewed_generated_files, apply_dispositions
+from tools.generated_delta import materialize_delta
+from tools.pilot_state import _sealed, append_event, derive_state, open_automation_review_boundary
+from tools.pilot_state import publish_attempt_receipt, publish_generated_delta, publish_phase5_receipt
+from tools.pilot_state import read_attempt_receipt, read_effective_canonical
+from tools.schema_validation import schema_diagnostics
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
 
 def test_partial_materialization_publishes_readback_delta_and_plan_before_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import materialize_delta
-    from tools.pilot_state import read_attempt_receipt
-    from tools.schema_validation import schema_diagnostics
-
     inputs = _inputs(tmp_path, mutate=_add_second_file)
     baseline, automation, review, document, run_root, attempt_id = inputs
     original_remove = generated_delta.remove_confined_bytes_if_equal
@@ -45,9 +51,6 @@ def test_partial_materialization_publishes_readback_delta_and_plan_before_cleanu
 
 
 def test_unbound_generated_delta_cannot_authorize_disposition_plan(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, _delta, _file_row, _reviewed_generated_files, materialize_delta
-    from tools.pilot_state import _sealed, publish_attempt_receipt, publish_phase5_receipt, read_effective_canonical
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
         materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id, interrupt_after=1)
@@ -65,9 +68,6 @@ def test_unbound_generated_delta_cannot_authorize_disposition_plan(tmp_path: Pat
 
 
 def test_materialization_blocks_revision_two_controller_boundary(tmp_path: Path):
-    from tools.generated_delta import materialize_delta
-    from tools.pilot_state import open_automation_review_boundary
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id)
     with pytest.raises(ValueError, match="automation revision two is forbidden after materialization"):
@@ -75,9 +75,6 @@ def test_materialization_blocks_revision_two_controller_boundary(tmp_path: Path)
 
 
 def test_ownership_interruption_already_blocks_revision_two(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, materialize_delta
-    from tools.pilot_state import open_automation_review_boundary
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
         materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id, interrupt_after=1)
@@ -87,9 +84,6 @@ def test_ownership_interruption_already_blocks_revision_two(tmp_path: Path):
 
 @pytest.mark.parametrize("forgery", ["facts", "content_digest", "ownership_digest", "order"])
 def test_event_bound_ownership_rejects_forged_generated_delta_before_publication(tmp_path: Path, forgery: str):
-    from tools.generated_delta import GeneratedDeltaError, _delta, _file_row, _reviewed_generated_files, materialize_delta
-    from tools.pilot_state import publish_generated_delta, read_effective_canonical
-
     inputs = _inputs(tmp_path, mutate=_add_second_file)
     baseline, automation, review, document, run_root, attempt_id = inputs
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
@@ -115,11 +109,6 @@ def test_event_bound_ownership_rejects_forged_generated_delta_before_publication
 
 
 def test_cases_only_attempt_never_creates_ownership_or_test_bytes(tmp_path: Path):
-    from tests.helpers import build_phase_two_baseline
-    from tests.test_automation_revision_budget import automated_document, automation as automation_artifact, host_evidence, review as review_artifact
-    from tools.generated_delta import GeneratedDeltaError, materialize_delta
-    from tests.spine_helpers import run_phase_one_spine
-
     (tmp_path / "tests").mkdir()
     document = automated_document()
     automation = automation_artifact(document)
@@ -137,9 +126,6 @@ def test_cases_only_attempt_never_creates_ownership_or_test_bytes(tmp_path: Path
 
 @pytest.mark.parametrize("published", [False, True])
 def test_materialization_recovers_exact_raw_delta_events_without_rewriting(tmp_path: Path, published: bool):
-    from tools.generated_delta import GeneratedDeltaError, _delta, _file_row, _reviewed_generated_files, materialize_delta
-    from tools.pilot_state import append_event, derive_state, publish_attempt_receipt, read_effective_canonical
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
         materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id, interrupt_after=1)
@@ -160,10 +146,6 @@ def test_materialization_recovers_exact_raw_delta_events_without_rewriting(tmp_p
 
 @pytest.mark.parametrize("published", [False, True])
 def test_disposition_recovers_exact_raw_final_events_without_effects(tmp_path: Path, published: bool, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import apply_dispositions, materialize_delta
-    from tools.pilot_state import _sealed, append_event, derive_state, publish_attempt_receipt, publish_phase5_receipt
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     delta = materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id)
     row = delta["files"][0]

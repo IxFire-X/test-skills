@@ -1,4 +1,5 @@
 import hashlib
+import time
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,10 @@ from tools.project_inventory import (
     read_exclusion_receipt,
     read_inventory_receipt,
 )
+from tools.project_inventory import token_signature_rule
 
 
 def test_shell_alternate_value_is_not_a_password_assignment():
-    from tools.project_inventory import token_signature_rule
-
     assert token_signature_rule(b'echo "${MVNW_PASSWORD:+has-password}"') is None
     assert token_signature_rule(b'echo "${READY:+PASSWORD=sensitive-value}"') == "token-assignment-v1"
 
@@ -138,15 +138,10 @@ def test_inventory_does_not_drop_a_user_requirements_to_do_directory(tmp_path: P
     (b"https://host/path?a=b:c@d", False),
 ])
 def test_url_credentials_finds_the_same_as_before(text: bytes, found: bool) -> None:
-    from tools.project_inventory import token_signature_rule
-
     assert (token_signature_rule(text) == "url-credentials-v1") is found
 
 
 def test_url_credentials_on_a_long_run_without_a_scheme_is_fast() -> None:
-    import time
-
-    from tools.project_inventory import token_signature_rule
 
     started = time.perf_counter()
     assert token_signature_rule(b"a" * 280_000) is None

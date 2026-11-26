@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from tools import api
+
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE_COMMANDS: dict[str, str] = {}  # a command no text names, with the reason; none since V5-B3
@@ -25,8 +27,6 @@ def _named(command: str, texts: dict[Path, str]) -> bool:
 
 
 def test_the_commands_of_the_api_are_the_commands_the_texts_name_plus_the_explicit_service_ones() -> None:
-    from tools import api
-
     texts = _texts()
     named = {command for command in api.COMMANDS if _named(command, texts)}
     assert set(api.COMMANDS) - named == set(SERVICE_COMMANDS), (

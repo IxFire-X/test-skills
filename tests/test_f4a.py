@@ -5,8 +5,15 @@ words.  The regression it closes (PT2): the fix of ``plan`` and the sample calle
 answer, a field that answer does not have, and gave the provenance as ``file#Lstart-Lend`` while the order check reads ``path:line``."""
 from __future__ import annotations
 
+import copy
+import inspect
 import json
 from pathlib import Path
+
+from tests.test_diagnostics_at_once import _synthetic
+from tools import stage_steps, step_size
+from tools.batch_assembly import fill_fragment_bindings, validate_fragment
+from tools.pilot_state import _PROVENANCE_LINE
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
@@ -21,8 +28,6 @@ def _flat(path: Path) -> str:
 
 
 def test_the_order_check_reads_the_provenance_as_path_and_line_not_as_a_fragment() -> None:
-    from tools.pilot_state import _PROVENANCE_LINE
-
     for filled in ("docs/feature.md:4", "docs/feature.md:4-7"):
         assert _PROVENANCE_LINE.match(filled)
     assert not _PROVENANCE_LINE.match("docs/feature.md#L4-L7")  # the form PT2 gave: the order check skips it without a word
@@ -32,9 +37,6 @@ def test_the_order_check_reads_the_provenance_as_path_and_line_not_as_a_fragment
 
 
 def test_submit_prints_a_receipt_without_the_body_and_the_text_says_so() -> None:
-    import inspect
-
-    from tools import stage_steps
 
     source = inspect.getsource(stage_steps._submit)
     assert 'if key != "artifact"' in source  # the receipt, not the answer
@@ -80,10 +82,6 @@ def test_the_generator_skill_and_the_sample_say_the_same_about_the_digest_fields
 
 
 def test_the_fragment_without_the_four_digest_fields_passes_validate_fragment_and_model_response_fills_them() -> None:
-    import copy
-
-    from tests.test_diagnostics_at_once import _synthetic
-    from tools.batch_assembly import fill_fragment_bindings, validate_fragment
 
     fragment, plan, header, context = _synthetic()
     digests = ("plan_digest", "header_digest", "context_receipt_digest", "digest")
@@ -108,9 +106,6 @@ def test_the_skill_asks_for_one_step_size_call_per_batch_and_names_the_key_of_ea
 
 
 def test_the_key_names_of_the_two_size_commands_are_those_the_skill_gives() -> None:
-    import inspect
-
-    from tools import step_size
 
     source = inspect.getsource(step_size)
     assert '"files_summary"' in source and "files_summary=" in source and "input_files_summary" not in source

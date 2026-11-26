@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_f1 import _opened
+from tests.test_stage_steps import _junction
 from tools import pilot_state
 from tools.project_inventory import ContextSelectionError, _canonical_bytes, freeze_context_receipt, freeze_inventory_receipt
 
@@ -109,9 +111,6 @@ def test_a_consistent_pair_of_inventory_and_baseline_laid_under_the_fresh_names_
 # ---- 5: the receipts of the context are read through the pinned root --------------------------------------------------------------------------
 
 def test_a_context_directory_that_is_a_junction_to_a_copy_outside_the_run_is_no_receipt(tmp_path: Path) -> None:
-    from tests.test_f1 import _opened
-    from tests.test_stage_steps import _junction
-
     run = _opened(tmp_path)
     root, attempt = Path(run["run_root"]), run["attempt_id"]
     folder = root / "context-selections" / attempt

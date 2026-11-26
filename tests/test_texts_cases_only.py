@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_pack_profile import copy_profile
+from tools import pack_registry
+from tools.schema_validation import schema_diagnostics
 
 pytestmark = pytest.mark.contract
 
@@ -36,8 +39,6 @@ SECURITY_WORDS = [r"безопасн", r"AppSec", r"Amber", r"Green", r"Red flag
 
 
 def _profile_texts() -> dict[str, str]:
-    from tools import pack_registry
-
     paths = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only")
     names = ["README.md", "QUICKSTART.md", "HOW-TO-USE.md", *(path for path in paths if path.startswith("skills/") and path.endswith(".md"))]
     return {name: (ROOT / name).read_text(encoding="utf-8").replace("\r\n", "\n") for name in names}
@@ -80,8 +81,6 @@ def test_the_controller_skill_is_not_longer_than_before_and_the_mode_b_text_is_k
 
 
 def test_mode_b_text_and_its_roles_are_in_the_registry_and_not_in_the_cases_only_profile() -> None:
-    from tools import pack_registry
-
     paths = [row["path"] for row in pack_registry.registry_rows(ROOT)]
     left = {"skills/orchestrate/references/mode-b.md", "skills/tc-to-autotest/SKILL.md", "skills/autotest-reviewer/SKILL.md",
             "skills/tc-to-autotest/references/automation-output-contract.md", "skills/autotest-reviewer/references/autotest-review-contract.md"}
@@ -198,9 +197,6 @@ def test_the_execution_commands_are_not_in_the_cases_only_pack(cases_only_pack: 
 
 def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_path: Path) -> None:
     """The sample is checked against the schemas it points to: the case, a requirement, a mapping and a capability, placeholders filled."""
-    import shutil
-
-    from tools.schema_validation import schema_diagnostics
 
     text = (ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
     fragment, case, *_forms = (json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S))  # PT2: then the forms of the plan inputs

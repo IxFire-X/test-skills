@@ -17,6 +17,10 @@ from pathlib import Path
 
 from tests.helpers import submit_stage
 from tests.test_review_requested import build_generated_run
+from tests.test_review_two_commands import _cycle, _open, _select_verdict, _verdict
+from tools import pilot_state
+from tools.run_pipeline import main
+from tools.run_report import render_markdown
 
 
 def _events(run_root: Path) -> list[dict]:
@@ -56,8 +60,6 @@ def test_a_refusal_is_an_event_bound_to_its_line(tmp_path: Path) -> None:
 
 
 def test_the_event_passes_the_schema_and_the_journal_is_still_valid(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = build_generated_run(tmp_path)
     _refuse(run, 3)
     state = pilot_state.derive_state(run["run_root"])  # the chain, the copies, the schema of every event
@@ -91,7 +93,6 @@ def test_the_basis_says_the_journal(tmp_path: Path) -> None:
     _refuse(run)
     report = _report(run)
     assert "журнал" in report["refusals"]["basis"] and "не подтверждено" not in report["refusals"]["basis"]
-    from tools.run_report import render_markdown
 
     assert "по журналу" in render_markdown(report)
 
@@ -107,8 +108,6 @@ def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_sta
 
 
 def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
-    from tests.test_review_two_commands import _cycle
-
     run = build_generated_run(tmp_path)
     before = _raw(run["run_root"])
     code, refused = _cycle("submit", run, "--dry-run")  # no prepare yet: a refusal
@@ -118,9 +117,6 @@ def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
 
 def test_the_events_between_the_others_change_no_reader_of_the_order(tmp_path: Path) -> None:
     """The same flow with a refusal at every stage and without: the same status, the same report outside the section of refusals."""
-    from tests.test_review_two_commands import _open, _select_verdict, _verdict
-    from tools.run_pipeline import main
-
     def flow(root: Path, refusals: bool) -> tuple[dict, dict, list]:
         run = build_generated_run(root)
         if refusals:

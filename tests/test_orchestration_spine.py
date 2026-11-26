@@ -10,6 +10,10 @@ from tools import pilot_state
 from tests.spine_helpers import resume_phase_one_spine, run_phase_one_spine
 from helpers import build_phase_two_baseline, phase_two_baseline
 from tools import exec_commands
+from tests import spine_helpers
+from tests.test_requirement_traceability import canonical_fixture
+from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
+from tools.run_pipeline import _durable_status
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -52,10 +56,6 @@ def test_spine_rejects_supplied_terminal_facts_before_run_creation(tmp_path: Pat
 
 
 def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_writes(tmp_path: Path) -> None:
-    from tools.run_pipeline import _durable_status
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-    from tests.test_requirement_traceability import canonical_fixture
-
     run = _run(tmp_path)
     root = Path(run["run"]["run_root"])
     attempt = run["state"]["attempts"][0]
@@ -115,8 +115,6 @@ def test_spine_result_is_bound_to_run_attempt_and_profile(tmp_path: Path) -> Non
 
 
 def test_spine_uses_confined_publishers_and_never_invokes_model_executor_or_project_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests import spine_helpers
-
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("forbidden dependency invoked")
 

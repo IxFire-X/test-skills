@@ -1,4 +1,7 @@
 import hashlib
+import json
+import os
+import venv
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,7 @@ from tools.project_inventory import (
     runtime_identity,
     validate_execution_baseline,
 )
+from tools.project_inventory import validate_execution_baseline_binding
 
 
 def _file_id(inventory: dict, project_path: str) -> str:
@@ -96,10 +100,6 @@ def test_pytest_baseline_binds_only_interpreter_identity(tmp_path: Path) -> None
 
 
 def test_system_maven_launcher_drift_invalidates_execution_baseline(tmp_path: Path) -> None:
-    import json
-    import os
-    from tools.project_inventory import validate_execution_baseline_binding
-
     project = tmp_path / "project"
     project.mkdir()
     launcher = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
@@ -233,8 +233,6 @@ def test_runtime_identity_rejects_absolute_parent_and_reparse_paths(tmp_path: Pa
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX venv interpreter links")
 def test_posix_venv_identity_binds_config_and_rejects_a_foreign_link(tmp_path: Path) -> None:
-    import venv
-
     venv.EnvBuilder(with_pip=False, symlinks=True).create(tmp_path / ".venv")
     identity = runtime_identity(tmp_path, ".venv/bin/python")
     config = tmp_path / ".venv/pyvenv.cfg"

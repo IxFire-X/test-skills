@@ -5,7 +5,11 @@ from pathlib import Path
 
 from tests.helpers import prepare_stage, put_in_slot, submit_stage
 from tests.test_autotest_cycle import GENERATOR, autotest_run
+from tests.test_first_run import _args, _python_project
 from tests.test_stage_steps import _events
+from tools import generated_delta, pilot_state, run_pipeline
+from tools.generated_delta import GeneratedDeltaError
+from tools.json_cli import error_fields
 
 
 def _held_run(tmp_path: Path) -> dict:
@@ -52,8 +56,6 @@ def test_another_path_beside_the_held_one_is_taken(tmp_path: Path) -> None:
 
 
 def test_the_held_paths_of_a_module_are_told_in_the_namespace_of_its_test_root() -> None:
-    from tools import generated_delta
-
     baseline = {"module": "services/api", "inputs": [{"project_path": "services/api/tests/test_a.py"}, {"project_path": "other/tests/test_b.py"}]}
     generated = [{"path": "tests/test_a.py"}, {"path": "tests/test_b.py"}, {"path": "tests\\test_a.py"}]
     assert generated_delta.held_indexes(baseline, generated) == [0, 2]
@@ -61,9 +63,6 @@ def test_the_held_paths_of_a_module_are_told_in_the_namespace_of_its_test_root()
 
 def test_removing_the_old_test_and_a_new_scan_free_the_path(tmp_path: Path, monkeypatch) -> None:
     """The second way out of the fix: the baseline is frozen by ``scan``, so only a new scan sees the project without the old test."""
-    from tests.test_first_run import _args, _python_project
-    from tools import generated_delta, pilot_state, run_pipeline
-
     project = _python_project(tmp_path, runtime=True)
     old = project / "services" / "api" / "tests" / "test_products.py"
     old.parent.mkdir()
@@ -86,7 +85,4 @@ def test_removing_the_old_test_and_a_new_scan_free_the_path(tmp_path: Path, monk
 
 def test_another_refusal_of_the_same_code_does_not_advise_a_new_path() -> None:
     """``MATERIALIZATION_CONFLICT`` has many causes: its fix is no row of the table, so none of them is told «name another path»."""
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.json_cli import error_fields
-
     assert "fix" not in error_fields(GeneratedDeltaError("MATERIALIZATION_CONFLICT", "generated file content digest does not bind UTF-8 source bytes"))

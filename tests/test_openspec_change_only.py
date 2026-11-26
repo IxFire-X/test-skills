@@ -4,6 +4,7 @@ The lines for the tester are the texts the user approved on 25.11 (handoff/v08/c
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,12 @@ import pytest
 from tests.test_openspec_marker import _answer_of, _prepare
 from tests.test_openspec_selection import BASE, _project, _scan
 from tests.test_task_docs_context import _write
+from tools import api, pilot_state, ready
 from tools.build_context import RequirementConflict, build_context, openspec_applied, openspec_change_diff
+from tools.model_records import openspec_snapshots
 from tools.openspec_scope import Weights, impact_areas, lines, neighbours, question, summary_tail
+from tools.run_report import _acceptance_lines, _scope_lines, analyst_questions, openspec_scope_lines
+from tools.step_size import CHANGE_DIFF_VIEW, _change_diff
 
 pytestmark = pytest.mark.contract
 
@@ -51,8 +56,6 @@ def test_scan_says_the_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_ready_says_the_scope(tmp_path: Path) -> None:
-    from tools import ready
-
     rows = ready.check(_project(tmp_path), CHANGE, "cases-only-v1", None)["checks"]
     assert [(row["level"], row["message"]) for row in rows if row["id"] == "openspec:scope"] == [("OK", SCOPE)]
 
@@ -135,9 +138,6 @@ def test_a_path_with_brackets_is_a_question_too() -> None:
 
 
 def test_a_generator_batch_reads_was_and_now(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-    from tools.step_size import CHANGE_DIFF_VIEW, _change_diff
-
     project = _project(tmp_path)
     _write(project, "openspec/changes/add-search/specs/owners/spec.md",
            "## MODIFIED Requirements\n### Requirement: Create\nCreate an owner.\n#### Scenario: Ok\n- WHEN saved\n- THEN listed\n")
@@ -148,8 +148,6 @@ def test_a_generator_batch_reads_was_and_now(tmp_path: Path, monkeypatch: pytest
 
 
 def test_an_added_beside_a_modified_not_applied_is_asked() -> None:
-    from tools.run_report import analyst_questions
-
     said = lines("c", ["owners"], [("ADDED", "owners", "Search", "Find an owner by «телефон»")],
                  [("MODIFIED", "owners", "Lookup", "Look an owner up by «телефон»", DELTA, 9, "x")], [], "")
     assert "- ADDED «Search» связан с неприменённым MODIFIED «Lookup»: его кейсы написаны по нынешнему тексту базы. Верно ли это?" in analyst_questions(said)
@@ -159,21 +157,15 @@ PARTIAL = "Объём неполный: применено 1 из 2 требов
 
 
 def test_the_report_shows_the_scope() -> None:
-    from tools.run_report import _scope_lines
-
     assert _scope_lines({"scope": None, "openspec_scope": [SCOPE, PARTIAL]}) == ["## Охват после разметки", "", f"- {SCOPE}", f"- {PARTIAL}", ""]
 
 
 def test_the_summary_says_the_scope_is_not_whole() -> None:
-    from tools.run_report import _acceptance_lines
-
     acceptance = {"outcome": "ACCEPTED_WHOLE", "generated": 2, "accepted": 2, "removed": 0}
     assert PARTIAL in _acceptance_lines({"acceptance": acceptance, "openspec_scope": [SCOPE, PARTIAL]})
 
 
 def test_the_report_takes_the_lines_in_their_order() -> None:
-    from tools.run_report import openspec_scope_lines
-
     assert openspec_scope_lines([PARTIAL, "x — y", SCOPE]) == [SCOPE, PARTIAL]
 
 
@@ -182,9 +174,6 @@ def test_the_tail_of_the_summary() -> None:
 
 
 def test_another_run_has_no_marks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-    from tools.model_records import openspec_snapshots
-
     scan = _scan(_project(tmp_path), monkeypatch, [BASE, *CHANGE])  # the spec.md named: the full regression of the area, as before
     root = Path(scan["run_root"])
     state = pilot_state.derive_state(root)
@@ -221,8 +210,6 @@ TEXT_7 = "ADDED «Search» связан с неприменённым MODIFIED �
 
 def _requirements_by_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> tuple[int, str, Path, str]:
     """A change only whose healthy ADDED is a neighbour of a MODIFIED the base lacks (the stand S4 of 26.11): the scan, then the step the code answers."""
-    from tools import api
-
     project = _project(tmp_path)
     _write(project, DELTA, LINKED_DELTA)
     scan = _scan(project, monkeypatch, CHANGE)
@@ -241,8 +228,6 @@ def test_the_question_of_a_linked_line_with_its_place_is_text_7() -> None:
 
 
 def test_the_analyst_is_asked_texts_6_and_7_from_the_answer_of_the_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_report import analyst_questions
-
     _code, _out, root, attempt_id = _requirements_by_code(tmp_path, monkeypatch, capsys)
     said = analyst_questions(_answer_of(root, attempt_id)["warnings"])
     assert f"- {TEXT_7}" in said and "- MODIFIED «Lookup» (" in said and "Кейсы на него не написаны" in said
@@ -250,7 +235,6 @@ def test_the_analyst_is_asked_texts_6_and_7_from_the_answer_of_the_code(tmp_path
 
 def test_an_answer_of_the_code_the_schema_refuses_sends_no_one_to_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                            capsys: pytest.CaptureFixture[str]) -> None:
-    import json
 
     from tools import build_context
 

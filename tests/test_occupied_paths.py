@@ -7,6 +7,9 @@ from pathlib import Path
 from tests.helpers import prepare_stage
 from tests.test_autotest_cycle import GENERATOR
 from tests.test_automation_path_held import _held_run
+from tests.test_finish import _project
+from tools.generated_delta import occupied_paths
+from tools.step_size import occupied_field, request_files
 
 
 def test_prepare_of_the_generator_names_the_held_path_and_the_rule(tmp_path: Path) -> None:
@@ -18,8 +21,6 @@ def test_prepare_of_the_generator_names_the_held_path_and_the_rule(tmp_path: Pat
 
 
 def test_the_paths_of_a_module_are_told_as_the_generator_names_its_own() -> None:
-    from tools.generated_delta import occupied_paths
-
     baseline = {"module": "services/api", "test_root": "tests", "inputs": [
         {"project_path": "services/api/tests/test_b.py"}, {"project_path": "services/api/tests/test_a.py"},
         {"project_path": "services/api/src/app.py"}, {"project_path": "other/tests/test_c.py"}]}
@@ -27,8 +28,6 @@ def test_the_paths_of_a_module_are_told_as_the_generator_names_its_own() -> None
 
 
 def test_a_long_list_is_cut_by_bytes_and_counts_the_rest() -> None:
-    from tools.step_size import occupied_field
-
     paths = [f"src/test/java/org/example/very/long/package/name/Test{index:04d}.java" for index in range(400)]
     field = occupied_field(paths)
     assert 3900 < len(json.dumps(field, ensure_ascii=False).encode("utf-8")) <= 4096
@@ -38,10 +37,6 @@ def test_a_long_list_is_cut_by_bytes_and_counts_the_rest() -> None:
 
 
 def test_the_reviewer_gets_no_field_and_a_module_without_held_paths_none_either(tmp_path: Path) -> None:
-    from tests.test_finish import _project
-    from tools.generated_delta import occupied_paths
-    from tools.step_size import request_files
-
     _project_path, run_root, _attempt_id, _values = _project(tmp_path)  # its project holds tests/conftest.py and tests/test_existing.py
     assert request_files(run_root, "tc-to-autotest:r1")["occupied_paths"]["paths"] == ["tests/conftest.py", "tests/test_existing.py"]
     assert "occupied_paths" not in request_files(run_root, "autotest-reviewer:r1")

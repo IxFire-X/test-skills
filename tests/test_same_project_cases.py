@@ -9,8 +9,11 @@ from pathlib import Path
 import pytest
 
 from tests.test_marker_reuse import _fresh, _request, _source as _marker_source
+from tests.test_phase2_scan import _skillsrc
 from tests.test_reuse_cases import REVIEW, _new, _source
 from tools import pilot_state
+from tools.init_skillsrc import _payload
+from tools.skillsrc_manifest import parse_skillsrc_bytes
 
 BUILD_FILE = "target/classes.txt"
 
@@ -65,10 +68,6 @@ def test_a_changed_file_is_still_the_input_inventory(tmp_path: Path) -> None:
 
 
 def test_a_changed_file_of_the_context_is_a_difference_of_the_marker_not_an_invalid_source(tmp_path: Path) -> None:
-    from tests.test_phase2_scan import _skillsrc
-    from tools.init_skillsrc import _payload
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
-
     (tmp_path / ".skillsrc").write_bytes(_skillsrc())
     source_root, _attempt = _marker_source(tmp_path)
     document = json.loads(json.dumps(parse_skillsrc_bytes(_skillsrc())))

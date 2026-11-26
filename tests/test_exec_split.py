@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_first_run import _python_project
+from tools import execution_gate, pack_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -133,8 +134,6 @@ def test_no_file_of_the_package_starts_a_process_opens_a_connection_or_loads_a_l
 def test_a_delivery_has_no_file_that_starts_a_process_and_only_the_confined_writer_has_ctypes(profile: str) -> None:
     """V4b: the exceptions of the ratchet are files of development; a delivery carries none, so inside it the ratchet has no exception for a process
     (``ctypes`` stays in the one file that pins a directory by handle)."""
-    from tools import pack_registry
-
     kept = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile)
     assert not {"tools/ci_gate.py", "tools/release_manifest.py"} & set(kept)
     offenders = []
@@ -193,8 +192,6 @@ def test_the_launch_primitives_and_the_stand_are_gone_from_every_file() -> None:
 
 
 def test_the_gate_lists_exactly_the_two_modules_and_loads_nothing_else() -> None:
-    from tools import execution_gate
-
     assert tuple(execution_gate.EXEC_MODULES) == EXEC_MODULES
     assert execution_gate.execution_available() is True
     assert execution_gate.default_profile() == "local-pilot-v1"

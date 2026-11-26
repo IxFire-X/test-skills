@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
+from tools import schema_engine
+from tools.schema_engine import _CHECKS, _VALIDATORS, Draft202012Validator, FormatChecker, SchemaError, ValidationError
+from tools.schema_validation import validator_for
+
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +40,6 @@ def _errors(schema, instance, **kwargs):
 
 
 def test_engine_compiles_every_schema_of_the_package() -> None:
-    from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
-
     assert_every_schema_is_in_the_contract_or_the_list({path.name for path in SCHEMAS})  # V0: was `== 44`
     registry = _registry()
     for contents in registry.values():
@@ -67,8 +70,6 @@ def test_schemas_use_only_the_formats_the_engine_knows() -> None:
     ("$dynamicRef", "#x"), ("$anchor", "x"), ("madeUp", 1),
 ])
 def test_an_unknown_keyword_is_refused_when_the_schema_is_loaded(keyword: str, value) -> None:
-    from tools.schema_engine import SchemaError
-
     with pytest.raises(SchemaError) as caught:
         _validator({"type": "object", keyword: value})
     assert keyword in str(caught.value)
@@ -90,8 +91,6 @@ def test_a_property_called_like_a_keyword_is_not_a_keyword() -> None:
     {"properties": []}, {"allOf": {}}, {"items": 3}, {"minimum": "1"}, {"$ref": 3}, {"format": 5},
 ])
 def test_a_malformed_keyword_value_is_a_schema_error(schema) -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     with pytest.raises(SchemaError):
         Draft202012Validator(schema)
     with pytest.raises(SchemaError):
@@ -99,8 +98,6 @@ def test_a_malformed_keyword_value_is_a_schema_error(schema) -> None:
 
 
 def test_an_unresolvable_reference_is_a_schema_error() -> None:
-    from tools.schema_engine import SchemaError
-
     for ref in ("#/$defs/missing", "other.schema.json", "other.schema.json#/$defs/x", "#anchor"):
         with pytest.raises(SchemaError):
             _validator({"$id": "schemas/a.json", "properties": {"x": {"$ref": ref}}})
@@ -230,8 +227,6 @@ def test_additional_properties_as_a_schema_and_the_not_keyword() -> None:
 
 
 def test_format_date_is_checked_and_date_time_is_not() -> None:
-    from tools.schema_engine import FormatChecker, SchemaError
-
     schema_date, schema_time = {"format": "date"}, {"format": "date-time"}
     checker = FormatChecker()
     assert not _errors(schema_date, "2026-11-03", format_checker=checker)
@@ -253,8 +248,6 @@ def test_format_date_is_checked_and_date_time_is_not() -> None:
 
 
 def test_iter_errors_is_lazy_and_validate_raises_the_first_error() -> None:
-    from tools.schema_engine import ValidationError
-
     validator = _validator({"required": ["a", "b"]})
     assert validator.is_valid({"a": 1, "b": 2}) and not validator.is_valid({})
     with pytest.raises(ValidationError) as caught:
@@ -263,8 +256,6 @@ def test_iter_errors_is_lazy_and_validate_raises_the_first_error() -> None:
 
 
 def test_the_schema_directory_loads_through_the_package_registry() -> None:
-    from tools.schema_validation import validator_for
-
     validator = validator_for(Path("schemas") / "candidate-fragment.schema.json", ROOT)
     errors = list(validator.iter_errors({}))
     assert errors and all(hasattr(e, "absolute_path") for e in errors)
@@ -297,8 +288,6 @@ def test_requirements_txt_is_only_a_comment_and_dev_requirements_hold_the_oracle
 
 
 def test_what_the_standard_library_raises_on_a_hostile_schema_is_a_schema_error() -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     broken_uri = {"$id": "https://[", "$defs": {"x": {}}, "properties": {"a": {"$ref": "#/$defs/x"}}}
     with pytest.raises(SchemaError):
         Draft202012Validator(broken_uri)
@@ -339,8 +328,6 @@ def test_a_dollar_in_a_pattern_is_the_end_of_the_string_only(pattern: str, accep
 
 @pytest.mark.parametrize("pattern", ["(?i)abc", "(?m)^a$", "(?s)a.b", "(?i:abc)", "(?-i:abc)", "(?x) a", r"(?a)\w", "(?#comment $)a", "a(?m:$)"])
 def test_an_inline_flag_or_comment_in_a_pattern_is_a_schema_error(pattern: str) -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     for schema in ({"pattern": pattern}, {"properties": {"x": {"items": {"pattern": pattern}}}}):
         with pytest.raises(SchemaError) as caught:
             Draft202012Validator(schema)
@@ -386,8 +373,6 @@ def test_a_dot_in_a_pattern_is_not_a_line_terminator(pattern: str, accepted: lis
 # \d \w \D \W are Unicode in Python and ASCII in ECMA 262; no schema of the package uses them, so the engine refuses them rather than translate them.
 @pytest.mark.parametrize("pattern", [r"\d", r"^\d+$", r"\w", r"^\w+$", r"\D", r"\W", r"[\d]", r"[a\w]", r"[^\W]", r"[\d-]", r"x\Dy", r"^(?=\w)a$", r"a\\\d", r"\bfoo", r"foo\b", r"\B", r"^(?:\b|a)$", r"a\\\b"])
 def test_a_digit_or_word_class_in_a_pattern_is_a_schema_error(pattern: str) -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     for schema in ({"pattern": pattern}, {"properties": {"x": {"items": {"pattern": pattern}}}}):
         with pytest.raises(SchemaError) as caught:
             Draft202012Validator(schema)
@@ -398,8 +383,6 @@ def test_a_digit_or_word_class_in_a_pattern_is_a_schema_error(pattern: str) -> N
 
 @pytest.mark.parametrize("pattern", [r"\bfoo", r"foo\b", r"\B", r"^(?:\b|a)$"])
 def test_a_word_boundary_in_a_pattern_is_a_schema_error_that_does_not_advise_a_digit_class(pattern: str) -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     with pytest.raises(SchemaError) as caught:
         Draft202012Validator({"pattern": pattern})
     assert repr(pattern) in str(caught.value) and "boundary" in str(caught.value) and "[0-9]" not in str(caught.value)
@@ -520,8 +503,6 @@ def test_the_path_fields_listed_are_all_the_path_fields_with_a_pattern() -> None
     {"properties": {"x": {"prefixItems": []}}}, {"$defs": {"unused": {"type": ["null", "null"]}}}, {"type": []},
 ])
 def test_a_duplicate_in_type_or_required_and_an_empty_prefix_items_are_schema_errors(schema) -> None:
-    from tools.schema_engine import Draft202012Validator, SchemaError
-
     with pytest.raises(SchemaError):
         Draft202012Validator(schema)
     with pytest.raises(SchemaError):
@@ -579,16 +560,12 @@ _EDGE_SCHEMAS = [  # (schema, instances); every keyword of the engine appears in
 
 @pytest.mark.parametrize("schema,instances", _EDGE_SCHEMAS, ids=lambda value: repr(value)[:60] if isinstance(value, (dict, bool)) else "instances")
 def test_is_valid_is_the_verdict_of_the_error_walk(schema, instances) -> None:
-    from tools.schema_engine import FormatChecker
-
     validator = _validator(schema, format_checker=FormatChecker())
     for instance in instances:
         assert validator.is_valid(instance) == (next(validator.iter_errors(instance), None) is None), (schema, instance)
 
 
 def test_every_keyword_of_the_engine_is_in_the_table_of_edge_cases() -> None:
-    from tools.schema_engine import _VALIDATORS
-
     mentioned: set[str] = set()
 
     def walk(node) -> None:
@@ -605,8 +582,6 @@ def test_every_keyword_of_the_engine_is_in_the_table_of_edge_cases() -> None:
 
 
 def test_the_boolean_walk_and_the_error_walk_have_a_rule_for_the_same_keywords() -> None:
-    from tools.schema_engine import _CHECKS, _VALIDATORS
-
     assert _CHECKS.keys() == _VALIDATORS.keys()
 
 
@@ -619,8 +594,6 @@ def test_the_boolean_walk_and_the_error_walk_have_a_rule_for_the_same_keywords()
     ({"contains": {"type": "integer"}}, ["a", "b", 1]),
 ])
 def test_a_valid_instance_builds_not_one_error_object(monkeypatch: pytest.MonkeyPatch, schema, instance) -> None:
-    from tools import schema_engine
-
     built = []
     original = schema_engine.ValidationError.__init__
 

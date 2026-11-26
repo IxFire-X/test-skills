@@ -7,7 +7,16 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_cases_import_docs import _to_plan
+from tests.test_finish import _cases_only_effective, _finish
+from tests.test_quality_hints import REJECTED, _assert, _document, _step
 from tests.test_run_report import _finished_run
+from tests.test_zephyr_template import _cases_only_run
+from tools import run_report
+from tools.run_pipeline import main
+from tools.run_report import _identifier, _step_size_lines, _zephyr_import, step_sizes, write_report
+from tools.step_size import RECORD
+from tools.zephyr_template_export import export_import_csv
 
 FREE = "Заказ клиента Иванова на 5000 руб сохранён"
 
@@ -19,9 +28,6 @@ def _both(run_root: Path) -> bytes:
 # 1. the text of a document requirement stays in questions-for-analyst.md ----------------------------------------------
 
 def test_a_gap_of_the_import_is_an_id_in_the_report_and_a_text_in_the_questions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import_docs import _to_plan
-    from tools.run_report import write_report
-
     run = _to_plan(tmp_path, monkeypatch)
     write_report(run["project"], run["root"].name)
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
@@ -33,9 +39,6 @@ def test_a_gap_of_the_import_is_an_id_in_the_report_and_a_text_in_the_questions(
 # 2. the names of the model's assertions ------------------------------------------------------------------------------
 
 def test_an_expectation_hint_of_the_report_is_code_case_and_step_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_quality_hints import REJECTED, _assert, _document, _step
-    from tools import run_report
-
     weak = _step("STEP-x-3", [_assert(FREE, "exists")], method="POST")
     document = _document([_step("STEP-x-1", [_assert("failed", "equals", True)], method="GET")], [_step("STEP-x-2", REJECTED, method="POST")], [weak])
     run_root = _finished_run(tmp_path)
@@ -51,8 +54,6 @@ def test_an_expectation_hint_of_the_report_is_code_case_and_step_only(tmp_path: 
 # 3. step-sizes.jsonl ----------------------------------------------------------------------------------------------------
 
 def test_a_measurement_row_with_free_text_is_counted_and_not_printed(tmp_path: Path) -> None:
-    from tools.run_report import write_report
-
     run_root = _finished_run(tmp_path)
     project = run_root.parents[1]
     good = {"step": "tc-reviewer:canonical", "bytes": 10, "input_bytes": 9, "role_bytes": 1, "role": "tc-reviewer", "files": 2, "tokens_est": 3,
@@ -68,16 +69,11 @@ def test_a_measurement_row_with_free_text_is_counted_and_not_printed(tmp_path: P
 
 @pytest.mark.parametrize("value", ["abc\n", "tc-reviewer:canonical\n", "a b", "", None, 7])
 def test_an_identifier_is_the_whole_string_not_a_line_of_it(value: object) -> None:
-    from tools.run_report import _identifier
-
     assert _identifier(value) is None
     assert _identifier("tc-reviewer:canonical") == "tc-reviewer:canonical"
 
 
 def test_a_step_name_with_a_line_break_is_none_and_a_dash_in_the_table(tmp_path: Path) -> None:
-    from tools.run_report import _step_size_lines, step_sizes
-    from tools.step_size import RECORD
-
     lines = [{"step": "tc-reviewer:canonical\n| x", "bytes": 1}, {"step": "abc\n", "bytes": 2}]
     (tmp_path / RECORD).write_text("".join(json.dumps(row) + "\n" for row in lines), encoding="utf-8")
     rows = step_sizes(tmp_path)
@@ -89,10 +85,6 @@ def test_a_step_name_with_a_line_break_is_none_and_a_dash_in_the_table(tmp_path:
 # 4. zephyr-import.json --------------------------------------------------------------------------------------------------
 
 def test_the_zephyr_import_of_the_report_names_only_columns_of_the_template_and_a_number(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_zephyr_template import _cases_only_run
-    from tools.run_report import _zephyr_import
-    from tools.zephyr_template_export import export_import_csv
-
     project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
     export_import_csv(project, run_root.name, bundle_csv)
     record = json.loads((run_root / "zephyr-import.json").read_text(encoding="utf-8"))
@@ -104,10 +96,6 @@ def test_the_zephyr_import_of_the_report_names_only_columns_of_the_template_and_
 
 @pytest.mark.parametrize("other, shown", [(2, 2), (0, 0), (-1, None), (True, None), ("2", None)])
 def test_the_zephyr_import_of_the_report_counts_the_columns_it_does_not_name(tmp_path: Path, capsys: pytest.CaptureFixture[str], other: object, shown: int | None) -> None:
-    from tests.test_zephyr_template import _cases_only_run
-    from tools.run_report import _zephyr_import
-    from tools.zephyr_template_export import export_import_csv
-
     project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
     export_import_csv(project, run_root.name, bundle_csv)
     record = json.loads((run_root / "zephyr-import.json").read_text(encoding="utf-8"))
@@ -126,9 +114,6 @@ def _zephyr_import_without(run_root: Path, record: dict) -> dict:
 # 5. a spoiled terminal result ---------------------------------------------------------------------------------------------
 
 def test_the_report_is_written_for_a_closed_run_with_a_spoiled_terminal_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _cases_only_effective, _finish
-    from tools.run_pipeline import main
-
     run_root, _attempt_id = _cases_only_effective(tmp_path)
     project = run_root.parents[1]
     assert _finish(project, run_root, capsys)[1]["status"] == "ok"
@@ -142,8 +127,6 @@ def test_the_report_is_written_for_a_closed_run_with_a_spoiled_terminal_result(t
 # 6. the count of source requirements ---------------------------------------------------------------------------------------
 
 def test_the_source_requirements_are_those_of_the_document_not_of_the_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_report
-
     run_root = _finished_run(tmp_path)
     project = run_root.parents[1]
     document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))

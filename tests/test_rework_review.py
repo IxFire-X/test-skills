@@ -8,9 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_review_canaries import _answer as first_answer, _boundary_and_removed, _finding as blocking, _generated_run
+from tests.test_review_canaries import _ids as ids, _open as open_first, _select
+from tests.test_review_open_recovery import _crash_once
+from tests.test_rework_publication import _acc, _lines
 from tests.test_rework_stage import STAGE, _events, _finding, _finish, _ids, _published, _put, _reviewed, _reworked, _status
 from tests.test_stage_steps import _call
-from tools import pilot_state
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state
+from tools.run_report import build_report, render_markdown
 
 REVIEW = "tc-reviewer:rework-1"
 
@@ -99,8 +104,6 @@ def test_a_reworked_case_not_accepted_stays_out_with_the_findings_of_both_rounds
 
 @pytest.mark.parametrize("verdict, over", [("ТРЕБУЕТ ДОРАБОТКИ", True), ("ПРИНЯТО", False)])
 def test_the_report_says_a_rework_began_over_the_limit_and_what_the_limit_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], verdict: str, over: bool) -> None:
-    from tools.run_report import build_report
-
     run = _ready(tmp_path, monkeypatch, capsys)  # one case of the two went back: 50 % against the limit of 20 the run has
     root, one = run["run_root"], _ids(run)[0]
     _open(run, capsys)
@@ -194,8 +197,6 @@ def test_a_new_session_is_independent_and_the_same_session_is_self_and_refused_w
 
 
 def test_the_report_does_not_call_a_review_independent_when_the_second_round_was_self(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_rework_publication import _acc, _lines
-
     acc = _acc("reviewed")
     assert "Ревью: независимое (INDEPENDENT), 2 круга" in _lines({**acc, "rework": {**acc["rework"], "independent": True}})
     assert "Ревью: в той же сессии (SELF), 2 круга" in _lines({**acc, "rework": {**acc["rework"], "independent": False}})
@@ -229,9 +230,6 @@ def test_an_answer_put_in_the_slot_after_the_second_round_was_aborted_is_refused
 
 def _self_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> dict:
     """``_reviewed`` over a run started with ``scan --accept-self-review``, the rework answered."""
-    from tests.test_review_canaries import _answer as first_answer, _boundary_and_removed, _finding as blocking, _generated_run, _ids as ids, _open as open_first, _select
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
     run = _generated_run(tmp_path, self_review=True)
@@ -244,8 +242,6 @@ def _self_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
 
 def test_a_run_that_accepted_self_passes_the_second_round_in_the_same_session_and_the_report_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                                 capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_report import build_report, render_markdown
-
     run = _self_run(tmp_path, monkeypatch, capsys)
     root = run["run_root"]
     code, out = _open(run, capsys, "--fresh-context", "no")  # no label: the one of the generator of the rework, the same session
@@ -260,8 +256,6 @@ def test_a_run_that_accepted_self_passes_the_second_round_in_the_same_session_an
 
 def test_a_second_round_cut_between_the_set_and_the_effective_canonical_is_finished_by_the_repeat_and_the_set_is_not_written_twice(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_review_open_recovery import _crash_once
-
     run = _ready(tmp_path, monkeypatch, capsys)
     root, attempt = run["run_root"], run["attempt_id"]
     _open(run, capsys)
@@ -290,8 +284,6 @@ def test_a_request_of_the_second_round_without_an_answer_and_without_the_result_
 
 def test_a_set_accepted_whole_after_a_second_round_in_the_same_session_is_not_called_independent_by_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                                           capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_report import build_report, render_markdown
-
     run = _self_run(tmp_path, monkeypatch, capsys)  # the first round in a fresh session (verified), the second one in the same
     root = run["run_root"]
     assert _open(run, capsys, "--fresh-context", "no")[0] == 0

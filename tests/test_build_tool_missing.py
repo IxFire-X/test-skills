@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from tests.test_first_run import _fake_mvn, _java_project
+from tools.init_skillsrc import build_tool_missing, ensure_skillsrc
+from tools.ready import check
+from tools.skillsrc_manifest import load_skillsrc
 
 
 def _no_build_tool_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -17,8 +20,6 @@ def _no_build_tool_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_init_without_mvn_names_the_missing_build_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.init_skillsrc import ensure_skillsrc
-
     project = _java_project(tmp_path)
     _no_build_tool_on_path(tmp_path, monkeypatch)
     receipt = ensure_skillsrc(project, {}, True)
@@ -29,9 +30,6 @@ def test_init_without_mvn_names_the_missing_build_tool(tmp_path: Path, monkeypat
 
 
 def test_init_with_mvn_writes_the_test_block_as_before_and_no_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.init_skillsrc import ensure_skillsrc
-    from tools.skillsrc_manifest import load_skillsrc
-
     project = _java_project(tmp_path)
     launcher = _fake_mvn(tmp_path, monkeypatch)
     receipt = ensure_skillsrc(project, {}, True)
@@ -42,9 +40,6 @@ def test_init_with_mvn_writes_the_test_block_as_before_and_no_warning(tmp_path: 
 
 
 def test_ready_names_the_same_reason_in_execution_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.init_skillsrc import ensure_skillsrc
-    from tools.ready import check
-
     project = _java_project(tmp_path)
     _no_build_tool_on_path(tmp_path, monkeypatch)
     ensure_skillsrc(project, {}, True)
@@ -55,8 +50,6 @@ def test_ready_names_the_same_reason_in_execution_build(tmp_path: Path, monkeypa
 
 
 def test_a_gradle_module_without_wrapper_names_the_wrapper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.init_skillsrc import build_tool_missing
-
     project = tmp_path / "gradle"
     project.mkdir()
     reason, fix = build_tool_missing({"root": ".", "stack": {"language": "java", "build_tool": "gradle"}}, project)

@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from tools.discover_project import java_api_level
+from tools.execution_adapters import MAVEN, style_notes
+from tools.project_inventory import _secret_rule
+
 
 def test_java_version_counts_under_any_external_parent(tmp_path: Path) -> None:
-    from tools.discover_project import java_api_level
-
     (tmp_path / "pom.xml").write_text(
         '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'
         "<parent><groupId>org.mybatis</groupId><artifactId>mybatis-parent</artifactId><version>53</version></parent>"
@@ -21,15 +23,11 @@ def test_java_version_counts_under_any_external_parent(tmp_path: Path) -> None:
 
 
 def test_a_license_goal_says_it_rewrites_every_header() -> None:
-    from tools.execution_adapters import MAVEN, style_notes
-
     hint = style_notes(MAVEN, "/p/mvnw", ("license-codehaus",), ("tests/test_generated.py",))["format_hint"]
     assert "license:update-file-header переписывает заголовки лицензий во всех файлах модуля" in hint, hint
 
 
 def test_checks_without_a_format_goal_say_so_instead_of_a_cut_sentence() -> None:
-    from tools.execution_adapters import MAVEN, style_notes
-
     hint = style_notes(MAVEN, "/p/mvnw", ("checkstyle", "apache-rat", "pmd", "spotbugs"), ("tests/test_generated.py",))["format_hint"]
     assert "(checkstyle, apache-rat, pmd, spotbugs): команды автоформатирования для этих проверок нет" in hint, hint
     assert "затем проверьте:" in hint and "): затем" not in hint
@@ -45,13 +43,9 @@ def test_checks_without_a_format_goal_say_so_instead_of_a_cut_sentence() -> None
     (b'<input name="password" type="password"/>', False),
 ])
 def test_a_password_in_a_spring_xml_attribute_is_a_secret(text: bytes, secret: bool) -> None:
-    from tools.project_inventory import _secret_rule
-
     rule = _secret_rule(Path("applicationContext.xml"), text, "src/main/resources/applicationContext.xml")
     assert (rule == ("password-assignment-v1", "token-signature")) is secret, rule
 
 
 def test_a_jsp_form_field_is_not_a_password() -> None:
-    from tools.project_inventory import _secret_rule
-
     assert _secret_rule(Path("SignonForm.jsp"), b'<input name="password" value="x"/>', "src/main/webapp/SignonForm.jsp") is None

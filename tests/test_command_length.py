@@ -4,13 +4,18 @@ realworld-b: 74 ``--tests`` flags made 9011 characters; ``gradlew.bat`` goes thr
 materialize said ok.  Only the printed form is shortened: the closed request, its digest and the reports it is held against stay per method."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from tests.p4_flow import flow_args
+from tests.test_exec_prepares import _project
 from tools import exec_commands
 from tools.execution_adapters import GRADLE, MAVEN, PYTEST, ExecutionRequest, command_for
+from tools.pilot_state import read_attempt_receipt
 from tools.run_pipeline import HostStop
+from tools.run_tests import _java_class, _java_node
 
 
 PROJECT = Path("/p")
@@ -91,8 +96,6 @@ def test_a_class_with_a_nested_class_that_holds_a_test_is_not_shortened() -> Non
 
 
 def test_the_methods_of_a_nested_class_are_never_generated_symbols(tmp_path: Path) -> None:
-    from tools.run_tests import _java_class, _java_node
-
     text = _java_artifacts({CLASS: 1}, nested="tests")["generated_files"][0]["content"]
     parsed = _java_class(Path("RealApiRequirementsTest.java"), text)
     assert parsed is not None
@@ -112,11 +115,6 @@ def test_pytest_tests_of_one_file_are_printed_as_the_file() -> None:
 
 
 def test_materialize_refuses_a_command_that_cannot_be_listed_shorter(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    import json
-
-    from tests.p4_flow import flow_args
-    from tests.test_exec_prepares import _project
-    from tools.pilot_state import read_attempt_receipt
 
     project, run_root, attempt_id = _project(tmp_path)
     monkeypatch.setattr(exec_commands, "_LINE_LIMIT", 10)

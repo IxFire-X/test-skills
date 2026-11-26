@@ -1,7 +1,12 @@
+from dataclasses import replace
 from pathlib import Path
 import os
 
 import pytest
+
+from tools.execution_adapters import GRADLE, MAVEN_STYLE_SKIPS, PYTEST, AdapterRequestError, build_request
+from tools.execution_adapters import request_digest
+from tools.run_tests import _report, _request_is_attempt_local, _request_report_path
 
 
 def _module(tmp_path: Path, adapter_id: str, runtime: str) -> dict:
@@ -29,8 +34,6 @@ def _module(tmp_path: Path, adapter_id: str, runtime: str) -> dict:
     ],
 )
 def test_closed_adapters_build_module_native_argv_only(tmp_path: Path, adapter_id: str, runtime: str, selectors: tuple[str, ...], expected: tuple[str, ...]):
-    from tools.execution_adapters import build_request
-
     request = build_request(adapter_id, _module(tmp_path, adapter_id, runtime), [{"selector": value} for value in selectors])
     assert request.adapter_id == adapter_id
     assert request.cwd == str(tmp_path.resolve())
@@ -43,8 +46,6 @@ def test_closed_adapters_build_module_native_argv_only(tmp_path: Path, adapter_i
 
 
 def test_adapter_rejects_unknown_runtime_escape_shell_fields_and_unreviewed_targets(tmp_path: Path):
-    from tools.execution_adapters import AdapterRequestError, build_request
-
     module = _module(tmp_path, "pytest:selected-symbols-v1", ".venv/python")
     module["test"]["argv_template"] = "pytest {target}"
     with pytest.raises(AdapterRequestError, match="NOT_RUNNABLE"):
@@ -58,8 +59,6 @@ def test_adapter_rejects_unknown_runtime_escape_shell_fields_and_unreviewed_targ
 
 
 def test_prestart_runtime_or_configuration_failure_is_not_runnable(tmp_path: Path):
-    from tools.execution_adapters import build_request
-
     missing = {"module_root": str(tmp_path), "test": {"adapter_id": "pytest:selected-symbols-v1", "interpreter": "missing/python", "build_profile": "default", "adapter_parameters": {}}}
     with pytest.raises(Exception):
         build_request("pytest:selected-symbols-v1", missing, [{"selector": "tests/test_a.py::test_a"}])
@@ -67,8 +66,6 @@ def test_prestart_runtime_or_configuration_failure_is_not_runnable(tmp_path: Pat
 
 def test_the_request_is_token_argv_only_never_a_shell_string(tmp_path: Path):
     """P4b: nothing launches the request; what the person runs is the argv, token by token, and the request has no shell string to hand over."""
-    from tools.execution_adapters import build_request
-
     request = build_request("pytest:selected-symbols-v1", _module(tmp_path, "pytest:selected-symbols-v1", ".venv/python"), [{"selector": "tests/test_a.py::test_a"}])
     assert isinstance(request.argv, tuple) and all(isinstance(token, str) and token for token in request.argv)
     assert request.argv[0] == request.executable and not any(token != token.strip() for token in request.argv)
@@ -77,8 +74,6 @@ def test_the_request_is_token_argv_only_never_a_shell_string(tmp_path: Path):
 
 def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tmp_path: Path):
     """Gradle's --tests syntax is Class.method, never JUnit's Class#method."""
-    from tools.execution_adapters import GRADLE, build_request
-
     request = build_request(
         GRADLE,
         _module(tmp_path, GRADLE, "gradlew"),
@@ -88,16 +83,12 @@ def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tm
     assert request.selectors == ("pkg.SampleTest#works",)
     assert request.argv[-2:] == ("--tests", "pkg.SampleTest.works")
     assert request.argv[1:3] == ("cleanTest", "test") and "--rerun-tasks" not in request.argv
-    from tools.run_tests import _request_report_path
     assert _request_report_path(request) == tmp_path.resolve() / "build/test-results/test"
-    from dataclasses import replace
     assert _request_report_path(replace(request, build_profile="", argv=tuple("-Pprofile=" if part == "-Pprofile=default" else part for part in request.argv))) is None
 
 
 def test_many_to_many_case_links_execute_each_exact_symbol_once(tmp_path: Path):
     """Several reviewed cases may map to one generated symbol without rerunning it."""
-    from tools.execution_adapters import PYTEST, build_request
-
     request = build_request(
         PYTEST,
         _module(tmp_path, PYTEST, ".venv/python"),
@@ -113,9 +104,6 @@ def test_many_to_many_case_links_execute_each_exact_symbol_once(tmp_path: Path):
 
 def test_runner_receipt_keeps_closed_request_and_report_digest_evidence(tmp_path: Path):
     """A V5 result must expose the exact safe launch facts that were executed."""
-    from tools.execution_adapters import PYTEST, build_request, request_digest
-    from tools.run_tests import _report
-
     request = build_request(
         PYTEST,
         _module(tmp_path, PYTEST, ".venv/python"),
@@ -155,18 +143,12 @@ def test_runner_receipt_keeps_closed_request_and_report_digest_evidence(tmp_path
 
 def test_request_digest_binds_every_closed_launch_fact(tmp_path: Path):
     """Any executable launch change must invalidate the request digest."""
-    from dataclasses import replace
-    from tools.execution_adapters import PYTEST, build_request, request_digest
-
     request = build_request(PYTEST, _module(tmp_path, PYTEST, ".venv/python"), [{"selector": "tests/test_a.py::test_a"}])
     assert request_digest(request) != request_digest(replace(request, timeout_seconds=request.timeout_seconds + 1))
     assert request_digest(request).startswith("sha256:")
 
 
 def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path, monkeypatch):
-    from tools.execution_adapters import MAVEN_STYLE_SKIPS, build_request
-    from tools.run_tests import _request_is_attempt_local, _request_report_path
-
     executable = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
     executable.write_text("runtime", encoding="utf-8")
     executable.chmod(0o755)
@@ -191,8 +173,6 @@ def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path
 @pytest.mark.parametrize("char", list('%^"()!|><;&$`') + ["\n", "\r"])
 def test_a_selector_or_profile_with_a_shell_character_is_not_runnable(tmp_path: Path, char: str):
     """V4b: the characters cmd.exe reads as expansion, escape, quote, group and delayed expansion are refused like the unix ones."""
-    from tools.execution_adapters import AdapterRequestError, build_request
-
     adapter = "maven-wrapper:selected-symbols-v1"
     with pytest.raises(AdapterRequestError, match="NOT_RUNNABLE"):
         build_request(adapter, _module(tmp_path, adapter, "mvnw"), [{"selector": f"pkg.SampleTest#works{char}"}])
@@ -204,7 +184,5 @@ def test_a_selector_or_profile_with_a_shell_character_is_not_runnable(tmp_path: 
 
 @pytest.mark.parametrize("selector", ["pkg.SampleTest#works", "tests/test_a.py::TestA::test_a[1-b]", "pkg.Outer.Inner#m_1"])
 def test_a_plain_selector_still_builds(tmp_path: Path, selector: str):
-    from tools.execution_adapters import build_request
-
     adapter = "maven-wrapper:selected-symbols-v1"
     assert build_request(adapter, _module(tmp_path, adapter, "mvnw"), [{"selector": selector}]).selectors == (selector,)

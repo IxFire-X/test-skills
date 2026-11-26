@@ -10,12 +10,20 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
 import pytest
 
-from tests.test_build_style import _module
+from tests.test_build_style import _module, _petclinic_like
+from tests.test_context_filter import _project, _scan
+from tests.test_ready_b2 import _big_task_document
+from tools import project_inventory
+from tools.execution_adapters import GRADLE, MAVEN, build_request, style_notes
+from tools.project_inventory import _secret_rule
+from tools.ready import style_rows
 
 LEAK = {
     "src/main/resources/secrets/db.txt": "password=hunter2!\n",
@@ -87,8 +95,6 @@ _FLAGS = frozenset({"true", "false", "yes", "no", "on", "off"})
 
 @pytest.mark.parametrize("suffix", [".properties", ".yml"])
 def test_the_password_rule_catches_everything_the_old_one_did_except_flags(suffix: str) -> None:
-    from tools.project_inventory import _secret_rule
-
     separator = "=" if suffix == ".properties" else ": "
     missed = []
     for key in _KEYS:
@@ -115,8 +121,6 @@ def test_the_password_rule_catches_everything_the_old_one_did_except_flags(suffi
     ("a.properties", "password=hunter2!\r\nname=x\r\n"),
 ])
 def test_new_password_forms_are_caught(name: str, text: str) -> None:
-    from tools.project_inventory import _secret_rule
-
     assert _secret_rule(Path(name), text.encode("utf-8"), "src/main/resources/" + name) == ("password-assignment-v1", "token-signature")
 
 
@@ -127,8 +131,6 @@ def test_new_password_forms_are_caught(name: str, text: str) -> None:
     ("a.yml", "with:\n  password: ${{ secrets.DOCKERHUB_TOKEN }}\n  CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}\n"),
 ])
 def test_empty_values_and_placeholders_are_no_secret(name: str, text: str) -> None:
-    from tools.project_inventory import _secret_rule
-
     assert _secret_rule(Path(name), text.encode("utf-8"), "src/main/resources/" + name) is None
 
 
@@ -138,8 +140,6 @@ def test_empty_values_and_placeholders_are_no_secret(name: str, text: str) -> No
 
 
 def test_gradle_runs_the_tests_past_the_build_cache(tmp_path: Path) -> None:
-    from tools.execution_adapters import GRADLE, build_request
-
     request = build_request(GRADLE, _module(tmp_path, GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
     assert request.argv[1:4] == ("cleanTest", "test", "--no-build-cache")
 
@@ -150,9 +150,6 @@ def test_gradle_runs_the_tests_past_the_build_cache(tmp_path: Path) -> None:
 
 
 def test_a_task_document_over_a_batch_may_raise_the_batch_over_the_step_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_ready_b2 import _big_task_document
-    from tests.test_context_filter import _project, _scan
-
     project = _project(tmp_path)
     _big_task_document(project)
     _code, scan = _scan(project, monkeypatch)
@@ -161,8 +158,6 @@ def test_a_task_document_over_a_batch_may_raise_the_batch_over_the_step_budget(t
 
 
 def test_the_format_hint_says_what_the_command_formats() -> None:
-    from tools.execution_adapters import MAVEN, style_notes
-
     kept = ("src/test/java/x/GenTests.java", "src/test/java/x/OtherTests.java")
     whole = style_notes(MAVEN, "/p/mvnw", ("spring-javaformat",), kept)["format_hint"]
     assert "весь модуль" in whole and all(path in whole for path in kept)
@@ -176,9 +171,6 @@ def test_the_format_hint_says_what_the_command_formats() -> None:
 
 def test_the_project_checks_row_names_every_file_outside_the_projects_git(tmp_path: Path) -> None:
     """FaT-H2a P6: RAT fell on a task document, not on .tools/ — the row names all such files."""
-    from tests.test_build_style import _petclinic_like
-    from tools.ready import style_rows
-
     project, module = _petclinic_like(tmp_path)
     row = {row["id"]: row for row in style_rows(project, module)}["execution:project-checks"]
     assert "нет в git проекта" in row["message"] and "новые документы" in row["message"] and ".pilot-runs/" in row["message"]
@@ -194,8 +186,6 @@ def test_the_project_checks_row_names_every_file_outside_the_projects_git(tmp_pa
 ])
 def test_a_variable_or_a_property_name_in_source_is_no_secret(text: str) -> None:
     """FaT-H2a P5: Account.java, User.java, jsoup's tree builders and commons-lang fell out on these forms."""
-    from tools.project_inventory import _secret_rule
-
     assert _secret_rule(Path("Account.java"), text.encode("utf-8"), "src/main/java/app/Account.java") is None
 
 
@@ -206,15 +196,11 @@ def test_a_variable_or_a_property_name_in_source_is_no_secret(text: str) -> None
     ("Keys.java", 'String k = "AKIAABCDEFGHIJKLMNOP";\n'),
 ])
 def test_a_string_literal_secret_in_source_is_still_left_out(name: str, text: str) -> None:
-    from tools.project_inventory import _secret_rule
-
     assert _secret_rule(Path(name), text.encode("utf-8"), "src/" + name) is not None
 
 
 def test_a_literal_with_spaces_in_source_is_still_a_secret() -> None:
     """jsoup ConnectTest: `String password = "Netscape engineers are weenies!";` fell out before and still does."""
-    from tools.project_inventory import _secret_rule
-
     text = b'String password = "Netscape engineers are weenies!";\n'
     assert _secret_rule(Path("ConnectTest.java"), text, "src/test/java/ConnectTest.java") == ("token-assignment-v1", "token-signature")
 
@@ -261,9 +247,6 @@ def _maven_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, password: str) 
 
 def test_a_pom_with_a_literal_password_leaves_the_context_but_binds_the_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """pom.xml is a closed manifest; a flyway <password>sa</password> keeps it out of the model, never stops local-pilot."""
-    import hashlib
-    import json
-
     project, code, scan = _maven_scan(tmp_path / "literal", monkeypatch, "sa")
     assert code == 0 and scan["policy_profile"] == "local-pilot-v1" and "execution_skipped" not in scan, scan
     root = Path(scan["run_root"])
@@ -286,6 +269,4 @@ def test_a_pom_with_a_literal_password_leaves_the_context_but_binds_the_baseline
 
 def test_the_context_size_fixes_call_the_step_budget_only_a_warning() -> None:
     """FaT-HT (hunt 3, 3.13): since FaT-RV the step budget only warns — no refusal text calls it a ceiling."""
-    from tools import project_inventory
-
     assert "не выше бюджета шага" not in project_inventory._SIZE_FIX and "только предупреждение" in project_inventory._SIZE_FIX

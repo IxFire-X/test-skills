@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_first_run import _python_project
+from tools import execution_gate, pack_registry, pilot_state
+from tools.schema_validation import load_json_strict, schema_diagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = "services/api/docs/feature.md"
@@ -33,8 +35,6 @@ SITECUSTOMIZE = (
 
 @pytest.fixture(scope="module")
 def cases_only_pack(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    from tools import pack_registry
-
     pack = tmp_path_factory.mktemp("cases-only") / "pack"
     paths = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only")
     for path in (*paths, "release/manifest.json"):
@@ -116,8 +116,6 @@ def test_the_drift_of_a_cases_only_run_is_the_inventorys_and_names_the_path(tmp_
 
 
 def test_the_project_state_of_a_run_starts_no_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     project, _marker = _git_project(tmp_path)
 
     def refuse(*_args, **_kwargs):
@@ -132,9 +130,6 @@ def test_a_null_project_state_is_valid_and_is_not_a_scenario_observation(monkeyp
     """The readers of ``project_state``: the observation of a ``cases-only-v1`` run (``None`` is "not taken": no observation is
     published, the answer is ``None``) and its validation.  A ``None`` state of a ``local-pilot-v1`` run is the precondition of
     ``tree-preservation`` (V4a), which a cases-only attempt never takes."""
-    from tools import pilot_state
-    from tools.schema_validation import load_json_strict, schema_diagnostics
-
     manifest = {"schema_version": "1.0.0", "run_id": "a" * 32, "project": str(tmp_path), "policy_profile": "cases-only-v1",
                 "authorization_digest": "sha256:" + "0" * 64, "project_state": None}
     manifest["digest"] = pilot_state._sealed({key: value for key, value in manifest.items()})["digest"]
@@ -153,8 +148,6 @@ def test_a_null_project_state_is_valid_and_is_not_a_scenario_observation(monkeyp
 
 @pytest.mark.parametrize("missing", ["exec_commands", "exec_runner"])
 def test_the_execution_is_available_only_with_both_files(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
-    from tools import execution_gate
-
     assert tuple(execution_gate.EXEC_MODULES) == ("exec_commands", "exec_runner")
     assert execution_gate.execution_available() is True
     original = execution_gate._present
@@ -163,8 +156,6 @@ def test_the_execution_is_available_only_with_both_files(monkeypatch: pytest.Mon
 
 
 def test_every_exec_file_on_disk_is_listed_by_the_gate_and_left_out_of_the_cases_only_profile() -> None:
-    from tools import execution_gate, pack_registry
-
     on_disk = sorted(path.stem for path in (ROOT / "tools").glob("exec_*.py"))
     assert on_disk == sorted(execution_gate.EXEC_MODULES), "a new exec_ file must be in EXEC_MODULES (and then it is left out of the profile)"
     assert all(pack_registry.is_cases_only_excluded(f"tools/{name}.py") for name in on_disk)

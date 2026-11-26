@@ -7,6 +7,17 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import run_tmp
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
+from tests.test_requirement_traceability import canonical_fixture
+from tests.test_run_report import _finished_run
+from tests.test_test_design import _designed
+from tools.autotest_hints import autotest_hints, capped_autotest_hints, main
+from tools.batch_assembly import _ASSEMBLY_SCHEMA, assemble_candidate
+from tools.run_report import expectation_summary, render_expectations, write_report
+from tools.schema_validation import schema_diagnostics
+from tools.test_design_hints import HINT_BYTES, capped, code_hints
+
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
 pytestmark = pytest.mark.contract
@@ -143,10 +154,6 @@ def test_only_the_last_write_of_a_case_is_judged() -> None:
 # --- shape, order, silence on a strong set --------------------------------------------------------
 
 def test_hints_carry_ids_only_and_fit_the_receipt_schema() -> None:
-    from tools.batch_assembly import _ASSEMBLY_SCHEMA
-    from tools.schema_validation import schema_diagnostics
-    from tools.test_design_hints import capped
-
     document = _document([_step("STEP-x-1", [_assert("failed", "equals", True)], method="GET")],
                          [_step("STEP-x-2", REJECTED, method="POST")], [_step("STEP-x-3", GENERIC_OK, method="POST")])
     document["test_cases"][0]["case_id"] = "TC-" + "y" * 300
@@ -162,9 +169,6 @@ def test_hints_carry_ids_only_and_fit_the_receipt_schema() -> None:
 
 
 def test_code_hints_put_a_vague_expectation_after_a_missing_negative_case_and_before_a_boundary() -> None:
-    from tests.test_test_design import _designed
-    from tools.test_design_hints import code_hints
-
     document = _designed()
     vague = _document([_step("STEP-x-1", [_assert("failed", "equals", True)], method="GET")])
     document["operation_capabilities"] = vague["operation_capabilities"]
@@ -179,16 +183,10 @@ def test_the_strong_example_set_gives_no_expectation_hints() -> None:
 
 
 def test_old_fixtures_give_no_expectation_hints() -> None:
-    from tests.test_requirement_traceability import canonical_fixture
-    from tests.test_test_design import _designed
-
     assert _hints(canonical_fixture()) == [] and _hints(_designed()) == []
 
 
 def test_the_assembly_receipt_carries_a_vague_expectation() -> None:
-    from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
-    from tools.batch_assembly import assemble_candidate
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
@@ -210,8 +208,6 @@ def test_the_assembly_receipt_carries_a_vague_expectation() -> None:
 
 
 def test_the_report_lists_expectation_hints_without_case_text() -> None:
-    from tools.run_report import expectation_summary, render_expectations
-
     document = _document([_step("STEP-x-1", [_assert("failed", "equals", True)], method="GET")], [_step("STEP-x-2", REJECTED, method="POST")])
     summary = expectation_summary(document)
     assert summary["hints"] == {"TD_VAGUE_EXPECTATION": 1, "TD_NEGATIVE_NO_STATE_CHECK": 1}
@@ -349,8 +345,6 @@ def test_python_weak_assertions_are_found_with_their_lines() -> None:
 
 
 def test_a_hint_names_the_assertion_id_on_its_line_and_never_the_code() -> None:
-    from tools.autotest_hints import autotest_hints
-
     hints = autotest_hints({"generated_files": [{"file_id": "FILE-a", "language": "java", "content": JAVA}, {"file_id": "FILE-b", "language": "kotlin", "content": "assertTrue(true)"}]})
     by_rule = {hint["rule"]: hint for hint in hints if hint["rule"] == "path-prefix"}
     assert by_rule["path-prefix"]["assertion_id"] == "ASSERT-001-3"
@@ -359,9 +353,6 @@ def test_a_hint_names_the_assertion_id_on_its_line_and_never_the_code() -> None:
 
 
 def test_autotest_hints_are_capped() -> None:
-    from tools.autotest_hints import autotest_hints, capped_autotest_hints
-    from tools.test_design_hints import HINT_BYTES
-
     content = "\n".join(f'        assertTrue(true); // ASSERT-{index:04d}' for index in range(500))
     kept = capped_autotest_hints(autotest_hints({"generated_files": [{"file_id": "FILE-a", "language": "java", "content": content}]}))
     assert len(json.dumps(kept, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= HINT_BYTES
@@ -369,9 +360,6 @@ def test_autotest_hints_are_capped() -> None:
 
 
 def test_the_cli_prints_json_and_never_fails_on_hints(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.helpers import run_tmp
-    from tools.autotest_hints import main
-
     tmp_path = run_tmp(tmp_path)
     artifact = tmp_path / "automation.json"
     artifact.write_text(json.dumps({"artifacts": {"generated_files": [{"file_id": "FILE-a", "language": "java", "content": JAVA}]}}), encoding="utf-8")
@@ -384,9 +372,6 @@ def test_the_cli_prints_json_and_never_fails_on_hints(tmp_path: Path, capsys: py
 
 @pytest.mark.slow
 def test_the_report_counts_weak_assertions_of_the_run_automation(tmp_path: Path) -> None:
-    from tests.test_run_report import _finished_run
-    from tools.run_report import write_report
-
     run_root = _finished_run(tmp_path)
     project = run_root.parents[1]
     write_report(project, run_root.name)

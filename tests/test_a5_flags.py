@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_pack_profile import copy_profile
+from tools import api
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,8 +36,6 @@ OLD_REVIEW_COMMANDS = ("review-open", "review-select", "review-publish", "review
 
 
 def test_the_old_commands_of_the_review_are_not_commands_of_the_api() -> None:
-    from tools import api
-
     assert not set(OLD_REVIEW_COMMANDS) & set(api.COMMANDS)
     assert not (ROOT / "tools" / "review_legacy.py").exists()
     flags = {option if isinstance(option, str) else option[0] for _handler, options, _check in api.COMMANDS.values() for option in options}

@@ -1,11 +1,14 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
 from tools import init_skillsrc
+from tools.discover_project import discover_project
+from tools.schema_validation import schema_diagnostics
 from tools.skillsrc_manifest import SkillsrcError, parse_skillsrc_bytes, resolve_module_root
 
 
@@ -53,9 +56,6 @@ def _patch_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_path: Path, monkeypatch) -> None:
-    import os
-    from tools.discover_project import discover_project
-
     source = tmp_path / "src/main/java/App.java"
     source.parent.mkdir(parents=True)
     source.write_text("class App {}", encoding="utf-8")
@@ -65,7 +65,6 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
         (tmp_path / name).chmod(0o755)
     discovery = discover_project(tmp_path)
     assert discovery["status"] == "ready", discovery
-    from tools.schema_validation import schema_diagnostics
     pack = Path(__file__).resolve().parents[1]
     assert schema_diagnostics(discovery, pack / "schemas/project-discovery-output.schema.json", pack) == []
     compiled = init_skillsrc.compile_skillsrc(discovery, {}, tmp_path)

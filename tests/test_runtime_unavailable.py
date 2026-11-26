@@ -4,12 +4,16 @@ pq1-b1: no Maven on PATH made materialize answer «baseline is invalid or unread
 accepted cases and tests negatively.  A damaged baseline keeps its closed refusal."""
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 
 from tests.test_closure_deadlocks import _run, _status
 from tests.test_exec_prepares import _project
+from tests.test_scan_guard import _runs, _scan
+from tools import project_inventory
+from tools.project_inventory import InventoryError, RuntimeUnavailableError, module_runtime_path, system_maven_path
 
 
 
@@ -34,9 +38,6 @@ def test_a_missing_module_python_names_the_cause_and_leaves_the_run_open(tmp_pat
 
 
 def test_a_system_maven_missing_from_path_reaches_the_refusal(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import project_inventory
-    from tools.project_inventory import RuntimeUnavailableError
-
     def gone(*_args, **_kwargs):
         raise RuntimeUnavailableError("system Maven is unavailable on PATH")
 
@@ -48,9 +49,6 @@ def test_a_system_maven_missing_from_path_reaches_the_refusal(tmp_path: Path, ca
 
 
 def test_a_damaged_baseline_still_closes_the_attempt_and_says_why(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import project_inventory
-    from tools.project_inventory import InventoryError
-
     def damaged(*_args, **_kwargs):
         raise InventoryError("execution baseline readback is invalid")
 
@@ -64,9 +62,6 @@ def test_a_damaged_baseline_still_closes_the_attempt_and_says_why(tmp_path: Path
 
 
 def test_the_closed_tool_paths_report_a_missing_runtime_as_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import shutil
-
-    from tools.project_inventory import InventoryError, RuntimeUnavailableError, module_runtime_path, system_maven_path
 
     monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
     with pytest.raises(RuntimeUnavailableError, match="system Maven is unavailable on PATH"):
@@ -81,8 +76,6 @@ def test_the_closed_tool_paths_report_a_missing_runtime_as_unavailable(tmp_path:
 
 def test_a_new_run_starts_from_the_state_the_fix_describes(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """Accepted automation, materialize refused, no runtime: the second way out the fix names is a new run, and it starts."""
-    from tests.test_scan_guard import _runs, _scan
-
     project, root, _attempt = _project(tmp_path)
     (project / "README.md").write_text("Пользователь видит список.\n", encoding="utf-8")
     _venv(project, present=False)

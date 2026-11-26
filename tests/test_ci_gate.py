@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from tools import ci_gate
+
 pytestmark = pytest.mark.contract
 
 
 def test_ci_gate_runs_the_required_checks_in_order(pack_root: Path, monkeypatch) -> None:
-    from tools import ci_gate
-
     calls = []
 
     def run(command, **kwargs):
@@ -27,8 +27,6 @@ def test_ci_gate_runs_the_required_checks_in_order(pack_root: Path, monkeypatch)
 
 
 def test_ci_gate_stops_after_the_first_failed_check(pack_root: Path, monkeypatch) -> None:
-    from tools import ci_gate
-
     statuses = iter((0, 1, 0))
     calls = []
 
@@ -46,8 +44,6 @@ def test_ci_gate_stops_after_the_first_failed_check(pack_root: Path, monkeypatch
 
 
 def test_ci_gate_reports_a_missing_runner_as_not_runnable(pack_root: Path, monkeypatch, capsys) -> None:
-    from tools import ci_gate
-
     def run(command, **kwargs):
         raise OSError("runner unavailable")
 
@@ -58,8 +54,6 @@ def test_ci_gate_reports_a_missing_runner_as_not_runnable(pack_root: Path, monke
 
 
 def test_ci_gate_reports_a_missing_required_tool_as_not_runnable(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools import ci_gate
-
     monkeypatch.setattr(ci_gate.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not run")))
 
     assert ci_gate.main(["--root", str(tmp_path)]) == 2
@@ -67,8 +61,6 @@ def test_ci_gate_reports_a_missing_required_tool_as_not_runnable(tmp_path: Path,
 
 
 def test_ci_gate_reports_a_delivery_copy_without_tests_as_not_runnable(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools import ci_gate
-
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "contract_check.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "render_contract_docs.py").write_text("", encoding="utf-8")

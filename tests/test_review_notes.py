@@ -8,6 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_automation_revision_budget import automated_document
+from tests.test_review_view import _edit
+from tools.revision_selection import select_effective_document
+from tools.run_pipeline import cmd_finish, cmd_status
+from tools.run_report import review_notes, write_report
+from tools.schema_validation import schema_diagnostics
+
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas" / "tc-reviewer-output.schema.json"
 MESSAGE = "Формулировка ожидаемого результата неточна: уточнить у аналитика единицы веса."
@@ -38,9 +45,6 @@ def _schema_errors(review: dict) -> list:
 # --- the contract: three cases ---------------------------------------------------------------------
 
 def test_accepted_with_warning_and_info_is_valid_and_selects_the_candidate_byte_for_byte() -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tools.revision_selection import select_effective_document
-
     document = automated_document()
     case_id = document["test_cases"][0]["case_id"]
     review = _review(document, "ПРИНЯТО", [_finding("WARNING", case_id), _finding("INFO", case_id, code="ANALYST_QUESTION")])
@@ -51,16 +55,12 @@ def test_accepted_with_warning_and_info_is_valid_and_selects_the_candidate_byte_
 
 
 def test_accepted_with_a_blocking_finding_is_invalid() -> None:
-    from tests.test_automation_revision_budget import automated_document
-
     document = automated_document()
     review = _review(document, "ПРИНЯТО", [_finding("WARNING", "TC-x"), _finding("BLOCKING", "TC-x")])
     assert _schema_errors(review)
 
 
 def test_accepted_with_corrections_or_a_successor_stays_invalid() -> None:
-    from tests.test_automation_revision_budget import automated_document
-
     document = automated_document()
     review = _review(document, "ПРИНЯТО", [_finding("WARNING", "TC-x")])
     corrected = copy.deepcopy(review)
@@ -73,9 +73,6 @@ def test_accepted_with_corrections_or_a_successor_stays_invalid() -> None:
 
 
 def test_accepted_without_findings_is_as_before() -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tools.revision_selection import select_effective_document
-
     document = automated_document()
     review = _review(document, "ПРИНЯТО", [])
     assert _schema_errors(review) == []
@@ -108,8 +105,6 @@ def _two_notes(document: dict) -> list:
 
 
 def test_the_notes_are_read_from_the_selecting_review_with_safe_codes_and_known_ids(tmp_path: Path) -> None:
-    from tools.run_report import review_notes
-
     run_root, attempt_id, document = _selected_run(tmp_path, _two_notes)
     case_id = document["test_cases"][0]["case_id"]
     notes = review_notes(run_root, attempt_id)
@@ -120,8 +115,6 @@ def test_the_notes_are_read_from_the_selecting_review_with_safe_codes_and_known_
 
 
 def test_the_report_lists_the_notes_without_the_model_text(tmp_path: Path) -> None:
-    from tools.run_report import write_report
-
     run_root, _attempt_id, document = _selected_run(tmp_path, _two_notes)
     write_report(tmp_path, run_root.name)
     report_json = (run_root / "report.json").read_text(encoding="utf-8")
@@ -136,9 +129,6 @@ def test_the_report_lists_the_notes_without_the_model_text(tmp_path: Path) -> No
 
 
 def test_auto_fix_notes_are_shown_too(tmp_path: Path) -> None:
-    from tests.test_review_view import _edit
-    from tools.run_report import review_notes
-
     run_root, attempt_id, document = _selected_run(
         tmp_path, lambda doc: [_finding("WARNING", doc["test_cases"][0]["case_id"])], edits_for=lambda doc: [_edit(doc)])
     notes = review_notes(run_root, attempt_id)
@@ -146,8 +136,6 @@ def test_auto_fix_notes_are_shown_too(tmp_path: Path) -> None:
 
 
 def test_finish_and_status_give_the_count_and_the_journal_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_finish, cmd_status
-
     run_root, attempt_id, _document = _selected_run(tmp_path, _two_notes)
     cmd_status(SimpleNamespace(project=str(tmp_path), run=run_root.name))
     status = json.loads(capsys.readouterr().out)
@@ -160,9 +148,6 @@ def test_finish_and_status_give_the_count_and_the_journal_path(tmp_path: Path, c
 
 
 def test_no_notes_no_section_and_no_field(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_finish, cmd_status
-    from tools.run_report import review_notes, write_report
-
     run_root, attempt_id, _document = _selected_run(tmp_path, lambda doc: [])
     assert review_notes(run_root, attempt_id)["count"] == 0
     cmd_status(SimpleNamespace(project=str(tmp_path), run=run_root.name))
@@ -202,8 +187,6 @@ def _autotest_note(severity: str = "WARNING") -> dict:
 
 
 def test_an_accepted_autotest_review_may_carry_a_warning_but_never_a_blocking_finding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.schema_validation import schema_diagnostics
-
     _run_root, _attempt_id, reviewed = _autotest_run(tmp_path, monkeypatch, [_autotest_note("WARNING"), _autotest_note("INFO")])
     assert schema_diagnostics(reviewed, AUTOTEST_SCHEMA, ROOT) == []
     blocking = copy.deepcopy(reviewed)
@@ -216,9 +199,6 @@ def test_an_accepted_autotest_review_may_carry_a_warning_but_never_a_blocking_fi
 
 def test_autotest_notes_reach_the_report_the_questions_and_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                   capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_status
-    from tools.run_report import review_notes, write_report
-
     run_root, attempt_id, _reviewed = _autotest_run(tmp_path, monkeypatch, [_autotest_note()])
     notes = review_notes(run_root, attempt_id, "autotests")
     assert notes["count"] == 1 and notes["items"] == [

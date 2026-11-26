@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from tools.run_report import _acceptance_lines
+
 
 def _acceptance(**changes) -> dict:
     base = {"verdict_given": "ТРЕБУЕТ ДОРАБОТКИ", "outcome": "PARTIAL", "reason": None, "generated": 66, "accepted": 65, "removed": 1, "share": 20,
@@ -85,8 +87,6 @@ def test_a_failed_run_of_the_tests_is_not_called_accepted_in_the_first_line() ->
 
 
 def test_a_run_with_findings_says_the_build_is_red_and_how_to_leave_them_out_and_where_the_list_is() -> None:
-    from tools.run_report import _acceptance_lines
-
     report = {"acceptance": _acceptance(outcome="ACCEPTED_WHOLE", accepted=76, generated=76, removed=0), "review_canaries": None, "reviewer_isolation_state": "verified",
               "counts": {"automation": True, "execution": "FAIL", "accepted": False}, "execution_stats": {"total": 75, "passed": 57, "failed": 18, "errors": 0}, "quarantine": [{}] * 18}
     text = "\n".join(_acceptance_lines(report))
@@ -105,8 +105,6 @@ def test_the_unit_of_the_tests_in_the_first_line_is_declined_after_from(total: i
 
 
 def test_a_set_accepted_in_part_names_the_unit_of_the_tests_too() -> None:
-    from tools.run_report import _acceptance_lines
-
     report = {"acceptance": _acceptance(), "review_canaries": None, "reviewer_isolation_state": "verified", "quarantine": [],
               "counts": {"automation": True, "execution": "PASS", "accepted": False}, "execution_stats": {"total": 57, "passed": 57, "failed": 0, "errors": 0}}
     assert "Автотесты: прошли 57 из 57 методов. Прогон не принят." in "\n".join(_acceptance_lines(report))
