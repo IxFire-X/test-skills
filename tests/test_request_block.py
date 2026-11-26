@@ -88,6 +88,15 @@ def test_the_v5_bytes_stay() -> None:
         "a2c0228dee0585e891cb5c7dd5b3cc15e936e712f51bdbc48d8c51d6a2632b78", "a76975e3318a38bf5e9dd00753a24b4a3c5af80a87829a381aa158680a56e77f"]
 
 
+def test_the_reader_drops_the_block_but_not_an_edited_one() -> None:
+    from tools.zephyr_csv import parse_zephyr_csv
+
+    payload = render_zephyr_csv(json.loads(EXAMPLE.read_text(encoding="utf-8")), V6).payload
+    assert REQUEST_HEAD.encode() in payload and REQUEST_HEAD not in json.dumps(parse_zephyr_csv(payload), ensure_ascii=False)
+    edited = payload.decode("utf-8-sig").replace(REQUEST_HEAD, "Мой запрос:").encode("utf-8-sig")
+    assert "Мой запрос:" in json.dumps(parse_zephyr_csv(edited), ensure_ascii=False)
+
+
 def test_the_preview_shows_the_block_outside_a_group_only() -> None:
     from tests.test_param_groups import grouped
     from tools.canonical_document import param_groups

@@ -101,14 +101,14 @@ def _tricky(document: dict) -> dict:
     return document
 
 
-def test_the_parse_of_a_v5_csv_gives_back_what_the_human_sees() -> None:
+def test_the_parse_of_a_v6_csv_gives_back_what_the_human_sees() -> None:
     from tools.canonical_document import validate_canonical_document
     from tools.test_case_projections import _human_action, render_zephyr_csv
     from tools.zephyr_csv import parse_zephyr_csv
 
     for document in (_example(), _tricky(_example()), canonical_fixture()):
         assert validate_canonical_document(document) == []
-        cases = parse_zephyr_csv(render_zephyr_csv(document, V5).payload)
+        cases = parse_zephyr_csv(render_zephyr_csv(document).payload)
         assert [case["title"] for case in cases] == [case["title"] for case in document["test_cases"]]
         for parsed, case in zip(cases, document["test_cases"]):
             orders = {step["step_id"]: step["display_order"] for step in case["steps"]}

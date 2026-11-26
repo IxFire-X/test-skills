@@ -3,7 +3,8 @@
 ``parse_zephyr_csv(bytes)`` returns the cases of the CSV with their human text byte for byte: a row with ``Name`` opens
 a case, the rows below without ``Name`` are its further steps.  The v5 profile (and a plain Zephyr export) has only
 human text in the step cells; a v4 CSV of the package carries its machine model there and is read as it is.  The only
-change to a value is the ``'`` the projection put before a formula start.  An unknown column, a step before the first
+changes to a value are the ``'`` the projection put before a formula start and the request block v6 adds to Test Data
+(the code builds it again on export; a tester who edited its head line made it their own text).  An unknown column, a step before the first
 case or a case without steps is refused by name — never guessed.
 """
 
@@ -14,7 +15,7 @@ import io
 import re
 from typing import Any, Iterable
 
-from tools.test_case_projections import CUSTOM_KEYS as _CUSTOM_KEYS, HEADERS as _HEADERS, PRIORITIES as _PRIORITIES
+from tools.test_case_projections import CUSTOM_KEYS as _CUSTOM_KEYS, HEADERS as _HEADERS, PRIORITIES as _PRIORITIES, REQUEST_HEAD
 
 _STEP, _DATA, _EXPECTED = (
     "Test Script (Step-by-Step) - Step", "Test Script (Step-by-Step) - Test Data", "Test Script (Step-by-Step) - Expected Result")
@@ -102,7 +103,8 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
             if not cases:
                 errors.append(f"строка {number}: шаг до первого кейса (строки с Name)")
                 continue
-            cases[-1]["steps"].append({"row": number, "action": row[_STEP], "test_data": row.get(_DATA, ""), "expected": row.get(_EXPECTED, "")})
+            data = row.get(_DATA, "").split("\n\n" + REQUEST_HEAD + "\n", 1)[0]  # v6: the block «Запрос curl …» goes, the human text stays
+            cases[-1]["steps"].append({"row": number, "action": row[_STEP], "test_data": data, "expected": row.get(_EXPECTED, "")})
     errors += [f"строка {case['row']}: у кейса «{case['title']}» нет шагов" for case in cases if not case["steps"]]
     if errors:
         raise ZephyrCsvError("ZEPHYR_CSV_ROWS", "; ".join(errors))
