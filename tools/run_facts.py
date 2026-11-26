@@ -11,6 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
 from tools.fixes import human_for
+from tools.json_cli import jsonl_lines
 from tools.stages import (AUTOMATION, AUTOMATION_REVIEW, CLOSURE, DRIFT, GENERATOR, HUMAN_RUN, MARKER, MATERIALIZE, REVIEW, REVIEW_ANSWER, SCAN,
                           answer_of)
 
@@ -145,10 +146,10 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
 def _last_refusal(root: Path, events: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The last line of ``refusals.jsonl`` a ``COMMAND_REFUSED`` event of the journal confirms by the sha256 of the line (as ``run_report.refusals``
     checks them: a line no event confirms is not believed); None without one."""
-    try:
-        lines = {"sha256:" + hashlib.sha256(line).hexdigest(): line for line in (root / "refusals.jsonl").read_bytes().split(b"\n") if line.strip()}
-    except OSError:
+    raw = jsonl_lines(root / "refusals.jsonl")
+    if raw is None:
         return None
+    lines = {"sha256:" + hashlib.sha256(line).hexdigest(): line for line in raw}
     for event in reversed(events):
         line = lines.get(str(event.get("artifact_digest"))) if event.get("event_type") == "COMMAND_REFUSED" else None
         try:

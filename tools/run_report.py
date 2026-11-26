@@ -7,14 +7,16 @@ it never copies code, specification text, cases or model answers.  Times are the
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import platform
 import re
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from tools import execution_gate, output_guard
 from tools.openspec_scope import PARTIAL, QUESTIONS, SCOPE_HEADS
@@ -379,18 +381,11 @@ _STEP_KEYS = ("step", "bytes", "input_bytes", "role_bytes", "role", "files", "to
 
 def step_sizes(root: Path) -> list[dict[str, Any]]:
     """The ``tools.step_size --run`` measurements in order; an unreadable line is skipped, not fatal."""
+    from tools.json_cli import jsonl_rows
     from tools.step_size import RECORD
 
-    try:
-        lines = (Path(root) / RECORD).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
     rows = []
-    for line in lines:
-        try:
-            value = json.loads(line)
-        except ValueError:
-            continue
+    for value in jsonl_rows(Path(root) / RECORD):
         if isinstance(value, Mapping) and isinstance(value.get("step"), str):
             rows.append({key: _STEP_FILTERS.get(key, _count)(value.get(key)) for key in _STEP_KEYS})  # the file is the agent's: no text of its own is copied
     return rows
@@ -535,9 +530,10 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
 
         events = pilot_state.derive_state(Path(root))["events"]
     confirmed = [event.get("artifact_digest") for event in events if event.get("event_type") == "COMMAND_REFUSED"]
-    try:
-        raw_lines = [line for line in (Path(root) / "refusals.jsonl").read_bytes().split(b"\n") if line.strip()]
-    except OSError:
+    from tools.json_cli import jsonl_lines
+
+    raw_lines = jsonl_lines(Path(root) / "refusals.jsonl")
+    if raw_lines is None:
         # The file is created by the first refusal, so a clean run of v0.2 has none.  What only v0.2 writes is ``step-sizes.jsonl`` (it measures
         # every step it sends to the model): with it the run is v0.2 and had no refusal; without it there is no way to tell, and the report says so.
         from tools.step_size import RECORD
@@ -657,47 +653,49 @@ _WARNING_TEXT = {**RECEIPT_WARNINGS, "CODEWORD_LOST": "запрос генера
                  "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: охват взят из плана (см. «Охват после разметки»)"}
 
 
-def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+def _document_hint(hint: Callable[[Path, str, Mapping[str, Any]], Any]) -> Callable[[Path, str | None, Any], Any]:
+    """The guard of a hint on the run's case document: None without an attempt or a document, and None when its inputs do not read —
+    the report never stops on a hint."""
+    @functools.wraps(hint)
+    def guarded(root: Path, attempt_id: str | None, document: Any) -> Any:
+        if not attempt_id or not isinstance(document, Mapping):
+            return None
+        try:
+            return hint(root, attempt_id, document)
+        except (KeyError, OSError, TypeError, ValueError, AttributeError):
+            return None
+    return guarded
+
+
+@_document_hint
+def existing_repeats(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """How many cases repeat a test of the project (the map of the generator's context) — counts and IDs only;
     None when the project has no map."""
     from tools.existing_tests import repeats
     from tools.review_view import run_existing_tests
 
-    if not attempt_id or not isinstance(document, Mapping):
-        return None
-    try:
-        existing = run_existing_tests(root, attempt_id)
-        return {"repeating": repeats(document, existing), "cases": len(document["test_cases"])} if existing else None
-    except (KeyError, OSError, TypeError, ValueError, AttributeError):
-        return None
+    existing = run_existing_tests(root, attempt_id)
+    return {"repeating": repeats(document, existing), "cases": len(document["test_cases"])} if existing else None
 
 
-def reference(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+@_document_hint
+def reference(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """``CV_REFERENCE`` of the run's case document against its reference cases — IDs and counts only."""
     from tools.pilot_state import read_reference_cases
     from tools.review_view import _reference_counts
     from tools.reference_match import reference_match
 
-    if not attempt_id or not isinstance(document, Mapping):
-        return None
-    try:
-        cases = read_reference_cases(root, attempt_id)
-        return None if cases is None else _reference_counts(reference_match(document, cases["cases"]))
-    except (KeyError, OSError, TypeError, ValueError, AttributeError):
-        return None
+    cases = read_reference_cases(root, attempt_id)
+    return None if cases is None else _reference_counts(reference_match(document, cases["cases"]))
 
 
-def end_to_end(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+@_document_hint
+def end_to_end(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """``CV_NO_END_TO_END`` of the run's case document — counts only, no case text."""
     from tools.review_view import end_to_end_hint, run_requirement_groups
 
-    if not attempt_id or not isinstance(document, Mapping):
-        return None
-    try:
-        grouping = run_requirement_groups(root, attempt_id, document)
-        return None if grouping is None else end_to_end_hint(document, *grouping)
-    except (KeyError, OSError, TypeError, ValueError, AttributeError):
-        return None
+    grouping = run_requirement_groups(root, attempt_id, document)
+    return None if grouping is None else end_to_end_hint(document, *grouping)
 
 
 def data_mismatch(document: Any) -> list[dict[str, Any]]:
@@ -736,14 +734,16 @@ def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str
 UNUSED_TEST_DESIGN = "генератор не заполнил технику и параметры — подсказки тест-дизайна не строились"
 
 
+def _hint_line(counts: Mapping[str, int]) -> str:
+    return "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in counts.items()) or "нет")
+
+
 def test_design_summary(document: Mapping[str, Any]) -> dict[str, Any]:
     """Technique counts and code hints by ID only — never case text; ``used`` false says the fields were empty."""
     from tools.test_design_hints import capped, design_hints, technique_counts, uses_test_design
 
     hints = design_hints(document)
-    counts: dict[str, int] = {}
-    for hint in hints:
-        counts[hint["code"]] = counts.get(hint["code"], 0) + 1
+    counts = dict(Counter(hint["code"] for hint in hints))
     return {"used": uses_test_design(document), "techniques": technique_counts(document), "hints": counts, "gaps": capped(hints)}
 
 
@@ -752,7 +752,7 @@ def render_test_design(summary: Mapping[str, Any]) -> str:
     if not summary["used"]:
         return "\n".join(lines + [f"- {UNUSED_TEST_DESIGN}"])
     lines.append("- Техники: " + ", ".join(f"{name} {count}" for name, count in summary["techniques"].items()))
-    lines.append("- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет"))
+    lines.append(_hint_line(summary["hints"]))
     lines += [f"  - {gap['code']} {gap.get('requirement_id', '')} {gap.get('parameter', '')} {gap['detail']}".rstrip() for gap in summary["gaps"]]
     return "\n".join(lines)
 
@@ -762,14 +762,12 @@ def expectation_summary(document: Mapping[str, Any]) -> dict[str, Any]:
     from tools.test_design_hints import capped, expectation_hints
 
     hints = [{key: hint[key] for key in ("code", "case_id", "step_id")} for hint in expectation_hints(document)]  # the detail names the model's assertions
-    counts: dict[str, int] = {}
-    for hint in hints:
-        counts[hint["code"]] = counts.get(hint["code"], 0) + 1
+    counts = dict(Counter(hint["code"] for hint in hints))
     return {"hints": counts, "gaps": capped(hints)}
 
 
 def render_expectations(summary: Mapping[str, Any]) -> str:
-    lines = ["## Ожидания кейсов", "", "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет")]
+    lines = ["## Ожидания кейсов", "", _hint_line(summary["hints"])]
     lines += [f"  - {gap['code']} {gap.get('case_id', '')} {gap.get('step_id', '')} {gap.get('detail', '')}".rstrip() for gap in summary["gaps"]]
     return "\n".join(lines)
 
@@ -824,7 +822,7 @@ def autotest_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def render_autotest_assertions(summary: Mapping[str, Any]) -> str:
-    lines = ["## Слабые утверждения автотестов", "", "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет")]
+    lines = ["## Слабые утверждения автотестов", "", _hint_line(summary["hints"])]
     lines += [f"  - {gap['code']} {gap['detail']}" if "file_id" not in gap else
               f"  - {gap['code']} {gap['file_id']}:{gap['line']} {gap['rule']} {gap.get('assertion_id', '')}".rstrip() for gap in summary["gaps"]]
     return "\n".join(lines)

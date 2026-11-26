@@ -82,6 +82,51 @@ _MODEL_REQUEST_FLAGS = ("--model-id", "--invocation-id", "--input-digest", "--re
 
 
 _REFUSALS = "refusals.jsonl"
+
+
+def emit_json(payload: object, *, indent: int | None = None, sort_keys: bool = True, separators: tuple[str, str] | None = (",", ":")) -> None:
+    """Print one JSON answer to stdout in UTF-8.  A reader that went away (``| head -c``: BrokenPipeError, on Windows EINVAL) is no
+    fault of the command: stdout goes to the null device, so the flush at exit meets the pipe no more."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    try:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=sort_keys, indent=indent, separators=separators))
+        sys.stdout.flush()
+    except OSError:
+        try:
+            null = os.open(os.devnull, os.O_WRONLY)
+        except OSError:
+            return
+        try:
+            os.dup2(null, sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        finally:
+            os.close(null)  # dup2 made its own copy on the descriptor of stdout
+
+
+def jsonl_rows(path: Path) -> list[object]:
+    """The values of the lines of a JSONL file of the run, in order: none when there is no file to read; a line that does not parse is
+    skipped, the others still count."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    rows = []
+    for line in lines:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def jsonl_lines(path: Path) -> list[bytes] | None:
+    """The raw non-empty lines of a JSONL file, as they are (a line is checked by its sha256); None when there is no file to read."""
+    try:
+        return [line for line in Path(path).read_bytes().split(b"\n") if line.strip()]
+    except OSError:
+        return None
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")  # a stage or a batch id; anything else is not a label of the run
 
 
@@ -126,12 +171,7 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
 
 def spent_stages(run_root: object) -> set[str]:
     """The stages whose one retry was refused, by the lines of ``refusals.jsonl`` (a dry run writes none)."""
-    from pathlib import Path
-
-    try:
-        rows = [json.loads(line) for line in (Path(str(run_root)) / _REFUSALS).read_text(encoding="utf-8").splitlines() if line.strip()]
-    except (OSError, ValueError):
-        return set()
+    rows = jsonl_rows(Path(str(run_root)) / _REFUSALS)  # a damaged line is skipped: it never gives a spent retry back
     return {str(row["stage"]) for row in rows if isinstance(row, dict) and row.get("spent") is True and row.get("stage")}
 
 
@@ -147,15 +187,13 @@ def _module_name(prog: str | None) -> str:
 
 def emit_error(message: str, prog: str | None = None) -> None:
     """Emit the one machine-readable response allowed for usage/input errors."""
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     payload: dict[str, object] = {"status": "error", "errors": [{"path": "", "message": message}]}
     if message.startswith("argument error: "):  # the one envelope of every refusal, the old field stays
         flags = [flag for flag in _MODEL_REQUEST_FLAGS if flag in message]
         fix = ("флаги " + ", ".join(flags) + " — у prepare; submit получает только --run-root, --stage, --dry-run, --transport-attempts, --abort; "
                "--attempt у prepare и submit нет") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"
         payload.update(code="INVALID_ARGUMENT", message=message, fix=fix)
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    emit_json(payload, separators=None)
 
 
 def one_closure(command):

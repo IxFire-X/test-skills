@@ -16,7 +16,7 @@ from typing import Any, Mapping, Sequence
 from tools import execution_gate
 from tools.existing_tests import own_tests
 from tools.fixes import fix_for, human_for
-from tools.json_cli import JsonArgumentParser, one_closure
+from tools.json_cli import JsonArgumentParser, emit_json, one_closure
 from tools.run_facts import (
     durable_status_facts as _durable_status_facts,
     human_summary,
@@ -114,7 +114,7 @@ def _print(payload: dict[str, Any]) -> None:
         payload = _envelope(payload)
         _journal_refusal(payload)
     _PRINTED[:] = [payload]
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    emit_json(payload, indent=2, sort_keys=False, separators=None)
 
 
 def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -12,8 +12,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
-import json
-import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -21,7 +19,7 @@ from typing import Any, Callable
 
 from tools import canonical_document, output_guard, stage_steps, step_size
 from tools.fixes import RETRY_SPENT
-from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
+from tools.json_cli import JsonArgumentParser, emit_json, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
 
@@ -192,16 +190,7 @@ def _parser() -> JsonArgumentParser:
 
 
 def _print(payload: Mapping[str, Any]) -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    try:
-        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-        sys.stdout.flush()
-    except OSError:  # the reader (``| head -c``) went away (BrokenPipeError, on Windows EINVAL): its cut is no fault of the command; the refusal is still recorded and returned
-        try:
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())  # the flush at exit meets the pipe no more
-        except (OSError, ValueError):
-            pass
+    emit_json(payload)  # a reader that went away is no fault of the command: the refusal is still recorded and returned
 
 
 def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:

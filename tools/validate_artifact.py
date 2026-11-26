@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -154,11 +153,9 @@ def retry_prompt(artifact: Any, errors: list[dict[str, str]], full_list: str = "
 
 
 def _emit(report: dict[str, Any]) -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    import json
+    from tools.json_cli import emit_json
 
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    emit_json(report)
 
 
 def main() -> int:

@@ -184,14 +184,11 @@ def record_output(project: Path, root: Path, step: str, response_digest: str, ra
 
 def output_sizes(root: Path) -> dict[str, int]:
     """Raw answer bytes by response digest (the last record of a digest wins)."""
+    from tools.json_cli import jsonl_rows
+
     sizes: dict[str, int] = {}
-    try:
-        lines = (Path(root) / OUTPUT_SIZES).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return sizes
-    for line in lines:
+    for row in jsonl_rows(Path(root) / OUTPUT_SIZES):
         try:
-            row = json.loads(line)
             sizes[str(row["response_digest"])] = int(row["raw_bytes"])
         except (ValueError, KeyError, TypeError):
             continue
