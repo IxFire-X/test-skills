@@ -152,6 +152,12 @@ def test_a_skeleton_that_does_not_fit_beside_the_files_needed_is_left_out(tmp_pa
     assert (chosen, missed, skeleton) == (["docs/visits.md", "src/Visit.java"], [], None)
 
 
+def test_a_named_file_with_a_blank_in_its_path_is_read_whole(tmp_path: Path) -> None:  # mastodon-ios: 101 of 614 Swift files
+    rows = [_file(tmp_path, "App/Notification Filtering/Policy.swift", "struct Policy {}\n"), _file(tmp_path, "App/Other.swift", "struct Other {}\n")]
+    picked = pick_context(tmp_path, [{"files": rows, "byte_count": 10_000}], 1, [], ["App/Notification Filtering/Policy.swift:1 — a policy"])
+    assert picked[0] == ["App/Notification Filtering/Policy.swift"]
+
+
 def test_documents_and_templates_are_no_part_of_the_skeleton() -> None:
     receipt = {"files": [{"project_path": path} for path in ("README.md", "templates/owners.html", "src/Owner.java", "app.yml")]}
     assert [row["project_path"] for row in skeleton_files([receipt], [])] == ["src/Owner.java"]

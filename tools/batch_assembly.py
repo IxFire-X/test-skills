@@ -522,7 +522,8 @@ def pick_context(project: Path, receipts: Sequence[Mapping[str, Any]], taken: in
     from tools.code_skeleton import skeleton_files, view_bytes
 
     sizes = {row["project_path"]: int(row["size"]) for receipt in receipts for row in receipt["files"]}
-    cited = Counter(re.sub(r":\d+(?:-\d+)?$", "", words[0]) for words in (str(source).split(None, 1) for source in sources) if words)  # a source: «path:line — text»
+    cited = Counter(found.group(1) if (found := re.match(r"(.+?):\d", head := str(source).split(" — ", 1)[0].strip())) else head
+                    for source in sources)  # a source: «path:line — text»; the path may hold blanks (iOS folders), the line «434-436, 870»
     cited = Counter({path: count for path, count in cited.items() if path in sizes})
     docs = {found.group(1) if (found := re.match(r"(.+?):(\d+)", str(item))) else str(item) for row in requirements for item in row["provenance"]}  # «path:line — text»; no line: the whole text
     named = set(cited) | {path for receipt in receipts[:1] for path in receipt.get("referenced") or ()}  # the files the marker named and the templates the code of --target names
