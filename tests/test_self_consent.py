@@ -12,9 +12,9 @@ from tests.helpers import prepare_stage
 from tests.test_profile_flows import mode_b_pack  # noqa: F401  (the fixture: a copy of the delivery of mode B)
 from tests.test_review_stage import STAGE, _answer, _prepare, _run, _submit
 from tests.test_stage_steps import _call, _events, _status
-from tests.test_rework_review import REVIEW, _answered, _open
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state
 from tests.test_review_canaries import _boundary_and_removed, _finding, _ids
-from tools import pilot_state, orchestrate_test_case_revision as orchestrate
+from tests.test_rework_review import REVIEW, _answered, _open
 
 FLAG = "--accept-self-review"
 SAME_SESSION = ("--fresh-context", "no")

@@ -18,8 +18,8 @@ from tests.journal_helpers import assert_refused_once
 from tests.test_review_requested import _digest_of, _generated_run, _journal, _put
 from tests.test_review_two_commands import _candidate_file, _cycle, _open, _select_verdict
 from tools import pilot_state
+from tools.orchestrate_test_case_revision import OrchestrationError, journal_assembly, review_decision
 from tools.pilot_state import derive_state, read_reviewer_session_ledger
-from tools.orchestrate_test_case_revision import OrchestrationError, review_decision, journal_assembly
 
 
 def _answer(run: dict, mutate=None, name: str = "review.json") -> str:

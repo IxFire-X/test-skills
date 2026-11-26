@@ -9,12 +9,13 @@ import json
 from pathlib import Path
 
 import pytest
-from tools.pilot_state import publish_model_stage_artifact, skill_pack_digest, ModelReuseMismatch, derive_state
-from tools.pilot_state import reuse_family, marker_reuse_suggestion
-from tools import pilot_state, orchestrate_test_case_revision as revision, review_canaries
-from tools.run_report import write_report
+
 from tests.test_first_run import _python_project
 from tests.test_scan_guard import _scan
+from tools import orchestrate_test_case_revision as revision, pilot_state, review_canaries
+from tools.pilot_state import ModelReuseMismatch, derive_state, marker_reuse_suggestion, publish_model_stage_artifact
+from tools.pilot_state import reuse_family, skill_pack_digest
+from tools.run_report import write_report
 
 
 def _source(project: Path) -> tuple[Path, str]:

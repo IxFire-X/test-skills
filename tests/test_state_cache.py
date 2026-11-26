@@ -4,14 +4,14 @@ of the journal is not hidden by it.  There is no cache file: ``tmp/`` is where t
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
-import json
 
 from tests.test_review_requested import _generated_run, _journal
-from tools import pilot_state
 from tests.test_review_two_commands import _open
+from tools import pilot_state
 from tools.run_pipeline import main
 
 

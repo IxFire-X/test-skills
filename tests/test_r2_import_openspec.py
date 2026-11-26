@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_au5_single_checks import _request_requirements, _spec_run
 from tests.test_cases_import import _project, _scan
+from tests.test_marker_parts import _marker
 from tools import api, context_marker_parts, pilot_state
 from tools.cases_import import CasesImportError, import_requirements
-from tools.json_cli import error_fields
-from tests.test_au5_single_checks import _request_requirements, _spec_run
-from tests.test_marker_parts import _marker
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.json_cli import error_fields
 from tools.project_inventory import read_execution_baseline
 
 SPEC = ("# sample Specification\n\n## Purpose\nCombine values.\n\n## Requirements\n### Requirement: Combine\n"

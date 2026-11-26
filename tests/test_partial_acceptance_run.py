@@ -8,16 +8,16 @@ import shutil
 from pathlib import Path
 
 import pytest
+
 import tests.test_batch_assembly as batch
 import tests.test_reviewer_protocol as protocol
-
 from tests.helpers import MODULE_PYTHON, answer_stage
 from tests.p4_flow import run_the_build
-from tests.test_review_canaries import _answer, _boundary_and_removed, _finding, _ids, _open, _select
-from tests.test_review_requested import _api, _generated_run, _put
 from tests.test_exec_prepares import _module_python
 from tests.test_profile_flows import _automated
 from tests.test_project_native_pytest import _local_attempt
+from tests.test_review_canaries import _answer, _boundary_and_removed, _finding, _ids, _open, _select
+from tests.test_review_requested import _api, _generated_run, _put
 from tools.pilot_state import read_terminal_result
 
 FIXTURE = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"

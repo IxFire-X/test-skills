@@ -11,16 +11,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_finish import _automation_chain
-from tools import pilot_state, exec_commands
-from tools.pilot_state import ModelResponseDigestMismatch, derive_state
-from tools.finalize_attempt import automation_next
-from tools.run_pipeline import HostStop, cmd_finish
-from tests.test_reviewer_protocol import _new_run
-from tests.test_automation_revision_budget import automated_document
-from tests.test_generated_delta import _published_reviewer_ledger
-from tests.test_self_review import _run as _self_run
 from tests.p4_flow import human_run, materialize
+from tests.test_automation_revision_budget import automated_document
+from tests.test_finish import _automation_chain
+from tests.test_generated_delta import _published_reviewer_ledger
+from tests.test_reviewer_protocol import _new_run
+from tests.test_self_review import _run as _self_run
+from tools import exec_commands, pilot_state
+from tools.finalize_attempt import automation_next
+from tools.pilot_state import ModelResponseDigestMismatch, derive_state
+from tools.run_pipeline import HostStop, cmd_finish
 
 
 def _run(capsys: pytest.CaptureFixture[str], command: str, project: Path, run_root: Path) -> tuple[int, dict]:

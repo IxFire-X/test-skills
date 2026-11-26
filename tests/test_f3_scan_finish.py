@@ -11,10 +11,10 @@ from tests.test_review_requested import _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
 from tests.test_f1 import _main, _pipeline
 from tests.test_first_run import _python_project
-from tools import context_marker_parts, pilot_state
-from tools.project_inventory import _context_receipt, read_inventory_receipt, read_execution_baseline
-from tools.project_inventory import select_context_batches, _digest
 from tests.test_reviewer_protocol import _new_run
+from tools import context_marker_parts, pilot_state
+from tools.project_inventory import _context_receipt, _digest, read_execution_baseline, read_inventory_receipt
+from tools.project_inventory import select_context_batches
 
 
 def _crash_nth(monkeypatch, owner, name: str, nth: int = 1) -> None:

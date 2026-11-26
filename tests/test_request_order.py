@@ -8,9 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from tests.test_self_review import _reviewed
-from tools.pilot_state import ModelRequestOutOfOrder
 from tools import pilot_state
+from tools.pilot_state import ModelRequestOutOfOrder
 
 
 def _selected(tmp_path: Path) -> tuple[Path, str, list[str]]:

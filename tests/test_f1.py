@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 
 from tests.helpers import answer_stage, submit_stage
+from tests.test_finish import _project
 from tests.test_review_requested import build_generated_run, _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
-from tools import step_size, pilot_state
+from tools import pilot_state, step_size
 from tools.fixes import human_for
 from tools.run_report import render_markdown
-from tests.test_finish import _project
 
 
 def _main(capsys, argv: list[str]) -> tuple[int, dict]:

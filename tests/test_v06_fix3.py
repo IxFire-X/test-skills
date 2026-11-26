@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_profile_flows import _api, _cli, _front, cases_only_pack  # noqa: F401  (the fixture: a copy of the delivery of cases)
 from tests.p4_flow import flow_args
-from tests.test_run_scoped_authorization import _the_flow_up_to_the_report
 from tests.test_cut_model import _generator_stage, _prepare_argv
-from tests.test_review_open_recovery import _main
 from tests.test_f3_scan_finish import _finish_argv, _pipeline, _rework_closed
-from tools import pilot_state, step_size, exec_commands
-from tools.run_pipeline import main
+from tests.test_profile_flows import _api, _cli, _front, cases_only_pack  # noqa: F401  (the fixture: a copy of the delivery of cases)
+from tests.test_review_open_recovery import _main
+from tests.test_run_scoped_authorization import _the_flow_up_to_the_report
+from tools import exec_commands, pilot_state, step_size
 from tools.orchestrate_test_case_revision import abort_rework_review
+from tools.run_pipeline import main
 
 PROFILE = "cases-only-v1"
 BIG = 50_000_000

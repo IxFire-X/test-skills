@@ -10,12 +10,12 @@ import pytest
 from tests.test_cases_import import _project, _scan
 from tests.test_review_open_recovery import _crash_once, _main
 from tests.test_cut_review import _crash_event, _events
-from tools import pilot_state, context_marker_parts
-from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
-from tools.context_marker_parts import merge_parts
 from tests.test_batch_assembly import _header
+from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
+from tools import context_marker_parts, pilot_state
 from tools.batch_assembly import plan_batches
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.context_marker_parts import merge_parts
 
 
 def _import_argv(root: Path, attempt_id: str) -> list[str]:

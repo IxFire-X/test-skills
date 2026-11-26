@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 
 from tests.test_marker_reuse import _fresh, _marker, _request, _source
+from tests.test_phase2_scan import _skillsrc
+from tests.test_quarantine import THREE_FUNCTIONS, _fail
 from tests.test_self_review import _run
 from tools import pilot_state
-from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-from tests.test_quarantine import THREE_FUNCTIONS, _fail
-from tests.test_phase2_scan import _skillsrc
 from tools.init_skillsrc import _payload
+from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
 from tools.skillsrc_manifest import parse_skillsrc_bytes
 
 TEST_PATH = "tests/test_written.py"

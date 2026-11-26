@@ -1,13 +1,15 @@
 import contextlib
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
-import pytest
-import io
 from pathlib import Path
-from tools import pilot_state, api
+
+import pytest
+
+from tools import api, pilot_state
 
 MODULE_PYTHON = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
 

@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state, step_size
-from tests.test_cut_model import _generator_stage, _prepare_argv
-from tests.test_review_open_recovery import _main
-from tests.test_cut_review import _evidence_verdict
-from tests.test_review_requested import _generated_run
-from tests.test_review_two_commands import _open, _select_verdict, _bundles, _cycle
 from tests.test_closure_deadlocks import _run
+from tests.test_cut_model import _generator_stage, _prepare_argv
+from tests.test_cut_review import _evidence_verdict
+from tests.test_review_open_recovery import _main
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _bundles, _cycle, _open, _select_verdict
+from tools import pilot_state, step_size
 from tools.orchestrate_test_case_revision import journal_assembly
 from tools.test_case_projections import render_markdown
 

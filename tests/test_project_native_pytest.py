@@ -5,17 +5,17 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import venv
 import pytest
-import subprocess
 
 from tests.test_automation_revision_budget import automated_document, automation, durable_boundary, host_evidence, review
 from tests.test_generated_delta import _effective_bundle_digest
 from tests.helpers import MODULE_PYTHON
+from tools.execution_adapters import PYTEST, ExecutionRequest
+from tools.pilot_state import derive_state, read_attempt_receipt, read_effective_canonical, read_terminal_result
 from tools.run_tests import validate_artifact_runner_compatibility
-from tools.pilot_state import read_attempt_receipt, read_terminal_result, read_effective_canonical, derive_state
-from tools.execution_adapters import ExecutionRequest, PYTEST
 
 
 def test_inline_runner_review_precedes_materialization(tmp_path: Path) -> None:

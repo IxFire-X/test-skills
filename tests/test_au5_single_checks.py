@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import build_phase_two_baseline, prepare_stage
 from tests.journal_helpers import assert_refused_once
 
-from tests.test_digest_traps import _journal
-from tests.test_marker_parts import _marker, _publish_part, _run
-from tests.helpers import build_phase_two_baseline, prepare_stage
 from tests.spine_helpers import run_phase_one_spine
-from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, GENERATOR, run_generator, run_reviewer
 from tests.test_automation_revision_budget import automated_document
+from tests.test_autotest_cycle import GENERATOR, INDEPENDENT, REVIEWER, run_generator, run_reviewer
+from tests.test_digest_traps import _journal
 from tests.test_generated_delta import _effective_bundle, _published_reviewer_ledger
+from tests.test_marker_parts import _marker, _publish_part, _run
 from tools import pilot_state
-from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 from tools.build_context import build_context
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 from tools.context_marker_parts import merge_parts
 from tools.pilot_state import publish_effective_canonical, read_effective_canonical
 

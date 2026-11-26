@@ -4,18 +4,18 @@
 The old commands (``model-request``, ``model-response``, ``automation-boundary-facts`` …) are gone since V5-B3: the cycle is the only way."""
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
-import hashlib
-import ast
 
 from tests.test_profile_flows import mode_b_pack  # noqa: F401  (the fixture: a copy of the delivery of mode B)
 from tests.helpers import prepare_stage, put_in_slot, submit_stage
 from tests.test_stage_steps import _events, _status
-from tests.test_automation_revision_budget import automation
 from tools import pilot_state, stage_steps
+from tests.test_automation_revision_budget import automation
 from tools.run_report import build_report
 
 GENERATOR, REVIEWER = "tc-to-autotest:r1", "autotest-reviewer:r1"

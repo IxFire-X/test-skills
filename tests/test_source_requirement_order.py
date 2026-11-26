@@ -9,9 +9,10 @@ import copy
 from pathlib import Path
 
 import pytest
-from tools.pilot_state import _requirement_order_rows
+
 from tests.test_marker_parts import _requirements
 from tools import pilot_state
+from tools.pilot_state import _requirement_order_rows
 
 DOC = "docs/portable-owner-lifecycle-requirements.md"
 

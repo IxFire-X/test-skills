@@ -5,23 +5,23 @@ without it the prior refusal stays.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import hashlib
 
 from tests.test_exit_policy import _local
 from tools import run_pipeline
-from tools.pilot_state import read_run, self_review_accepted, create_lowered_run, create_run, read_effective_canonical
-from tools.pilot_state import terminal_reviewer_evidence, publish_effective_canonical, publish_reviewer_session_ledger
-from tools.pilot_state import _validate_result_record, terminal_result
-from tools.orchestrate_test_case_revision import OrchestrationError
 from tools.automation_validation import validate_accepted_autotest_review
 from tools.finalize_attempt import effective_canonical_required
-from tools.run_pipeline import cmd_finish
+from tools.orchestrate_test_case_revision import OrchestrationError
+from tools.pilot_state import _validate_result_record, create_lowered_run, create_run, publish_effective_canonical
+from tools.pilot_state import publish_reviewer_session_ledger, read_effective_canonical, read_run, self_review_accepted
+from tools.pilot_state import terminal_result, terminal_reviewer_evidence
 from tools.ready import check
+from tools.run_pipeline import cmd_finish
 
 RECEIPT_KEYS = {"schema_version", "run_id", "request_id", "policy_profile", "execution_requested", "digest"}
 

@@ -8,7 +8,7 @@ import pytest
 
 from tests.test_marker_parts import _marker, _requirements, _run
 from tools import pilot_state, scope_pause
-from tools.run_report import write_report, build_report
+from tools.run_report import build_report, write_report
 
 FIRST = "SREQ-batch-a-001"
 ASK = f"{FIRST} вопрос (docs/feature.md:3) — не сказано, какой код вернёт отказ — какой код ответа должен вернуть отказ?"

@@ -5,27 +5,27 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
-import shutil
-import tempfile
 
-from tests.test_pack_profile import copy_profile
-from tests.test_self_review import _run
 from tests.test_exec_split import _json
-from tests.test_first_run import _python_project
-from tools import api, pilot_state, orchestrate_test_case_revision as orchestrate
-from tools.step_size import compact_inputs
-from tools.ready import check
-from tools.schema_validation import schema_diagnostics
-from tools.pilot_state import effective_canonical_or_reason
-from tests.test_review_requested import _generated_run, build_generated_run
-from tools.run_report import build_report, render_markdown
 from tests.test_finish import _project
+from tests.test_first_run import _python_project
+from tests.test_pack_profile import copy_profile
+from tests.test_review_requested import _generated_run, build_generated_run
 from tests.test_review_two_commands import _open, _select_verdict, _verdict
+from tests.test_self_review import _run
+from tools import api, orchestrate_test_case_revision as orchestrate, pilot_state
+from tools.pilot_state import effective_canonical_or_reason
+from tools.ready import check
+from tools.run_report import build_report, render_markdown
+from tools.schema_validation import schema_diagnostics
+from tools.step_size import compact_inputs
 
 pytestmark = pytest.mark.contract
 

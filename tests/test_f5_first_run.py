@@ -19,12 +19,12 @@ import pytest
 
 from tests.test_first_run import _write
 from tests.test_phase2_scan import _skillsrc
-from tools import run_pipeline, pilot_state
+from tools import pilot_state, run_pipeline
+from tools.discover_project import discover_project
 from tools.init_skillsrc import _payload
 from tools.module_ids import module_id_for
 from tools.pilot_state import module_path_problem
 from tools.schema_validation import schema_diagnostics
-from tools.discover_project import discover_project
 
 ROOT = Path(__file__).resolve().parents[1]
 

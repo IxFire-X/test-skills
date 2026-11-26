@@ -5,16 +5,16 @@ import sys
 from pathlib import Path
 
 import pytest
-import tools.pilot_state as state
 from helpers import phase_two_baseline
 
+import tools.pilot_state as state
 from tools import pilot_state
 from tools.pilot_state import append_event, create_attempt, create_run, derive_state, module_selection_digest
-from tools.pilot_state import read_attempt_receipt, record_execution_unknown
-from tools.run_pipeline import main
 from tests.test_pilot_state import _append_synthetic_terminal, _append_synthetic_unknown
 from tests.test_durable_execution_trace import _publish_execution, _unknown_report
 from tests.test_execution_receipt import _execution_facts
+from tools.pilot_state import read_attempt_receipt, record_execution_unknown
+from tools.run_pipeline import main
 
 
 DIGEST = "sha256:" + "a" * 64

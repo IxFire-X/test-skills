@@ -1,5 +1,6 @@
 from pathlib import Path
 import pytest
+
 from tests.test_reviewer_protocol import _bind_session, _completed, _session, _started, _verdict
 from tools import pilot_state
 from tools.finalize_attempt import finalize_attempt

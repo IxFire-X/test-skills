@@ -1,30 +1,31 @@
 """tails10: the points of the security check and of the code review of stack 10 — the checks of the paths a person or an agent names come first."""
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
-from tools.run_pipeline import expand_docs
-from tests.test_context_filter import _receipts, _selected_paths
-from tests.test_own_tests import _prior, _scan
-from tools import pilot_state, skillsrc_manifest, step_size
-from tests.test_fix2 import _closed
-from tools.existing_tests import held_bytes, own_files
-from tools.review_view import _short
+
 from tests import test_cases_import_docs as docs
-from tools.run_report import write_report, analyst_questions
-from tools.cases_import import _verdict_keys, CasesImportError, require_case_links
 from tests.test_cases_import import _project
-from tests.test_cases_verdict import BASE, LIVE, SPEC, _write
-from tools.ready import check
+from tests.test_cases_import_docs import _to_plan
 from tests.test_cases_import_new import _autofix, _rework
 from tests.test_cases_rewrite import TWO_ON_ONE
-from tests.test_cases_import_docs import _to_plan
+from tests.test_cases_verdict import BASE, LIVE, SPEC, _write
+from tests.test_context_filter import _receipts, _selected_paths
+from tests.test_fix2 import _closed
+from tests.test_own_tests import _prior, _scan
+from tools import pilot_state, skillsrc_manifest, step_size
+from tools.cases_import import CasesImportError, _verdict_keys, require_case_links
 from tools.cases_scope import Scope
-import hashlib
-import os
-import json
+from tools.existing_tests import held_bytes, own_files
+from tools.ready import check
+from tools.review_view import _short
+from tools.run_pipeline import expand_docs
+from tools.run_report import analyst_questions, write_report
 
 
 # --- 1: expand_docs looks at nothing outside the project -----------------------------------------

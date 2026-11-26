@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 
 import pytest
+
 from tests.helpers import prepare_stage
 from tests.test_cases_import import _to_generator
-from tools import pilot_state
-from tests.test_step_inputs import _generator_run
 from tests.test_marker_parts import _run
+from tests.test_step_inputs import _generator_run
+from tools import pilot_state
 from tools.batch_assembly import BatchAssemblyError, validate_fragment
 from tools.json_cli import error_fields
 

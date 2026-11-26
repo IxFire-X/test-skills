@@ -14,18 +14,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
 from tests.test_closure_deadlocks import _run
 from tests.test_finish import _automation_chain
-from tools.run_pipeline import main
-from tools.pilot_state import derive_state, publish_model_stage_artifact, read_model_stage_artifact
+from tests.test_first_run import _python_project
 from tests.test_review_requested import _generated_run
 from tests.test_review_two_commands import _cycle, _open
-from tests.test_first_run import _python_project
 from tests.test_scan_guard import _runs, _scan
 from tools import run_pipeline
-from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
 from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
 from tools.canonical_document import validate_canonical_document
+from tools.pilot_state import derive_state, publish_model_stage_artifact, read_model_stage_artifact
+from tools.run_pipeline import main
 
 pytestmark = pytest.mark.contract
 

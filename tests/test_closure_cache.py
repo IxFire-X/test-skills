@@ -6,9 +6,10 @@ import functools
 from pathlib import Path
 
 import pytest
+
 from tests import test_durable_execution_trace as trace
-from tools.finalize_attempt import finalize_durable_execution_attempt
 from tools import pilot_state
+from tools.finalize_attempt import finalize_durable_execution_attempt
 
 # About 1.5x the measured closure after FaT-9: 12 state derivations and 75 validations (before: 189 and 3593).
 DERIVE_STATE_LIMIT = 18

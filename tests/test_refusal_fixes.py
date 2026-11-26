@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_review_requested import _generated_run
-from tools.pilot_state import ModelRequestInvalid, publish_model_request, ModelRequestDuplicate
-from tools.pilot_state import ModelStageArtifactInvalid, publish_model_stage_artifact
 from tests.test_marker_parts import _run
-from tools.batch_assembly import with_digest
-from tools.json_cli import error_fields
+from tests.test_review_requested import _generated_run
 from tools import pilot_state
+from tools.batch_assembly import with_digest
 from tools.fixes import fix_for
+from tools.json_cli import error_fields
+from tools.pilot_state import ModelRequestDuplicate, ModelRequestInvalid, ModelStageArtifactInvalid
+from tools.pilot_state import publish_model_request, publish_model_stage_artifact
 
 
 def _request(run: dict, **extra):

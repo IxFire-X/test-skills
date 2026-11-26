@@ -2,19 +2,19 @@ import json
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
+from tests.helpers import generator_requests_before_dg
+from tests.test_automation_revision_budget import automated_document
 from tools import pilot_state
 from tools import confined_output
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive
-from tools.pilot_state import append_event, create_run, derive_state, create_attempt
+from tools.pilot_state import append_event, create_attempt, create_run, derive_state
 from tools.project_inventory import read_inventory_receipt, select_context_batches
 from helpers import phase_two_baseline
-from types import SimpleNamespace
-from tests.test_automation_revision_budget import automated_document
-from tests.helpers import generator_requests_before_dg
 
 
 AUTHORIZATION = {"request_id": "request-1", "execution_requested": False}

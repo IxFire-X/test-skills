@@ -2,12 +2,13 @@
 read back — the producer, the journal binding, a tampered or hand-placed file."""
 import pytest
 from pathlib import Path
+
 from tests.test_durable_execution_trace import _publish_execution
 from tests.test_execution_receipt import _execution_facts
-from tools.finalize_attempt import finalize_durable_execution_attempt
-from tools.pilot_state import read_scenario_observation, scenario_observation_target, append_event, derive_state
-from tools.pilot_state import _canonical_bytes, _sealed, _terminal_retry_snapshot, read_terminal_result
 from tools import pilot_state
+from tools.finalize_attempt import finalize_durable_execution_attempt
+from tools.pilot_state import _canonical_bytes, _sealed, _terminal_retry_snapshot, append_event, derive_state
+from tools.pilot_state import read_scenario_observation, read_terminal_result, scenario_observation_target
 
 
 def _terminal_retry_observation(tmp_path: Path):

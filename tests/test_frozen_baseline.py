@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_cases_import import _project, _scan
 from tests.test_review_open_recovery import _main
 from tests.test_review_requested import _generated_run, _journal
-from tools import pilot_state, api, run_pipeline
-from tools.project_inventory import read_execution_baseline
+from tools import api, pilot_state, run_pipeline
 from tools.orchestrate_test_case_revision import review_inputs
-from tests.test_cases_import import _project, _scan
+from tools.project_inventory import read_execution_baseline
 
 
 def _attempt(run: dict) -> dict:

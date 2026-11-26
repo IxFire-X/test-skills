@@ -14,8 +14,8 @@ import pytest
 from tests.test_review_canaries import _answer, _flags, _open, _select
 from tests.test_review_requested import _generated_run
 from tools import pilot_state
-from tools.pilot_state import read_model_request, publish_model_request
-from tools.review_canaries import nonce_digest, recorded_answer, codeword_state
+from tools.pilot_state import publish_model_request, read_model_request
+from tools.review_canaries import codeword_state, nonce_digest, recorded_answer
 from tools.schema_validation import schema_diagnostics
 
 

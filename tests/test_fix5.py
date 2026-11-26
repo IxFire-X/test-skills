@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state, stage_steps, run_pipeline
-from tools.json_cli import error_envelope
+from tests.test_fix2 import _cut_rework
 from tests.test_request_order import _selected
 from tests.test_review_requested import _generated_run
-from tests.test_fix2 import _cut_rework
+from tools import pilot_state, run_pipeline, stage_steps
+from tools.json_cli import error_envelope
 
 
 def _refused(root: Path, stage: str, **flags) -> dict:

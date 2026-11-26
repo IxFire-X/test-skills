@@ -12,9 +12,9 @@ from tests.helpers import answer_stage, prepare_stage, submit_stage
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_requested import _generated_run, _journal
 from tests.journal_helpers import assert_refused_once
-from tools.pilot_state import read_model_request
 from tools.batch_assembly import with_digest
 from tools.orchestrate_test_case_revision import journal_assembly
+from tools.pilot_state import read_model_request
 
 ROOT = Path(__file__).resolve().parents[1]
 

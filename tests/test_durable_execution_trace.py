@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.spine_helpers import finalize_phase_one_spine
 from tests.test_execution_receipt import _execution_facts
 from tests.test_exit_policy import _local
-from tests.spine_helpers import finalize_phase_one_spine
-from tools import exec_commands, pilot_state, finalize_attempt
+from tools import exec_commands, finalize_attempt, pilot_state
 from tools.execution_adapters import request_digest
-from tools.project_inventory import read_execution_baseline
 from tools.finalize_attempt import FinalizationError
+from tools.project_inventory import read_execution_baseline
 
 
 def _publish_execution(root: Path, attempt_id: str, report: dict, *, request=None) -> dict:

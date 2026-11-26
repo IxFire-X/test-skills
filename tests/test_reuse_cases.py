@@ -11,7 +11,7 @@ import pytest
 from tests.test_review_canaries import _answer, _fake_seed, _select
 from tests.test_review_codeword import _with_words
 from tests.test_review_requested import _generated_run
-from tools import pilot_state, stage_steps, run_report, review_canaries
+from tools import pilot_state, review_canaries, run_report, stage_steps
 from tools.fixes import FIXES
 
 REVIEW = "tc-reviewer:canonical"

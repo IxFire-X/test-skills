@@ -21,13 +21,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.p4_flow import flow_args
+from tests.test_finish import _project
 from tests.test_first_run import _python_project, _write
 from tests.test_phase2_scan import _args
 from tests.test_reviewer_protocol import _new_run
 from tests.test_secret_inputs import SECRET, SECRET_PATH, _secret_project
-from tests.p4_flow import flow_args
-from tests.test_finish import _project
-from tools import run_pipeline, pilot_state, project_inventory
+from tools import pilot_state, project_inventory, run_pipeline
 from tools import exec_commands
 from tools.ready import _table, check
 

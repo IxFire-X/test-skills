@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from tests import test_durable_execution_trace as trace
 from tests.journal_helpers import assert_refused_once, refusal_log
 from tests.test_api_cli import _api, _marker_run, _marker_value, _reversed
-from tools import pilot_state, stage_steps
-from tests import test_durable_execution_trace as trace
-from tools.run_pipeline import main
 from tests.test_first_run import _python_project
 from tests.test_reviewer_protocol import _new_run
+from tools import pilot_state, stage_steps
+from tools.run_pipeline import main
 
 
 def _count_full_checks(monkeypatch: pytest.MonkeyPatch) -> collections.Counter:

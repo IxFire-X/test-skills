@@ -2,21 +2,21 @@
 refusal; the stage keeps its one retry. The chain runs through the commands of the agent (`prepare`, `submit`)."""
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
-import copy
 
 from tests.test_review_requested import _api, _generated_run, _journal, _put
 from tests.helpers import prepare_stage, submit_stage
 from tests.journal_helpers import assert_refused_once
+from tests.test_automation_revision_budget import review
+from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
+from tools import pilot_state
+from tools.automation_validation import automation_sha256
 from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment, with_digest
 from tools.canonical_document import uncovered_requirements
-from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
-from tests.test_automation_revision_budget import review
-from tools.automation_validation import automation_sha256
-from tools import pilot_state
 
 
 def _publish_inputs(run: dict) -> tuple[str, str]:

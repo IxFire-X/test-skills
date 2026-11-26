@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from tools.run_pipeline import _report_mismatch
 
 ATTEMPT = "a" * 32

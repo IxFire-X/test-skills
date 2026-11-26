@@ -7,9 +7,9 @@ import pytest
 
 from tests.test_exit_policy import _local
 from tests.test_generated_delta import _inputs
-from tools.finalize_attempt import decide_dispositions, build_pre_finalization_trace, disposition_receipt
-from tools.finalize_attempt import publish_terminal_result, verify_finalization, _finalization_verifier_inputs
 from tools import pilot_state
+from tools.finalize_attempt import _finalization_verifier_inputs, build_pre_finalization_trace, decide_dispositions
+from tools.finalize_attempt import disposition_receipt, publish_terminal_result, verify_finalization
 
 
 def _delta(tmp_path: Path, *, two: bool = False, fail_after: int | None = None):

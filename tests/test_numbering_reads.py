@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 from tests.test_openspec_selection import _scan
+from tests.test_partial_report import _acceptance
 from tests.test_requirement_labels import DOC, NUMBERED, _marker, _project
 from tests.test_sections import _doc
 from tests.test_stage_steps import _junction
-from tests.test_partial_report import _acceptance
 from tools import pilot_state, step_size
-from tools.run_report import build_report, _acceptance_lines
+from tools.run_report import _acceptance_lines, build_report
 
 
 def _numbers(scan: dict) -> list[dict]:

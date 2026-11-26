@@ -12,9 +12,9 @@ from tests.test_review_requested import _generated_run, _journal
 from tests.test_scan_guard import _scan
 from tests.test_scope_pause import _paused_run
 from tools import pilot_state, step_size
+from tools.run_report import _composition
 from tools.scan_rules import non_code_class
 from tools.step_size import plan_view_bytes
-from tools.run_report import _composition
 
 MODULE = "services/api"
 

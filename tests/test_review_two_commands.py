@@ -10,12 +10,12 @@ The helpers ``_open`` and ``_select_verdict`` are the cycle for the tests of oth
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 import json
 from pathlib import Path
 
 import pytest
-import copy
 
 from tests.test_review_requested import build_generated_run, _generated_run, _journal, _put, _review_answer
 from tests.journal_helpers import assert_refused_once

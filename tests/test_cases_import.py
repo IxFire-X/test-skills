@@ -4,34 +4,34 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
+import shutil as copying
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import re
-import shutil as copying
 
 from tests.journal_helpers import assert_refused_once
 
-from tests.helpers import MODULE_PYTHON, prepare_stage, submit_stage, answer_stage
-from tools import ready, api, context_marker_parts, exec_commands
-from tools.pilot_state import derive_state, read_model_request, read_model_stage_artifact, append_event
-from tools.pilot_state import publish_model_request, publish_model_stage_artifact, read_attempt_receipt
-from tools.pilot_state import read_effective_canonical, read_terminal_result
-from tools.run_report import build_report
-from tests.test_review_requested import _journal, _put
-from tools.batch_assembly import with_digest, IMPORT_ANSWER_PER_HUMAN_BYTE, plan_batches, require_imported_human_fields
-from tools.batch_assembly import fill_fragment_mechanics
-from tools.cases_import import imported_value, source_requirements, read_cases, password_cells
-from tests.test_requirement_traceability import canonical_fixture
-from tools.review_view import IMPORT_NOTE, render
-from tests.test_automation_revision_budget import durable_boundary, host_evidence, review, automated_document
+from tests.helpers import MODULE_PYTHON, answer_stage, prepare_stage, submit_stage
 from tests.p4_flow import flow_args, human_run
+from tests.test_automation_revision_budget import automated_document, durable_boundary, host_evidence, review
+from tests.test_requirement_traceability import canonical_fixture
+from tests.test_review_requested import _journal, _put
 from tests.test_review_two_commands import _candidate_file, _open, _select_verdict, _verdict
+from tools import api, context_marker_parts, exec_commands, ready
 from tools.automation_validation import automation_sha256
-from tools.test_case_projections import render_zephyr_csv
+from tools.batch_assembly import IMPORT_ANSWER_PER_HUMAN_BYTE, fill_fragment_mechanics, plan_batches
+from tools.batch_assembly import require_imported_human_fields, with_digest
+from tools.cases_import import imported_value, password_cells, read_cases, source_requirements
+from tools.pilot_state import append_event, derive_state, publish_model_request, publish_model_stage_artifact
+from tools.pilot_state import read_attempt_receipt, read_effective_canonical, read_model_request
+from tools.pilot_state import read_model_stage_artifact, read_terminal_result
+from tools.review_view import IMPORT_NOTE, render
+from tools.run_report import build_report
 from tools.schema_validation import schema_diagnostics
+from tools.test_case_projections import render_zephyr_csv
 
 pytestmark = pytest.mark.contract
 

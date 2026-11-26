@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from tools import pilot_state
 
 ROOT = Path(__file__).resolve().parents[1]

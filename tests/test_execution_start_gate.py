@@ -1,13 +1,13 @@
+from dataclasses import replace
 from pathlib import Path
 from tests.helpers import MODULE_PYTHON
-from tests.test_project_native_pytest import _request, _reviewed_inputs
 import shutil
-
-import pytest
 import subprocess
 
+import pytest
+
 from helpers import build_phase_two_baseline
-from dataclasses import replace
+from tests.test_project_native_pytest import _request, _reviewed_inputs
 from tools import pilot_state
 from tools.execution_adapters import request_digest
 from tools.pilot_state import publish_attempt_receipt

@@ -15,7 +15,7 @@ import pytest
 from tests.test_review_canaries import _answer, _boundary_and_removed, _fake_seed, _finding, _generated_run, _ids
 from tests.test_stage_steps import _call, _events, _put, _status
 from tests.test_rework_stage import _published
-from tools import pilot_state, review_canaries, stage_steps, orchestrate_test_case_revision as orchestrate
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state, review_canaries, stage_steps
 
 STAGE = "tc-reviewer:canonical"
 INDEPENDENT = ("--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
