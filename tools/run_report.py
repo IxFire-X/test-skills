@@ -620,7 +620,10 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-_WARNING_TEXT = {"CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
+# a receipt of execution or disposition on the disk that does not read (run_pipeline.receipts_warning); the words wait for the user's approval
+RECEIPT_WARNINGS = {"RUN_OF_OTHER_VERSION": "прогон сделан другой версией, квитанции не прочитаны",
+                    "RECEIPTS_UNREADABLE": "квитанции прогона не прочитаны"}
+_WARNING_TEXT = {**RECEIPT_WARNINGS, "CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
                  "REVIEW_UNRELIABLE": "ревью ненадёжно, accepted=false",
                  "REVIEW_WEAK": "ревью слабое",
@@ -966,7 +969,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
     """The report and the marker warnings of the run (the warnings feed only the analyst questions).  ``kept``: filled with the human's cases the export keeps
     (by CSV row) with their title and the reviewer's words — the one computation of the outcome serves the report and the analyst's file."""
     from tools import pilot_state as pilot
-    from tools.run_pipeline import _durable_status_facts
+    from tools.run_pipeline import _durable_status_facts, receipts_warning
 
     project = Path(project).resolve()
     root = project / ".pilot-runs" / run_id
@@ -1117,7 +1120,8 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
                     + ([EFFECTIVE_UNREADABLE] if effective_unreadable else [])
                     + (["refusals.mismatch"] if refused and refused["mismatch"] else [])
                     + (["CODEWORD_LOST"] if refused and refused.get("codeword_lost") else [])
-                    + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
+                    + ([canaries["warning"]] if canaries and canaries.get("warning") else [])
+                    + ([receipts] if (receipts := receipts_warning(project, root, attempt_id)) else []),
         **({"requirement_labels": labels} if labels else {}),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _with_restored(_import_summary(root, events), acceptance),

@@ -1949,6 +1949,46 @@ def _with_moved_note(payload: dict[str, Any], project: Path, root: Path) -> dict
     return {**payload, "warnings": [*payload.get("warnings", []), f"PROJECT_MOVED: {note['fix']}"], "project_moved": note}
 
 
+RECEIPT_KINDS = ("execution-receipt", "disposition-receipt")  # the receipts whose refused read status and report would pass in silence
+
+
+def receipts_warning(project: Path, root: Path, attempt_id: str | None) -> str | None:
+    """``RUN_OF_OTHER_VERSION`` or ``RECEIPTS_UNREADABLE``: a receipt of execution or disposition of the attempt is on the disk and its
+    strict read refuses it, so status and report show neither the findings nor the numbers of the run (handoff/v08/golden-mode-b-gap.md).
+    «Another version» only when the run recorded the fingerprint of its package (``skill_pack_digest`` of the marker's request) and it is
+    not this package's; the same fingerprint, or none, says that the receipts are not read and not why (a changed or a broken file).
+    Nothing when no such file is there, and nothing for a moved project: ``PROJECT_MOVED`` says why (a receipt binds its folder)."""
+    from tools import pilot_state as pilot
+
+    if not attempt_id:
+        return None
+    unread = False
+    for kind in RECEIPT_KINDS:
+        if pilot.receipt_target(root, attempt_id, kind).is_file():
+            try:
+                pilot.read_attempt_receipt(root, attempt_id, kind, "ARTIFACT_READ_BACK")
+            except (KeyError, OSError, TypeError, ValueError):
+                unread = True
+    if not unread or pilot.run_project_move(project, root) is not None:
+        return None
+    here = pilot.skill_pack_digest()
+    return "RUN_OF_OTHER_VERSION" if here is not None and _run_pack(root, attempt_id) not in (None, here) else "RECEIPTS_UNREADABLE"
+
+
+def _run_pack(root: Path, attempt_id: str) -> str | None:
+    """The ``skill_pack_digest`` that the marker's request of the attempt recorded, or None: a run before the fingerprint, a run with no
+    request of the marker, or a request that does not read."""
+    from tools import pilot_state as pilot
+
+    try:
+        asked = next((event for event in pilot.derive_state(root)["events"] if event.get("attempt_id") == attempt_id
+                      and event["event_type"] == "MODEL_REQUESTED" and str(event.get("stage_instance_id")).startswith("context-marker")), None)
+        value = asked and pilot.read_model_request(root, attempt_id, str(asked["stage_instance_id"]), str(asked["artifact_digest"])).get("skill_pack_digest")
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = False) -> tuple[Path, Mapping[str, Any], Mapping[str, Any]]:
     from tools.pilot_state import derive_state, read_run
 
@@ -2223,6 +2263,10 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
             result.update(_next_run(project, run["manifest"], read_terminal_result(root, str(attempt["attempt_id"])).get("reason_code")))
         except (KeyError, OSError, TypeError, ValueError):
             pass
+    if attempt is not None and (code := receipts_warning(project, root, str(attempt["attempt_id"]))):
+        from tools.run_report import RECEIPT_WARNINGS
+
+        result["warnings"] = [*result.get("warnings", []), f"{code}: {RECEIPT_WARNINGS[code]}"]
     return _with_moved_note(result, project, root)
 
 
