@@ -7,9 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_exec_prepares import _project
+from tests.test_p4_ingest import _args
+from tests.test_partial_acceptance_run import _fixture_run
+from tests.test_review_canaries import _answer, _finding, _generated_run, _ids, _open, _select
 from tests.test_rework_stage import STAGE, _published, _reviewed
 from tests.test_stage_steps import _events, _status
-from tools import api
+from tools import api, exec_commands, orchestrate_test_case_revision as orchestrate, pilot_state
+from tools.run_pipeline import _run_in_progress
 
 
 def _finish(run_root: Path, capsys: pytest.CaptureFixture[str], *extra: str) -> tuple[int, dict]:
@@ -27,8 +32,6 @@ def _nothing_written(run_root: Path, before: tuple[list[str], list[str]]) -> boo
 # 1. a finish in the middle of a rework ------------------------------------------------------------------------------------
 
 def test_finish_in_the_middle_of_a_rework_of_a_build_run_refuses_before_any_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_partial_acceptance_run import _fixture_run
-
     _fixture_run(monkeypatch)
     run, _done = _reviewed(tmp_path, monkeypatch)
     root = run["run_root"]
@@ -65,10 +68,6 @@ def test_finish_with_a_spoiled_rework_receipt_says_a_new_run_not_status(tmp_path
 # 2. the receipts of the written tests are gone, the journal binds them ---------------------------------------------------
 
 def test_finish_does_not_close_an_attempt_whose_bound_receipts_of_the_written_tests_are_gone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_exec_prepares import _project
-    from tests.test_p4_ingest import _args
-    from tools import exec_commands, pilot_state
-
     project, root, attempt_id = _project(tmp_path)
     assert exec_commands.cmd_materialize(_args(project, root)) == 0
     written = sorted(path for path in project.rglob("test_generated.py") if ".pilot-runs" not in path.parts)
@@ -87,9 +86,6 @@ def test_finish_does_not_close_an_attempt_whose_bound_receipts_of_the_written_te
 
 @pytest.mark.parametrize("build", [False, True])
 def test_the_hint_of_scan_offers_finish_only_where_finish_closes_a_waiting_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build: bool) -> None:
-    from tests.test_partial_acceptance_run import _fixture_run
-    from tools.run_pipeline import _run_in_progress
-
     if build:
         _fixture_run(monkeypatch)
     run, _done = _reviewed(tmp_path, monkeypatch)
@@ -99,9 +95,6 @@ def test_the_hint_of_scan_offers_finish_only_where_finish_closes_a_waiting_rewor
 # 5. after a cut select, finish leaves neither REJECTED nor UNREVIEWED ---------------------------------------------------
 
 def test_finish_after_a_select_cut_before_its_rejected_file_leaves_a_file_of_the_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_review_canaries import _answer, _finding, _generated_run, _ids, _open, _select
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
     run = _generated_run(tmp_path)
@@ -124,9 +117,6 @@ def test_finish_after_a_select_cut_before_its_rejected_file_leaves_a_file_of_the
 
 
 def test_finish_of_a_rejected_run_leaves_a_lying_rejected_file_as_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_review_canaries import _answer, _finding, _generated_run, _ids, _open, _select
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
     run = _generated_run(tmp_path)

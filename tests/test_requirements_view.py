@@ -6,6 +6,10 @@ from pathlib import Path
 
 from tests.test_marker_parts import _publish_requirements, _run
 from tools import pilot_state
+from tools.context_marker_parts import plan
+from tools.run_report import _composition
+from tools.step_size import REQUIREMENTS_VIEW, _requirements_view_data, journal_inputs, requirements_view_bytes
+from tools.step_size import requirements_view_path, stage_inputs
 
 PART = "context-marker:batch-001"
 BLOCK = "### Requirement: Длина описания\nСистема SHALL принимать до 255 символов."
@@ -43,8 +47,6 @@ def test_view_at_is_null_without_line() -> None:
 
 
 def test_part_reads_the_view(tmp_path: Path) -> None:
-    from tools.step_size import REQUIREMENTS_VIEW, stage_inputs
-
     root, _answer = _asked_part(tmp_path)
     files = stage_inputs(root, PART)["files"]
     assert [row["basis"] for row in files if row.get("basis") == REQUIREMENTS_VIEW] == [REQUIREMENTS_VIEW]
@@ -52,8 +54,6 @@ def test_part_reads_the_view(tmp_path: Path) -> None:
 
 
 def test_old_part_reads_the_answer(tmp_path: Path) -> None:
-    from tools.step_size import requirements_view_path, stage_inputs
-
     root, answer = _asked_part(tmp_path)
     requirements_view_path(root, answer["content_digest"]).unlink()  # a part asked before the view: no view on the disk
     files = stage_inputs(root, PART, write_views=False)["files"]
@@ -61,9 +61,6 @@ def test_old_part_reads_the_answer(tmp_path: Path) -> None:
 
 
 def test_plan_counts_the_view(tmp_path: Path) -> None:
-    from tools.context_marker_parts import plan
-    from tools.step_size import requirements_view_bytes
-
     root, attempt_id, baseline, _receipts = _run(tmp_path)
     answer = _publish_requirements(root, attempt_id, baseline)
     artifact = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer["content_digest"])["artifact"]
@@ -72,8 +69,6 @@ def test_plan_counts_the_view(tmp_path: Path) -> None:
 
 
 def test_report_counts_the_view_as_markup(tmp_path: Path) -> None:
-    from tools.run_report import _composition
-
     root, answer = _asked_part(tmp_path)
     found = {"files": [{"path": str(root / "marker-views" / "x.requirements-view.json"), "bytes": 10, "basis": "requirements-view-v1"}], "bindings": []}
     assert _composition(found, root.parent.parent, root)["markup"] == 10
@@ -85,16 +80,12 @@ def _old_run(tmp_path: Path) -> tuple[Path, dict]:
 
 
 def test_a_measurement_writes_no_view(tmp_path: Path) -> None:
-    from tools.step_size import journal_inputs, requirements_view_path
-
     root, answer = _old_run(tmp_path)
     journal_inputs(root.parent.parent, root.name, "context-marker", 1)
     assert not requirements_view_path(root, answer["content_digest"]).exists()
 
 
 def test_a_measurement_counts_the_view_it_does_not_write(tmp_path: Path) -> None:
-    from tools.step_size import journal_inputs, requirements_view_bytes
-
     root, answer = _old_run(tmp_path)
     attempt_id = pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]
     artifact = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer["content_digest"])["artifact"]
@@ -104,8 +95,6 @@ def test_a_measurement_counts_the_view_it_does_not_write(tmp_path: Path) -> None
 
 
 def test_a_measurement_of_a_part_asked_before_the_view_reads_the_answer(tmp_path: Path) -> None:
-    from tools.step_size import journal_inputs, requirements_view_path
-
     root, answer = _asked_part(tmp_path)
     requirements_view_path(root, answer["content_digest"]).unlink()  # a part asked before the view: no view on the disk
     files, held = journal_inputs(root.parent.parent, root.name, "context-marker", 1)
@@ -113,8 +102,6 @@ def test_a_measurement_of_a_part_asked_before_the_view_reads_the_answer(tmp_path
 
 
 def test_an_answer_outside_the_run_is_not_read(tmp_path: Path) -> None:
-    from tools.step_size import _requirements_view_data
-
     root, answer = _old_run(tmp_path)
     attempt_id = pilot_state.derive_state(root)["attempts"][-1]["attempt_id"]
     stored = root / "model-stage-artifacts" / attempt_id / (answer["content_digest"].removeprefix("sha256:") + ".json")

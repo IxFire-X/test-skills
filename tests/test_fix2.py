@@ -4,8 +4,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.test_f1 import _opened, _pipeline
+from tests.test_finish import _automation_chain
+from tests.test_generated_delta import _inputs
+from tests.test_reuse_cases import _scanned
+from tests.test_reuse_rework import SECOND, _source
+from tests.test_review_canaries import _answer, _boundary_and_removed, _fake_seed, _finding, _ids, _open, _select
+from tests.test_review_open_recovery import _crash_once
+from tests.test_review_requested import _generated_run
 from tests.test_review_two_commands import _select_verdict, _verdict
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state, review_canaries
+from tools.generated_delta import materialize_delta
 
 
 def _closed(tmp_path: Path, capsys) -> dict:
@@ -21,8 +32,6 @@ def _closed(tmp_path: Path, capsys) -> dict:
 # ---- 1: the files of the closure and the result are no lost receipts ----------------------------------------------------------------
 
 def test_a_closed_attempt_with_all_its_files_has_no_lost_receipt(tmp_path: Path, capsys) -> None:
-    from tools import pilot_state
-
     run = _closed(tmp_path, capsys)
     root = Path(run["run_root"])
     assert pilot_state.derive_state(root)["attempts"][0]["state"] == "TERMINAL"
@@ -32,11 +41,6 @@ def test_a_closed_attempt_with_all_its_files_has_no_lost_receipt(tmp_path: Path,
 # ---- 4: the scan names the consent for the review of a rework made in the session of the rework ------------------------------------------------
 
 def test_the_scan_names_the_consent_for_a_second_round_of_the_same_session(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tests.test_reuse_cases import _scanned
-    from tests.test_review_canaries import _fake_seed
-    from tests.test_reuse_rework import SECOND, _source
-    from tools import orchestrate_test_case_revision as orchestrate, pilot_state, review_canaries
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)  # what the tests of the rework set for every run of theirs
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
     monkeypatch.setattr(review_canaries, "seed", _fake_seed)
@@ -51,11 +55,6 @@ def test_the_scan_names_the_consent_for_a_second_round_of_the_same_session(tmp_p
 
 def _cut_rework(tmp_path: Path, monkeypatch) -> tuple[dict, dict]:
     """The first review sent a case back for the rework; ``submit`` is cut after the file ``rework-round`` was written, before its events.  The answer is the one to be repeated."""
-    from tests.test_review_canaries import _answer, _boundary_and_removed, _finding, _ids, _open, _select
-    from tests.test_review_open_recovery import _crash_once
-    from tests.test_review_requested import _generated_run
-    from tools import orchestrate_test_case_revision as orchestrate, pilot_state
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
     run = _generated_run(tmp_path)
@@ -72,9 +71,6 @@ def _cut_rework(tmp_path: Path, monkeypatch) -> tuple[dict, dict]:
 
 
 def test_the_repeat_of_a_submit_cut_after_the_rework_file_goes_on(tmp_path: Path, monkeypatch) -> None:
-    from tests.test_review_canaries import _select
-    from tools import orchestrate_test_case_revision as orchestrate, pilot_state
-
     run, answer = _cut_rework(tmp_path, monkeypatch)
     _select(run, answer)  # not «unbound factual receipt»
     state = pilot_state.derive_state(run["run_root"])
@@ -84,8 +80,6 @@ def test_the_repeat_of_a_submit_cut_after_the_rework_file_goes_on(tmp_path: Path
 
 def test_a_rework_file_laid_beside_the_journal_does_not_become_a_receipt_by_a_read(tmp_path: Path, monkeypatch) -> None:
     """A file the journal does not bind (a cut submit leaves the same one, an agent can lay one): the readers say «no rework» and write nothing."""
-    from tools import orchestrate_test_case_revision as orchestrate, pilot_state
-
     run, _answer = _cut_rework(tmp_path, monkeypatch)
     root, journal = Path(run["run_root"]), Path(run["run_root"]) / "events.jsonl"
     before = journal.read_bytes()
@@ -94,9 +88,6 @@ def test_a_rework_file_laid_beside_the_journal_does_not_become_a_receipt_by_a_re
 
 
 def test_the_scan_writes_nothing_into_an_earlier_run_whose_rework_file_lacks_its_events(tmp_path: Path, monkeypatch) -> None:
-    from tests.test_reuse_cases import _scanned
-    from tools import pilot_state
-
     src, _answer = _cut_rework(tmp_path, monkeypatch)
     run_root, attempt_id = _scanned(src)
     before = (Path(src["run_root"]) / "events.jsonl").read_bytes()
@@ -109,12 +100,6 @@ def test_the_scan_writes_nothing_into_an_earlier_run_whose_rework_file_lacks_its
 
 def test_a_cut_materialize_that_left_the_ownership_file_without_events_forbids_revision_two(tmp_path: Path, monkeypatch) -> None:
     """The sibling test of ``test_materialization_failure`` cuts after the events; here the cut is between the file and its events (the level of those tests: the chain of the local-pilot mode takes the same call)."""
-    import pytest
-
-    from tests.test_generated_delta import _inputs
-    from tests.test_review_open_recovery import _crash_once
-    from tools import pilot_state
-    from tools.generated_delta import materialize_delta
 
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     with monkeypatch.context() as broken:
@@ -132,10 +117,6 @@ def test_a_cut_materialize_that_left_the_ownership_file_without_events_forbids_r
 
 def test_a_boundary_receipt_whose_digest_field_is_a_number_is_refused_with_a_value_error(tmp_path: Path) -> None:
     """The receipt is sealed again after the edit: only the check of the field itself can refuse it."""
-    import pytest
-
-    from tests.test_finish import _automation_chain
-    from tools import pilot_state
 
     root, attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
     path = pilot_state._receipt_target(root, attempt_id, "automation-review-boundary-r1")

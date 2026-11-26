@@ -14,6 +14,7 @@ import pytest
 from tests.test_phase2_scan import _args, _project
 from tests.test_scan_exclusions import _write
 from tools import run_pipeline
+from tools.ready import check
 
 
 def _context_paths(payload: dict) -> set[str]:
@@ -85,8 +86,6 @@ def test_a_task_document_outside_the_project_stops_the_scan(tmp_path: Path, monk
 
 
 def test_ready_passes_a_task_document_outside_the_module(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project, module = _project(tmp_path)
     _write(module, "src/app.py", "X = 1\n")
     _write(project, "docs/to_do/T1/spec.md", "Задача 1.\n")

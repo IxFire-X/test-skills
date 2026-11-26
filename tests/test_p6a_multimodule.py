@@ -12,6 +12,9 @@ from pathlib import Path
 import pytest
 
 from tools import run_pipeline
+from tools.module_ids import module_id_for
+from tools.project_inventory import read_execution_baseline
+from tools.ready import check, module_choice
 
 FIXTURE = Path(__file__).parent / "fixtures" / "maven-multimodule"
 DOC = "docs/feature.md"
@@ -60,8 +63,6 @@ def _context_paths(payload: dict) -> set[str]:
     ("services/my.core", "root--" + b"services".hex() + "--" + b"my.core".hex()),
 ])
 def test_the_module_id_is_the_folder_path_and_hex_only_for_names_it_cannot_carry(root: str, module_id: str) -> None:
-    from tools.module_ids import module_id_for
-
     assert module_id_for(root) == module_id
 
 
@@ -107,8 +108,6 @@ def test_a_wrong_module_lists_the_current_ids(tmp_path: Path, monkeypatch: pytes
 
 
 def test_ready_takes_the_new_and_the_old_id(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     for given, legacy in (("api", False), ("root--617069", True)):
         report = check(project, [DOC], profile="cases-only-v1", module=given)
@@ -132,8 +131,6 @@ def test_a_document_of_the_repository_root_is_read_for_a_submodule(tmp_path: Pat
 
 
 def test_the_run_binds_the_outside_document_and_status_sees_no_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.project_inventory import read_execution_baseline
-
     project = _project(tmp_path)
     scan = _scan(project, monkeypatch, module="api")
     run_root = Path(scan["run_root"])
@@ -176,8 +173,6 @@ def test_a_document_in_an_excluded_folder_names_the_rule(tmp_path: Path, monkeyp
 
 
 def test_ready_passes_a_document_of_the_root_for_a_submodule(tmp_path: Path) -> None:
-    from tools.ready import check
-
     report = check(_project(tmp_path), [DOC], profile="cases-only-v1", module="api")
     assert next(item for item in report["checks"] if item["id"] == f"docs:{DOC}")["level"] == "OK"
     assert next(item for item in report["checks"] if item["id"] == "scan")["level"] in {"OK", "WARN"}
@@ -186,8 +181,6 @@ def test_ready_passes_a_document_of_the_root_for_a_submodule(tmp_path: Path) -> 
 
 
 def test_ready_stops_on_a_secret_document_outside_the_module_with_its_rule(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     (project / DOC).write_text('# Требования\n\npassword="secret123456"\n', encoding="utf-8")
     row = next(item for item in check(project, [DOC], profile="cases-only-v1", module="api")["checks"] if item["id"] == f"docs:{DOC}")
@@ -222,8 +215,6 @@ def test_ready_names_the_inventory_rule_of_a_secret_document_with_and_without_a_
 
 
 def test_ready_without_a_module_says_to_name_one_and_lists_the_modules(tmp_path: Path) -> None:
-    from tools.ready import check
-
     report = check(_project(tmp_path), [DOC], profile="cases-only-v1", module=None)
     row = next(item for item in report["checks"] if item["id"] == "module")
     assert row["level"] == "STOP" and "--module <id>" in row["message"] and "api" in row["message"] and "core" in row["message"], row
@@ -231,7 +222,6 @@ def test_ready_without_a_module_says_to_name_one_and_lists_the_modules(tmp_path:
 
 def test_the_list_of_modules_in_that_line_stops_at_twelve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import discover_project
-    from tools.ready import module_choice
 
     monkeypatch.setattr(discover_project, "discover_project", lambda _root: {"modules": [{"id": f"m{number:02d}"} for number in range(15)]})
     line = module_choice(tmp_path)

@@ -7,11 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state
+from tests.test_finish import _project
+from tests.test_marker_parts import _marker, _run
+from tools import pilot_state, review_view, step_size
+from tools.batch_assembly import with_digest
+from tools.pilot_state import derive_state, read_effective_canonical
+from tools.step_size import request_files
 
 
 def _generator_run(tmp_path: Path):
-    from tests.test_marker_parts import _marker, _run
     from tools.batch_assembly import with_digest
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -36,8 +40,6 @@ def _request(root: Path, attempt_id: str, stage: str, digests: list[str]) -> Non
 
 def test_published_generator_inputs_are_found(tmp_path: Path) -> None:
     """FaT-DG: plan and header of the published inputs are found by their one digest."""
-    from tools.step_size import request_files
-
     root, attempt_id, _baseline, receipts, marker, *_rest = _generator_run(tmp_path)
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Опубликованный заголовок"})
     plan = pilot_state.publish_generator_input(root, attempt_id, "plan", {"kind": "plan", "header_digest": header["digest"], "batches": [
@@ -54,8 +56,6 @@ def test_published_generator_inputs_are_found(tmp_path: Path) -> None:
 
 
 def test_the_generator_inputs_come_from_the_published_request(tmp_path: Path) -> None:
-    from tools.step_size import request_files
-
     root, attempt_id, _baseline, receipts, marker, plan, header, plan_path, header_path = _generator_run(tmp_path)
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     found = request_files(root, "tc-generator:BATCH-fixture")
@@ -70,9 +70,6 @@ def test_the_generator_inputs_come_from_the_published_request(tmp_path: Path) ->
 
 def test_plan_and_header_published_without_a_suffix_are_found(tmp_path: Path) -> None:
     """FaT-10d: the microservices run published `--name batch-plan` and `--name batch-header`; both were STEP_INPUT_UNRESOLVED."""
-    from tools.batch_assembly import with_digest
-    from tools.step_size import request_files
-
     root, attempt_id, _baseline, receipts, marker, _plan, _header, _plan_path, _header_path = _generator_run(tmp_path)
     plan = with_digest({"kind": "plan", "batches": ["BATCH-fixture"], "name": "без суффикса"})
     header = with_digest({"kind": "header", "title": "Заголовок без суффикса"})
@@ -85,9 +82,6 @@ def test_plan_and_header_published_without_a_suffix_are_found(tmp_path: Path) ->
 
 
 def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) -> None:
-    from tests.test_finish import _project
-    from tools.step_size import request_files
-
     _project_path, run_root, _attempt_id, _values = _project(tmp_path)
     places = {}
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
@@ -102,10 +96,6 @@ def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) 
 def test_the_receipt_inside_the_effective_carrier_is_a_binding_not_a_second_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """FaT-AV: the effective bundle receipt has no file of its own; its carrier holds the whole document again (Petclinic
     1 603 574 B = 801 053 + 802 521). The step reads the receipt's own bytes, never the carrier."""
-    from tests.test_finish import _project
-    from tools import step_size
-    from tools.pilot_state import read_effective_canonical
-
     project, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
     found = step_size.request_files(run_root, "tc-to-autotest:r1")
@@ -123,10 +113,6 @@ def test_the_receipt_inside_the_effective_carrier_is_a_binding_not_a_second_docu
 
 def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """FaT-AV: like the reviewer, the generator reads the view of the effective document; the request digests stay."""
-    from tests.test_finish import _project
-    from tools import review_view, step_size
-    from tools.pilot_state import derive_state, read_effective_canonical
-
     project, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
     built = review_view.ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator does before the step is measured
@@ -135,16 +121,12 @@ def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: 
 
 
 def test_no_request_yet_is_an_error(tmp_path: Path) -> None:
-    from tools.step_size import request_files
-
     root, *_rest = _generator_run(tmp_path)
     with pytest.raises(ValueError, match="prepare"):
         request_files(root, "tc-generator:BATCH-fixture")
 
 
 def test_an_unknown_digest_is_unresolved_and_a_warning_not_a_stop(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import step_size
-
     root, attempt_id, _baseline, receipts, marker, plan, _header, _plan_path, _header_path = _generator_run(tmp_path)
     unknown = "sha256:" + "2" * 64
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], unknown])
@@ -157,8 +139,6 @@ def test_an_unknown_digest_is_unresolved_and_a_warning_not_a_stop(tmp_path: Path
 def test_a_twin_with_the_digest_field_of_a_file_and_other_bytes_is_no_second_file_of_that_digest(tmp_path: Path) -> None:
     """v0.6: the twin's seal does not hold (its ``digest`` field is the plan's, its bytes are not), so it binds nothing: the plan is its one file, not an ``ambiguous`` input
     the twin could make of any digest."""
-    from tools.step_size import request_files
-
     root, attempt_id, _baseline, receipts, marker, plan, header, plan_path, _header_path = _generator_run(tmp_path)
     twin = dict(plan, kind="другой план")  # same self "digest" field, other bytes
     pilot_state.publish_run_artifact_bytes(root, attempt_id, "twin-plan.json", json.dumps(twin, ensure_ascii=False).encode("utf-8"))
@@ -168,8 +148,6 @@ def test_a_twin_with_the_digest_field_of_a_file_and_other_bytes_is_no_second_fil
 
 
 def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import step_size
-
     root, attempt_id, _baseline, receipts, marker, plan, header, _plan_path, _header_path = _generator_run(tmp_path)
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     code = step_size.main(["--project", str(root.parent.parent), "--run", root.name, "--stage", "tc-generator:BATCH-fixture"])
@@ -184,9 +162,6 @@ def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixtu
 
 
 def test_the_requirements_step_measures_only_the_documents(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_marker_parts import _run
-    from tools import step_size
-
     root, attempt_id, baseline, _receipts = _run(tmp_path, files=3)
     docs = [tmp_path / row["path"] for row in baseline["requirements"].get("docs", [])]
     code = step_size.main(["--project", str(tmp_path), "--run", root.name, "--stage", "context-marker:requirements"])
@@ -200,10 +175,6 @@ def test_the_requirements_step_measures_only_the_documents(tmp_path: Path, capsy
 def test_a_document_kept_only_in_its_carrier_is_read_once_from_it(tmp_path: Path) -> None:
     """FaT-AV: the microservices run kept the case document in tmp/ only; the carrier is then the one file of the step
     and the receipt it also holds adds nothing."""
-    from tests.test_finish import _project
-    from tools.pilot_state import read_effective_canonical
-    from tools.step_size import request_files
-
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
     for path in (run_root / "candidate-bundle").rglob("*.json"):

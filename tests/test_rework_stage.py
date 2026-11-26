@@ -11,9 +11,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_marker_parts import _run
 from tests.test_review_canaries import _answer, _boundary_and_removed, _candidate, _finding, _generated_run, _ids, _open, _select
 from tests.test_stage_steps import _call, _events, _put, _status
-from tools import pilot_state, stage_steps
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state, stage_steps, step_size
+from tools.batch_assembly import fill_rework_mechanics
+from tools.canonical_document import document_sha256
+from tools.orchestrate_test_case_revision import acceptance_summary, close_pending_rework, configured_share, reject_share
+from tools.orchestrate_test_case_revision import rework_basis, rework_round_data, rework_rounds
+from tools.review_canaries import recorded_answer
+from tools.skillsrc_manifest import parse_skillsrc_bytes
 
 STAGE = "tc-generator:rework-1"
 
@@ -192,17 +199,12 @@ def test_the_rework_is_not_asked_for_before_the_review_is_closed(tmp_path: Path,
 
 
 def test_a_live_edit_of_the_limit_after_the_first_select_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import orchestrate_test_case_revision as orchestrate
-
     run, _done = _reviewed(tmp_path, monkeypatch)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # the file says 0 now (or says nothing: a drift reads as the default)
     assert _status(run["run_root"])["next"] == {"verb": "prepare", "stage": STAGE} and _call(capsys, "prepare", run["run_root"], STAGE)[0] == 0
 
 
 def test_the_rounds_are_read_from_the_limits_the_run_froze(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import step_size
-    from tools.orchestrate_test_case_revision import rework_rounds
-
     run = _generated_run(tmp_path)
     args = (run["run_root"], run["attempt_id"])
     for limits, wanted in (({"rework_rounds": 1}, 1), ({"rework_rounds": 0}, 0), ({}, 1), ({"rework_rounds": 7}, 1)):
@@ -211,16 +213,12 @@ def test_the_rounds_are_read_from_the_limits_the_run_froze(tmp_path: Path, monke
 
 
 def _frozen_limits(monkeypatch: pytest.MonkeyPatch, **limits) -> None:
-    from tools import step_size
-
     monkeypatch.setattr(step_size, "run_limits", lambda *_args: (limits, None))
 
 
 @pytest.mark.parametrize("limits, first, set_", [({"review_reject_share": 20, "rework_rounds": 1}, 50, 20), ({"review_reject_share": 20, "rework_rounds": 0}, 20, 20),
                                                  ({"rework_rounds": 1}, 50, 20), ({"review_reject_share": 35, "rework_rounds": 0}, 35, 35)])
 def test_the_first_review_takes_out_up_to_half_the_set_while_the_rework_is_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limits: dict, first: int, set_: int) -> None:
-    from tools.orchestrate_test_case_revision import configured_share, reject_share
-
     run = _generated_run(tmp_path)
     _frozen_limits(monkeypatch, **limits)
     args = (run["run_root"], run["attempt_id"])
@@ -238,9 +236,6 @@ def test_more_cases_rejected_than_the_limit_go_to_the_rework_unless_it_is_off(tm
 
 
 def test_a_run_closed_over_the_limit_before_the_rework_began_names_no_outcome_the_ledger_does_not_have(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.orchestrate_test_case_revision import acceptance_summary
-    from tools.review_canaries import recorded_answer
-
     _frozen_limits(monkeypatch, review_reject_share=20, rework_rounds=0)
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
@@ -286,8 +281,6 @@ def test_finish_after_an_answer_nobody_reviewed_shows_the_case_of_r1_not_the_rew
 
 
 def test_a_repeated_finish_publishes_nothing_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.orchestrate_test_case_revision import close_pending_rework
-
     run, _done = _reviewed(tmp_path, monkeypatch)
     _closed(run, capsys)
     files, effective = {path.name: path.read_bytes() for path in (run["run_root"] / "published").iterdir()}, pilot_state.read_effective_canonical(run["run_root"], run["attempt_id"])
@@ -310,9 +303,6 @@ def test_finish_closes_a_run_without_a_rework_as_before(tmp_path: Path, monkeypa
 
 @pytest.mark.parametrize("value", [0, 1])
 def test_the_limit_of_a_real_skillsrc_is_what_the_scan_froze(tmp_path: Path, value: int) -> None:
-    from tests.test_marker_parts import _run
-    from tools.orchestrate_test_case_revision import rework_rounds
-
     (tmp_path / "a").mkdir()
     _run(tmp_path / "a", files=1)
     content = json.loads((tmp_path / "a" / ".skillsrc").read_text(encoding="utf-8"))
@@ -325,9 +315,6 @@ def test_the_limit_of_a_real_skillsrc_is_what_the_scan_froze(tmp_path: Path, val
 
 
 def test_the_schema_of_the_skillsrc_refuses_more_than_one_round(tmp_path: Path) -> None:
-    from tests.test_marker_parts import _run
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
-
     _run(tmp_path, files=1)
     content = json.loads((tmp_path / ".skillsrc").read_text(encoding="utf-8"))
     for value in (2, -1, "1"):
@@ -336,9 +323,6 @@ def test_the_schema_of_the_skillsrc_refuses_more_than_one_round(tmp_path: Path) 
 
 
 def test_a_receipt_of_another_answer_of_the_reviewer_is_no_rework_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.canonical_document import document_sha256
-    from tools.orchestrate_test_case_revision import rework_basis
-
     run, _done = _reviewed(tmp_path, monkeypatch, rounds=0)  # the review is closed and its set published; the receipt is planted
     pilot_state.publish_rework_round(run["run_root"], run["attempt_id"], document_sha256(_candidate(run)), "sha256:" + "2" * 64)
     with pytest.raises(ValueError, match="REWORK_NOT_PENDING"):
@@ -383,8 +367,6 @@ def _thin_answer(run: dict, new_steps: int = 2) -> dict:
 
 def test_a_reworked_case_with_new_steps_and_no_service_fields_is_accepted_and_recorded_complete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                             capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.orchestrate_test_case_revision import rework_round_data
-
     run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _thin_answer(run))
     code, out = _call(capsys, "submit", root, STAGE, "--dry-run")
@@ -405,8 +387,6 @@ def test_a_reworked_case_with_new_steps_and_no_service_fields_is_accepted_and_re
 
 
 def test_the_full_form_of_the_answer_of_the_rework_is_left_as_it_is_and_the_thin_one_becomes_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.batch_assembly import fill_rework_mechanics
-
     run, _done = _reviewed(tmp_path, monkeypatch)
     filled, summary = fill_rework_mechanics(_thin_answer(run))
     assert summary and set(filled) == {"schema_version", "status", "batch_id", "test_cases"}  # no ``diagnostics`` of a batch in the answer
@@ -414,8 +394,6 @@ def test_the_full_form_of_the_answer_of_the_rework_is_left_as_it_is_and_the_thin
 
 
 def test_the_categories_of_a_reworked_case_are_put_in_the_canonical_order() -> None:
-    from tools.batch_assembly import fill_rework_mechanics
-
     filled, summary = fill_rework_mechanics({"test_cases": [{"case_id": "TC-1", "categories": ["negative", "positive"], "steps": []}]})
     assert (filled["test_cases"][0]["categories"], summary) == (["positive", "negative"], ["categories ×1"])
 

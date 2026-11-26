@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests import test_cases_import as ci
+from tools import run_pipeline
 
 # FaT-R3: a first line longer than the csv field limit (131 072 B) without «;» made csv.reader raise _csv.Error —
 # not a ValueError, so scan ended in a traceback and left an orphan run.
@@ -32,8 +33,6 @@ def test_a_csv_with_a_long_first_line_in_cases_is_a_json_refusal(tmp_path: Path,
 
 
 def test_a_long_first_line_in_reference_is_refused_before_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_pipeline
-
     project = ci._project(tmp_path)
     (project / "cases" / "reference.csv").write_text(LONG + "\r\n", encoding="utf-8")
     (project / "docs").mkdir(exist_ok=True)
@@ -47,8 +46,6 @@ def test_a_long_first_line_in_reference_is_refused_before_the_run(tmp_path: Path
 
 
 def test_an_unexpected_error_in_a_command_is_a_json_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_pipeline
-
     printed: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", printed.append)
     monkeypatch.setattr(run_pipeline, "cmd_status", lambda _args: (_ for _ in ()).throw(ZeroDivisionError("boom")))
@@ -58,8 +55,6 @@ def test_an_unexpected_error_in_a_command_is_a_json_answer(monkeypatch: pytest.M
 
 
 def test_the_internal_answer_is_cut_to_500_characters(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_pipeline
-
     printed: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", printed.append)
     monkeypatch.setattr(run_pipeline, "cmd_status", lambda _args: (_ for _ in ()).throw(ZeroDivisionError("y" * 5000)))

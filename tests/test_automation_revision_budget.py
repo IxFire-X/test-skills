@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import build_phase_two_baseline
+from tests.spine_helpers import run_phase_one_spine
+from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
 from tests.test_requirement_traceability import canonical_fixture
+from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
+from tools.automation_validation import validate_automation_artifact, validate_automation_revision_chain
+from tools.pilot_state import append_event, open_automation_review_boundary, publish_effective_canonical
+from tools.pilot_state import publish_model_request, publish_model_stage_artifact
+from tools.schema_validation import schema_diagnostics
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -151,22 +159,13 @@ def codes(rows: list[dict[str, str]]) -> set[str]:
 
 
 def test_accepts_initial_and_one_complete_controller_bound_correction(tmp_path: Path) -> None:
-    from tools.automation_validation import (
-        automation_sha256,
-        autotest_review_sha256,
-        validate_accepted_autotest_review,
-        validate_automation_revision_chain,
-    )
-
     document = automated_document()
-    from tests.test_generated_delta import _effective_bundle_digest
     bundle_digest = _effective_bundle_digest(document)
     first = automation(document, effective_bundle_receipt_digest=bundle_digest)
     first_evidence = host_evidence("session-1")
     run_root, attempt_id, first_boundary = durable_boundary(tmp_path, first, "session-1", first_evidence, policy_profile="local-pilot-v1", document=document)
     first_review = review(document, first, first_boundary, "AUTO_FIX_APPLIED", session_id="session-1")
     # FaT-RQ: r2 is the next stage only after the r1 review is in the journal
-    from tools.pilot_state import append_event, publish_model_request, publish_model_stage_artifact
 
     append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id="autotest-reviewer:r1",
                  artifact_digest=automation_sha256(first))
@@ -183,8 +182,6 @@ def test_accepts_initial_and_one_complete_controller_bound_correction(tmp_path: 
 
 
 def test_rejects_third_review_but_allows_completed_pre_execution_correction_after_later_fail() -> None:
-    from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_automation_revision_chain
-
     document = automated_document()
     first = automation(document)
     first_evidence = host_evidence("session-1")
@@ -201,8 +198,6 @@ def test_rejects_third_review_but_allows_completed_pre_execution_correction_afte
 
 
 def test_rejects_partial_or_unbound_correction_and_missing_review_coverage() -> None:
-    from tools.automation_validation import autotest_review_sha256, validate_accepted_autotest_review, validate_automation_revision_chain
-
     document = automated_document()
     first = automation(document)
     first_evidence = host_evidence("session-1")
@@ -223,10 +218,6 @@ def test_rejects_partial_or_unbound_correction_and_missing_review_coverage() -> 
 
 
 def test_rejects_self_attested_isolation_and_v5_schema_requires_bound_revision_fields() -> None:
-    from tools.automation_validation import validate_accepted_autotest_review
-    from tools.schema_validation import schema_diagnostics
-    from pathlib import Path
-
     document = automated_document()
     artifact = automation(document)
     evidence = host_evidence("session-1")
@@ -237,9 +228,6 @@ def test_rejects_self_attested_isolation_and_v5_schema_requires_bound_revision_f
 
 
 def test_rejects_tampered_attempt_owned_static_review_boundary(tmp_path: Path) -> None:
-    from tools.automation_validation import validate_accepted_autotest_review
-    from tests.test_generated_delta import _effective_bundle_digest
-
     document = automated_document()
     artifact = automation(document, effective_bundle_receipt_digest=_effective_bundle_digest(document))
     run_root, attempt_id, boundary = durable_boundary(tmp_path, artifact, "session-1", host_evidence("session-1"), policy_profile="local-pilot-v1", document=document)
@@ -252,12 +240,6 @@ def test_rejects_tampered_attempt_owned_static_review_boundary(tmp_path: Path) -
 
 
 def test_static_review_boundary_rejects_wrong_effective_selection_before_publication(tmp_path: Path) -> None:
-    from tests.helpers import build_phase_two_baseline
-    from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
-    from tools.automation_validation import automation_sha256
-    from tools.pilot_state import open_automation_review_boundary, publish_effective_canonical
-    from tests.spine_helpers import run_phase_one_spine
-
     (tmp_path / "tests").mkdir()
     document = automated_document()
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
@@ -284,8 +266,6 @@ def test_static_review_boundary_rejects_wrong_effective_selection_before_publica
 
 def test_generated_file_binds_exact_utf8_content_bytes() -> None:
     """The reviewed artifact, not a later caller, owns materialized bytes."""
-    from tools.automation_validation import validate_automation_artifact
-
     document = automated_document()
     artifact = automation(document)
     row = artifact["artifacts"]["generated_files"][0]
@@ -299,8 +279,6 @@ def test_generated_file_binds_exact_utf8_content_bytes() -> None:
 
 def test_a_wrong_content_digest_names_the_file_and_the_digest_to_put() -> None:
     """FaT-CD: no command of the package gives content_digest, so the refusal names the exact value and where it goes."""
-    from tools.automation_validation import validate_automation_artifact
-
     document = automated_document()
     artifact = automation(document)
     row = artifact["artifacts"]["generated_files"][0]

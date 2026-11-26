@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_f5_first_run import _project, _ready, _row, _runs, _scan
+from tools.ready import check_skillsrc, legacy_yaml_keys
+from tools.skillsrc_manifest import SkillsrcError, json_with_comments, parse_skillsrc_bytes
 
 
 def _link(link: Path, target: Path) -> None:
@@ -66,8 +68,6 @@ COMMENTED = ['// the settings of the project\n{"version": "3.0"}\n', '{\n  // th
 
 @pytest.mark.parametrize("text", COMMENTED)
 def test_a_skillsrc_of_json_with_comments_is_no_yaml_and_the_fix_says_remove_the_comments(tmp_path: Path, text: str) -> None:
-    from tools.ready import check_skillsrc, legacy_yaml_keys
-
     (tmp_path / ".skillsrc").write_text(text, encoding="utf-8", newline="")
     assert legacy_yaml_keys(tmp_path) is None
     [row] = check_skillsrc(tmp_path)[:1]
@@ -77,17 +77,12 @@ def test_a_skillsrc_of_json_with_comments_is_no_yaml_and_the_fix_says_remove_the
 
 @pytest.mark.parametrize("text", COMMENTED)
 def test_the_loader_says_the_same_for_a_skillsrc_with_comments(tmp_path: Path, text: str) -> None:
-    from tools.skillsrc_manifest import SkillsrcError, parse_skillsrc_bytes
-
     with pytest.raises(SkillsrcError) as stopped:
         parse_skillsrc_bytes(text.encode("utf-8"), project=tmp_path)
     assert stopped.value.code == "invalid_json" and "комментар" in stopped.value.fix and ".yaml.bak" not in stopped.value.fix, stopped.value.fix
 
 
 def test_a_real_yaml_skillsrc_is_still_yaml_and_a_plain_invalid_json_is_not_comments(tmp_path: Path) -> None:
-    from tools.ready import check_skillsrc, legacy_yaml_keys
-    from tools.skillsrc_manifest import json_with_comments
-
     yaml = "version: 3.0\nlimits:\n  max: 1\n"
     (tmp_path / ".skillsrc").write_text(yaml, encoding="utf-8")
     assert legacy_yaml_keys(tmp_path) and "YAML" in check_skillsrc(tmp_path)[0]["message"]

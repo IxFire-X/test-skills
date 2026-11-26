@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tools import review_canaries as rc
+from tools.schema_validation import schema_diagnostics
 
 pytestmark = pytest.mark.contract
 
@@ -104,16 +105,12 @@ def test_the_machine_example_gets_no_text_error_and_no_twin() -> None:
 
 
 def test_the_map_keeps_twins_apart_and_validates() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     value = json.loads(rc.map_bytes(DIGEST, rc.seed(_manual_set())[1]))
     assert value["twins"] and all(row["class"] == rc.TWIN for row in value["twins"]) and all(row["class"] != rc.TWIN for row in value["canaries"])
     assert schema_diagnostics(value, ROOT / "schemas" / "review-canaries.schema.json", ROOT) == []
 
 
 def test_a_map_of_1_0_0_still_validates() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     value = {"schema_version": "1.0.0", "candidate_digest": DIGEST, "canaries": []}
     assert schema_diagnostics(value, ROOT / "schemas" / "review-canaries.schema.json", ROOT) == []
 
@@ -208,8 +205,6 @@ def test_a_blocking_on_data_with_an_expectation_of_another_step_is_no_catch() ->
 
 
 def test_a_map_with_a_data_row_validates() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     value = json.loads(rc.map_bytes(DIGEST, [_data_row()]))
     assert schema_diagnostics(value, ROOT / "schemas" / "review-canaries.schema.json", ROOT) == []
 

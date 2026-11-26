@@ -6,9 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from tests import test_requirement_labels as labels
+from tests.test_openspec_selection import _scan
+from tests.test_requirement_labels import DOC, _marker, _project
 from tests.test_scope_pause import _published_plan_of, _submit_plan
+from tests.test_sections import _plan
 from tests.test_unclear_questions import FIRST, _marked_run
 from tools import scope_pause
+from tools.run_report import write_report
 
 TBD = "REQ-1 Размер страницы — TBD."
 DETAIL = "REQ-1 Отказ даёт 400. Неподтверждённое условие: код отказа не описан."
@@ -48,8 +53,6 @@ def test_a_document_marked_unset_in_every_requirement_is_not_cut() -> None:
 
 
 def test_the_report_says_in_one_line_how_many_requirements_have_no_case_and_why(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_report import write_report
-
     root, _attempt_id = _marked_run(tmp_path, TBD)
     assert _submit_plan(capsys, root)[0] == 0
     write_report(root.parent.parent, root.name)
@@ -59,10 +62,6 @@ def test_the_report_says_in_one_line_how_many_requirements_have_no_case_and_why(
 
 
 def test_a_mark_the_marker_worded_away_is_found_in_the_line_of_the_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_openspec_selection import _scan
-    from tests.test_requirement_labels import DOC, _marker, _project
-    from tests.test_sections import _plan
-
     scan = _scan(_project(tmp_path, "1.1.1. Оплата картой.\n2.1.1. Размер страницы — TBD.\n"), monkeypatch, [DOC])
     assert _marker(tmp_path / "project", scan, 2, capsys)[0] == 0  # the rows say «Требование 2» without the mark
     assert _plan(scan, capsys)[0] == 0
@@ -71,10 +70,6 @@ def test_a_mark_the_marker_worded_away_is_found_in_the_line_of_the_document(tmp_
 
 
 def test_a_line_of_the_document_that_two_requirements_were_taken_from_marks_neither(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests import test_requirement_labels as labels
-    from tests.test_openspec_selection import _scan
-    from tests.test_sections import _plan
-
     row = {"display_order": 1, "text": "Требование", "provenance": [f"{labels.DOC}:1"]}
     monkeypatch.setattr(labels, "_rows", lambda _count: [dict(row, source_requirement_id="SREQ-0001"), dict(row, source_requirement_id="SREQ-0002", display_order=2, provenance=[f"{labels.DOC}:2"]),
                                                           dict(row, source_requirement_id="SREQ-0003", display_order=3, provenance=[f"{labels.DOC}:2"])])

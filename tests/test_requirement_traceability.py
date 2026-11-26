@@ -4,7 +4,7 @@ from copy import deepcopy
 import hashlib
 from pathlib import Path
 
-from tools.build_context import build_context
+from tools.build_context import build_context, extract_inventory, openspec_diagnostics
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import schema_diagnostics
 
@@ -84,8 +84,6 @@ def test_context_assigns_source_ids_after_stable_snapshot_sorting() -> None:
 
 
 def test_context_keeps_plain_prose_and_multiline_requirements_with_mixed_headings() -> None:
-    from tools.build_context import extract_inventory
-
     sections = [
         "Пользователь может отменить заказ. Вернуть точное значение `a  b`.",
         "## REQ-12\nПоказать карточку товара.\nПри отсутствии вернуть 404.",
@@ -131,8 +129,6 @@ def test_context_allows_more_than_two_hundred_normalized_source_requirements() -
 
 
 def test_openspec_composes_selected_change_and_checks_split_normalized_context() -> None:
-    from tools.build_context import openspec_diagnostics
-
     def snapshot(path: str, content: str) -> dict[str, str]:
         return {"path": path, "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
 
@@ -173,8 +169,6 @@ def test_openspec_composes_selected_change_and_checks_split_normalized_context()
 
 
 def test_openspec_reports_missing_extra_and_wrong_source_in_normalized_context() -> None:
-    from tools.build_context import openspec_diagnostics
-
     content = "## Requirements\n### Requirement: Search\nSearch the catalog.\n#### Scenario: Found\n- WHEN search\n- THEN results\n"
     entry = {"path": "openspec/specs/catalog/spec.md", "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
     context = build_context(PACK_ROOT, docs_snapshot=[entry])

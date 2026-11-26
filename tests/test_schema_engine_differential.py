@@ -25,6 +25,7 @@ jsonschema = pytest.importorskip("jsonschema")
 referencing = pytest.importorskip("referencing")
 from referencing.jsonschema import DRAFT202012  # noqa: E402
 
+from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
 from tools import schema_engine  # noqa: E402
 from tools.schema_validation import _error_code, _error_path, loads_json_strict  # noqa: E402
 
@@ -329,8 +330,6 @@ def _live_instances() -> list[tuple[str, Any]]:
 
 
 def test_the_oracle_and_the_engine_cover_the_same_schemas_and_they_are_the_schemas_of_the_contract() -> None:
-    from tests.contract.schema_registry import assert_every_schema_is_in_the_contract_or_the_list
-
     assert_every_schema_is_in_the_contract_or_the_list(set(RAW))  # V0: was `len(RAW) == 44`
     assert set(ORACLE) == set(ENGINE) == set(RAW)
 

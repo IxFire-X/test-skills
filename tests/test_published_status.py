@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_closure_deadlocks import _run
 from tests.test_review_requested import _generated_run
 from tests.test_review_two_commands import _bundles, _cycle, _open, _select_verdict, _verdict
+from tools import orchestrate_test_case_revision as orchestrate, pilot_state, publish_test_case_bundle as bundle
 
 
 @pytest.fixture(autouse=True)
 def _no_rework(monkeypatch: pytest.MonkeyPatch) -> None:
     """The set a review rejects whole is what these tests look at; with the rework on, one case of two sent back goes to the rework (test_rework_stage)."""
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)
 
 
@@ -68,8 +68,6 @@ def test_the_reviewer_text_is_escaped_in_both_files(tmp_path: Path) -> None:
 
 
 def test_a_run_closed_without_a_verdict_leaves_an_unreviewed_file_and_no_csv(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_closure_deadlocks import _run
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     code, aborted = _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")
@@ -83,8 +81,6 @@ def test_a_run_closed_without_a_verdict_leaves_an_unreviewed_file_and_no_csv(tmp
 
 
 def test_submit_again_after_the_set_was_written_but_not_journaled_finishes_the_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     answer = _verdict(run)
@@ -128,8 +124,6 @@ def test_a_report_of_a_run_without_a_terminal_result_does_not_call_an_independen
 
 
 def test_status_report_and_the_reviewer_step_work_before_the_verdict_with_no_set_on_disk(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_closure_deadlocks import _run
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     assert _files(run, "*.json") == []
@@ -145,7 +139,6 @@ def test_status_report_and_the_reviewer_step_work_before_the_verdict_with_no_set
 
 
 def test_finish_and_report_after_a_rejection_count_the_cases_of_the_candidate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_closure_deadlocks import _run
     from tools.orchestrate_test_case_revision import journal_assembly
 
     run = _rejected_run(tmp_path)
@@ -158,8 +151,6 @@ def test_finish_and_report_after_a_rejection_count_the_cases_of_the_candidate(tm
 
 
 def test_a_preview_without_the_body_tag_is_refused_not_published_without_the_header(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import publish_test_case_bundle as bundle
-
     document = json.loads((Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json").read_text(encoding="utf-8"))
     real = bundle._render_html_preview_validated
     monkeypatch.setattr(bundle, "_render_html_preview_validated",

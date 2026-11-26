@@ -9,8 +9,17 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import answer_stage
+from tests.test_f1 import _batch_request, _report
+from tests.test_review_requested import build_generated_run
 from tests.test_step_inputs import _generator_run, _request
-from tools import pilot_state
+from tests.test_zephyr_template import _cases_only_run
+from tools import cases_import, existing_tests, pilot_state, step_size
+from tools.existing_tests import own_files
+from tools.project_inventory import _canonical_bytes, _digest
+from tools.run_report import _zephyr_import, budget_warnings
+from tools.step_size import DEFAULT_BUDGET, LIMITS_DRIFT_NOTE, journal_files, request_files, run_limits, step_budget
+from tools.zephyr_template_export import ZephyrTemplateError, export_import_csv
 
 STAGE = "tc-generator:BATCH-fixture"
 
@@ -25,8 +34,6 @@ def _published_request(tmp_path: Path):
 # --- A1-6: step_size --------------------------------------------------------------------------------------------------
 
 def test_a_request_file_with_other_input_digests_but_the_right_digest_field_is_not_measured(tmp_path: Path) -> None:
-    from tools.step_size import request_files
-
     root, attempt_id, _baseline, _receipts, marker, request_digest = _published_request(tmp_path)
     assert request_files(root, STAGE)["files"]
     target = root / "model-requests" / attempt_id / (request_digest.removeprefix("sha256:") + ".json")
@@ -38,8 +45,6 @@ def test_a_request_file_with_other_input_digests_but_the_right_digest_field_is_n
 
 
 def test_a_context_selection_file_without_its_event_is_not_an_input_of_the_marker(tmp_path: Path) -> None:
-    from tools.step_size import journal_files
-
     root, attempt_id, _baseline, receipts, *_rest = _published_request(tmp_path)
     project = root.parent.parent
     planted = dict(receipts[0], files=[{"project_path": "src/planted.py", "opaque_id": "x", "size": 1, "content_digest": "sha256:" + "0" * 64}])
@@ -49,8 +54,6 @@ def test_a_context_selection_file_without_its_event_is_not_an_input_of_the_marke
 
 
 def test_the_limits_come_from_the_skillsrc_the_baseline_froze_and_from_nowhere_else(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.step_size import DEFAULT_BUDGET, LIMITS_DRIFT_NOTE, run_limits, step_budget
-
     root, attempt_id, baseline, *_rest = _published_request(tmp_path)
     project = root.parent.parent
     state = pilot_state.derive_state(root)
@@ -71,8 +74,6 @@ def test_the_limits_come_from_the_skillsrc_the_baseline_froze_and_from_nowhere_e
 
 
 def test_the_over_budget_warning_of_the_report_follows_the_calls_of_the_journal_not_the_rows_of_the_measurement_file() -> None:
-    from tools.run_report import budget_warnings
-
     assert budget_warnings([], [{"fits": False}]) == []
     assert budget_warnings([{"by": "model", "fits": False}], []) == ["STEP_OVER_BUDGET"]
 
@@ -93,11 +94,6 @@ def render_markdown_section(report: dict) -> str:
 
 
 def test_the_output_large_warning_of_the_report_is_judged_by_the_stored_answer_and_the_raw_size_is_printed_as_the_agents(tmp_path: Path, capsys, monkeypatch) -> None:
-    from tests.helpers import answer_stage
-    from tests.test_f1 import _batch_request, _report
-    from tests.test_review_requested import build_generated_run
-    from tools import step_size
-
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10_000_000)
     run = build_generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
@@ -115,8 +111,6 @@ def test_the_output_large_warning_of_the_report_is_judged_by_the_stored_answer_a
 # --- A1-8: existing_tests -----------------------------------------------------------------------------------------------
 
 def test_an_ownership_receipt_nobody_bound_hides_no_test_and_the_run_is_counted_unread(tmp_path: Path) -> None:
-    from tools.existing_tests import own_files
-
     root, *_rest = _published_request(tmp_path)
     project = root.parent.parent
     planted = project / ".pilot-runs" / ("a" * 32) / "materialization-ownership" / ("b" * 32 + ".json")
@@ -126,9 +120,6 @@ def test_an_ownership_receipt_nobody_bound_hides_no_test_and_the_run_is_counted_
 
 
 def test_an_inventory_of_a_neighbour_run_under_the_expected_name_is_not_the_one_the_map_is_built_from(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import existing_tests
-    from tools.project_inventory import _canonical_bytes, _digest
-
     root, _attempt_id, baseline, receipts, *_rest = _published_request(tmp_path)
     project = root.parent.parent
     name = str(receipts[0]["inventory_digest"]).removeprefix("sha256:") + ".json"
@@ -147,9 +138,6 @@ def test_an_inventory_of_a_neighbour_run_under_the_expected_name_is_not_the_one_
 # --- A1-10 ---------------------------------------------------------------------------------------------------------------
 
 def test_a_bundle_csv_that_is_not_the_csv_of_the_document_is_refused_by_the_zephyr_export(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_zephyr_template import _cases_only_run
-    from tools.zephyr_template_export import ZephyrTemplateError, export_import_csv
-
     project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
     bundle_csv.write_bytes(bundle_csv.read_bytes() + b"\xd0\x9f\xd0\xbe\xd0\xb4\xd0\xbb\xd0\xbe\xd0\xb6\xd0\xb5\xd0\xbd\xd0\xbd\xd0\xb0\xd1\x8f,\xd1\x81\xd1\x82\xd1\x80\xd0\xbe\xd0\xba\xd0\xb0\n")
     with pytest.raises(ZephyrTemplateError) as refused:
@@ -158,10 +146,6 @@ def test_a_bundle_csv_that_is_not_the_csv_of_the_document_is_refused_by_the_zeph
 
 
 def test_the_report_prints_the_zephyr_import_only_for_the_template_it_was_made_from(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_zephyr_template import _cases_only_run
-    from tools.run_report import _zephyr_import
-    from tools.zephyr_template_export import export_import_csv
-
     project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
     export_import_csv(project, run_root.name, bundle_csv)
     record = _zephyr_import(run_root)
@@ -176,8 +160,6 @@ def test_the_report_prints_the_zephyr_import_only_for_the_template_it_was_made_f
 
 
 def test_an_inventory_without_its_event_does_not_make_a_moved_project_work(tmp_path: Path) -> None:
-    from tools.project_inventory import _canonical_bytes, _digest
-
     root, _attempt_id, _baseline, receipts, *_rest = _published_request(tmp_path / "work")
     source = root.parent.parent
     target = tmp_path / "copy" / "project"
@@ -196,8 +178,6 @@ def test_an_inventory_without_its_event_does_not_make_a_moved_project_work(tmp_p
 
 
 def test_the_manifest_of_the_run_is_read_through_read_run_by_cases_import_and_step_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import cases_import, step_size
-
     root, *_rest = _published_request(tmp_path)
     asked = []
     real = pilot_state.read_run

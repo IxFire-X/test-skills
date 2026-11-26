@@ -8,6 +8,10 @@ import re
 
 from tests.test_partial_acceptance import _finding, r1_document
 from tests.test_param_groups import EXAMPLE, grouped
+from tests.test_partial_publication import _markdown, _partial, _rejected_files
+from tools.publish_test_case_bundle import build_bundle, status_payloads
+from tools.review_view import render
+from tools.test_case_projections import SLOT, _html_test_data, template_texts
 
 PROFILE = "zephyr-scale-step-row-24-v5"
 ESCAPES = "<b>x</b> | y"
@@ -44,8 +48,6 @@ def _bracketed() -> dict:
 # --- Q1: a bracket pair is not torn -----------------------------------------------------------------
 
 def test_the_common_text_of_variants_does_not_tear_a_bracket_or_a_quote() -> None:
-    from tools.test_case_projections import SLOT, template_texts
-
     texts = ["Значение: 1 (int)", 'Значение: "abcd" (String)', "Значение: Long.valueOf(10)", "Значение: true (boolean)"]
     template, middles = template_texts(texts)
     assert template == "Значение: " + SLOT and middles == [text.removeprefix("Значение: ") for text in texts]
@@ -62,15 +64,11 @@ def test_a_variant_keeps_its_closing_bracket_in_the_markdown_table() -> None:
 
 
 def test_the_reviewer_view_shows_the_variants_with_whole_pairs_too() -> None:
-    from tools.review_view import render
-
     view = render(_bracketed()).decode("utf-8")
     assert "| 1 (int) |" in view and "| Long.valueOf(10) |" in view and "| true (boolean) |" in view
 
 
 def test_the_reviewer_view_of_a_set_without_groups_keeps_its_bytes() -> None:
-    from tools.review_view import render
-
     assert hashlib.sha256(render(r1_document())).hexdigest() == "f30cc0b0216e501dac59893bae2d47fea6bfc29c54ac6fc0a1d18d536d53fcf8"
 
 
@@ -143,8 +141,6 @@ def test_a_group_is_one_row_of_the_table_with_the_requirements_of_all_its_cases(
 
 
 def test_a_subtraction_keeps_the_numbers_of_the_set_the_reviewer_read_in_its_table() -> None:
-    from tests.test_partial_publication import _markdown, _partial
-
     document = r1_document()
     effective, partial = _partial(document, [_finding("BLOCKING", [document["test_cases"][0]["case_id"]])])
     text = _markdown(effective, partial)
@@ -153,9 +149,6 @@ def test_a_subtraction_keeps_the_numbers_of_the_set_the_reviewer_read_in_its_tab
 
 
 def test_the_table_of_a_partial_html_stands_below_its_header() -> None:
-    from tools.publish_test_case_bundle import build_bundle
-    from tests.test_partial_publication import _partial
-
     document = r1_document()
     effective, partial = _partial(document, [_finding("BLOCKING", [document["test_cases"][0]["case_id"]])])
     page = build_bundle(effective, PROFILE, partial=partial).preview_bytes.decode("utf-8")
@@ -163,16 +156,12 @@ def test_the_table_of_a_partial_html_stands_below_its_header() -> None:
 
 
 def test_the_status_header_stays_the_first_thing_in_both_files() -> None:
-    from tools.publish_test_case_bundle import status_payloads
-
     files = dict(status_payloads(_doc(3), PROFILE, "REJECTED", ["нет"]))
     assert files["html"].decode("utf-8").index("ОТКЛОНЁН") < files["html"].decode("utf-8").index("<h1>")
     assert files["md"].decode("utf-8").startswith("> **ОТКЛОНЁН РЕВЬЮЕРОМ") and b"**\xd0\x9a\xd0\xb5\xd0\xb9\xd1\x81\xd1\x8b \xd0\xbd\xd0\xb0\xd0\xb1\xd0\xbe\xd1\x80\xd0\xb0" in files["md"]
 
 
 def test_the_rejected_cases_say_their_requirements_once() -> None:
-    from tests.test_partial_publication import _rejected_files
-
     document = r1_document()
     text = _rejected_files(document, [_finding("BLOCKING", [document["test_cases"][2]["case_id"]])])["md"]
     assert text.count("**Требования:**") == 1 and "**Без другого принятого кейса:** CREQ-B1-011" in text
@@ -215,8 +204,6 @@ def test_a_case_without_preconditions_makes_nothing_common() -> None:
 
 
 def test_a_step_without_data_has_a_dash_not_a_sentence_in_the_html() -> None:
-    from tools.test_case_projections import _html_test_data
-
     step = {"operation": {"kind": "http"}, "inputs": [], "test_data": "Тело запроса отсутствует."}
     assert _html_test_data(step) == "—"
     step["test_data"] = ""
@@ -244,8 +231,6 @@ def test_the_text_of_the_model_is_escaped_in_the_table_the_folders_and_the_commo
 # --- CSV and JSON are as they were ---------------------------------------------------------------------
 
 def test_the_csv_and_the_json_keep_their_bytes() -> None:
-    from tools.publish_test_case_bundle import build_bundle
-
     pins = {"r1": (r1_document(), "c83b5492ae57e52035da3139a15648e55189c56b7e2ab5e06655e466694a3538", "a2c0228dee0585e891cb5c7dd5b3cc15e936e712f51bdbc48d8c51d6a2632b78"),
             "grouped": (grouped(), "52a41186010541ce6bbf05e9196fa574de75e724e0ffa02a69d61ea6aa259694", "eeab6190d5d6e446b918ce9709aa086f04e903704c72acaa4cfbb515ea81a606")}
     for document, json_sha, csv_sha in pins.values():

@@ -8,12 +8,20 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state
+from tests.test_automation_revision_budget import automated_document
+from tests.test_cases_import_docs import _request_requirements, _scanned
+from tests.test_finish import _project
+from tests.test_generated_delta import _reviewer_protocol_inputs
+from tests.test_self_review import _run
+from tests.test_step_inputs import _generator_run
+from tools import pilot_state, step_size
+from tools.canonical_document import document_sha256
+from tools.review_view import render
+from tools.run_report import build_report
+from tools.step_size import journal_files, stage_inputs
 
 
 def _published_generator(tmp_path: Path):
-    from tests.test_step_inputs import _generator_run
-
     root, attempt_id, _baseline, receipts, marker, *_rest = _generator_run(tmp_path)
     header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Опубликованный заголовок"})
     plan = pilot_state.publish_generator_input(root, attempt_id, "plan", {"kind": "plan", "header_digest": header["digest"], "batches": [
@@ -25,8 +33,6 @@ def _published_generator(tmp_path: Path):
 
 def test_copies_in_tmp_change_neither_the_paths_nor_the_bytes(tmp_path: Path) -> None:
     """The agent keeps copies of the plan and the header in tmp/ (Petclinic: the report took tmp/plan.json, 282 B for 27 447 B)."""
-    from tools.step_size import stage_inputs
-
     root, _attempt_id, plan, header = _published_generator(tmp_path)
     before = stage_inputs(root, "tc-generator:BATCH-fixture")
     (root / "tmp").mkdir(exist_ok=True)
@@ -41,8 +47,6 @@ def test_copies_in_tmp_change_neither_the_paths_nor_the_bytes(tmp_path: Path) ->
 
 
 def test_a_journal_file_that_is_gone_is_not_in_journal_and_nothing_is_guessed(tmp_path: Path) -> None:
-    from tools.step_size import stage_inputs
-
     root, attempt_id, _plan, header = _published_generator(tmp_path)
     (root / "generator-headers" / f"{attempt_id}.json").unlink()
     found = stage_inputs(root, "tc-generator:BATCH-fixture")
@@ -52,8 +56,6 @@ def test_a_journal_file_that_is_gone_is_not_in_journal_and_nothing_is_guessed(tm
 
 def test_the_run_is_never_walked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """F5: the old index read and hashed every JSON of the run on every call."""
-    from tools.step_size import stage_inputs
-
     root, *_rest = _published_generator(tmp_path)
     walked: list[tuple[Path, str]] = []
     real_rglob, real_glob = Path.rglob, Path.glob
@@ -66,13 +68,6 @@ def test_the_run_is_never_walked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_the_reviewer_reads_its_view_and_the_package_binding(tmp_path: Path) -> None:
     """The package of the reviewer was never found (Petclinic final: STEP_INPUT_UNRESOLVED in the report); the journal keeps
     it as the package_binding of the reviewer ledger."""
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools.canonical_document import document_sha256
-    from tools.review_view import render
-    from tools.step_size import stage_inputs
-
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()
     _reviewer_protocol_inputs(document, run_root, attempt_id, bundle_root=run_root / "cases")
@@ -90,10 +85,6 @@ def test_the_reviewer_reads_its_view_and_the_package_binding(tmp_path: Path) -> 
 
 
 def test_step_inputs_the_step_size_and_the_report_give_one_number(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _project
-    from tools import step_size
-    from tools.run_report import build_report
-
     project, run_root, _attempt_id, _values = _project(tmp_path)
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
         found = step_size.request_files(run_root, stage)
@@ -107,9 +98,6 @@ def test_step_inputs_the_step_size_and_the_report_give_one_number(tmp_path: Path
 def test_the_correction_also_reads_the_first_automation_and_its_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """For r2 the answers of tc-to-autotest:r1 and of autotest-reviewer:r1 bind the correction (predecessor and review
     digests); they are no input digest of the request, and the step reads them all the same."""
-    from tests.test_finish import _project
-    from tools.step_size import stage_inputs
-
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
     r1 = stage_inputs(run_root, "tc-to-autotest:r1")
     events = pilot_state.derive_state(run_root)["events"]
@@ -134,9 +122,6 @@ def test_the_correction_also_reads_the_first_automation_and_its_review(tmp_path:
 def test_the_requirements_step_measures_the_documents_of_the_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The baseline keeps only the digest of the --docs projection (W7, IMP3): the documents come from the scan request of
     the run, and in an import with documents the CSV as well — the same for stage_inputs and journal_files."""
-    from tests.test_cases_import_docs import _request_requirements, _scanned
-    from tools.step_size import journal_files, stage_inputs
-
     project, root, attempt_id = _scanned(tmp_path, monkeypatch)
     _request_requirements(root, attempt_id)
     found = stage_inputs(root, "context-marker:requirements")
@@ -148,9 +133,6 @@ def test_the_requirements_step_measures_the_documents_of_the_task(tmp_path: Path
 
 def test_a_bundle_path_outside_the_project_is_unresolved_never_measured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The json_path of the effective bundle receipt is the agent's data: a file outside the project is not read."""
-    from tests.test_finish import _project
-    from tools import step_size
-
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
     effective = pilot_state.read_effective_canonical(run_root, attempt_id)
     outside = tmp_path / "elsewhere" / "document.json"

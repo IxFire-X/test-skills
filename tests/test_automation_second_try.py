@@ -10,10 +10,13 @@ from types import SimpleNamespace
 import pytest
 
 from tests.helpers import prepare_stage
+from tests.test_automation_revision_budget import automated_document, automation, codes, host_evidence, review
 from tests.test_autotest_cycle import GENERATOR, INDEPENDENT, REVIEWER, autotest_run, next_of, run_generator, run_reviewer
 from tests.test_profile_flows import mode_b_pack  # noqa: F401  (the fixture: a copy of the delivery of mode B)
 from tests.test_self_consent import FLAG, SAME_SESSION
-from tools import pilot_state
+from tools import pilot_state, step_size
+from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_automation_revision_chain
+from tools.exec_commands import _not_prepared_fix
 
 REWORK = "ТРЕБУЕТ ДОРАБОТКИ"
 SECOND = ("--invocation-id", "autotest-reviewer-subagent-2", "--fresh-context", "yes")  # one session reviews one revision
@@ -92,8 +95,6 @@ def test_a_repeated_prepare_of_the_second_revision_writes_nothing(tmp_path: Path
 
 
 def test_the_second_revision_over_the_budget_of_the_step_is_a_measurement_not_a_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import step_size
-
     run = _sent_back(tmp_path)
     monkeypatch.setattr(step_size, "step_budget", lambda project: 1000)
     code, out = prepare_stage(run["root"], "tc-to-autotest:r2")
@@ -102,8 +103,6 @@ def test_the_second_revision_over_the_budget_of_the_step_is_a_measurement_not_a_
 
 
 def test_materialize_after_a_rework_verdict_names_the_second_revision_not_a_dead_end(tmp_path: Path) -> None:
-    from tools.exec_commands import _not_prepared_fix
-
     run = _sent_back(tmp_path)
     assert "tc-to-autotest:r2" in _not_prepared_fix(run["root"], run["attempt"])
 
@@ -116,9 +115,6 @@ def test_an_accepted_review_does_not_offer_the_second_revision(tmp_path: Path) -
 
 
 def test_the_chain_of_a_rework_verdict_and_a_correction_is_valid_and_of_an_acceptance_and_a_correction_is_not() -> None:
-    from tests.test_automation_revision_budget import automation, automated_document, codes, host_evidence, review
-    from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_automation_revision_chain
-
     document = automated_document()
     first, first_evidence, second_evidence = automation(document), host_evidence("session-1"), host_evidence("session-2", reviewer="reviewer-2")
     for verdict, expected in ((REWORK, False), ("ПРИНЯТО", True)):

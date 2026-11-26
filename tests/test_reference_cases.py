@@ -11,11 +11,15 @@ import pytest
 
 from tests.test_scan_guard import DOCS, _scan
 from tests.test_first_run import _python_project
+from tests.test_review_view import _example as example
+from tools import pilot_state, run_pipeline, run_report
+from tools.reference_match import reference_label, reference_match
+from tools.review_view import render
+from tools.test_case_projections import _PROFILE_V4, render_zephyr_csv
+from tools.zephyr_csv import own_v4_marker, parse_zephyr_csv
 
 
 def _example() -> dict:
-    from tests.test_review_view import _example as example
-
     return example()
 
 
@@ -32,8 +36,6 @@ def _reference(document: dict) -> list[dict]:
 
 
 def test_the_same_cases_pair_one_to_one() -> None:
-    from tools.reference_match import reference_match
-
     document = _example()
     match = reference_match(document, _reference(document))
     assert len(match["pairs"]) == len(document["test_cases"]) and match["gaps"] == match["new"] == match["duplicates"] == []
@@ -41,8 +43,6 @@ def test_the_same_cases_pair_one_to_one() -> None:
 
 
 def test_a_missing_case_is_a_gap_and_an_unrelated_case_is_new() -> None:
-    from tools.reference_match import reference_label, reference_match
-
     document = _example()
     reference = _reference(document)
     fewer = copy.deepcopy(document)
@@ -57,8 +57,6 @@ def test_a_missing_case_is_a_gap_and_an_unrelated_case_is_new() -> None:
 
 
 def test_two_new_cases_on_one_reference_case_are_a_possible_duplicate() -> None:
-    from tools.reference_match import reference_label, reference_match
-
     document = _example()
     reference = _reference(document)
     twice = copy.deepcopy(document)
@@ -69,8 +67,6 @@ def test_two_new_cases_on_one_reference_case_are_a_possible_duplicate() -> None:
 
 
 def test_render_without_reference_is_byte_identical_and_with_it_counts_only() -> None:
-    from tools.review_view import render
-
     document = _example()
     assert hashlib.sha256(render(document)).hexdigest() == "df245643eca8b66e8cc49f2c7fb1756465d9f9000cf78c79b654bf5d4a2a2b82"
     reference = _reference(document)
@@ -85,8 +81,6 @@ def test_render_without_reference_is_byte_identical_and_with_it_counts_only() ->
 
 
 def test_a_zephyr_csv_in_docs_is_refused_with_the_reference_fix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_pipeline
-
     project = _python_project(tmp_path, runtime=False)
     (project / "services" / "api" / "docs" / "cases.csv").write_bytes(_csv(_example()))
     with pytest.raises(run_pipeline.HostStop) as stop:
@@ -96,8 +90,6 @@ def test_a_zephyr_csv_in_docs_is_refused_with_the_reference_fix(tmp_path: Path, 
 
 
 def test_scan_reference_publishes_a_receipt_and_keeps_it_out_of_the_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     project = _python_project(tmp_path, runtime=False)
     reference_path = "services/api/docs/reference.csv"
     data = _csv(_example())
@@ -120,8 +112,6 @@ def test_scan_reference_that_is_not_a_zephyr_csv_is_refused_by_the_reader(tmp_pa
 
 
 def test_run_report_names_the_comparison_by_counts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from tools import pilot_state, run_report
-
     document = _example()
     reference = _reference(document)[1:]
     monkeypatch.setattr(pilot_state, "read_reference_cases", lambda *_args: {"cases": reference})
@@ -132,9 +122,6 @@ def test_run_report_names_the_comparison_by_counts(monkeypatch: pytest.MonkeyPat
 
 
 def test_own_v4_marker_names_the_machine_first_line_of_test_data() -> None:
-    from tools.test_case_projections import _PROFILE_V4, render_zephyr_csv
-    from tools.zephyr_csv import own_v4_marker, parse_zephyr_csv
-
     v4 = parse_zephyr_csv(render_zephyr_csv(_example(), _PROFILE_V4).payload)
     assert own_v4_marker(step["test_data"] for case in v4 for step in case["steps"]) in {"Операция:", "HTTP:", "Действие проекта:"}
     assert own_v4_marker(step["test_data"] for case in _reference(_example()) for step in case["steps"]) is None  # v5
@@ -142,8 +129,6 @@ def test_own_v4_marker_names_the_machine_first_line_of_test_data() -> None:
 
 
 def test_scan_reference_in_the_v4_profile_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.test_case_projections import _PROFILE_V4, render_zephyr_csv
-
     project = _python_project(tmp_path, runtime=False)
     (project / "services/api/docs/v4.csv").write_bytes(render_zephyr_csv(_example(), _PROFILE_V4).payload)
     code, payload = _scan(project, monkeypatch, reference="services/api/docs/v4.csv")

@@ -6,10 +6,19 @@
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tests.test_automation_revision_budget import automated_document
+from tests.test_first_run import _python_project
+from tests.test_generated_delta import _reviewer_protocol_inputs
+from tests.test_scan_guard import _scan
+from tests.test_self_review import _run
+from tools import run_pipeline
+from tools.orchestrate_test_case_revision import OrchestrationError, orchestrate_revision
 
 pytestmark = pytest.mark.contract
 
@@ -17,9 +26,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_a_module_root_is_taken_as_the_module_of_that_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _scan
-
     project = _python_project(tmp_path, runtime=False)
     by_id = _scan(project, monkeypatch, module="nested")[1]
     code, by_root = _scan(project, monkeypatch, module="services/api")
@@ -29,9 +35,6 @@ def test_a_module_root_is_taken_as_the_module_of_that_folder(tmp_path: Path, mon
 
 
 def test_an_unknown_module_is_module_unknown_with_the_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _scan
-
     code, payload = _scan(_python_project(tmp_path, runtime=False), monkeypatch, module="nope")
     assert code == 2 and payload["reason"] == "MODULE_UNKNOWN", payload
     assert "nested (root services/api)" in payload["detail"]
@@ -39,11 +42,6 @@ def test_an_unknown_module_is_module_unknown_with_the_ids(tmp_path: Path, monkey
 
 
 def test_finish_after_the_review_answer_but_before_the_selection_names_submit(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools import run_pipeline
-
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
     with pytest.raises(run_pipeline.HostStop) as stop:
@@ -57,12 +55,6 @@ def test_finish_after_the_review_answer_but_before_the_selection_names_submit(tm
 
 def test_the_same_directory_with_other_files_stays_a_receipt_refusal(tmp_path: Path) -> None:
     """The receipt names other files in the same directory (another candidate or revision): no claim about the directory."""
-    import dataclasses
-
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools.orchestrate_test_case_revision import OrchestrationError, orchestrate_revision
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()

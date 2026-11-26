@@ -2,6 +2,8 @@
 cases); the report and the analyst's file name it by its Key; the accepted set, the autotests and the new cases of the model are as before."""
 from __future__ import annotations
 
+import csv
+import io
 import json
 from pathlib import Path
 
@@ -9,6 +11,14 @@ import pytest
 
 from tests.test_cases_import_docs import _fragment, _to_plan
 from tests.test_cases_import_new import _submit
+from tests.test_partial_publication import PROFILE, _partial, _real, r1_document
+from tools.cases_import import imported_value
+from tools.finalize_attempt import split_cases
+from tools.pilot_state import read_effective_canonical
+from tools.publish_test_case_bundle import build_bundle
+from tools.run_report import write_report
+from tools.test_case_projections import _HEADERS, restored_csv
+from tools.zephyr_template_export import ZephyrTemplateError
 
 HEADER = ("Key,Name,Objective,Precondition,Priority,Folder,Labels,Test Script (Step-by-Step) - Step,Test Script (Step-by-Step) - Test Data,"
           "Test Script (Step-by-Step) - Expected Result")
@@ -101,9 +111,6 @@ def test_a_rejected_new_case_is_not_in_the_export(tmp_path: Path, monkeypatch: p
 
 
 def test_the_accepted_set_and_the_autotests_do_not_see_the_restored_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.finalize_attempt import split_cases
-    from tools.pilot_state import read_effective_canonical
-
     run = _rejected(tmp_path, monkeypatch, capsys, 1)
     document = read_effective_canonical(run["root"], run["attempt_id"])["document"]
     assert run["target"] not in [case["case_id"] for case in document["test_cases"]] and len(document["test_cases"]) == 2
@@ -136,8 +143,6 @@ def test_the_template_export_carries_the_tail_and_does_not_mark_it_automated(tmp
 
 @pytest.mark.parametrize("spoil", [lambda data: data + "X-1,Допись агента,,,,,,Шаг,—,Результат\r\n", lambda data: data.replace("Склейка двух значений", "Подмена")], ids=["a row added", "the tail changed"])
 def test_the_template_export_refuses_a_file_that_is_not_the_set_and_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], spoil) -> None:
-    from tools.zephyr_template_export import ZephyrTemplateError
-
     run = _rejected(tmp_path, monkeypatch, capsys, 1, profile="cases-only-v1")
     bundle, export = _export(run, capsys)
     bundle.write_bytes(spoil(bundle.read_text(encoding="utf-8-sig")).encode("utf-8-sig"))
@@ -149,8 +154,6 @@ def test_the_template_export_refuses_a_file_that_is_not_the_set_and_its_tail(tmp
 @pytest.mark.parametrize(("number", "row", "name", "title"), [(1, 2, "PC-T1", "Склейка двух значений"), (2, 4, "Key нет", "Склейка с пустым значением")])
 def test_the_report_and_the_analyst_name_the_rejected_case_of_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
                                                                       number: int, row: int, name: str, title: str) -> None:
-    from tools.run_report import write_report
-
     run = _rejected(tmp_path, monkeypatch, capsys, number)
     write_report(run["project"], run["root"].name)
     report, markdown = (json.loads((run["root"] / "report.json").read_text(encoding="utf-8")), (run["root"] / "report.md").read_text(encoding="utf-8"))
@@ -166,9 +169,6 @@ def test_the_report_and_the_analyst_name_the_rejected_case_of_the_csv(tmp_path: 
 
 
 def test_a_run_without_an_import_has_no_tail_and_its_bytes_are_the_old_ones() -> None:
-    from tests.test_partial_publication import PROFILE, _partial, _real, r1_document
-    from tools.publish_test_case_bundle import build_bundle
-
     document = r1_document()
     effective, partial = _partial(document, _real(document, 1))
     assert "restored" not in partial
@@ -182,11 +182,6 @@ def test_a_case_that_passed_the_rework_leaves_no_tail(tmp_path: Path, monkeypatc
 
 
 def test_the_tail_carries_the_label_of_an_obsolete_case() -> None:
-    import csv
-    import io
-
-    from tools.cases_import import imported_value
-    from tools.test_case_projections import _HEADERS, restored_csv
 
     links = [{"row": 2, "source_requirement_ids": [], "reason": "требование удалено", "verdict": "obsolete"}, {"row": 4, "source_requirement_ids": [], "reason": "нет"}]
     [row, _other] = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), links=links, requirements=[])["cases"]

@@ -6,6 +6,16 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import answer_stage, run_tmp
+from tests.test_automation_revision_budget import automated_document
+from tests.test_generated_delta import _reviewer_protocol_inputs
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _open, _select_verdict
+from tools import step_size
+from tools.run_report import write_report
+from tools.step_size import OUTPUT_TRUNCATED, TOKENS_PER_BYTE, looks_truncated
+from tools.validate_artifact import validate
+
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,10 +23,7 @@ EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json
 
 
 def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import answer_stage
     from tests.test_batch_journal import _run
-    from tools import step_size
-    from tools.run_report import write_report
 
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     run_root = run["run_root"]
@@ -46,10 +53,7 @@ def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path
 
 
 def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
     from tests.test_self_review import _run
-    from tools.run_report import write_report
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
@@ -59,11 +63,7 @@ def test_a_direct_publication_without_raw_bytes_is_measured_as_before(tmp_path: 
 
 
 def test_the_report_totals_the_model_calls_and_prints_the_raw_answer_size(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
     from tests.test_self_review import _run
-    from tools.run_report import write_report
-    from tools.step_size import TOKENS_PER_BYTE
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
@@ -81,9 +81,6 @@ def test_the_report_totals_the_model_calls_and_prints_the_raw_answer_size(tmp_pa
 
 def _review_run(tmp_path: Path) -> dict:
     """A run whose review is prepared: its slot is where the answers of the tests below go."""
-    from tests.test_review_requested import _generated_run
-    from tests.test_review_two_commands import _open
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     return run
@@ -98,9 +95,6 @@ def _cut_answer(tmp_path: Path) -> tuple[Path, int]:
 
 
 def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_and_a_hint(tmp_path: Path) -> None:
-    from tests.test_review_two_commands import _select_verdict
-    from tools.step_size import OUTPUT_TRUNCATED
-
     path, size = _cut_answer(tmp_path)
     code, output = _select_verdict(_review_run(tmp_path), str(path))  # F4b: refused in main with its code and fix, before the function
     message = output["message"]
@@ -109,9 +103,6 @@ def test_an_answer_cut_in_the_middle_is_model_output_truncated_with_its_bytes_an
 
 
 def test_validate_artifact_names_a_cut_answer_and_gives_a_retry_prompt(tmp_path: Path) -> None:
-    from tests.helpers import run_tmp
-    from tools.validate_artifact import validate
-
     path, size = _cut_answer(run_tmp(tmp_path))
     code, report = validate(str(ROOT / "schemas" / "canonical-test-document.schema.json"), str(path))
     assert code == 2 and report["status"] == "error"
@@ -121,10 +112,6 @@ def test_validate_artifact_names_a_cut_answer_and_gives_a_retry_prompt(tmp_path:
 
 @pytest.mark.parametrize("text", ['{"a": 1,, "b": 2}', '{"a": 1} trailing', '[1, 2]]'])
 def test_a_broken_but_closed_json_is_not_called_truncated(tmp_path: Path, text: str) -> None:
-    from tests.test_review_two_commands import _select_verdict
-    from tools.step_size import looks_truncated
-    from tools.validate_artifact import validate
-
     assert looks_truncated(text) is False
     path = tmp_path / "broken.json"
     path.write_text(text, encoding="utf-8")
@@ -138,9 +125,6 @@ QUOTE = '{"a": "he said "hi" ok", "b": {"c": 1}}'  # whole, ends with its bracke
 
 
 def test_a_whole_answer_with_an_unescaped_quote_is_not_called_truncated_and_has_its_own_human(tmp_path: Path) -> None:
-    from tests.test_review_two_commands import _select_verdict
-    from tools.step_size import looks_truncated
-
     assert looks_truncated(QUOTE) is False
     path = tmp_path / "quote.json"
     path.write_text(QUOTE, encoding="utf-8")
@@ -151,6 +135,4 @@ def test_a_whole_answer_with_an_unescaped_quote_is_not_called_truncated_and_has_
 
 @pytest.mark.parametrize("text", ['{"a": "abc', '{"a": [1, 2', '{"a": {"b": 1}', '{"a": "x\\"', '{"a": tru', '  '])
 def test_an_open_string_or_bracket_at_the_end_is_truncated(text: str) -> None:
-    from tools.step_size import looks_truncated
-
     assert looks_truncated(text) is (text.strip() != "")

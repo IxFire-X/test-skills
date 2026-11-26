@@ -1,13 +1,17 @@
 """PH: ``loads_json_strict`` / ``load_json_strict`` refuse with the module's own ``StrictJsonError`` — whatever the standard library raises."""
 from __future__ import annotations
 
+import json
+import random
 import re
 import sys
+import time
 from json import dumps as json_dumps
 from pathlib import Path
 
 import pytest
 
+from tools import schema_validation
 from tools.schema_validation import MAX_JSON_DEPTH, StrictJsonError, load_json_strict, loads_json_strict
 
 
@@ -64,8 +68,6 @@ def test_a_nesting_of_the_limit_loads_and_one_level_more_is_refused(kind: str) -
 
 @pytest.mark.parametrize("kind", ["array", "object", "mixed"])
 def test_a_huge_nesting_is_refused_by_the_limit_not_by_the_interpreter(kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    import json
-
     def never(*args: object, **kwargs: object) -> object:
         raise AssertionError("the text reached json.loads")
 
@@ -101,8 +103,6 @@ def test_the_limit_applies_to_a_file_too(tmp_path: Path) -> None:
 
 
 def test_the_recursion_error_of_the_interpreter_stays_a_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    import json
-
     def too_deep(*args: object, **kwargs: object) -> object:
         raise RecursionError("maximum recursion depth exceeded")
 
@@ -131,8 +131,6 @@ _UNTERMINATED = {  # ~200 KB each: a response cut off in the middle of a string
 def test_an_unterminated_string_of_escaped_quotes_is_refused_in_linear_time(kind: str) -> None:
     """A response cut off in the middle of a string with escaped quotes: the depth check takes the rest of the text as the string in one pass.
     (With a mandatory closing quote every quote of the rest was tried as the start of a string, each walking to the end: 32 KB took 5.6 s, 800 KB about an hour.)"""
-    import time
-
     text = _UNTERMINATED[kind]()
 
     start = time.perf_counter()
@@ -161,9 +159,6 @@ def _reference_exceeds(text: str, limit: int) -> bool:
 
 
 def test_the_fast_check_agrees_with_the_plain_definition_on_random_texts(monkeypatch: pytest.MonkeyPatch) -> None:
-    import random
-
-    from tools import schema_validation
 
     pieces = ["[", "]", "{", "}", '"a"', '"["', '"]"', '"{"', '"\\""', '"\\\\"', '"\\\\["', ",", "1", ":", '"', "\\"]  # a lone quote opens a string that may stay unterminated; a lone backslash escapes what follows it inside one
     randomizer = random.Random(20261104)

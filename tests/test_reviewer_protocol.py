@@ -8,6 +8,17 @@ import pytest
 
 from helpers import build_phase_two_baseline
 
+from tests.test_batch_assembly import _fragment, _header, _plan
+from tests.test_requirement_traceability import canonical_fixture
+from tools.batch_assembly import assemble_candidate
+from tools.canonical_document import document_sha256
+from tools.orchestrate_test_case_revision import _review_rows, open_reviewer_session, publish_unreviewed_candidate
+from tools.orchestrate_test_case_revision import reviewer_package_binding, validate_reviewer_session
+from tools.pilot_state import derive_state, publish_context_selection, publish_generator_input, publish_model_request
+from tools.pilot_state import publish_model_stage_artifact, read_attempt_receipt, read_reviewer_session_ledger
+from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
+from tools.revision_selection import validate_review_decision
+
 
 def _digest(value):
     return "sha256:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -113,8 +124,6 @@ def _completed():
 
 
 def test_completed_canonical_session_has_one_verdict_and_verified_same_model_isolation(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     session, binding, review = _session(_started(), _verdict(), _completed())
     run_root, attempt_id = _bind_session(tmp_path, session, binding)
     result = validate_reviewer_session(session, binding, review, run_root=run_root, attempt_id=attempt_id, effective_canonical=True)
@@ -130,9 +139,6 @@ def test_completed_canonical_session_has_one_verdict_and_verified_same_model_iso
 
 
 def test_authoritative_verdict_records_normalized_semantics_and_binds_rejection(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-    from tools.pilot_state import read_reviewer_session_ledger
-
     session, binding, review = _session(
         _started(), _verdict(), _completed(), review_verdict="ТРЕБУЕТ ДОРАБОТКИ",
     )
@@ -157,11 +163,6 @@ def test_authoritative_verdict_records_normalized_semantics_and_binds_rejection(
         )
 
 def test_auto_fix_successor_is_produced_by_the_reviewer_artifact():
-    from tests.test_requirement_traceability import canonical_fixture
-    from tools.canonical_document import document_sha256
-    from tools.orchestrate_test_case_revision import _review_rows
-    from tools.revision_selection import validate_review_decision
-
     candidate = canonical_fixture()
     successor = deepcopy(candidate)
     successor["revision"] = 2
@@ -200,17 +201,6 @@ def test_auto_fix_successor_is_produced_by_the_reviewer_artifact():
 
 
 def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_path: Path):
-    from tests.test_batch_assembly import _fragment, _header, _plan
-    from tools.batch_assembly import assemble_candidate
-    from tools.orchestrate_test_case_revision import open_reviewer_session, publish_unreviewed_candidate, reviewer_package_binding
-    from tools.pilot_state import (
-        derive_state,
-        publish_context_selection,
-        publish_model_request,
-        publish_model_stage_artifact,
-    )
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-
     project = tmp_path / "project"
     bundle = project / "bundles"
     project.mkdir()
@@ -242,7 +232,6 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     marker_publication = publish_model_stage_artifact(
         run_root, attempt_id, "context-marker:baseline", marker,
     )
-    from tools.pilot_state import publish_generator_input
 
     publish_generator_input(run_root, attempt_id, "header", header)  # FaT-DG: the generator request takes the published pair
     publish_generator_input(run_root, attempt_id, "plan", plan)
@@ -283,7 +272,6 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
 
     assert not Path(receipt.json_path).exists()  # the candidate is bound by its receipt; no file is written before the verdict
     assert session["boundary_digest"]
-    from tools.pilot_state import read_attempt_receipt
     boundary = read_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
     assert boundary["package_digest"] == binding["package_digest"]
 
@@ -293,8 +281,6 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
 
 
 def test_evidence_retrieval_is_bounded_and_abort_is_only_zero_verdict_terminal_path(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     binding = _package()
     evidence = _evidence_receipt(binding)
     requested = {"ordinal": 2, "event_type": "EVIDENCE_REQUESTED", "request_digest": "sha256:" + "2" * 64, "byte_count": 100}
@@ -323,8 +309,6 @@ def test_evidence_retrieval_is_bounded_and_abort_is_only_zero_verdict_terminal_p
     (_started(), _verdict(), {"ordinal": 3, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_CONTEXT_LIMIT"}),
 ])
 def test_second_verdict_or_invalid_terminal_sequence_is_forbidden(tmp_path: Path, events):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     with pytest.raises(ValueError, match="REVIEWER_PROTOCOL"):
         session, binding, review = _session(*events)
         run_root, attempt_id = _bind_session(tmp_path, session, binding)
@@ -332,8 +316,6 @@ def test_second_verdict_or_invalid_terminal_sequence_is_forbidden(tmp_path: Path
 
 
 def test_missing_or_contradictory_isolation_evidence_is_not_accepted_or_is_invalid(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     session, binding, review = _session(_started(), _verdict(), _completed(), host=False)
     run_root, attempt_id = _bind_session(tmp_path, session, binding)
     unverified = validate_reviewer_session(session, binding, review, run_root=run_root, attempt_id=attempt_id)
@@ -350,8 +332,6 @@ def test_missing_or_contradictory_isolation_evidence_is_not_accepted_or_is_inval
 
 
 def test_second_session_for_same_attempt_is_rejected_before_reviewer_invocation(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import open_reviewer_session
-
     first, binding, _review = _session(_started(), _verdict(), _completed())
     run_root, attempt_id = _bind_session(tmp_path, first, binding)
     second, _binding, _review = _session(_started(), _verdict(), _completed(), package=binding)
@@ -362,8 +342,6 @@ def test_second_session_for_same_attempt_is_rejected_before_reviewer_invocation(
 
 
 def test_waiting_session_is_nonterminal_and_exact_evidence_receipts_are_required(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     waiting, binding, _review = _session(_started(), status="WAITING")
     run_root, attempt_id = _bind_session(tmp_path, waiting, binding)
     assert validate_reviewer_session(waiting, binding, run_root=run_root, attempt_id=attempt_id)["acceptance_eligible"] is False
@@ -380,8 +358,6 @@ def test_waiting_session_is_nonterminal_and_exact_evidence_receipts_are_required
 
 
 def test_reviewer_ledger_revisions_are_prefix_only_and_terminal_is_unique(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     requested = {"ordinal": 2, "event_type": "EVIDENCE_REQUESTED", "request_digest": "sha256:" + "2" * 64, "byte_count": 100}
     waiting, binding, _review = _session(_started(), requested, status="WAITING")
     run_root, attempt_id = _bind_session(tmp_path, waiting, binding)
@@ -416,8 +392,6 @@ def test_reviewer_ledger_revisions_are_prefix_only_and_terminal_is_unique(tmp_pa
 
 
 def test_missing_published_ledger_file_blocks_every_later_revision(tmp_path: Path):
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     waiting, binding, _review = _session(_started(), status="WAITING")
     run_root, attempt_id = _bind_session(tmp_path, waiting, binding)
     facts = validate_reviewer_session(waiting, binding, run_root=run_root, attempt_id=attempt_id)

@@ -7,6 +7,10 @@ from __future__ import annotations
 import pytest
 
 from tests.test_partial_acceptance import _finding, _grouped, _group_ids, _outcome, _real, r1_document
+from tools.publish_test_case_bundle import BundleMismatchError, build_bundle, gap_rows, partial_context, publish_bundle
+from tools.publish_test_case_bundle import verify_bundle
+from tools.revision_selection import review_outcome
+from tools.test_case_projections import section_labels
 
 PROFILE = "zephyr-scale-step-row-24-v5"
 
@@ -28,8 +32,6 @@ def _markdown(effective: dict, partial: dict) -> str:
 # --- the numbers ----------------------------------------------------------------------------------
 
 def test_a_group_is_one_section_and_the_next_case_follows_it() -> None:
-    from tools.test_case_projections import section_labels
-
     document = _grouped()
     labels, ids = section_labels(document), _group_ids(document)
     assert len({labels[item] for item in ids}) == 1
@@ -43,8 +45,6 @@ def test_the_cases_of_a_subtraction_keep_the_numbers_of_the_set_the_reviewer_rea
 
 
 def test_a_set_with_nothing_taken_out_is_numbered_as_before() -> None:
-    from tools.publish_test_case_bundle import build_bundle
-
     document = r1_document()
     assert build_bundle(document, PROFILE).markdown_bytes == build_bundle(document, PROFILE, partial=None).markdown_bytes
     assert b"## \xd0\xa2\xd0\x9a-1. " in build_bundle(document, PROFILE).markdown_bytes
@@ -81,9 +81,6 @@ def test_the_gaps_are_the_last_section_with_the_reviewers_words() -> None:
 
 
 def test_no_gap_section_and_no_gap_sentence_when_every_requirement_keeps_a_case() -> None:
-    from tools.publish_test_case_bundle import build_bundle, partial_context
-    from tools.revision_selection import review_outcome
-
     document = r1_document()
     document["test_cases"][1]["requirement_ids"] = sorted({*document["test_cases"][1]["requirement_ids"], *document["test_cases"][0]["requirement_ids"]},
                                                           key=lambda item: [row["requirement_id"] for row in document["requirements"]].index(item))
@@ -100,8 +97,6 @@ def _report_for(document: dict, findings: list[dict]) -> dict:
 
 
 def test_the_html_has_the_header_and_the_gaps_too_and_the_model_text_is_escaped() -> None:
-    from tools.publish_test_case_bundle import build_bundle
-
     document = r1_document()
     effective, partial = _partial(document, [_finding("BLOCKING", [document["test_cases"][0]["case_id"]], "<b>Нет</b> | проверки")])
     page = build_bundle(effective, PROFILE, partial=partial).preview_bytes.decode("utf-8")
@@ -111,8 +106,6 @@ def test_the_html_has_the_header_and_the_gaps_too_and_the_model_text_is_escaped(
 
 
 def test_the_import_csv_holds_only_what_is_accepted_and_the_bundle_verifies_only_with_its_context(tmp_path) -> None:
-    from tools.publish_test_case_bundle import BundleMismatchError, publish_bundle, verify_bundle
-
     document = r1_document()
     effective, partial = _partial(document, _real(document, 1))
     receipt = publish_bundle(effective, tmp_path, PROFILE, partial=partial)
@@ -154,8 +147,6 @@ def test_a_variant_of_a_group_stands_alone_in_the_rejected_file_and_one_dragged_
 
 
 def test_the_warnings_of_the_projections_survive_a_partial_bundle() -> None:
-    from tools.publish_test_case_bundle import build_bundle
-
     document = r1_document()
     document["metadata"]["documentation"] = []
     effective, partial = _partial(document, _real(document, 1))
@@ -163,8 +154,6 @@ def test_the_warnings_of_the_projections_survive_a_partial_bundle() -> None:
 
 
 def test_two_rejected_variants_of_one_group_are_named_apart_everywhere_and_a_single_case_keeps_its_number() -> None:
-    from tools.publish_test_case_bundle import gap_rows
-
     document = _grouped()
     ids = _group_ids(document)  # three variants of one section: two rejected, the third goes out with them
     effective, partial = _partial(document, [_finding("BLOCKING", ids[:2])])

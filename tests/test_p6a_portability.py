@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from tools import run_pipeline
+from tests.test_review_notes import _selected_run, _two_notes
+from tools import ready, run_pipeline
+from tools.doctor import inspect_environment
 from tools.run_pipeline import HostStop, _read_run_coordinate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,8 +25,6 @@ def _terminal_run(tmp_path: Path) -> Path:
 
 
 def _open_run(tmp_path: Path) -> Path:
-    from tests.test_review_notes import _selected_run, _two_notes
-
     return _selected_run(tmp_path, _two_notes)[0]
 
 
@@ -141,8 +141,6 @@ def _to_crlf(path: Path) -> None:
 
 
 def test_doctor_says_crlf_in_words_and_names_the_gitattributes_fix(tmp_path: Path) -> None:
-    from tools.doctor import inspect_environment
-
     pack = _pack_copy(tmp_path)
     assert inspect_environment(pack)["status"] == "PASS"
     converted = [pack / "tools" / "doctor.py", pack / "skills" / next(p.name for p in (ROOT / "skills").iterdir() if p.is_dir()) / "SKILL.md"]
@@ -158,8 +156,6 @@ def test_doctor_says_crlf_in_words_and_names_the_gitattributes_fix(tmp_path: Pat
 
 def test_doctor_keeps_the_byte_check_for_a_real_change(tmp_path: Path) -> None:
     """Not a weakening: a changed byte that is not a line ending is still "does not match", with no CRLF explanation."""
-    from tools.doctor import inspect_environment
-
     pack = _pack_copy(tmp_path)
     target = pack / "tools" / "doctor.py"
     target.write_bytes(target.read_bytes() + b"# changed\r\n")
@@ -170,8 +166,6 @@ def test_doctor_keeps_the_byte_check_for_a_real_change(tmp_path: Path) -> None:
 
 
 def test_ready_pack_row_carries_the_crlf_fix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import ready
-
     pack = _pack_copy(tmp_path)
     _to_crlf(pack / "tools" / "doctor.py")
     monkeypatch.setattr(ready, "PACK", pack)

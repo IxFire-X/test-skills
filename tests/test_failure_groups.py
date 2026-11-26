@@ -6,14 +6,19 @@ class of an error, a text without the literals of the test data (the report leav
 at the end; the mark of 4.4 is pinned in test_quarantine."""
 from __future__ import annotations
 
+import difflib
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
+from tests.test_quarantine import THREE_FUNCTIONS, _fail
+from tests.test_run_report import _finished_run
 from tools.automation_validation import automation_sha256
+from tools.finalize_attempt import decide_dispositions
 from tools.quarantine import failure_cause, failure_groups, failure_line, failure_texts, one_cause, status_checks
+from tools.run_report import _acceptance_lines, _cause_lines, build_report, render_markdown
 from tools.run_tests import _failure_message
 
 pytestmark = pytest.mark.contract
@@ -174,15 +179,11 @@ def test_the_words_of_no_text() -> None:
 
 
 def test_the_block_of_the_causes() -> None:
-    from tools.run_report import _cause_lines
-
     groups = _grouped(*["expected: 201 but was: 403"] * 5, checks=STATUS_CHECK)
     assert _cause_lines(_report(groups, 5)) == ["Причины:", "- 5 — ответ 403 вместо ожидаемого 201 (5); тесты: m0, m1, m2 и ещё 2", ""]
 
 
 def test_the_summary_tells_the_causes() -> None:
-    from tools.run_report import _acceptance_lines
-
     groups = _grouped(*["expected: 201 but was: 403"] * 6, "boom", "bang", checks=STATUS_CHECK)
     report = {**_report(groups, 8), "acceptance": {"generated": 2, "accepted": 2, "removed": 0, "outcome": "ACCEPTED_WHOLE"},
               "counts": {"automation": 1, "execution": "FAIL"}, "execution_stats": {"total": 10, "passed": 2, "failed": 8, "errors": 0}}
@@ -194,10 +195,6 @@ def test_the_summary_tells_the_causes() -> None:
 
 @pytest.mark.slow
 def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
-    import difflib
-
-    from tests.test_run_report import _finished_run
-    from tools.run_report import build_report, render_markdown
 
     run_root = _finished_run(tmp_path)
     report = build_report(run_root.parents[1], run_root.name)[0]
@@ -210,10 +207,6 @@ def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_the_report_groups_a_failure_by_its_text_and_the_check_of_the_canon(tmp_path: Path) -> None:
-    from tests.test_quarantine import THREE_FUNCTIONS, _fail
-    from tools.finalize_attempt import decide_dispositions
-    from tools.run_report import build_report
-
     # the label is the check ASSERT-batch-a-001 of the canon of the fixture, an http_status; the text has no word of the status
     run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS, message="ASSERT-batch-a-001 expected: <200> but was: <403>")
     decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)

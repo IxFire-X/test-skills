@@ -7,6 +7,7 @@
 - O-9: ``_plain`` leaves a scalar as it is."""
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import pytest
 from tests.test_pack_profile import copy_profile
 from tests.test_review_requested import _generated_run
 from tests.test_review_two_commands import _cycle, _open, _select_verdict
+from tools import orchestrate_test_case_revision as revision
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,9 +105,6 @@ def test_the_cli_refuse_with_a_code_and_a_fix(tmp_path: Path) -> None:
 # ---- O-9 --------------------------------------------------------------------------------------------------------------
 
 def test_plain_does_not_copy_a_scalar(monkeypatch: pytest.MonkeyPatch) -> None:
-    import copy
-
-    from tools import orchestrate_test_case_revision as revision
 
     value = {"a": ["x", 1, 2.5, True, None, {"b": "y"}], "c": ("z", 3)}
     calls: list[object] = []

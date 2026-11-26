@@ -4,7 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.test_automation_revision_budget import automated_document, automation
+from tools.build_trace_document import _construct
+from tools.fixes import fix_for, human_for
+from tools.quarantine import failure_groups, failure_note, setup_lines
 from tools.schema_validation import schema_diagnostics
+from tools.trace_check import check
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
 SETUP = {"kind": "setup", "case_id": "TC-batch-a-001", "setup_id": "SETUP-batch-a-001-01", "file_id": "FILE-products", "symbol_id": "SYMBOL-setup"}
@@ -61,9 +65,6 @@ def test_the_setup_relation_goes_before_the_steps_of_its_case() -> None:
 
 
 def test_the_trace_has_the_setup_without_checks() -> None:
-    from tools.build_trace_document import _construct
-    from tools.trace_check import check
-
     document = setup_document()
     trace = _construct(document, setup_automation(document), {}, None)
     assert trace["setups"] == [{"case_id": "TC-batch-a-001", "setup_id": "SETUP-batch-a-001-01", "display_order": 1}]
@@ -72,15 +73,11 @@ def test_the_trace_has_the_setup_without_checks() -> None:
 
 
 def test_a_trace_without_setup_has_no_setup_rows() -> None:
-    from tools.build_trace_document import _construct
-
     document = automated_document()
     assert "setups" not in _construct(document, automation(document), {}, None)
 
 
 def test_a_failed_setup_is_its_own_cause_not_a_failed_check() -> None:
-    from tools.quarantine import failure_groups, failure_note, setup_lines
-
     ref, _message = failure_note("SetupFailed: SETUP-batch-a-001-01 POST /products answered 500")
     groups = failure_groups([{"file": "t.py", "method": "test_products", "ref": ref, "kind": "error", "message": ""}], setups=setup_lines(setup_document()))
     line = setup_document()["test_cases"][0]["preconditions"][0]
@@ -89,8 +86,6 @@ def test_a_failed_setup_is_its_own_cause_not_a_failed_check() -> None:
 
 
 def test_the_refusals_of_the_setup_say_the_approved_words() -> None:
-    from tools.fixes import fix_for, human_for
-
     assert [(fix_for(code), human_for(code)) for code in ("AUTOMATION_MISSING_SETUP_COVERAGE", "AUTOMATION_SETUP_ASSERTED", "SETUP_PRECONDITION_UNKNOWN")] == [
         ("Автотест не выполняет подготовку <SETUP-id> кейса <TC-id>: вызови помощник подготовки до первого шага, проверять её не нужно",
          "Автотест пропускает подготовку данных из предусловия кейса"),

@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
 from tests.test_requirement_traceability import canonical_fixture
+from tools.batch_assembly import _ASSEMBLY_SCHEMA, assemble_candidate, canonical_bytes
+from tools.canonical_document import document_sha256, validate_canonical_document
+from tools.run_report import UNUSED_TEST_DESIGN, render_test_design
+from tools.schema_validation import schema_diagnostics
+from tools.test_case_projections import render_html_preview, render_markdown, render_zephyr_csv
+from tools.test_design_hints import GROUP_BYTES, GROUP_LIMIT, HINT_BYTES, HINT_LIMIT, capped, capped_code_hints
+from tools.test_design_hints import design_hints, uses_test_design
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -56,23 +64,17 @@ def _codes(document: dict) -> list[str]:
 # --- schema --------------------------------------------------------------------------------------
 
 def test_a_document_with_and_without_the_new_fields_is_valid() -> None:
-    from tools.canonical_document import validate_canonical_document
-
     assert validate_canonical_document(canonical_fixture()) == []
     assert validate_canonical_document(_designed()) == []
 
 
 def test_a_label_longer_than_40_characters_is_refused() -> None:
-    from tools.canonical_document import validate_canonical_document
-
     document = _designed()
     document["requirements"][0]["design"]["parameters"][0]["valid"][0]["label"] = "x" * 41
     assert validate_canonical_document(document)
 
 
 def test_the_old_document_keeps_its_digest() -> None:
-    from tools.canonical_document import document_sha256
-
     assert "technique" not in json.dumps(canonical_fixture())
     # FaT-WT: a reference digest — comparing two copies would hold for any deterministic function, even one that adds empty
     # design/technique fields; the digest of a document without them is pinned (develop 79a5906) and recomputed by hand
@@ -84,8 +86,6 @@ def test_the_old_document_keeps_its_digest() -> None:
 # --- hints ---------------------------------------------------------------------------------------
 
 def test_a_document_without_the_new_fields_gives_no_hints() -> None:
-    from tools.test_design_hints import design_hints, uses_test_design
-
     document = canonical_fixture()
     document["requirements"][0]["text"] = "Имя не более 30 символов."
     assert uses_test_design(document) is False and design_hints(document) == []
@@ -112,8 +112,6 @@ def test_full_coverage_gives_no_hints() -> None:
 
 
 def test_boundary_hint_names_the_missing_side() -> None:
-    from tools.test_design_hints import design_hints
-
     document = _designed()
     details = sorted(hint["detail"] for hint in design_hints(document) if hint["code"] == "TD_BOUNDARY_MISSING")
     assert details == ["above_max", "below_min", "min"]
@@ -155,8 +153,6 @@ def test_pairs_covered_by_fewer_cases_than_the_full_product_give_no_hints() -> N
 
 
 def test_an_uncovered_pair_is_hinted_and_two_parameters_are_not_checked() -> None:
-    from tools.test_design_hints import design_hints
-
     document = _three_parameters([{"a": 1, "b": 1, "c": 1}, {"a": 2, "b": 2, "c": 2}])
     pairs = [hint for hint in design_hints(document) if hint["code"] == "TD_PAIR_UNCOVERED"]
     assert pairs and all("=" in hint["detail"] or hint["detail"].startswith("и ещё ") for hint in pairs)
@@ -172,8 +168,6 @@ def test_an_unknown_reference_is_hinted() -> None:
 
 
 def test_hints_are_capped_at_four_kilobytes_with_a_remainder() -> None:
-    from tools.test_design_hints import HINT_BYTES, capped
-
     hints = [{"code": "TD_NEGATIVE_MISSING", "requirement_id": f"CREQ-x-{index:03d}", "parameter": "P-x", "detail": "C-" + "y" * 40}
              for index in range(200)]
     kept = capped(hints)
@@ -184,9 +178,6 @@ def test_hints_are_capped_at_four_kilobytes_with_a_remainder() -> None:
 # --- assembly, report, projections, growth -------------------------------------------------------
 
 def test_the_assembly_receipt_carries_the_hints_and_stays_the_same_without_new_fields() -> None:
-    from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
-    from tools.batch_assembly import assemble_candidate
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
@@ -214,14 +205,10 @@ def test_the_report_counts_techniques_and_says_when_the_fields_were_not_used() -
 
 
 def test_the_report_markdown_names_an_unused_test_design() -> None:
-    from tools.run_report import UNUSED_TEST_DESIGN, render_test_design
-
     assert UNUSED_TEST_DESIGN in render_test_design({"used": False, "techniques": {}, "hints": {}, "gaps": []})
 
 
 def test_projections_show_the_technique_and_the_csv_does_not_change() -> None:
-    from tools.test_case_projections import render_html_preview, render_markdown, render_zephyr_csv
-
     designed, plain = _designed(), canonical_fixture()
     assert "Техника: Граничные значения" in render_markdown(designed).payload.decode("utf-8")
     assert "Техника: Граничные значения" in render_html_preview(designed).payload.decode("utf-8")
@@ -232,7 +219,6 @@ def test_projections_show_the_technique_and_the_csv_does_not_change() -> None:
 def test_reviewer_input_grows_at_most_five_percent_on_the_upper_case() -> None:
     example = Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
     assert example.is_file()
-    from tools.batch_assembly import canonical_bytes
 
     document = json.loads(example.read_text(encoding="utf-8"))
     skill = sum(path.stat().st_size for path in [(PACK_ROOT / "skills/tc-reviewer/SKILL.md"), *(PACK_ROOT / "skills/tc-reviewer/references").rglob("*")] if path.is_file())
@@ -249,7 +235,6 @@ def test_reviewer_input_grows_at_most_five_percent_on_the_upper_case() -> None:
         index = order[case["requirement_ids"][0]]
         case["technique"] = "BVA"
         case["design_refs"] = [{"parameter": f"P-{index}-name", "bound": "above_max", "value": "31"}]
-    from tools.test_design_hints import HINT_BYTES
 
     base = len(canonical_bytes(document)) + skill
     after = len(canonical_bytes(enriched)) + skill + HINT_BYTES
@@ -257,10 +242,6 @@ def test_reviewer_input_grows_at_most_five_percent_on_the_upper_case() -> None:
 
 
 def test_maximum_length_ids_keep_every_hint_within_the_receipt_schema() -> None:
-    from tools.batch_assembly import _ASSEMBLY_SCHEMA
-    from tools.schema_validation import schema_diagnostics
-    from tools.test_design_hints import capped, design_hints
-
     document = _designed()
     long = lambda prefix, tag: prefix + tag + "x" * (40 - len(prefix) - len(tag))  # noqa: E731
     document["requirements"][0]["design"] = {"parameters": [
@@ -282,8 +263,6 @@ def test_maximum_length_ids_keep_every_hint_within_the_receipt_schema() -> None:
 
 
 def test_many_pairs_never_push_out_a_missing_negative_case() -> None:
-    from tools.test_design_hints import capped, design_hints
-
     document = _designed()
     document["requirements"][0]["design"] = {"parameters": [
         {"id": f"P-{name}", "name": name, "valid": [{"id": f"C-{name}-{index}"} for index in range(3)], "invalid": []}
@@ -302,8 +281,6 @@ def test_many_pairs_never_push_out_a_missing_negative_case() -> None:
 
 def test_vague_expectations_never_push_the_design_hints_out_of_the_receipt() -> None:
     """FaT-CV2 (2.6): the hunter's scenario — 56 vague + 5 boundaries + 1 pair keeps all 6 design hints."""
-    from tools.test_design_hints import GROUP_BYTES, GROUP_LIMIT, HINT_BYTES, HINT_LIMIT, capped_code_hints
-
     vague = [{"code": "TD_VAGUE_EXPECTATION", "case_id": f"TC-night-{index:03d}", "step_id": f"STEP-night-{index:03d}",
               "detail": "отказ виден только как флаг failed=true"} for index in range(56)]
     bounds = [{"code": "TD_BOUNDARY_MISSING", "requirement_id": f"CREQ-night-{index}", "parameter": "P-age", "detail": "max"}
@@ -322,8 +299,6 @@ def test_vague_expectations_never_push_the_design_hints_out_of_the_receipt() -> 
 
 
 def test_the_receipt_hints_without_overflow_are_the_same_as_before() -> None:
-    from tools.test_design_hints import capped, capped_code_hints
-
     hints = [{"code": "TD_NEGATIVE_MISSING", "requirement_id": "CREQ-a", "parameter": "P-x", "detail": "C-neg"},
              {"code": "TD_VAGUE_EXPECTATION", "case_id": "TC-a", "step_id": "STEP-a", "detail": "флаг"}]
     assert capped_code_hints(hints) == capped(hints) == hints

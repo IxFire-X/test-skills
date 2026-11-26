@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from tools.fixes import FIXES
+from tools.skillsrc_manifest import parse_skillsrc_bytes
+
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,15 +86,11 @@ def test_the_skill_does_not_send_the_agent_for_outside_documentation() -> None:
 
 
 def test_a_secret_in_a_csv_gets_a_placeholder_not_an_environment_variable() -> None:
-    from tools.fixes import FIXES
-
     fix = FIXES["IMPORT_CSV_SECRET"]
     assert "плейсхолдером" in fix and "<" in fix and "переменн" not in fix and "окружения" not in fix
 
 
 def test_the_example_skillsrc_is_one_java_project_and_valid() -> None:
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
-
     text = (ROOT / ".skillsrc.example").read_text(encoding="utf-8")
     document = parse_skillsrc_bytes(text.encode("utf-8"))
     assert [module["stack"]["language"] for module in document["modules"]] == ["java"]

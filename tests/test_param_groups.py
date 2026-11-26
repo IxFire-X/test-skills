@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tools.canonical_document import _design_variants, param_groups, validate_canonical_document
+from tools.fixes import FIXES, fix_for
+from tools.review_view import render
+from tools.test_case_projections import render_html_preview, render_markdown, render_zephyr_csv
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 NAMES = ("Anna", "Boris", "Clara")
@@ -67,8 +72,6 @@ def test_a_group_whose_cases_differ_only_in_values_is_valid() -> None:
 
 
 def test_the_old_canonical_without_groups_stays_valid_in_both_versions() -> None:
-    from tools.canonical_document import validate_canonical_document
-
     document = json.loads(EXAMPLE.read_text(encoding="utf-8"))
     assert document["schema_version"] == "1.0.0" and validate_canonical_document(document) == []
     document["schema_version"] = "1.1.0"
@@ -157,8 +160,6 @@ def test_imported_cases_of_a_group_are_still_compared_by_their_steps() -> None:
 
 
 def test_the_fix_of_the_group_refusal_names_the_fields_an_imported_case_keeps() -> None:
-    from tools.fixes import FIXES
-
     assert "management" in FIXES["SEMANTIC_PARAM_GROUP_MISMATCH"]
 
 
@@ -187,8 +188,6 @@ def test_a_group_must_vary_exactly_one_declared_design_parameter(edit: str) -> N
 
 
 def test_the_group_parameter_is_the_one_whose_variants_differ() -> None:
-    from tools.canonical_document import param_groups
-
     groups = param_groups(grouped())
     assert [(group["group_id"], group["parameter"]["id"], [case["case_id"] for case in group["cases"]]) for group in groups] == [
         ("PG-first-name", "P-first", ["TC-B1-001", "TC-B1-001-V1", "TC-B1-001-V2"])]
@@ -198,8 +197,6 @@ def test_the_group_parameter_is_the_one_whose_variants_differ() -> None:
 # --- projections --------------------------------------------------------------------------------
 
 def test_html_shows_a_group_once_with_a_parameter_and_a_row_per_case() -> None:
-    from tools.test_case_projections import render_html_preview
-
     plain = render_html_preview(json.loads(EXAMPLE.read_text(encoding="utf-8"))).payload.decode("utf-8")
     page = render_html_preview(grouped()).payload.decode("utf-8")
     assert page.count("<section>") == plain.count("<section>")
@@ -212,8 +209,6 @@ def test_html_shows_a_group_once_with_a_parameter_and_a_row_per_case() -> None:
 
 
 def test_markdown_shows_a_group_once_with_a_parameter_and_a_row_per_case() -> None:
-    from tools.test_case_projections import render_markdown
-
     plain = render_markdown(json.loads(EXAMPLE.read_text(encoding="utf-8"))).payload.decode("utf-8")
     document = grouped()
     document["test_cases"][1]["title"] += " (Boris)"
@@ -228,9 +223,6 @@ def test_markdown_shows_a_group_once_with_a_parameter_and_a_row_per_case() -> No
 
 
 def test_an_empty_or_blank_value_of_a_group_is_shown_in_quotes_in_the_published_set_and_the_reviewer_view() -> None:
-    from tools.review_view import render
-    from tools.test_case_projections import render_html_preview, render_markdown
-
     document = grouped(("Anna", "", "   "))
     rows = [line for line in render_markdown(document).payload.decode("utf-8").splitlines() if line.startswith("| ") and "TC-B1-001" in line]
     assert '| 2 | "" |' in rows[1] and '| 3 | "   " |' in rows[2]
@@ -241,8 +233,6 @@ def test_an_empty_or_blank_value_of_a_group_is_shown_in_quotes_in_the_published_
 
 
 def test_the_zephyr_csv_keeps_one_case_per_variant() -> None:
-    from tools.test_case_projections import render_zephyr_csv
-
     document = grouped()
     plain = copy.deepcopy(document)
     for case in plain["test_cases"]:
@@ -251,8 +241,6 @@ def test_the_zephyr_csv_keeps_one_case_per_variant() -> None:
 
 
 def test_a_document_without_groups_renders_the_same_bytes() -> None:
-    from tools.test_case_projections import render_html_preview, render_markdown
-
     document = json.loads(EXAMPLE.read_text(encoding="utf-8"))
     newer = dict(document, schema_version="1.1.0")
     assert render_html_preview(newer).payload == render_html_preview(document).payload
@@ -262,8 +250,6 @@ def test_a_document_without_groups_renders_the_same_bytes() -> None:
 # --- the reviewer view (step 2) ------------------------------------------------------------------
 
 def test_the_reviewer_view_shows_a_group_once_with_a_row_per_case() -> None:
-    from tools.review_view import render
-
     plain = render(json.loads(EXAMPLE.read_text(encoding="utf-8"))).decode("utf-8")
     view = render(grouped()).decode("utf-8")
     assert view.count("\n### ") == plain.count("\n### ")
@@ -277,8 +263,6 @@ def test_the_reviewer_view_shows_a_group_once_with_a_row_per_case() -> None:
 
 
 def test_the_reviewer_view_of_a_group_is_smaller_and_without_groups_unchanged() -> None:
-    from tools.review_view import render
-
     document = grouped()
     plain = copy.deepcopy(document)
     for case in plain["test_cases"]:
@@ -292,8 +276,6 @@ def test_the_reviewer_view_of_a_group_is_smaller_and_without_groups_unchanged() 
 
 
 def test_the_same_design_reference_with_its_keys_in_another_order_is_no_variant() -> None:
-    from tools.canonical_document import _design_variants
-
     one = {"design_refs": [{"parameter": "P-first", "class": "C-1", "value": "Anna"}]}
     other = {"design_refs": [{"value": "Anna", "class": "C-1", "parameter": "P-first"}]}
     assert _design_variants([one, other])[0] == []
@@ -301,6 +283,4 @@ def test_the_same_design_reference_with_its_keys_in_another_order_is_no_variant(
 
 
 def test_the_fix_of_the_parameter_refusal_says_where_the_design_goes() -> None:
-    from tools.fixes import fix_for
-
     assert "каждого CREQ" in str(fix_for("SEMANTIC_PARAM_GROUP_PARAMETER"))

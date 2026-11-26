@@ -15,7 +15,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_first_run import _write
+from tests.p4_flow import flow_args
+from tests.test_autotest_cycle import autotest_run, run_generator, run_reviewer
+from tests.test_exec_prepares import _project
+from tests.test_first_run import _fake_mvn, _python_project, _write
+from tests.test_scan_guard import _rework, _run_command, _scan, _status
+from tools import pilot_state, run_pipeline
+from tools.discover_project import discover_project
+from tools.exec_commands import _not_prepared_fix, _revalidate_execution_baseline, cmd_materialize
+from tools.init_skillsrc import ensure_skillsrc, not_selected_defaults
+from tools.ready import check
+from tools.run_pipeline import HostStop, cmd_status
 
 STARTER = """<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>NAME</artifactId><version>1</version>
 <dependencies>DEPS</dependencies></project>
@@ -42,8 +52,6 @@ def _single(tmp_path: Path, *deps: str) -> Path:
     ((STARTER_TEST, JUNIT4), True),
 ])
 def test_starter_test_is_junit5_unless_junit4_is_there(tmp_path: Path, deps: tuple[str, ...], question: bool) -> None:
-    from tools.discover_project import discover_project
-
     report = discover_project(_single(tmp_path, *deps))
     [module] = report["modules"]
     fields = [item["field"] for item in report["questions"]]
@@ -54,8 +62,6 @@ def test_starter_test_is_junit5_unless_junit4_is_there(tmp_path: Path, deps: tup
 
 
 def test_a_build_wrapper_is_named_only_when_the_file_is_there(tmp_path: Path) -> None:
-    from tools.discover_project import discover_project
-
     project = _single(tmp_path)
     assert "wrapper" not in discover_project(project)["modules"][0].get("test", {})
     _write(project, "mvnw", "#!/bin/sh\n")
@@ -79,9 +85,6 @@ def _microservices(tmp_path: Path) -> tuple[Path, dict[str, str]]:
 
 
 def test_a_question_of_a_module_that_is_not_selected_answers_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _fake_mvn
-    from tools.init_skillsrc import ensure_skillsrc
-
     _fake_mvn(tmp_path, monkeypatch)  # FaT-NB: with the build tool found init adds no BUILD_TOOL_NOT_FOUND note
     project, ids = _microservices(tmp_path)
     assert ensure_skillsrc(project, {}, write=False)["status"] == "needs_input"
@@ -96,8 +99,6 @@ def test_a_question_of_a_module_that_is_not_selected_answers_itself(tmp_path: Pa
 
 
 def test_a_question_with_several_options_stays_a_question(tmp_path: Path) -> None:
-    from tools.init_skillsrc import not_selected_defaults
-
     discovery = {"questions": [
         {"id": "module:b:stack.build_tool", "field": "modules.b.stack.build_tool",
          "options": [{"id": "gradle", "value": "gradle", "evidence": ["b/build.gradle:build-tool"]},
@@ -111,10 +112,6 @@ def test_a_question_with_several_options_stays_a_question(tmp_path: Path) -> Non
 
 def test_ready_and_scan_ask_only_about_the_selected_module_and_a_later_scan_names_the_default(tmp_path: Path,
                                                                                                monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _fake_mvn
-    from tools import run_pipeline
-    from tools.ready import check
-
     project, ids = _microservices(tmp_path)
     _fake_mvn(tmp_path, monkeypatch)  # like the campaign: the system mvn gives each module its closed test tuple
     report = check(project, ["customers/docs/owners.md"], "cases-only-v1", ids["customers"])
@@ -140,9 +137,6 @@ def test_ready_and_scan_ask_only_about_the_selected_module_and_a_later_scan_name
 # --------------------------------------------------------------------------------------
 
 def test_status_names_a_vanished_runtime_and_still_compares_the_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _scan, _status
-
     project = _python_project(tmp_path, runtime=True)
     code, scan = _scan(project, monkeypatch)
     assert code == 0 and scan["policy_profile"] == "local-pilot-v1", scan
@@ -155,9 +149,6 @@ def test_status_names_a_vanished_runtime_and_still_compares_the_files(tmp_path: 
 
 
 def test_exec_names_a_vanished_runtime(tmp_path: Path) -> None:
-    from tools.run_pipeline import HostStop
-    from tools.exec_commands import _revalidate_execution_baseline
-
     missing = tmp_path / "services/api/.venv/Scripts/python.exe"
     coordinates = {"manifest": {"project": str(tmp_path)}, "run_root": str(tmp_path / "run"), "module_root": str(tmp_path),
                    "attempt": {"attempt_id": "a", "baseline_digest": "sha256:" + "0" * 64, "module": "."}}
@@ -174,9 +165,6 @@ def test_exec_names_a_vanished_runtime(tmp_path: Path) -> None:
                                                                 ("ТРЕБУЕТ ДОРАБОТКИ", "automation", "prepare", "tc-to-autotest:r2")])  # V7e: the rework verdict leaves one correction
 def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                           verdict: str, state: str, verb: str, stage: str | None) -> None:
-    from tests.test_exec_prepares import _project
-    from tools.run_pipeline import cmd_status
-
     project, run_root, _attempt_id = _project(tmp_path, static_verdict=verdict)
     cmd_status(SimpleNamespace(project=str(project), run=run_root.name))
     status = json.loads(capsys.readouterr().out)
@@ -185,10 +173,6 @@ def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, caps
 
 def test_materialize_after_a_rework_verdict_of_the_review_names_the_second_revision_and_finish(tmp_path: Path,
                                                                                             capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import flow_args
-    from tests.test_exec_prepares import _project
-    from tools.exec_commands import cmd_materialize
-
     project, run_root, _attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     assert cmd_materialize(flow_args(project, run_root)) == 2
     output = json.loads(capsys.readouterr().out)
@@ -198,9 +182,6 @@ def test_materialize_after_a_rework_verdict_of_the_review_names_the_second_revis
 
 def test_materialize_after_the_review_of_the_last_revision_refused_points_to_finish_not_to_another_review(tmp_path: Path) -> None:
     """The hunt-2 guard, moved from the first review to the last one: after the rejection of r2 no revision is named."""
-    from tests.test_autotest_cycle import autotest_run, run_generator, run_reviewer
-    from tools.exec_commands import _not_prepared_fix
-
     run = autotest_run(tmp_path)
     run_generator(run)
     run_reviewer(run, "ТРЕБУЕТ ДОРАБОТКИ")
@@ -217,10 +198,6 @@ def test_materialize_after_the_review_of_the_last_revision_refused_points_to_fin
 def test_the_hunters_second_pass_runs_past_an_abandoned_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """scan A → a file changes → status A: drift → its command makes B → ТРЕБУЕТ ДОРАБОТКИ → finish B → the next_run
     command works, and names A as abandoned; A itself is left as it is."""
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _rework, _run_command, _scan, _status
-    from tools import pilot_state, run_pipeline
-
     project = _python_project(tmp_path, runtime=False)
     code, first = _scan(project, monkeypatch, accept_self_review=True)
     assert code == 0, first
@@ -248,9 +225,6 @@ def test_the_hunters_second_pass_runs_past_an_abandoned_run(tmp_path: Path, monk
 
 def test_a_live_run_without_drift_still_blocks_and_finish_is_offered_only_when_it_closes(tmp_path: Path,
                                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _rework, _scan
-
     project = _python_project(tmp_path, runtime=False)
     code, first = _scan(project, monkeypatch, accept_self_review=True)
     assert code == 0, first

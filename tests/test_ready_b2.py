@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 from tests.test_context_filter import BIG, DOCS, MODULE, _project, _scan
-from tests.test_first_run import _write
+from tests.test_first_run import _python_project, _write
+from tests.test_secret_inputs import _two_test_roots
+from tools.ready import _table, check, check_scan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,8 +37,6 @@ def test_scan_stops_on_a_task_document_larger_than_a_batch_with_a_fix(tmp_path: 
 
 
 def test_ready_shows_the_same_stop_before_the_scan(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     _big_task_document(project)
     report = check(project, [DOCS], profile="cases-only-v1")
@@ -46,9 +46,6 @@ def test_ready_shows_the_same_stop_before_the_scan(tmp_path: Path) -> None:
 
 
 def test_the_self_review_command_is_in_the_table_with_the_package_interpreter(tmp_path: Path) -> None:
-    from tests.test_first_run import _python_project
-    from tools.ready import _table, check
-
     report = check(_python_project(tmp_path, runtime=False), ["docs/task.md"], "cases-only-v1", "nested")
     row = next(row for row in report["checks"] if row["id"] == "review:isolation")
     fix = row["details"]["self_review_scan"]  # PT: data, not a fix of an OK row
@@ -57,9 +54,6 @@ def test_the_self_review_command_is_in_the_table_with_the_package_interpreter(tm
 
 
 def test_execution_rows_are_warnings_never_stops(tmp_path: Path) -> None:
-    from tests.test_secret_inputs import _two_test_roots
-    from tools.ready import _table, check
-
     report = check(_two_test_roots(tmp_path), ["services/api/docs/feature.md"], profile="local-pilot-v1")
     execution = [row for row in report["checks"] if row["block"] == "execution"]
     baseline = [row for row in execution if row["id"].startswith("execution:baseline:")]
@@ -70,17 +64,12 @@ def test_execution_rows_are_warnings_never_stops(tmp_path: Path) -> None:
 
 
 def test_an_empty_profile_is_the_profile_of_the_delivery(tmp_path: Path) -> None:
-    from tests.test_secret_inputs import _two_test_roots
-    from tools.ready import check
-
     project = _two_test_roots(tmp_path)
     ids = lambda profile: [row["id"] for row in check(project, ["services/api/docs/feature.md"], profile=profile)["checks"]]
     assert ids("") == ids(None)
 
 
 def test_ready_target_previews_the_narrowed_context(tmp_path: Path) -> None:
-    from tools.ready import check
-
     project = _project(tmp_path)
     _write(project, f"{MODULE}/src/other/Big.java", "class Big {\n" + "  int a = 1;\n" * (BIG // 13 + 1) + "}\n")
     wide = check(project, [DOCS], profile="cases-only-v1")
@@ -96,9 +85,6 @@ def test_ready_target_previews_the_narrowed_context(tmp_path: Path) -> None:
 
 
 def test_the_scan_row_warns_only_when_an_exclusion_is_suspicious(tmp_path: Path) -> None:
-    from tests.test_first_run import _python_project
-    from tools.ready import check_scan
-
     project = _python_project(tmp_path, runtime=True)
     assert check_scan(project, {"root": "."})[0]["level"] == "OK"
     _write(project, "config/credentials.txt", "x\n")  # a secret-looking name (secret-filename-v1) is left out: somebody should look

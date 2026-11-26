@@ -11,6 +11,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_exit_policy import _local
+from tests.test_first_run import _python_project
+from tests.test_phase2_scan import _args
+from tools import contract_check, ready, run_pipeline
+from tools.pilot_state import terminal_result
+from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, skillsrc_review_self
+
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,8 +32,6 @@ def test_the_contract_names_the_isolation_rule_the_code_applies() -> None:
 
 
 def test_the_checker_expects_the_same_name() -> None:
-    from tools import contract_check
-
     for profile, names in contract_check.EXPECTED_ACCEPTANCE.items():
         assert PREDICATE in names and OLD not in names, (profile, names)
 
@@ -39,9 +44,6 @@ def test_the_rendered_document_says_it_too() -> None:
 def test_the_code_accepts_verified_or_self_admitted_and_no_other_isolation() -> None:
     """The behaviour the predicate states, by the result facts of local-pilot-v1: verified → accepted; unverified → not accepted;
     unverified but SELF-admitted → accepted, and marked SELF (a verified review never carries the mark)."""
-    from tests.test_exit_policy import _local
-    from tools.pilot_state import terminal_result
-
     base = _local()
     unverified = {**base, "reviewer_isolation_state": "independence_unverified"}
     admitted = {**unverified, "review_independence": "SELF"}
@@ -65,11 +67,6 @@ def _with_review_self(project: Path, value: object) -> None:
 
 
 def test_the_skillsrc_review_self_admits_the_review_like_the_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_phase2_scan import _args
-    from tools import run_pipeline
-    from tools.skillsrc_manifest import skillsrc_review_self
-
     project = _python_project(tmp_path, runtime=False)
     _with_review_self(project, True)
     assert skillsrc_review_self(project) is True
@@ -83,11 +80,6 @@ def test_the_skillsrc_review_self_admits_the_review_like_the_flag(tmp_path: Path
 
 
 def test_the_skillsrc_without_the_key_or_with_false_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_phase2_scan import _args
-    from tools import run_pipeline
-    from tools.skillsrc_manifest import skillsrc_review_self
-
     project = _python_project(tmp_path, runtime=False)
     assert skillsrc_review_self(project) is False
     _with_review_self(project, False)
@@ -99,9 +91,6 @@ def test_the_skillsrc_without_the_key_or_with_false_changes_nothing(tmp_path: Pa
 
 
 def test_the_schema_takes_review_self_and_nothing_else_under_review(tmp_path: Path) -> None:
-    from tests.test_first_run import _python_project
-    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
-
     project = _python_project(tmp_path, runtime=False)
     _with_review_self(project, True)
     assert load_skillsrc(project / ".skillsrc")["review"] == {"self": True}
@@ -115,9 +104,6 @@ def test_the_schema_takes_review_self_and_nothing_else_under_review(tmp_path: Pa
 
 
 def test_ready_says_the_question_is_answered_when_the_skillsrc_answers_it(tmp_path: Path) -> None:
-    from tests.test_first_run import _python_project
-    from tools import ready
-
     project = _python_project(tmp_path, runtime=False)
     plain = next(row for row in ready.check(project, [], "cases-only-v1")["checks"] if row["id"] == "review:isolation")
     assert "accept-self-review" in plain["details"]["self_review_scan"] and "fix" not in plain  # PT: the row is OK, nothing to fix
@@ -129,10 +115,6 @@ def test_ready_says_the_question_is_answered_when_the_skillsrc_answers_it(tmp_pa
 def test_a_second_scan_with_review_self_behaves_as_without_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The key changes who answers the SELF question, not what a repeated scan does: the same request again gives what it gives
     without the key (here the run in progress), and the first run stays the one that admitted SELF."""
-    from tests.test_first_run import _python_project
-    from tests.test_phase2_scan import _args
-    from tools import run_pipeline
-
     def twice(root: Path, with_key: bool) -> tuple[dict, dict]:
         project = _python_project(root, runtime=False)
         if with_key:

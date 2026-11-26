@@ -9,6 +9,11 @@ import pytest
 
 from tests.helpers import prepare_stage, submit_stage
 from tests.test_cases_import_docs import LINKS, _changed, _fragment, _to_plan
+from tests.test_requirement_traceability import canonical_fixture
+from tools.batch_assembly import _size_split
+from tools.pilot_state import derive_state
+from tools.review_view import _import_gaps, render
+from tools.run_report import write_report
 
 NEW = 2  # the index of the new case in the fragment: after the two imported ones
 
@@ -95,8 +100,6 @@ def test_a_refusal_points_at_the_array_of_the_fragment_when_a_new_case_stands_fi
 
 
 def test_a_requirement_the_human_left_out_on_the_pause_gets_no_new_cases_in_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_report import write_report
-
     run = _to_plan(tmp_path, monkeypatch, exclude=("SREQ-0002",))
     write_report(run["project"], run["root"].name)
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
@@ -106,9 +109,6 @@ def test_a_requirement_the_human_left_out_on_the_pause_gets_no_new_cases_in_the_
 
 
 def test_the_review_view_names_no_new_cases_for_a_requirement_left_out_on_the_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.pilot_state import derive_state
-    from tools.review_view import _import_gaps
-
     run = _to_plan(tmp_path, monkeypatch, exclude=("SREQ-0002",))
     assert _import_gaps(run["root"], derive_state(run["root"]))[0] == []
 
@@ -149,16 +149,11 @@ def test_a_rework_may_rewrite_the_text_of_a_new_case(tmp_path: Path, monkeypatch
 
 
 def test_the_review_view_names_the_new_cases_by_their_ids() -> None:
-    from tests.test_requirement_traceability import canonical_fixture
-    from tools.review_view import render
-
     text = render(canonical_fixture(), imported=True, import_gaps=(["SREQ-batch-a-001", "SREQ-batch-a-002"], [])).decode("utf-8")
     assert "новые кейсы (TC-batch-a-001) написал генератор, а не человек — их текст оценивай и правь как обычно" in text
 
 
 def test_the_size_estimate_counts_a_requirement_without_a_case_by_its_text() -> None:
-    from tools.batch_assembly import _size_split
-
     text = "т" * 100  # 200 bytes
     source = [{"source_requirement_id": "SREQ-1", "display_order": 1, "text": text}]
     imported = {"cases": [], "gaps": [{"source_requirement_id": "SREQ-1", "text": text}]}

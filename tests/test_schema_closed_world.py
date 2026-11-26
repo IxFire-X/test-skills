@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+from tools.schema_validation import schema_diagnostics, validator_for
+
 
 def _contract(root: Path) -> dict:
     return json.loads((root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
 
 
 def test_validator_cache_is_keyed_by_every_local_schema_byte(tmp_path: Path) -> None:
-    from tools.schema_validation import validator_for
-
     schemas = tmp_path / "schemas"
     schemas.mkdir()
     draft = "https://json-schema.org/draft/2020-12/schema"
@@ -41,7 +41,6 @@ def test_validator_cache_is_keyed_by_every_local_schema_byte(tmp_path: Path) -> 
     assert changed is not first
     assert list(changed.iter_errors({}))
 
-    from tools.schema_validation import schema_diagnostics
     assert schema_diagnostics([], Path("schemas/main.schema.json"), tmp_path) == []
     assert schema_diagnostics((), Path("schemas/main.schema.json"), tmp_path)
     shared["minItems"] = 1

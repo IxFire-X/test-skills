@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_finish import _cases_only_effective
+from tests.test_quarantine import THREE_FUNCTIONS, _fail
 from tools import pilot_state
 from tools.run_pipeline import receipts_warning
 
 
 @pytest.fixture(scope="module")
 def frozen(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, str, str]:
-    from tests.test_quarantine import THREE_FUNCTIONS, _fail
-
     at = tmp_path_factory.mktemp("receipts") / "project"
     at.mkdir()
     run_root, attempt_id, _delta = _fail(at, content=THREE_FUNCTIONS)
@@ -96,8 +96,6 @@ def test_the_line_of_another_version(run: tuple[Path, Path, str], monkeypatch: p
 
 
 def test_an_accepted_set_of_cases_only_that_does_not_read_is_told(tmp_path: Path) -> None:
-    from tests.test_finish import _cases_only_effective
-
     root, attempt_id = _cases_only_effective(tmp_path)
     target = pilot_state.receipt_target(root, attempt_id, "effective-canonical")
     receipt = json.loads(target.read_text(encoding="utf-8"))

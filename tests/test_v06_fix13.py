@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_skillsrc_human_keys import _init_cli, _project as _configured_project
 from tools import confined_output
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_in_project as write_in_project
+from tools.init_skillsrc import atomic_write_skillsrc, ensure_skillsrc
+from tools.skillsrc_manifest import SkillsrcError
 
 
 def _project(tmp_path: Path) -> Path:
@@ -95,9 +98,6 @@ def test_a_failed_write_leaves_no_temporary_file_and_the_file_that_lies_there(tm
 # ---- on the public path: init over a .skillsrc that is a link -------------------------------------------------------------------------------------
 
 def test_init_does_not_write_over_a_skillsrc_that_is_a_link(tmp_path: Path) -> None:
-    from tests.test_skillsrc_human_keys import _init_cli, _project as _configured_project
-    from tools.init_skillsrc import ensure_skillsrc
-
     project = _configured_project(tmp_path)
     assert ensure_skillsrc(project, {"module:root:test.framework": "pytest"}, write=True)["status"] == "created"
     document = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
@@ -117,10 +117,6 @@ def test_init_does_not_write_over_a_skillsrc_that_is_a_link(tmp_path: Path) -> N
 
 
 def test_a_document_that_is_no_skillsrc_is_refused_before_anything_is_written(tmp_path: Path) -> None:
-    from tests.test_skillsrc_human_keys import _project as _configured_project
-    from tools.init_skillsrc import atomic_write_skillsrc
-    from tools.skillsrc_manifest import SkillsrcError
-
     project = _configured_project(tmp_path)
     (project / ".skillsrc").write_bytes(b"old")
     with pytest.raises(SkillsrcError):

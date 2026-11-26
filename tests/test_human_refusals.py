@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from tools import run_pipeline
 from tools.fixes import HUMAN, OPENSPEC_REASONS, human_for
+from tools.ready import _question_text
 
 # words of the package's inside: the tester does not know them
 INTERNAL = ("батч", "пачк", "квитанц", "digest", "канон", "стади", "журнал", "слот", "p7", "sreq", "creq", "описи")
@@ -56,8 +58,6 @@ def test_a_refusal_of_a_code_without_a_phrase_carries_no_human_key(monkeypatch: 
 
 
 def test_a_run_pipeline_refusal_of_a_listed_code_carries_the_phrase(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import run_pipeline
-
     def refuse(_args):
         raise run_pipeline.HostStop("SCAN_RUN_IN_PROGRESS", "busy", "продолжите его")
 
@@ -68,15 +68,11 @@ def test_a_run_pipeline_refusal_of_a_listed_code_carries_the_phrase(monkeypatch:
 
 
 def test_ready_names_the_test_question_of_the_skillsrc_in_words_not_as_a_dump() -> None:
-    from tools.ready import _question_text
-
     question = {"id": "module:gson:test.framework", "field": "modules.gson.test.framework", "options": [{"id": "junit5", "value": "junit5"}]}
     text = _question_text([question])
     assert "модуля gson" in text and "junit5" in text and "{" not in text and "'" not in text
 
 
 def test_ready_names_the_source_question_of_the_skillsrc_in_words_too() -> None:
-    from tools.ready import _question_text
-
     text = _question_text([{"id": "module:examples:paths.source", "field": "modules.examples.paths.source", "options": []}])
     assert "модуля examples" in text and "исходный код" in text and "paths" not in text
