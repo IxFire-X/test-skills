@@ -125,9 +125,17 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
         locators.add(locator)
     required: set[tuple[str, str]] = set()
     relation_keys: set[tuple[Any, ...]] = set()
+    setups = {(row["case_id"], row["setup_id"]): row for row in trace.get("setups") or []}  # canonical 1.2.0
     for index, relation in enumerate(trace["implementation_relations"]):
         path = f"/implementation_relations/{index}"
         pair = (relation["file_id"], relation["symbol_id"])
+        if relation["kind"] == "setup":  # the setup helper: a setup of its case, a symbol of the files, no check
+            if (relation["case_id"], relation["setup_id"]) not in setups:
+                rows.append(_diag(path, "TRACE_RELATION_SETUP")); continue
+            if pair not in symbols or relation["file_id"] not in files:
+                rows.append(_diag(path, "TRACE_RELATION_SYMBOL")); continue
+            required.add(pair)
+            continue
         if relation["case_id"] not in cases or (relation["case_id"], relation["step_id"]) not in steps:
             rows.append(_diag(path, "TRACE_RELATION_STEP")); continue
         if steps[(relation["case_id"], relation["step_id"])]["manual_only"] or steps[(relation["case_id"], relation["step_id"])]["blocker_ids"]:
@@ -143,6 +151,9 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
         required.add(pair)
     relation_order = []
     for relation in trace["implementation_relations"]:
+        if relation["kind"] == "setup":  # before the steps of its case, in the order of its setup
+            relation_order.append((case_order.get(relation["case_id"], 10**9), -1, (setups.get((relation["case_id"], relation["setup_id"])) or {}).get("display_order", 10**9), -1, -1))
+            continue
         relation_order.append((case_order.get(relation["case_id"], 10**9), step_order.get((relation["case_id"], relation["step_id"]), 10**9), 0 if relation["kind"] == "operation" else 1, expectation_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id")), -1), assertion_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id"), relation.get("assertion_id")), -1), relation["file_id"], relation["symbol_id"]))
     if relation_order != sorted(relation_order): rows.append(_diag("/implementation_relations", "TRACE_RELATION_ORDER"))
     for pair in symbols:
@@ -179,6 +190,9 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
         step = steps.get((key[0], key[1]))
         if step is not None and key[0] not in excluded and not step["manual_only"] and not step["blocker_ids"] and not any(assertion[:3] == key for assertion in assertions):
             rows.append(_diag("/assertions", "TRACE_ASSERTION_TOPOLOGY"))
+    for key in setups:  # canonical 1.2.0: every setup of a case the automation keeps is performed by a setup helper
+        if key[0] not in excluded and not any(row["kind"] == "setup" and (row["case_id"], row["setup_id"]) == key for row in trace["implementation_relations"]):
+            rows.append(_diag("/implementation_relations", "TRACE_SETUP_COVERAGE"))
     if trace["automation_status"] == "BLOCKED":
         if not any(step["blocker_ids"] for step in steps.values()) or not trace["automation_diagnostics"] or any((trace["files"], trace["symbols"], trace["implementation_relations"], trace["manual_dispositions"])): rows.append(_diag("/automation_status", "TRACE_BLOCKED_BRANCH"))
     elif (

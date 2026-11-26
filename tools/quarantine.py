@@ -28,6 +28,7 @@ _SAFE = re.compile(r"[^A-Za-z0-9 ._:/#@=+-]")
 
 
 _ASSERT_REF = re.compile(r"ASSERT-[A-Za-z0-9_.:-]+")
+_SETUP_REF = re.compile(r"\bSETUP-[A-Za-z0-9_.:-]+")  # canonical 1.2.0: the setup helper throws SetupFailed with the id of its setup
 NOTE_LIMIT = 120
 _SEVERAL = re.compile(r"\(\d+ failures?\)$")  # the head of several failures: JUnit assertAll and AssertJ soft assertions end it with «(N failures)»
 _EXCEPTION_CLASS = re.compile(r"^[\w.$]+(?:Error|Exception): ")
@@ -70,6 +71,8 @@ def failure_note(message: str) -> tuple[str, str]:
     if match and match.start() == int(first.startswith("[")):  # AssertJ writes the label of ``as(…)`` in brackets
         # The mark already shows the ref, so the note does not repeat it.
         first = first[match.end():].lstrip(" :-]")
+    elif not match and (setup := _SETUP_REF.search(first)):  # a setup that did not succeed: no check of the case ran, the ref is the setup
+        return setup.group(0), _SAFE.sub("_", first)[:NOTE_LIMIT].rstrip()
     return (match.group(0) if match else "FAIL"), _SAFE.sub("_", first)[:NOTE_LIMIT].rstrip()
 
 
@@ -164,18 +167,35 @@ def status_checks(document: Mapping[str, Any] | None) -> dict[str, bool]:
     return checks
 
 
+def setup_lines(document: Mapping[str, Any] | None) -> dict[str, str]:
+    """``setup_id -> the precondition line it prepares`` of each setup of the canon (1.2.0); nothing for a canon without setup."""
+    try:
+        return {str(item["setup_id"]): str(case["preconditions"][item["precondition_index"]]) for case in (document or {}).get("test_cases") or []
+                for item in case.get("setup") or [] if item["precondition_index"] < len(case["preconditions"])}
+    except (AttributeError, KeyError, TypeError):
+        return {}
+
+
+# the cause of a setup that did not succeed (approved by the user on 25.11): the checks of these cases never ran
+SETUP_CAUSE = "Подготовка не удалась: {setup_id} «{line}» — {count} автотест(ов); проверки этих кейсов не выполнялись — сначала почините подготовку (адрес, данные, доступ)"
+
+
 def failure_groups(rows: Sequence[Mapping[str, Any]], texts: Mapping[tuple[str, str], str] | None = None,
-                   checks: Mapping[str, bool] | None = None) -> list[dict[str, Any]]:
+                   checks: Mapping[str, bool] | None = None, setups: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
     """The failed methods of the findings (``file, method, ref, kind, message``) grouped by cause, the biggest group first:
     ``{"cause", "rule", "count", "methods"}``.  A status groups by the actual code, whatever was expected («all answered 403» is one
     cause).  The text of a method comes from *texts* (``failure_texts``); without it the note decides by the code and the class only.
-    *checks* (``status_checks``): whether the check of the label reads a status, the same for a text and a note."""
-    texts, checks = texts or {}, checks or {}
+    *checks* (``status_checks``): whether the check of the label reads a status, the same for a text and a note.  *setups* (``setup_lines``):
+    a failure whose ref is a setup of the canon is the cause «подготовка не удалась», apart from the checks."""
+    texts, checks, setups = texts or {}, checks or {}, setups or {}
     groups: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         whole = texts.get((str(row.get("file")), str(row.get("method"))))
-        rule, key, expected = failure_cause(str(row.get("kind") or ""), str(row.get("message") or "") if whole is None else whole,
-                                            whole is not None, checks.get(str(row.get("ref"))))
+        if str(row.get("ref")) in setups:
+            rule, key, expected = "setup", str(row.get("ref")), None
+        else:
+            rule, key, expected = failure_cause(str(row.get("kind") or ""), str(row.get("message") or "") if whole is None else whole,
+                                                whole is not None, checks.get(str(row.get("ref"))))
         group = groups.setdefault((rule, key), {"rule": rule, "key": key, "expected": collections.Counter(), "methods": []})
         group["methods"].append(str(row.get("method")))
         if expected:
@@ -185,6 +205,8 @@ def failure_groups(rows: Sequence[Mapping[str, Any]], texts: Mapping[tuple[str, 
         expected = ", ".join(f"{code} ({count})" for code, count in sorted(group["expected"].items(), key=lambda item: (-item[1], item[0])))
         cause = {"status": f"ответ {group['key']} вместо ожидаемого {expected}", "exception": f"исключение {group['key']}",
                  "text": group["key"]}.get(group["rule"], UNKNOWN_CAUSE)
+        if group["rule"] == "setup":
+            cause = SETUP_CAUSE.format(setup_id=group["key"], line=setups[group["key"]], count=len(group["methods"]))
         found.append({"cause": cause, "rule": group["rule"], "count": len(group["methods"]), "methods": group["methods"]})
     return sorted(found, key=lambda group: -group["count"])  # stable: among equal groups the first seen stays first
 

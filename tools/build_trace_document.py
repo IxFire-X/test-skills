@@ -158,6 +158,7 @@ def _construct(document: Mapping[str, Any], automation: Mapping[str, Any], autot
                 expectations.append({"case_id": case["case_id"], "step_id": step["step_id"], "expectation_id": expectation["expectation_id"], "display_order": expectation["display_order"]})
                 for assertion in expectation["assertions"]:
                     assertions.append({"case_id": case["case_id"], "step_id": step["step_id"], "expectation_id": expectation["expectation_id"], "assertion_id": assertion["assertion_id"], "display_order": assertion["display_order"]})
+    setups = [{"case_id": case["case_id"], "setup_id": item["setup_id"], "display_order": item["display_order"]} for case in document["test_cases"] for item in case.get("setup", [])]
     execution = None if run_result is None else {"verdict": run_result["verdict"], "run_id": run_result["run_id"], "evidence_authoritative": run_result["evidence_authoritative"], "evidence": [dict(row) for row in run_result["execution_evidence"]], "process_evidence": [dict(row) for row in run_result["process_evidence"]], **({"exit_code": run_result["exit_code"], "duration_sec": run_result["stats"]["duration_sec"], "target": {"runner": run_result["target"]["runner"], "command": run_result["target"]["command"]}} if run_result["process_evidence"] else {})}
     return {
         "schema_version": "5.0.0", "stage": "trace", "source": _source(document), "automation_sha256": automation_sha256(automation), "autotest_review_sha256": automation_sha256(autotest_review), "automation_status": artifacts["automation_status"],
@@ -165,6 +166,7 @@ def _construct(document: Mapping[str, Any], automation: Mapping[str, Any], autot
         "files": [{"file_id": row["file_id"], "path": row["path"], "language": row["language"], "framework": row["framework"], "file_digest": row["content_digest"]} for row in artifacts["generated_files"]],
         "symbols": [dict(row) for row in artifacts["generated_symbols"]], "implementation_relations": [dict(row) for row in artifacts["implementation_relations"]],
         "manual_dispositions": [dict(row) for row in artifacts["manual_dispositions"]], "automation_diagnostics": [dict(row) for row in artifacts["diagnostics"]],
+        **({"setups": setups} if setups else {}),  # canonical 1.2.0: the setup rows, only when there is setup
         **({"excluded_cases": [dict(row) for row in artifacts["excluded_cases"]]} if "excluded_cases" in artifacts else {}),
         "execution": execution, "lifecycle": {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE" if execution is None else execution["verdict"]},
     }

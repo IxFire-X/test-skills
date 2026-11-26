@@ -780,8 +780,8 @@ def _failure_groups(rows: Sequence[Mapping[str, Any]], execution: Mapping[str, A
     checks of the canon (*document*) tell which labels read the code of the answer."""
     if not rows:
         return {}
-    failure_texts, status_checks, failure_groups = execution_gate.from_mode_b("quarantine", "failure_texts", "status_checks", "failure_groups")
-    return {"failure_groups": failure_groups(rows, failure_texts(execution, automation), status_checks(document))}
+    failure_texts, status_checks, setup_lines, failure_groups = execution_gate.from_mode_b("quarantine", "failure_texts", "status_checks", "setup_lines", "failure_groups")
+    return {"failure_groups": failure_groups(rows, failure_texts(execution, automation), status_checks(document), setup_lines(document))}
 
 
 def _one_cause(report: Mapping[str, Any]) -> Mapping[str, Any] | None:

@@ -13,7 +13,7 @@ from tools import review_view
 
 _ID = re.compile(r"[^\s|=#]+\Z")  # an id a table line can hold
 _LOCATORS = {"java_class_method": ("class_fqn", "method_name"), "python_module_function": ("function_name",), "python_class_method": ("qualified_class_name", "method_name")}
-_ROW = {"operation": {"kind", "case_id", "step_id", "file_id", "symbol_id"}, "assertion": {"kind", "case_id", "step_id", "file_id", "symbol_id", "expectation_id", "assertion_id"}}
+_ROW = {"operation": {"kind", "case_id", "step_id", "file_id", "symbol_id"}, "setup": {"kind", "case_id", "setup_id", "file_id", "symbol_id"}, "assertion": {"kind", "case_id", "step_id", "file_id", "symbol_id", "expectation_id", "assertion_id"}}
 _json = partial(json.dumps, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -29,7 +29,7 @@ def _symbols(rows: list[Any]) -> str | None:
 
 
 def _key(row: Mapping[str, Any]) -> tuple[str, str, str]:
-    return row["case_id"], row["step_id"], row.get("assertion_id", "")
+    return row["case_id"], row.get("step_id") or row["setup_id"], row.get("assertion_id", "")
 
 
 def _relations(rows: list[Any], facts: Mapping[tuple[str, str, str], str]) -> str | None:
@@ -40,13 +40,15 @@ def _relations(rows: list[Any], facts: Mapping[tuple[str, str, str], str]) -> st
     for row in rows:
         if set(row) != _ROW.get(row["kind"]) or not all(_ID.match(item) for key, item in row.items() if key != "kind"):
             return None
-        new = " ".join(row[name] for name in ("symbol_id", "file_id", "case_id", "step_id"))
+        new = " ".join(row[name] for name in ("symbol_id", "file_id", "case_id", "setup_id" if row["kind"] == "setup" else "step_id"))
         if new != head:
             head, expectation = new, None
             lines.append(new)
-        elif row["kind"] == "operation":
+        elif row["kind"] in ("operation", "setup"):
             return None
-        if row["kind"] == "operation":
+        if row["kind"] == "setup":  # canonical 1.2.0: the setup helper of a case — it checks nothing
+            lines[-1] += " | setup"
+        elif row["kind"] == "operation":
             lines[-1] += " | " + facts.get(_key(row), "operation")
         else:
             if row["expectation_id"] != expectation:

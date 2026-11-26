@@ -61,6 +61,12 @@
       "required": ["kind", "case_id", "step_id", "file_id", "symbol_id"],
       "properties": {"kind": {"const": "operation"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}}
     },
+    "setup_relation": {
+      "description": "canonical 1.2.0: the symbol of the setup helper that performs the setup of a case; it asserts nothing.",
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "case_id", "setup_id", "file_id", "symbol_id"],
+      "properties": {"kind": {"const": "setup"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "setup_id": {"type": "string", "pattern": "^SETUP-[A-Za-z0-9_.:-]+$"}, "file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}}
+    },
     "assertion_relation": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "case_id", "step_id", "expectation_id", "assertion_id", "file_id", "symbol_id"],
@@ -91,7 +97,7 @@
         "correction_review_sha256": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"},
         "generated_files": {"type": "array", "items": {"$ref": "#/$defs/generated_file"}},
         "generated_symbols": {"type": "array", "items": {"$ref": "#/$defs/generated_symbol"}},
-        "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
+        "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/setup_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
         "manual_dispositions": {"type": "array", "items": {"$ref": "#/$defs/manual_disposition"}},
         "excluded_cases": {"type": "array", "items": {"$ref": "#/$defs/excluded_case"}},
         "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}

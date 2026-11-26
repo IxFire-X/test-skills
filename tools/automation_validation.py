@@ -48,6 +48,9 @@ _MESSAGES = {
     "AUTOMATION_NONREADY_TARGET": "relations may target only ready steps",
     "AUTOMATION_MISSING_OPERATION_COVERAGE": "ready step requires an operation relation",
     "AUTOMATION_MISSING_ASSERTION_COVERAGE": "ready assertion requires an assertion relation",
+    "AUTOMATION_UNKNOWN_SETUP": "setup_id does not belong to case_id",
+    "AUTOMATION_MISSING_SETUP_COVERAGE": "the setup of a ready case requires a setup relation",
+    "AUTOMATION_SETUP_ASSERTED": "the symbol of a setup helper must not be the symbol of an assertion relation",
     "AUTOMATION_ORPHAN_SYMBOL": "generated symbol must occur in a relation",
     "AUTOMATION_ORPHAN_FILE": "generated file must own a related symbol: no row of implementation_relations names its file_id (an orphan file has no symbol linked to a case step or assertion)",
     "AUTOMATION_DUPLICATE_MANUAL_DISPOSITION": "manual disposition must be unique",
@@ -258,6 +261,8 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
     target_operations: set[tuple[str, str]] = set()
     target_assertions: set[tuple[str, str, str, str]] = set()
     related_pairs: set[tuple[str, str]] = set()
+    setups = {(case["case_id"], item["setup_id"]): (setup_index, item) for case in document["test_cases"] for setup_index, item in enumerate(case.get("setup", []))}
+    target_setups: dict[tuple[str, str], int] = {}  # canonical 1.2.0: (case, setup) → the index of its relation
     for index, row in enumerate(relations):
         base = _pointer("artifacts", "implementation_relations", index)
         pair = (row["file_id"], row["symbol_id"])
@@ -269,6 +274,24 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         case = cases.get(row["case_id"])
         if case is None:
             diagnostics.append(_diagnostic("AUTOMATION_UNKNOWN_CASE", base + "/case_id"))
+            continue
+        if row["kind"] == "setup":  # the setup helper of a case: before its steps, in the order of its setup
+            setup = setups.get((row["case_id"], row["setup_id"]))
+            if setup is None:
+                diagnostics.append(_diagnostic("AUTOMATION_UNKNOWN_SETUP", base + "/setup_id"))
+                continue
+            key = ("setup", row["case_id"], row["setup_id"], None, None, row["file_id"], row["symbol_id"])
+            if key in relation_keys:
+                diagnostics.append(_diagnostic("AUTOMATION_DUPLICATE_RELATION", base))
+                row_valid = False
+            relation_keys.add(key)
+            if row["case_id"] in excluded:
+                diagnostics.append(_diagnostic("AUTOMATION_EXCLUDED_CASE_TARGET", base + "/case_id"))
+                row_valid = False
+            if row_valid:
+                target_setups[(row["case_id"], row["setup_id"])] = index
+                related_pairs.add(pair)
+                valid_relation_rows.append(((case[0], -1, setup[0], -1, -1, row["file_id"], row["symbol_id"]), row))
             continue
         step_data = steps.get((row["case_id"], row["step_id"]))
         if step_data is None:
@@ -310,6 +333,10 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         valid_relation_rows.append(((case[0], step_index, 0 if row["kind"] == "operation" else 1, expectation_index, assertion_index, row["file_id"], row["symbol_id"]), row))
     if [row for _, row in valid_relation_rows] != [row for _, row in sorted(valid_relation_rows, key=lambda item: item[0])]:
         diagnostics.append(_diagnostic("AUTOMATION_RELATION_ORDER", "/artifacts/implementation_relations"))
+    asserting = {(row["file_id"], row["symbol_id"]) for row in relations if row["kind"] == "assertion"}
+    for key, index in sorted(target_setups.items(), key=lambda item: item[1]):  # a setup helper checks nothing: it throws SetupFailed itself
+        if (relations[index]["file_id"], relations[index]["symbol_id"]) in asserting:
+            diagnostics.append(_diagnostic("AUTOMATION_SETUP_ASSERTED", _pointer("artifacts", "implementation_relations", index)))
 
     for index, row in enumerate(artifacts["generated_symbols"]):
         if (row["file_id"], row["symbol_id"]) not in related_pairs:
@@ -376,6 +403,9 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         diagnostics.append(_diagnostic("AUTOMATION_GENERATED_DIAGNOSTICS", "/artifacts/diagnostics"))
 
     if status == "GENERATED" and (not blocked or partial):
+        for (case_id, setup_id), (setup_index, _setup) in setups.items():
+            if case_id not in excluded and (case_id, setup_id) not in target_setups:
+                diagnostics.append(_diagnostic("AUTOMATION_MISSING_SETUP_COVERAGE", _pointer("test_cases", cases[case_id][0], "setup", setup_index)))
         for (case_id, step_id), (step_index, step) in steps.items():
             if case_id in excluded:
                 continue

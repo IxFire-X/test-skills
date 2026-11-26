@@ -553,7 +553,7 @@ def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: M
     rows_by_pair: dict[tuple[str, str], tuple[str, ...]] = {}
     for group in param_groups(dict(document)):
         case_ids = [case["case_id"] for case in group["cases"]]
-        pairs_of = {case_id: {(row["file_id"], row["symbol_id"]) for row in relations if row["case_id"] == case_id} for case_id in case_ids}
+        pairs_of = {case_id: {(row["file_id"], row["symbol_id"]) for row in relations if row["case_id"] == case_id and row["kind"] != "setup"} for case_id in case_ids}  # a setup helper is no row of the group
         bound = [case_id for case_id in case_ids if pairs_of[case_id]]
         if not bound:
             continue  # a group without automation (manual or blocked cases) has no rows to run
@@ -887,7 +887,7 @@ def masked_failure_text(text: str) -> str:
     into the receipt, the report and the annotation of a quarantined method."""
     from tools.execution_journal import canonical_runner_output
 
-    lead = re.match(r"ASSERT-[A-Za-z0-9_.:-]+", text)  # the label of the assertion is the reference of the quarantine mark, not free text
+    lead = re.match(r"(?:ASSERT|SETUP)-[A-Za-z0-9_.:-]+", text)  # the label of the assertion (or of the setup, 1.2.0) is the reference of the quarantine mark, not free text
     head, rest = (lead.group(0), text[lead.end():]) if lead else ("", text)
     masked = canonical_runner_output(rest, limit=500).decode("utf-8", errors="replace") if rest.strip() else rest
     return head + (" " + masked.strip() if head and masked.strip() == "<redacted>" else masked)
