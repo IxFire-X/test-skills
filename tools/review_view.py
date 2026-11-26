@@ -31,11 +31,12 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Collection, Iterable, Mapping
+from typing import Any, Collection, Iterable, Mapping, Sequence
 
 from tools.canonical_document import param_groups
 from tools.json_cli import JsonArgumentParser, cli_error
 from tools.reference_match import reference_match
+from tools.style_samples import hint_lines as style_hint_lines
 from tools.test_case_projections import SLOT, template_texts
 
 VIEW_VERSION = "review-view-v2"
@@ -273,6 +274,21 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
                                                                     for digest in plan["context_receipt_digests"]], plan.get("context_files")), Path(root))
 
 
+def run_style_hint(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, list[str]]:
+    """``case_id -> facts`` of the style samples of the run (``.skillsrc`` ``style.samples``) the cases carry and neither the
+    requirements nor the context files of the run give; empty without samples."""
+    from tools.pilot_state import derive_state, read_context_selection, read_style_samples
+    from tools.style_samples import known_text, transferred
+
+    samples = read_style_samples(Path(root), attempt_id)
+    if samples is None:
+        return {}
+    selected = dict.fromkeys(str(event["artifact_digest"]) for event in derive_state(Path(root))["events"]
+                             if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")
+    files = [row for digest in selected for row in read_context_selection(Path(root), attempt_id, digest)["files"]]
+    return transferred(document, samples["cases"], known_text(Path(root).parent.parent, document, files))
+
+
 def run_context_note(root: Path, attempt_id: str) -> str | None:
     """With more than one context batch, which of them the generator saw — the line of the plan; None with one
     context batch (the view keeps its bytes) or before a plan."""
@@ -506,7 +522,8 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
            reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
            context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None,
-           basis: Mapping[str, Any] | None = None, moved: Iterable[tuple[str, str, str]] = ()) -> bytes:
+           basis: Mapping[str, Any] | None = None, moved: Iterable[tuple[str, str, str]] = (),
+           style: Mapping[str, Sequence[str]] | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` for the
     automation generator. With the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before. With the map of *existing* project tests the hints add
@@ -534,6 +551,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
     path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(real, groups, batches))
     path_hint += _existing_lines(real, existing or {})
     path_hint += _reference_lines(None if reference is None else reference_match(real, list(reference)))
+    path_hint += style_hint_lines(style or {})  # CV_STYLE_SAMPLE: none without a carried fact
     lines = [
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
@@ -684,11 +702,15 @@ def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any
     except (OSError, ValueError, KeyError, TypeError):
         context = None
     reference = None if not review or attempt_id is None else read_reference_cases(root, attempt_id)
+    try:  # the facts of the style samples in the cases — a hint, never a stop
+        style = None if not review or attempt_id is None else run_style_hint(root, attempt_id, dict(real))
+    except (OSError, ValueError, KeyError, TypeError):
+        style = None
     imported = review and cases_path(root) is not None
     data = render(document, profile, *(grouping or (None, None)), existing=existing,
                   reference=None if reference is None else reference["cases"],
                   imported=imported, normalized=_normalized(root, state) if imported else 0,
-                  context=context, import_gaps=_import_gaps(root, state) if imported else None, basis=basis)
+                  context=context, import_gaps=_import_gaps(root, state) if imported else None, basis=basis, style=style)
     return data, grouping, reference
 
 

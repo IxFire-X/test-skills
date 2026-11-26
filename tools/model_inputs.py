@@ -255,6 +255,38 @@ def publish_reference_cases(run_root: Path, attempt_id: str, path: str, data: by
     return publish_bound(run_root, attempt_id, "reference-cases", facts)
 
 
+def publish_style_samples(run_root: Path, attempt_id: str, path: str, data: bytes, samples: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """The style samples of ``.skillsrc`` ``style.samples`` (``tools.style_samples.select``) as a receipt of the attempt: an input
+    of every batch of the generator, after the header and the capabilities of the earlier batches, before ``imported``."""
+    from tools.batch_assembly import with_digest
+
+    value = with_digest({"path": path, "sha256": "sha256:" + hashlib.sha256(bytes(data)).hexdigest(), "cases": [dict(case) for case in samples]})
+    return publish_bound(run_root, attempt_id, "style-samples", {"style_samples": value})
+
+
+def read_style_samples(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
+    """The style samples of the attempt, None when its project names none."""
+    try:
+        return read_attempt_receipt(run_root, attempt_id, "style-samples", "ARTIFACT_READ_BACK")["record"]["style_samples"]
+    except (ValueError, OSError, KeyError):
+        return None
+
+
+def _check_style_samples(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:  # the samples as select gave them, sealed
+    value = receipt.get("style_samples")
+    if (
+        set(receipt) != common | {"style_samples"}
+        or not identity_matches
+        or not isinstance(value, Mapping)
+        or set(value) != {"path", "sha256", "cases", "digest"}
+        or not isinstance(value.get("path"), str)
+        or not _DIGEST.fullmatch(str(value.get("sha256", "")))
+        or not isinstance(value.get("cases"), list) or not 1 <= len(value["cases"]) <= 3
+        or _generator_input_digest(value) != value.get("digest")
+    ):
+        raise ValueError("invalid style-samples receipt")
+
+
 def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
     """The reference of the attempt, None when the scan had no ``--reference``."""
     try:
@@ -979,6 +1011,12 @@ class ModelResponseDigestMismatch(ValueError):
     code = "MODEL_RESPONSE_DIGEST_MISMATCH"
 
 
+def _style_samples_file(root: Path, attempt_id: str) -> list[Path]:
+    """The receipt file of the style samples, for the size of the common input of the batches; none without samples."""
+    target = _receipt_target(root, attempt_id, "style-samples")
+    return [target] if read_style_samples(root, attempt_id) is not None else []
+
+
 def _generator_input_digest(value: Mapping[str, Any]) -> str:
     from tools.batch_assembly import with_digest
 
@@ -1168,7 +1206,8 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     header_digest = _generator_input_digest(header)
     receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
     plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
-                                    project, [found["answer"]], found["receipts"], run_skeleton(root, attempt), found["out_of_scope"], found["sources"])
+                                    project, [found["answer"], *_style_samples_file(root, attempt_id)], found["receipts"], run_skeleton(root, attempt),
+                                    found["out_of_scope"], found["sources"])  # the samples are part of the common input of every batch
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)
@@ -1293,6 +1332,9 @@ def _expected_model_inputs(
                     f"MODEL_INPUTS_MISMATCH: capabilities прошлых пачек для {instance} не опубликованы; fix: их публикует prepare --stage tc-generator:{instance}"
                 ) from error
             expected.append((str(prior["digest"]), f"digest capabilities прошлых пачек для {instance} (их публикует prepare)"))
+        samples = read_style_samples(root, attempt_id)
+        if samples is not None:  # the form of the team's cases (.skillsrc style.samples), before the skeleton: that one stays the last input
+            expected.append((str(samples["digest"]), "digest образцов стиля (scan, .skillsrc style.samples)"))
         if _imported_cases(project, root, state, attempt_id) is not None:  # the skeleton of this batch is its last input
             try:
                 skeleton = _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + instance, "ARTIFACT_READ_BACK")["record"]["imported"]
@@ -1564,7 +1606,7 @@ published_generator_inputs, batch_ordinal, accepted_earlier_fragments, codeword_
 # a kind of cases -> its check (``pilot_state._validate_factual_receipt`` takes it from here); a kind not here is looked up by
 # the prefix of its family, ``RECEIPT_FAMILIES``
 RECEIPT_CHECKS = {
-    "reference-cases": _check_reference_cases, "rework-round": _check_rework_round,
+    "reference-cases": _check_reference_cases, "rework-round": _check_rework_round, "style-samples": _check_style_samples,
     **{kind: _check_generator_input for kind in _GENERATOR_INPUT_KINDS.values()}, "imported-cases": _check_imported_cases,
 }
 

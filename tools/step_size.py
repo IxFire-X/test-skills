@@ -304,7 +304,7 @@ def _compact(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-_RECEIPT_SLOTS = ("batch-plans/{a}.json", "generator-headers/{a}.json", "prior-capabilities/{a}.*.json", "imported-cases/{a}.*.json",
+_RECEIPT_SLOTS = ("batch-plans/{a}.json", "generator-headers/{a}.json", "style-samples/{a}.json", "prior-capabilities/{a}.*.json", "imported-cases/{a}.*.json",
                   "imported-cases/{a}.json", "reviewer-session-boundaries/{a}.json", "automation-review-boundaries/{a}.*.json",
                   "artifacts/{a}/*")  # run artifacts of the attempt (publish_run_artifact_bytes), also without a suffix
 _BUNDLES = ("cases", "candidate-bundle")  # where publish_test_case_bundle writes the document of the run

@@ -379,6 +379,30 @@ def _section_entry(rel: str, text: str, headings: list[str]) -> dict[str, str]:
             "lines": ", ".join(f"{item.first}-{item.last}" for item in sorted(found, key=lambda item: item.first))}
 
 
+def _style_samples(project: Path) -> tuple[str, bytes, list[dict[str, Any]], list[str]] | None:
+    """``.skillsrc`` ``style.samples`` (v0.9): ``(path, bytes, samples, warnings of the scan)``; None when the project names none.
+    The CSV is a file of the project as ``--reference`` (inside it, no link), refused above ``FILE_BYTES`` before the parse."""
+    from tools.skillsrc_manifest import load_skillsrc
+    from tools.style_samples import FILE_BYTES, select
+    from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv, require_human_csv
+
+    manifest = project / ".skillsrc"
+    named = (load_skillsrc(manifest).get("style") or {}).get("samples") if manifest.is_file() else None
+    if not named:
+        return None
+    rel, data = _input_files(project, [named], "style.samples", outside_fix="укажите в .skillsrc style.samples путём внутри проекта")[0]
+    if len(data) > FILE_BYTES:
+        raise HostStop("ZEPHYR_CSV_ROWS", f"{rel}: образцы стиля — {len(data)} Б, больше {FILE_BYTES} Б",
+                       fix="положите в style.samples до трёх коротких кейсов команды — экспорт Zephyr в CSV")
+    try:
+        cases = parse_zephyr_csv(data)
+        require_human_csv(cases)
+    except ZephyrCsvError as error:
+        raise HostStop(error.code, f"{rel}: {error}", fix="style.samples — экспорт тест-кейсов Zephyr Scale в CSV (профиль v5 или v6)") from error
+    samples, warnings = select(cases, rel)
+    return (rel, data, samples, warnings) if samples else None
+
+
 def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, list[dict[str, Any]]] | None:
     """``scan --reference <csv>`` read by the shared Zephyr reader; a reader refusal is the scan's refusal."""
     if not reference:
@@ -999,7 +1023,8 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
     context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
     by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
     reference = _reference_cases(project, getattr(args, "reference", None))
-    selected_ids = _without_cases_csv(selected_ids, frozen_inventory, getattr(args, "cases", None), reference and reference[0])
+    samples = _style_samples(project)  # the form of the team's cases: a receipt, an input of the generator, never context
+    selected_ids = _without_cases_csv(selected_ids, frozen_inventory, getattr(args, "cases", None), reference and reference[0], samples and samples[0])
     context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
     budget = _scan_context_budget(frozen_inventory, project)
     own, unread = own_tests(project, frozen_inventory)
@@ -1020,13 +1045,16 @@ def _scan_context_plan(project: Path, args: Any, run_root: Path, frozen_inventor
     if not batches:  # the closed manifest .skillsrc is always in the context, so this is not an honest run: nothing to cut or finish
         raise ContextSelectionError("the scan selected no context batch")
     return {"batches": batches, "context_skipped": context_skipped, "reference": reference, "own_runs_unread": unread,
-            "own_files": sum(row["reason"] == "CONTEXT_OWN_TEST" for row in skipped)}  # the files hidden, not the files that are own
+            "own_files": sum(row["reason"] == "CONTEXT_OWN_TEST" for row in skipped),  # the files hidden, not the files that are own
+            **({"style_samples": samples} if samples else {})}
 
 
 def _publish_context(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -> None:
     """The receipts of the plan the attempt has no event for, in batch order, then the reference receipt (all idempotent)."""
     from tools import pilot_state as pilot
 
+    if plan.get("style_samples"):  # an input of every batch of the generator; first, so a scan cut after it still has batches to write (the repeat finishes it)
+        pilot.publish_style_samples(run_root, attempt_id, *plan["style_samples"][:3])
     have = {str(event["artifact_digest"]) for event in pilot.derive_state(run_root)["events"]
             if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"}
     for batch in plan["batches"]:
@@ -1046,6 +1074,8 @@ def _scan_payload(project: Path, run_root: Path, args: Any, module: Mapping[str,
     unread = plan["own_runs_unread"]
     if getattr(args, "cases_read", None):
         context_warnings = [*context_warnings, f"CSV {args.cases}: кейсов {args.cases_read}"]
+    if plan.get("style_samples"):
+        context_warnings = [*context_warnings, *plan["style_samples"][3]]
     if unread:  # the human must see why the input is larger than it was meant to be (a moved project, a damaged run), and which runs
         context_warnings = [*context_warnings, f"OWN_TESTS_UNREAD: прошлых прогонов не прочитано: {len(unread)} ({', '.join(unread[:5])}{f' и ещё {len(unread) - 5}' if len(unread) > 5 else ''}; папка проекта перенесена или скопирована, "
                             "прогон повреждён или занят другой командой); это не ошибка, работу можно продолжать — тесты, записанные ими в проект, остаются во входе модели, вход больше"]
@@ -1251,6 +1281,7 @@ read_skillsrc_binding = _read_skillsrc_binding
 docs_entries = _docs_entries
 cases_scope_files = _cases_scope_files
 reference_cases = _reference_cases
+style_samples = _style_samples
 init_skillsrc_run = _init_skillsrc_run
 resolve_scan_module = _resolve_scan_module
 scan_skill_pack_root = _scan_skill_pack_root

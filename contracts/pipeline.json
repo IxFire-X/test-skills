@@ -70,6 +70,7 @@
     {"path": "batch-plans/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "batch-plan", "registry_id": "batch_plan"},
     {"path": "generator-headers/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "generator-header", "registry_id": "canonical_header"},
     {"path": "reference-cases/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "reference-cases"},
+    {"path": "style-samples/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "style-samples"},
     {"path": "review-canaries/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "review-canaries"},
     {"path": "rework-rounds/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "rework-round"},
     {"path": "imported-cases/<attempt>.json", "event": "bound", "profiles": ["cases-only-v1", "local-pilot-v1"], "writer": "tools.run_receipts:_receipt_target", "kind": "imported-cases"},

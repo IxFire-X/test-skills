@@ -46,6 +46,7 @@ from tools.run_scan import (  # what scan computes (C2); the command scan below 
     publish_context as _publish_context,
     read_skillsrc_binding as _read_skillsrc_binding,
     reference_cases as _reference_cases,
+    style_samples as _style_samples,
     resolve_scan_module as _resolve_scan_module,
     run_in_progress as _run_in_progress,
     scan_command as _scan_command,
@@ -207,6 +208,7 @@ def cmd_scan(args: Any) -> int:
         entries = _docs_entries(Path(args.project).resolve(), getattr(args, "docs", None))
         _cases_scope_files(entries, getattr(args, "cases", None))
         _reference_cases(Path(args.project).resolve(), getattr(args, "reference", None))
+        _style_samples(Path(args.project).resolve())
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
         return 2

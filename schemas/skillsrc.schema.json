@@ -10,7 +10,7 @@
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
     "discovery": {}, "modules": {}, "requirements": {}, "limits": {}, "review": {},
     "disposition_policy": {"enum": ["quarantine", "cleanup"]},
-    "projection": {}
+    "projection": {}, "style": {}
   },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
@@ -36,7 +36,8 @@
         "limits": {"$ref": "#/$defs/limits"},
         "review": {"$ref": "#/$defs/review"},
         "disposition_policy": {"enum": ["quarantine", "cleanup"]},
-        "projection": {"$ref": "#/$defs/projection"}
+        "projection": {"$ref": "#/$defs/projection"},
+        "style": {"$ref": "#/$defs/style"}
       }
     },
     "v3": {
@@ -56,13 +57,19 @@
         "limits": {"$ref": "#/$defs/limits"},
         "review": {"$ref": "#/$defs/review"},
         "disposition_policy": {"enum": ["quarantine", "cleanup"]},
-        "projection": {"$ref": "#/$defs/projection"}
+        "projection": {"$ref": "#/$defs/projection"},
+        "style": {"$ref": "#/$defs/style"}
       }
     },
     "review": {
       "type": "object", "additionalProperties": false,
       "description": "P2: self: true — every run of this project admits a review in the same session (SELF), as scan --accept-self-review does; the question is not asked again.",
       "properties": {"self": {"type": "boolean"}}
+    },
+    "style": {
+      "type": "object", "additionalProperties": false,
+      "description": "v0.9: samples is a project-relative Zephyr CSV of the team's cases; up to three of them show the generator the form of the cases, never their facts.",
+      "properties": {"samples": {"type": "string", "minLength": 1, "maxLength": 500}}
     },
     "projection": {
       "type": "object", "additionalProperties": false,

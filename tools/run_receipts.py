@@ -41,7 +41,7 @@ _UNCACHED_RECEIPT_KINDS = frozenset({"phase1-artifact", "execution-receipt", "re
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries", "rework-round": "rework-rounds"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "style-samples": "style-samples", "review-canaries": "review-canaries", "rework-round": "rework-rounds"}
     if kind.startswith(_SKELETON_KIND):  # the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -228,7 +228,7 @@ def read_attempt_receipt(
 
 _RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-boundaries", "effective-canonicals", "automation-review-boundaries",
                     "execution-inputs", "materialization-ownership", "generated-deltas", "materialization-commands", "execution-receipts", "resume-validations", "execution-traces",
-                    "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "review-canaries",
+                    "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "style-samples", "review-canaries",
                     "imported-cases", "prior-capabilities", "rework-rounds")
 
 
