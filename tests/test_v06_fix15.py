@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from tests.test_f1 import _pipeline
+from tests.test_project_inventory import _spine_run
 from tests.test_skillsrc_human_keys import _project as _configured_project
 from tests.test_stage_steps import _answer, _generator, _junction
-from tests.test_v06_fix10 import _spine_run
 from tests.test_v06_fix13 import _link
 from tools import pilot_state
 from tools.init_skillsrc import ensure_skillsrc
