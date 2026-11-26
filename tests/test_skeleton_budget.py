@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_cases_import import _to_generator
+from tools import pilot_state
+
 pytestmark = pytest.mark.contract
 
 
@@ -31,9 +34,6 @@ def _step_input(plan) -> int:
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-
     run = _to_generator(tmp_path, monkeypatch)
     run["receipt_path"] = pilot_state._receipt_target(run["root"], run["attempt_id"], "imported-cases")
     run["receipt"] = json.loads(run["receipt_path"].read_bytes())

@@ -1,5 +1,14 @@
+from tests.spine_helpers import finalize_phase_one_spine
+from tests.test_execution_receipt import _execution_facts
+from tests.test_exit_policy import _facts, _local
+from tests.test_finalization_branches import _delta
+from tools import pilot_state
+from tools.execution_adapters import request_digest
 from tools.finalize_attempt import build_pre_finalization_trace, disposition_receipt, publish_terminal_result, verify_finalization
+from tools.finalize_attempt import FinalizationError, _required_trace_artifacts, finalize_attempt
 from pathlib import Path
+
+from helpers import phase_two_baseline
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -16,7 +25,6 @@ def test_invalid_finalization_still_terminalizes_and_preserves_factual_axes():
     pre = build_pre_finalization_trace(_branch(), _dispositions())
     receipt = verify_finalization({"pre_finalization_trace_digest": "sha256:" + "0" * 64}, pre)
     assert receipt["valid"] is False
-    from tests.test_exit_policy import _local
     result = publish_terminal_result(receipt, {**_local(run_id="a" * 32, attempt_id="b" * 32, verification="PASS", coverage="FULL", finalization_valid=False), "policy_profile": "local-pilot-v1"})
     assert result["reason_code"] == "FINALIZATION_INVALID"
     assert result["accepted"] is False
@@ -31,12 +39,6 @@ def test_cases_only_explicitly_marks_execution_artifacts_not_applicable():
 
 
 def test_durable_closure_binds_readbacks_then_terminal_event_and_derives_acceptance(tmp_path):
-    from tests.test_execution_receipt import _execution_facts
-    from tests.test_exit_policy import _local
-    from tools.execution_adapters import request_digest
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
     published = pilot_state.publish_attempt_receipt(root, attempt_id, "execution-receipt", {"payload": report})
@@ -76,23 +78,15 @@ def test_durable_closure_binds_readbacks_then_terminal_event_and_derives_accepta
 
 
 def test_false_green_minimal_trace_and_caller_accepted_are_rejected():
-    from tools.finalize_attempt import FinalizationError, build_pre_finalization_trace, publish_terminal_result
-
     with __import__("pytest").raises(FinalizationError):
         build_pre_finalization_trace({"policy_profile": "local-pilot-v1"}, _dispositions())
     pre = build_pre_finalization_trace(_branch(), _dispositions())
     receipt = verify_finalization({"pre_finalization_trace_digest": pre["digest"]}, pre)
-    from tests.test_exit_policy import _local
     with __import__("pytest").raises(FinalizationError):
         publish_terminal_result(receipt, _local() | {"policy_profile": "local-pilot-v1", "accepted": True})
 
 
 def test_unpublished_or_forged_finalization_cannot_terminalize(tmp_path):
-    from helpers import phase_two_baseline
-    from tests.test_exit_policy import _local
-    from tools import pilot_state
-    from tools.finalize_attempt import FinalizationError, publish_terminal_result, verify_finalization
-
     run = pilot_state.create_run(tmp_path, "local-pilot-v1", {"request_id": "forged-run", "host_id": "host-1", "execution_requested": True})
     root = run["run_root"]
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
@@ -108,16 +102,6 @@ def test_unpublished_or_forged_finalization_cannot_terminalize(tmp_path):
 
 
 def test_low_level_terminal_publication_cannot_claim_local_pass_without_execution_and_dispositions(tmp_path):
-    from tests.test_exit_policy import _local
-    from tests.test_finalization_branches import _delta
-    from tools import pilot_state
-    from tools.finalize_attempt import (
-        _required_trace_artifacts,
-        build_pre_finalization_trace,
-        disposition_receipt,
-        verify_finalization,
-    )
-
     _delta_value, run_root, attempt_id = _delta(tmp_path)
     run_id = pilot_state.read_run(run_root)["manifest"]["run_id"]
     reviewer = pilot_state.terminal_reviewer_evidence(run_root, attempt_id)
@@ -166,9 +150,6 @@ def test_low_level_terminal_publication_cannot_claim_local_pass_without_executio
 
 
 def test_cases_only_uses_no_generated_delta_and_invalid_receipt_still_terminalizes():
-    from tests.test_exit_policy import _facts
-    from tools.finalize_attempt import finalize_attempt
-
     branch = {**_branch(), "policy_profile": "cases-only-v1", "finalization_inputs": {"required_artifacts": {"canonical_digest": "sha256:" + "0" * 64}}}
     facts = _facts() | {"policy_profile": "cases-only-v1"}
     storage = {}

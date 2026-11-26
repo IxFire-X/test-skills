@@ -7,16 +7,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_automation_revision_budget import automated_document
+from tests.test_execution_receipt import _execution_facts
 from tests.test_pilot_state import AUTHORIZATION, _baseline, _module_digest
-from tools import pilot_state
+from tools import pilot_state, step_size
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER, merge_marker_artifacts
+from tools.context_marker_parts import merge_parts, plan
 from tools.pilot_state import append_event, create_run
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _requirements() -> list[dict]:
-    from tests.test_automation_revision_budget import automated_document
-
     return automated_document()["source_requirements"]
 
 
@@ -64,10 +66,6 @@ def _publish_part(root: Path, attempt_id: str, baseline: dict, index: int, recei
 
 
 def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import step_size
-    from tools.context_marker_merge import merge_marker_artifacts
-    from tools.context_marker_parts import merge_parts, plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     assert len(receipts) == 3
     steps = plan(root)
@@ -109,8 +107,6 @@ def test_the_merge_rules_first_occurrence_whitespace_and_the_warning_key() -> No
     """FaT-WT: the rules of ``context_marker_merge`` on literal answers: part order, the first occurrence wins, sources
     equal after whitespace normalisation are one, the requirements placeholder goes once a part saw code, and warnings are
     one per (source, observation) split at the first « — »."""
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER, merge_marker_artifacts
-
     requirements = _marker([REQUIREMENTS_PLACEHOLDER], ["док — нет ожидаемого результата", "общее замечание"])
     first = _marker([REQUIREMENTS_PLACEHOLDER, "src/a.py — читает  owners", "src/b.py — пишет"],
                     ["док —   нет ожидаемого   результата", "src/a.py — нет теста"])
@@ -138,8 +134,6 @@ def test_a_statement_said_twice_is_one_row_with_two_lines_of_provenance_and_the_
 
 
 def test_merge_stops_while_a_part_is_missing(tmp_path: Path) -> None:
-    from tools.context_marker_parts import merge_parts
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     _publish_part(root, attempt_id, baseline, 1, receipts[0], requirements, _marker(["src/part0.py — x"]))
@@ -170,8 +164,6 @@ def test_a_forged_merged_marker_is_rejected(tmp_path: Path) -> None:
 
 
 def test_one_batch_keeps_the_single_marker(tmp_path: Path) -> None:
-    from tools.context_marker_parts import plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path, files=1)
     assert len(receipts) == 1
     steps = plan(root)
@@ -182,8 +174,6 @@ def test_one_batch_keeps_the_single_marker(tmp_path: Path) -> None:
 
 
 def test_plan_names_a_part_over_budget_because_of_its_requirements(tmp_path: Path) -> None:
-    from tools.context_marker_parts import plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     steps = plan(root, budget=len(json.dumps(_marker(["x"]), ensure_ascii=False).encode()) + 1000)
@@ -194,10 +184,6 @@ def test_plan_names_a_part_over_budget_because_of_its_requirements(tmp_path: Pat
 
 def test_a_merged_marker_is_the_one_the_reviewer_package_binds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The same durable run as the review tests, with the marker made in parts: the merged answer is bound into the reviewer package, its request names every part answer."""
-    from tests.test_execution_receipt import _execution_facts
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-    from tools.context_marker_parts import merge_parts
-
     real_request, real_artifact = pilot_state.publish_model_request, pilot_state.publish_model_stage_artifact
     pending: dict = {}
     parts_inputs: list = []
@@ -239,8 +225,6 @@ def test_a_merged_marker_is_the_one_the_reviewer_package_binds(tmp_path: Path, m
 
 
 def test_a_merge_over_part_of_the_receipts_is_rejected(tmp_path: Path) -> None:
-    from tools.context_marker_parts import merge_parts
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     parts = [_publish_part(root, attempt_id, baseline, index, receipts[index - 1], requirements, _marker([f"src/part{index - 1}.py — x"]))
@@ -273,8 +257,6 @@ def test_a_single_marker_must_bind_every_receipt(tmp_path: Path) -> None:
 
 def test_a_part_plan_names_no_digests_until_the_requirements_answer(tmp_path: Path) -> None:
     """FaT-M (1.10): before the requirements answer a part has no input_digests with null in them — a note instead."""
-    from tools.context_marker_parts import plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     parts = plan(root)["parts"][1:]
     assert all("input_digests" not in part and part["waits"] == "ждёт ответа context-marker:requirements" for part in parts)
@@ -287,8 +269,6 @@ def test_a_part_plan_names_no_digests_until_the_requirements_answer(tmp_path: Pa
 
 def test_a_part_without_the_documents_digest_is_planned_and_accepted(tmp_path: Path) -> None:
     """FaT-P3: part input = inventory, receipt of the batch, requirements answer; the documents are in no part."""
-    from tools.context_marker_parts import merge_parts, plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     steps = plan(root)["parts"][1:]
@@ -304,8 +284,6 @@ def test_a_part_without_the_documents_digest_is_planned_and_accepted(tmp_path: P
 
 def test_a_part_of_a_run_before_p3_with_the_documents_digest_is_still_accepted(tmp_path: Path) -> None:
     """FaT-P3: v0.1 runs keep the requirements digest first in each part; they replay and merge as before."""
-    from tools.context_marker_parts import merge_parts, plan
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     for index, receipt in enumerate(receipts, start=1):
@@ -327,8 +305,6 @@ def test_a_part_with_a_foreign_head_is_refused(tmp_path: Path) -> None:
 
 def test_the_input_size_of_a_part_has_no_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """FaT-P3: stage_inputs of a part is smaller by the size of the documents (v0.1: 897 KB = documents 475 KB + batch + answer)."""
-    from tools import step_size
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     document = tmp_path / "analytics.md"
     document.write_bytes(b"D" * 5000)

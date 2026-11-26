@@ -9,7 +9,10 @@ import pytest
 
 from tests.helpers import prepare_stage
 from tests.test_autotest_cycle import GENERATOR, INDEPENDENT, REVIEWER, autotest_run, run_generator
-from tools import pilot_state
+from tools import automation_text, autotest_hints, pilot_state
+from tools.automation_text import render
+from tools.review_view import render as view_of
+from tools.step_size import automation_text_rows, request_files
 
 DIGEST = "sha256:" + "ab" * 32
 OPERATION, ASSERTION = "operation", "assertion"
@@ -78,15 +81,11 @@ def _relations(section: str) -> list[dict]:
 
 
 def test_the_tables_read_back_into_the_symbols_and_the_relations_of_the_answer_row_by_row() -> None:
-    from tools.automation_text import render
-
     artifact = _artifact()
     assert _read_back(render(artifact, DIGEST)) == artifact
 
 
 def test_a_file_of_code_is_its_content_byte_for_byte_and_its_sha256_is_the_content_digest() -> None:
-    from tools.automation_text import render
-
     artifact = _artifact()
     files = {row["file_id"]: row for row in artifact["artifacts"]["generated_files"]}
     parts = render(artifact, DIGEST)
@@ -107,8 +106,6 @@ def test_a_file_of_code_is_its_content_byte_for_byte_and_its_sha256_is_the_conte
     (lambda a: a["generated_symbols"][2].update(symbol_id="SYMBOL | 3"), "символы (JSON)"),
 ])
 def test_a_row_or_a_locator_of_an_unknown_shape_leaves_that_part_as_the_json_it_was(damage, section: str) -> None:
-    from tools.automation_text import render
-
     artifact = _artifact()
     damage(artifact["artifacts"])
     tables = next(data for name, _basis, data in render(artifact, DIGEST) if name.endswith(".tables.txt")).decode("utf-8")
@@ -119,8 +116,6 @@ def test_a_row_or_a_locator_of_an_unknown_shape_leaves_that_part_as_the_json_it_
 
 
 def test_two_files_that_would_get_one_name_leave_the_whole_answer_as_it_was() -> None:
-    from tools.automation_text import render
-
     artifact = _artifact()
     for row, name in zip(artifact["artifacts"]["generated_files"], ("FILE-a:1", "FILE-a_1")):
         row.update(file_id=name, path="tests/test_x.py")
@@ -129,8 +124,6 @@ def test_two_files_that_would_get_one_name_leave_the_whole_answer_as_it_was() ->
 
 def test_two_files_whose_names_differ_only_in_case_leave_the_whole_answer_as_it_was() -> None:
     """On Windows ``FILE-A.txt`` and ``FILE-a.txt`` are one file."""
-    from tools.automation_text import render
-
     artifact = _artifact()
     for row, name in zip(artifact["artifacts"]["generated_files"], ("FILE-A", "FILE-a")):
         row.update(file_id=name, path="tests/test_x.py")
@@ -138,8 +131,6 @@ def test_two_files_whose_names_differ_only_in_case_leave_the_whole_answer_as_it_
 
 
 def test_the_text_form_of_an_answer_with_many_relations_is_smaller_than_its_json() -> None:
-    from tools.automation_text import render
-
     artifact = _artifact(cases=30, asserts=8)
     total = sum(len(data) for _name, _basis, data in render(artifact, DIGEST))
     assert total < len(json.dumps(artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) * 0.6
@@ -200,8 +191,6 @@ def test_a_derived_file_the_agent_changed_is_written_again_by_the_next_prepare(t
 
 
 def test_an_answer_whose_bytes_are_not_its_digest_is_not_turned_into_files(tmp_path: Path) -> None:
-    from tools.step_size import request_files
-
     run = _prepared(tmp_path)
     prepare_stage(run["root"], REVIEWER, *INDEPENDENT)
     boundary = pilot_state.read_attempt_receipt(run["root"], run["attempt"], "automation-review-boundary-r1", "ARTIFACT_READ_BACK")["record"]
@@ -213,9 +202,6 @@ def test_an_answer_whose_bytes_are_not_its_digest_is_not_turned_into_files(tmp_p
 
 
 def test_the_rows_of_a_big_answer_are_smaller_than_its_json_and_the_hint_check_still_reads_the_json(tmp_path: Path) -> None:
-    from tools import autotest_hints
-    from tools.step_size import automation_text_rows
-
     run = _prepared(tmp_path)
     big = run["root"] / "big.json"  # a file of the run: it is read through the core
     big.write_bytes(json.dumps(_artifact(cases=30, asserts=8), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
@@ -227,8 +213,6 @@ def test_the_rows_of_a_big_answer_are_smaller_than_its_json_and_the_hint_check_s
 
 
 def test_the_generator_reads_what_it_read_before(tmp_path: Path) -> None:
-    from tools.step_size import request_files
-
     run = _prepared(tmp_path)
     found = request_files(run["root"], GENERATOR)
     assert [row["basis"] for row in found["files"]] == ["вид"] and not list((run["root"] / "review-views").glob("*.tables.txt"))
@@ -266,9 +250,6 @@ def _text(parts: list, suffix: str) -> str:
 
 
 def test_the_operation_and_the_assertions_of_a_related_step_are_in_the_tables_and_not_in_the_view() -> None:
-    from tools.automation_text import render
-    from tools.review_view import render as view_of
-
     document, legend = _example(), "- Вид для ревьюера"
     parts = render(_answer(document), DIGEST, document)
     relations = _text(parts, ".tables.txt").split("## связи\n")[1].strip("\n").split("\n")
@@ -290,8 +271,6 @@ def _view_files(parts: list) -> list[str]:
 
 
 def test_the_view_comes_in_parts_that_fit_one_read_and_their_bodies_are_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import automation_text
-
     document = _example()
     answer = _answer(document)
     parts = automation_text.render(answer, DIGEST, document)
@@ -310,8 +289,6 @@ def test_the_view_comes_in_parts_that_fit_one_read_and_their_bodies_are_the_view
 
 
 def test_a_head_longer_than_a_part_is_cut_by_its_items_and_a_case_is_never_cut(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import automation_text
-
     document = _example()
     monkeypatch.setattr(automation_text, "PART_BYTES", 5_000)  # the head and any case are longer
     files = _view_files(automation_text.render(_answer(document), DIGEST, document))
@@ -323,8 +300,6 @@ def test_a_head_longer_than_a_part_is_cut_by_its_items_and_a_case_is_never_cut(m
 
 
 def test_a_head_that_fits_shares_its_part_with_the_first_cases(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import automation_text
-
     document = _example()
     monkeypatch.setattr(automation_text, "PART_BYTES", 200_000)
     first = _view_files(automation_text.render(_answer(document), DIGEST, document))[0]

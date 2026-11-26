@@ -12,6 +12,10 @@ import pytest
 from tests.helpers import answer_stage
 from tests.test_batch_journal import _run
 from tests.test_review_requested import _put
+from tools.batch_assembly import BatchAssemblyError
+from tools.json_cli import error_fields
+from tools.pilot_state import read_model_stage_artifact
+from tools.run_report import refusals
 
 pytestmark = pytest.mark.contract
 
@@ -39,16 +43,11 @@ def test_a_fragment_with_another_context_receipt_gets_a_fix_that_names_the_objec
 
 
 def test_a_refusal_whose_fix_would_point_at_diagnostics_has_none_gets_a_fix_that_stands_alone() -> None:
-    from tools.batch_assembly import BatchAssemblyError
-    from tools.json_cli import error_fields
-
     fields = error_fields(BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "something single"))
     assert "смотри diagnostics" not in fields["fix"] and "message" in fields["fix"], fields
 
 
 def test_a_refusal_of_a_submit_is_in_the_journal_and_in_the_report(tmp_path: Path) -> None:
-    from tools.run_report import refusals
-
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     bare = {**{key: value for key, value in fragments[0].items() if key != "digest"}, "context_receipt": _other_receipt(fragments[0]["context_receipt"])}  # V6: a missing receipt is put by the code; another one is a refusal
     path = Path(_put(run["tmp"] / "bare.json", bare))
@@ -68,8 +67,6 @@ def test_a_passing_dry_run_is_not_a_refusal(tmp_path: Path) -> None:
 
 
 def test_submit_prints_the_receipt_of_the_record_and_not_the_answers_body(tmp_path: Path) -> None:
-    from tools.pilot_state import read_model_stage_artifact
-
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     stage = f"tc-generator:{fragments[0]['batch_id']}"
     big = copy.deepcopy(fragments[0])

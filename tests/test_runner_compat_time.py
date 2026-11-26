@@ -12,12 +12,13 @@ from pathlib import Path
 
 import pytest
 
+from tools import run_tests
+from tools.run_tests import RUNNER_INPUT_MAX_BYTES, _java_api_level_diagnostics, _java_class, _java_node
+
 LIMIT = 2.0
 
 
 def test_a_long_line_of_words_does_not_stall_the_method_lookup() -> None:
-    from tools.run_tests import _java_class, _java_node
-
     text = "package p;\nclass T {\n  void a() {\n" + "a " * 12000 + "\n  }\n  @Test void one() {}\n  @Test void two() {}\n  @Test void three() {}\n}\n"
     parsed = _java_class(Path("T.java"), text)
     started = time.perf_counter()
@@ -27,8 +28,6 @@ def test_a_long_line_of_words_does_not_stall_the_method_lookup() -> None:
 
 
 def test_an_unclosed_comment_does_not_stall_the_api_check() -> None:
-    from tools.run_tests import _java_api_level_diagnostics
-
     text = ("package p;\nimport java.util.List;\nclass T {\n  void a() { List<String> x = List.of(\"a\"); \"b\".repeat(2); }\n"
             "  /* never closed\n" + "\n" * 20000 + "}\n")
     started = time.perf_counter()
@@ -55,8 +54,6 @@ _OLD = r"\b(?=\w)(?:public|protected|private)?\s*(?:static\s+)?[\w<>\[\]., ?]+\s
     "  void x() { a b c d e f target() {} }\n",
 ])
 def test_the_lookup_finds_the_same_declarations_as_before(body: str) -> None:
-    from tools.run_tests import _java_class, _java_node
-
     text = "package p;\nclass T {\n" + body + "}\n"
     parsed = _java_class(Path("T.java"), text)
     old = "target" if len(re.findall(_OLD.format(name=re.escape("target")), parsed[1])) == 1 else None
@@ -66,8 +63,6 @@ def test_the_lookup_finds_the_same_declarations_as_before(body: str) -> None:
 def test_too_much_generated_code_is_refused_before_any_parsing(tmp_path: Path) -> None:
     """FaT-AU4 (audit F6): one runner-compat call reads at most RUNNER_INPUT_MAX_BYTES of generated code.  The canonical
     `{}` is invalid: the one diagnostic being RUNNER_INPUT_TOO_LARGE shows nothing was parsed before the limit."""
-    from tools import run_tests
-
     big = "x" * (run_tests.RUNNER_INPUT_MAX_BYTES + 1)
     artifact = {"artifacts": {"generated_files": [{"path": "src/test/java/p/T.java", "content": big}]}}
     result = run_tests.validate_artifact_runner_compatibility(tmp_path, "java", {}, artifact, materialized=False)
@@ -81,6 +76,4 @@ def test_too_much_generated_code_is_refused_before_any_parsing(tmp_path: Path) -
 
 
 def test_the_campaign_size_is_well_under_the_limit() -> None:
-    from tools.run_tests import RUNNER_INPUT_MAX_BYTES
-
     assert RUNNER_INPUT_MAX_BYTES >= 5 * 184 * 1000  # the largest automation of the campaign: 184 KB of code

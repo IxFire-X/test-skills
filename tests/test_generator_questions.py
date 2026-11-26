@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+from tools.run_report import analyst_questions
 
 
 def _ready():
@@ -13,8 +15,6 @@ def _ready():
 
 
 def test_a_case_with_the_label_of_an_observation_is_refused() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header, context, plan, fragment = _ready()
     fragment["test_cases"][0].setdefault("management", {})["labels"] = ["наблюдение"]
     _refresh(fragment)
@@ -24,8 +24,6 @@ def test_a_case_with_the_label_of_an_observation_is_refused() -> None:
 
 
 def test_a_question_of_the_generator_is_no_case_and_no_part_of_the_document() -> None:
-    from tools.batch_assembly import assemble_candidate, validate_fragment
-
     header, context, plan, fragment = _ready()
     fragment["analyst_questions"] = [{"question": "Что вернуть при отмене чужой записи?", "requirement_ids": [fragment["requirements"][0]["requirement_id"]]}]
     _refresh(fragment)
@@ -35,8 +33,6 @@ def test_a_question_of_the_generator_is_no_case_and_no_part_of_the_document() ->
 
 
 def test_a_question_that_names_a_requirement_of_another_batch_is_refused() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header, context, plan, fragment = _ready()
     fragment["analyst_questions"] = [{"question": "Что вернуть?", "requirement_ids": ["CREQ-B9-nope"]}]
     _refresh(fragment)
@@ -45,7 +41,5 @@ def test_a_question_that_names_a_requirement_of_another_batch_is_refused() -> No
 
 
 def test_the_questions_file_holds_the_questions_of_the_generator() -> None:
-    from tools.run_report import analyst_questions
-
     text = analyst_questions([], generated=[{"requirement_ids": ["CREQ-B1-005"], "question": "Что вернуть при отмене чужой записи?"}])
     assert "## Вопросы генератора" in text and "- CREQ-B1-005: Что вернуть при отмене чужой записи?" in text

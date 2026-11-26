@@ -8,7 +8,8 @@ import pytest
 
 from tests.test_exec_prepares import _project
 from tests.test_p4_ingest import _args
-from tools import exec_commands, generated_delta
+from tools import exec_commands, finalize_attempt, generated_delta
+from tools.run_pipeline import cmd_finish
 
 
 def _say(capsys: pytest.CaptureFixture[str]) -> dict:
@@ -20,8 +21,6 @@ def _broken_write(*_args, **_kwargs):
 
 
 def test_a_test_file_that_cannot_be_written_closes_the_attempt_as_not_fully_written(tmp_path, capsys, monkeypatch) -> None:
-    from tools.run_pipeline import cmd_finish
-
     project, run_root, attempt_id = _project(tmp_path)
     monkeypatch.setattr(generated_delta, "create_confined_bytes_exclusive", _broken_write)
     code = exec_commands.cmd_materialize(_args(project, run_root))
@@ -47,8 +46,6 @@ def test_a_link_on_the_way_to_the_reports_is_a_refusal_with_the_attempt_and_a_wa
 
 
 def test_finish_closes_an_attempt_whose_tests_were_written_in_part_when_materialize_was_cut_before_closing_it(tmp_path, capsys, monkeypatch) -> None:
-    from tools.run_pipeline import cmd_finish
-
     project, run_root, _attempt_id = _project(tmp_path)
     monkeypatch.setattr(generated_delta, "create_confined_bytes_exclusive", _broken_write)
     monkeypatch.setattr(exec_commands, "_close_incomplete_materialization", lambda *_args: 2)  # cut here: the delta is published, the attempt is open
@@ -60,8 +57,6 @@ def test_finish_closes_an_attempt_whose_tests_were_written_in_part_when_material
 
 
 def test_a_closure_that_fails_in_materialize_is_an_answer_with_the_attempt_and_finish_as_the_way_out(tmp_path, capsys, monkeypatch) -> None:
-    from tools import finalize_attempt
-
     project, run_root, attempt_id = _project(tmp_path)
     monkeypatch.setattr(generated_delta, "create_confined_bytes_exclusive", _broken_write)
 

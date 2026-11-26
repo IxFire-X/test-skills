@@ -14,6 +14,15 @@ from tests.journal_helpers import assert_refused_in_order
 
 from tests.helpers import prepare_stage, submit_stage
 from tests.test_cases_import import CSV, _project, _scan
+from tests.test_requirement_traceability import canonical_fixture
+from tests.test_review_requested import _journal
+from tools import context_marker_parts, pilot_state
+from tools.batch_assembly import _imported_groups
+from tools.cases_import import CasesImportError
+from tools.fixes import FIXES
+from tools.review_view import render
+from tools.run_report import write_report
+from tools.step_size import journal_files
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -68,8 +77,6 @@ def _responses(root: Path) -> list[str]:
 
 
 def test_scan_cases_with_docs_makes_a_run_whose_requirements_step_reads_the_documents_and_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.step_size import journal_files
-
     project, root, _attempt = _scanned(tmp_path, monkeypatch)
     files = journal_files(project, root.name, "context-marker:requirements", None)
     assert "cases/zephyr.csv" in [path.relative_to(project).as_posix() for path in files]
@@ -83,9 +90,6 @@ def test_scan_cases_with_docs_makes_a_run_whose_requirements_step_reads_the_docu
     ([*LINKS, {"row": 4, "source_requirement_ids": ["SREQ-0002"]}], "строка 4: не строка кейса CSV"),
 ])
 def test_wrong_case_links_are_refused_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, links, named: str) -> None:
-    from tools import pilot_state
-    from tools.cases_import import CasesImportError
-
     _project_dir, root, attempt_id = _scanned(tmp_path, monkeypatch)
     _request_requirements(root, attempt_id)
     with pytest.raises(CasesImportError, match="IMPORT_CASE_LINKS") as refused:
@@ -149,8 +153,6 @@ def test_the_merged_marker_keeps_every_requirement_and_adds_one_for_a_case_outsi
 
 
 def test_the_cases_of_a_shared_requirement_and_its_requirements_are_one_group() -> None:
-    from tools.batch_assembly import _imported_groups
-
     source = [{"source_requirement_id": item} for item in ("SREQ-1", "SREQ-2", "SREQ-3", "SREQ-4")]
     imported = {"cases": [{"source_requirement_ids": ["SREQ-1", "SREQ-3"]}, {"source_requirement_ids": ["SREQ-3"]},
                           {"source_requirement_ids": ["SREQ-2"]}, {"source_requirement_ids": ["SREQ-4"]}]}
@@ -209,8 +211,6 @@ def _changed(good: dict, change) -> dict:
 
 
 def test_the_trace_goes_through_the_documents_and_the_management_stays_byte_for_byte(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _journal
-
     run = _to_plan(tmp_path, monkeypatch)
     [batch] = run["plan"]["batches"]
     stage = f"tc-generator:{batch['batch_id']}"
@@ -237,8 +237,6 @@ def test_the_trace_goes_through_the_documents_and_the_management_stays_byte_for_
 
 
 def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_report import write_report
-
     run = _to_plan(tmp_path, monkeypatch)
     write_report(run["project"], run["root"].name)
     report = json.loads((run["root"] / "report.json").read_text(encoding="utf-8"))
@@ -252,9 +250,6 @@ def test_the_report_and_the_analyst_name_the_gap_and_the_case_outside_the_docume
 
 
 def test_the_review_view_names_the_gaps_of_an_import_with_documents() -> None:
-    from tests.test_requirement_traceability import canonical_fixture
-    from tools.review_view import render
-
     text = render(canonical_fixture(), imported=True, import_gaps=(["SREQ-0002"], ["строка 3"])).decode("utf-8")
     assert "требований без кейса в CSV (для них написаны новые кейсы) — SREQ-0002; кейсов вне документов (SREQ-CSV-) — строка 3" in text
     assert "Импорт с документами" not in render(canonical_fixture(), imported=True).decode("utf-8")  # stage 1 keeps its bytes
@@ -287,8 +282,6 @@ def _openspec_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 
 
 def test_a_requirement_the_model_lost_from_openspec_is_still_refused_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     root, attempt_id, rows, answer = _openspec_run(tmp_path, monkeypatch)
     lost = {**answer, "artifacts": {**answer["artifacts"], "analytics_documentation": {
         "requirements": rows[:1], "case_links": [{"row": 2, "source_requirement_ids": [rows[0]["source_requirement_id"]], "verdict": "fits"}, answer["artifacts"]["analytics_documentation"]["case_links"][1]]}}}
@@ -298,8 +291,6 @@ def test_a_requirement_the_model_lost_from_openspec_is_still_refused_before_the_
 
 
 def test_an_openspec_requirement_without_a_case_stays_in_the_marker_and_the_composition_check_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import context_marker_parts, pilot_state
-
     root, attempt_id, rows, answer = _openspec_run(tmp_path, monkeypatch)
     answer = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the first act of `submit --stage plan`
@@ -315,7 +306,5 @@ def test_an_openspec_requirement_without_a_case_stays_in_the_marker_and_the_comp
 
 
 def test_the_role_and_the_fix_count_the_row_of_a_case_from_the_header_as_one() -> None:
-    from tools.fixes import FIXES
-
     role = (PACK_ROOT / "skills" / "context-marker" / "SKILL.md").read_text(encoding="utf-8")
     assert "the header being 1, the first case 2" in role and "шапка — 1, первый кейс — 2" in FIXES["IMPORT_CASE_LINKS"]

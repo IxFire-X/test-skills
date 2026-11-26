@@ -11,9 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_phase2_scan import _args, _project
+from tests.test_phase2_scan import _args, _project, _skillsrc
 from tools import run_pipeline
 from tools.project_inventory import build_inventory
+from tools.scan_rules import exclusion_summary
+from tools.schema_validation import schema_diagnostics
+from tools.skillsrc_manifest import parse_skillsrc_bytes
+from tools.stack_catalog import confined_files, is_ignored_path
 
 JAVA = "package com.x;\n\npublic class Foo {\n}\n"
 
@@ -117,8 +121,6 @@ def test_include_brings_back_a_directory_left_out_by_name_but_no_secret(tmp_path
 
 
 def test_the_summary_names_reasons_and_only_the_suspicious_exclusions() -> None:
-    from tools.scan_rules import exclusion_summary
-
     rows = [
         {"project_path": "target", "reason_code": "BUILD_OUTPUT", "scanner_rule_id": "output-directory-v1", "safe_label": "excluded-directory"},
         {"project_path": "docs/coverage", "reason_code": "BUILD_OUTPUT", "scanner_rule_id": "output-directory-v1", "safe_label": "excluded-directory"},
@@ -155,12 +157,8 @@ def test_scan_prints_the_summary_and_reads_docs_in_drafts(tmp_path: Path, monkey
 
 
 def test_include_in_skillsrc_is_a_relative_glob() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     root = Path(__file__).resolve().parents[1]
     schema = root / "schemas" / "skillsrc.schema.json"
-    from tests.test_phase2_scan import _skillsrc
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
 
     document = parse_skillsrc_bytes(_skillsrc())
     for good in (["build/generated/**"], ["docs/to_do"]):
@@ -172,8 +170,6 @@ def test_include_in_skillsrc_is_a_relative_glob() -> None:
 
 
 def test_an_exclusion_receipt_from_before_fat2_is_still_valid() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     root = Path(__file__).resolve().parents[1]
     old = {"schema_version": "1.0.0", "exclusions": [
         {"project_path": "build", "reason_code": "BUILD_OUTPUT", "scanner_rule_id": "output-directory-v1", "safe_label": "excluded-directory"},
@@ -183,8 +179,6 @@ def test_an_exclusion_receipt_from_before_fat2_is_still_valid() -> None:
 
 
 def test_module_search_accepts_a_module_inside_a_src_build_directory(tmp_path: Path) -> None:
-    from tools.stack_catalog import confined_files
-
     project = tmp_path / "project"
     _write(project, "src/main/build/pom.xml", "<project/>\n")
     _write(project, "build/pom.xml", "<project/>\n")
@@ -223,8 +217,6 @@ def test_scan_puts_a_task_specification_in_to_do_into_the_model_context(tmp_path
 
 
 def test_the_module_search_still_skips_to_do(tmp_path: Path) -> None:
-    from tools.stack_catalog import confined_files, is_ignored_path
-
     project = tmp_path / "project"
     _write(project, "docs/to_do/task/pom.xml", "<project/>\n")
     assert not confined_files(project) and is_ignored_path(("docs", "to_do", "task"))

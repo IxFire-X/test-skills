@@ -1,5 +1,7 @@
 import pytest
 
+from tools.batch_assembly import BatchAssemblyError, plan_batches
+
 
 def _requirements():
     return [
@@ -18,8 +20,6 @@ def _evidence(**overrides):
 
 
 def test_plan_batches_defaults_to_one_stable_complete_batch():
-    from tools.batch_assembly import plan_batches
-
     plan = plan_batches(list(reversed(_requirements())), _evidence())
 
     assert plan["batches"] == [{
@@ -35,8 +35,6 @@ def test_plan_batches_defaults_to_one_stable_complete_batch():
 
 
 def test_plan_uses_contiguous_physical_display_order_not_lexicographic_source_ids():
-    from tools.batch_assembly import plan_batches
-
     requirements = [
         {"source_requirement_id": "SREQ-10", "display_order": 2, "text": "B01 Десятый", "provenance": ["source:10"], "digest": "sha256:" + "a" * 64},
         {"source_requirement_id": "SREQ-2", "display_order": 1, "text": "A01 Второй", "provenance": ["source:2"], "digest": "sha256:" + "b" * 64},
@@ -53,7 +51,5 @@ def test_plan_uses_contiguous_physical_display_order_not_lexicographic_source_id
     {"source_requirement_id": "SREQ-1", "display_order": 1, "text": "Требование", "provenance": [{"path": "source:one"}], "digest": "sha256:" + "a" * 64},
 ])
 def test_plan_rejects_noncanonical_source_requirement_content(bad):
-    from tools.batch_assembly import BatchAssemblyError, plan_batches
-
     with pytest.raises(BatchAssemblyError, match="BATCH_SEMANTIC_CONFLICT"):
         plan_batches([bad], _evidence())

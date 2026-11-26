@@ -12,6 +12,19 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import run_tmp
+from tests.test_finish import _blocked_document, _project
+from tests.test_generated_delta import _reviewer_protocol_inputs
+from tests.test_self_review import _run
+from tools.canonical_document import document_sha256, require_valid_canonical_document
+from tools.orchestrate_test_case_revision import OrchestrationError, _plain, _review_rows, orchestrate_revision
+from tools.pilot_state import derive_state, read_effective_canonical
+from tools.review_canaries import seed
+from tools.review_edits import apply_edits, edits_rebuild
+from tools.review_view import DATA_MISMATCH, LITERAL_LIMIT, VIEW_VERSION, _autotest_step, _input, data_mismatches
+from tools.review_view import ensure_autotest_view, render
+from tools.revision_selection import validate_successor
+
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,8 +47,6 @@ def _role_bytes() -> int:
 # --- the view -----------------------------------------------------------------------------------
 
 def test_the_view_of_the_example_fits_the_target_per_case_with_the_role() -> None:
-    from tools.review_view import render
-
     document = _example()
     view = render(document)
     assert len(view) + _role_bytes() <= TARGET_BYTES * len(document["test_cases"]) / TARGET_CASES
@@ -44,25 +55,18 @@ def test_the_view_of_the_example_fits_the_target_per_case_with_the_role() -> Non
 
 @pytest.mark.skipif(not NIGHT.is_file(), reason="the night canonical of 27.10 is on the work machine only")
 def test_the_night_canonical_of_52_cases_is_at_most_320_kb_for_the_reviewer() -> None:
-    from tools.review_view import render
-
     document = json.loads(NIGHT.read_text(encoding="utf-8"))
     assert len(document["test_cases"]) == TARGET_CASES
     assert len(render(document)) + _role_bytes() <= TARGET_BYTES
 
 
 def test_the_view_is_the_same_bytes_for_the_same_candidate() -> None:
-    from tools.review_view import render
-
     document = _example()
     shuffled = json.loads(json.dumps(document, sort_keys=True))
     assert render(document) == render(copy.deepcopy(document)) == render(shuffled)
 
 
 def test_the_view_keeps_the_human_part_and_one_line_of_checks_and_no_raw_machine_keys() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_view import render
-
     document = _example()
     view = render(document).decode("utf-8")
     case = document["test_cases"][0]
@@ -79,9 +83,6 @@ def test_the_view_keeps_the_human_part_and_one_line_of_checks_and_no_raw_machine
 
 
 def test_an_automation_blocker_is_shown_under_its_step_and_the_view_stays_deterministic() -> None:
-    from tests.test_finish import _blocked_document
-    from tools.review_view import render
-
     document = _blocked_document()
     view = render(document)
     step = document["test_cases"][0]["steps"][0]
@@ -92,8 +93,6 @@ def test_an_automation_blocker_is_shown_under_its_step_and_the_view_stays_determ
 
 
 def test_a_literal_input_missing_from_the_step_data_is_a_hint_not_a_stop() -> None:
-    from tools.review_view import DATA_MISMATCH, data_mismatches, render
-
     document = _example()
     # FaT-NW: «3» of «через три дня» is named by the word — the example has no hint (before FaT-NW it was the only one)
     assert data_mismatches(document) == []
@@ -113,10 +112,6 @@ def test_a_literal_input_missing_from_the_step_data_is_a_hint_not_a_stop() -> No
 
 def test_the_view_command_writes_the_view_of_the_assembled_candidate_only(tmp_path: Path) -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _reviewer_protocol_inputs
-    from tests.test_self_review import _run
-    from tools.canonical_document import document_sha256
-    from tools.review_view import render
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()
@@ -132,7 +127,6 @@ def test_the_view_command_writes_the_view_of_the_assembled_candidate_only(tmp_pa
     done = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     out = json.loads(done.stdout)
     assert done.returncode == 0 and out["candidate_sha256"] == document_sha256(document) and out["data_mismatch"] == 0
-    from tools.review_canaries import seed
 
     mutated, canaries = seed(document)  # P7: the view command shows the reviewer the candidate with its control errors
     assert Path(out["path"]).read_bytes() == render(mutated, basis=document) and out["bytes"] == len(render(mutated, basis=document))
@@ -153,9 +147,6 @@ def _edit(document: dict, **overrides) -> dict:
 
 def test_exact_edits_make_the_successor_and_pass_the_usual_checks() -> None:
     from tests.test_requirement_traceability import canonical_fixture as automated_document  # a plain step: free human text
-    from tools.canonical_document import document_sha256, require_valid_canonical_document
-    from tools.review_edits import apply_edits
-    from tools.revision_selection import validate_successor
 
     document = automated_document()
     before = copy.deepcopy(document)
@@ -191,7 +182,6 @@ def test_exact_edits_make_the_successor_and_pass_the_usual_checks() -> None:
 ])
 def test_an_edit_that_does_not_match_exactly_is_refused(overrides: dict, code: str) -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.review_edits import apply_edits
 
     document = automated_document()
     successor, rows = apply_edits(document, [_edit(document, **overrides)], {"FIX-cv"})
@@ -200,7 +190,6 @@ def test_an_edit_that_does_not_match_exactly_is_refused(overrides: dict, code: s
 
 def test_one_text_is_edited_once_and_only_an_assembled_revision_1_is_edited() -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.review_edits import apply_edits
 
     document = automated_document()
     twice = [_edit(document), _edit(document, new="Другой заголовок")]
@@ -213,9 +202,6 @@ def test_one_text_is_edited_once_and_only_an_assembled_revision_1_is_edited() ->
 
 def test_the_reviewer_output_has_exactly_one_successor_form() -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.canonical_document import document_sha256
-    from tools.orchestrate_test_case_revision import _review_rows
-    from tools.review_edits import apply_edits
 
     document = automated_document()
     edits = [_edit(document)]
@@ -240,10 +226,7 @@ def test_the_reviewer_output_has_exactly_one_successor_form() -> None:
 
 def test_the_edits_command_prints_the_effective_reference_for_the_report(tmp_path: Path) -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.canonical_document import document_sha256
-    from tools.review_edits import apply_edits
 
-    from tests.helpers import run_tmp
 
     document = automated_document()
     tmp = run_tmp(tmp_path)
@@ -277,10 +260,6 @@ def _auto_fixed(tmp_path: Path, edits_for):
 
 
 def test_auto_fix_by_edits_selects_the_successor_and_binds_the_effective_canonical(tmp_path: Path) -> None:
-    from tools.orchestrate_test_case_revision import _plain, orchestrate_revision
-    from tools.pilot_state import read_effective_canonical
-    from tools.review_edits import apply_edits
-
     run_root, attempt_id, document, session, package, review, receipt, bundle_root = _auto_fixed(tmp_path, lambda doc: [_edit(doc)])
     result = orchestrate_revision(document, receipt, package, session, review, bundle_root, run_root=run_root, attempt_id=attempt_id)
     successor, _rows = apply_edits(document, review["artifacts"]["successor_edits"])
@@ -289,8 +268,6 @@ def test_auto_fix_by_edits_selects_the_successor_and_binds_the_effective_canonic
 
 
 def test_an_edit_that_does_not_apply_stops_the_selection_with_its_code(tmp_path: Path) -> None:
-    from tools.orchestrate_test_case_revision import OrchestrationError, orchestrate_revision
-
     run_root, attempt_id, document, session, package, review, receipt, bundle_root = _auto_fixed(tmp_path, lambda doc: [_edit(doc)])
     review = copy.deepcopy(review)
     review["artifacts"]["successor_edits"][0]["old"] = "не тот текст"
@@ -301,8 +278,6 @@ def test_an_edit_that_does_not_apply_stops_the_selection_with_its_code(tmp_path:
 
 def test_the_closure_check_rebuilds_the_candidate_from_the_effective_document() -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.canonical_document import document_sha256
-    from tools.review_edits import apply_edits, edits_rebuild
 
     document = automated_document()
     edits = [_edit(document)]
@@ -336,8 +311,6 @@ def _operation_line(view: str, step_id: str) -> str:
 
 
 def test_each_step_shows_its_operation_inputs_and_outputs() -> None:
-    from tools.review_view import render
-
     document = _example()
     _case, step = _mvc_step(document)
     capabilities = {item["capability_id"]: item for item in document["operation_capabilities"]}
@@ -350,8 +323,6 @@ def test_each_step_shows_its_operation_inputs_and_outputs() -> None:
 
 
 def test_a_changed_capability_or_path_is_visible_to_the_reviewer() -> None:
-    from tools.review_view import render
-
     document = _example()
     _case, step = _mvc_step(document)
     before = _operation_line(render(document).decode("utf-8"), step["step_id"])
@@ -362,8 +333,6 @@ def test_a_changed_capability_or_path_is_visible_to_the_reviewer() -> None:
 
 
 def test_a_sensitive_input_is_masked_and_a_long_literal_is_cut_with_a_mark_found_in_the_full_json() -> None:
-    from tools.review_view import LITERAL_LIMIT, render
-
     document = _example()
     _case, step = _mvc_step(document)
     path = next(item for item in step["inputs"] if item["target"]["name"] == "path")
@@ -378,7 +347,6 @@ def test_a_sensitive_input_is_masked_and_a_long_literal_is_cut_with_a_mark_found
     assert json.dumps(next(item for item in found["inputs"] if item["target"]["name"] == "path")["source"]["value"],
                       ensure_ascii=False).startswith(shown[:LITERAL_LIMIT])
     # a sensitive input is masked in the view (the canonical schema rejects one today, the view never names it anyway)
-    from tools.review_view import _input
 
     masked = copy.deepcopy(path)
     masked["target"]["sensitive"] = True
@@ -386,8 +354,6 @@ def test_a_sensitive_input_is_masked_and_a_long_literal_is_cut_with_a_mark_found
 
 
 def test_the_view_lists_every_capability_with_its_action_and_test_boundary() -> None:
-    from tools.review_view import LITERAL_LIMIT, render
-
     document = _example()
     view = render(document).decode("utf-8")
     section = view.split("## Операции (capabilities)\n", 1)[1].split("\n## ", 1)[0]
@@ -403,8 +369,6 @@ def test_the_view_lists_every_capability_with_its_action_and_test_boundary() -> 
 
 
 def test_the_header_says_code_checked_structure_not_meaning() -> None:
-    from tools.review_view import VIEW_VERSION, render
-
     view = render(_example()).decode("utf-8")
     assert VIEW_VERSION == "review-view-v2"
     assert "Машинную часть" not in view
@@ -442,8 +406,6 @@ def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, h
     ("Отправить запрос через тридцать дней", 3, True), ("Ввести возраст", 17, True),
 ])
 def test_a_russian_numeral_names_the_number(text: str, value, hinted: bool) -> None:
-    from tools.review_view import data_mismatches
-
     document = _example()
     _case, step = _mvc_step(document)
     item = copy.deepcopy(step["inputs"][0])
@@ -479,9 +441,6 @@ def _case_block(view: str, case_id: str) -> str:
 
 
 def test_the_autotest_view_keeps_every_machine_value_whole_and_drops_what_the_generator_does_not_need() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_view import LITERAL_LIMIT, render
-
     document = _example()
     _case, mvc = _mvc_step(document)
     long_path = "/owners/" + "x" * (LITERAL_LIMIT * 2)
@@ -513,8 +472,6 @@ def test_the_autotest_view_keeps_every_machine_value_whole_and_drops_what_the_ge
 
 
 def test_the_autotest_view_is_deterministic_and_is_not_the_review_view() -> None:
-    from tools.review_view import render
-
     document = _example()
     shuffled = json.loads(json.dumps(document, sort_keys=True))
     view = render(document, profile="autotest")
@@ -526,10 +483,6 @@ def test_the_autotest_view_is_deterministic_and_is_not_the_review_view() -> None
 
 @pytest.mark.slow
 def test_the_autotest_view_of_the_effective_document_is_written_by_the_code_and_the_cli_has_no_flag_for_it(tmp_path: Path) -> None:
-    from tests.test_finish import _project
-    from tools.pilot_state import derive_state, read_effective_canonical
-    from tools.review_view import ensure_autotest_view, render
-
     project, run_root, attempt_id, _values = _project(tmp_path)
     effective = read_effective_canonical(run_root, attempt_id)
     made = ensure_autotest_view(project, run_root, derive_state(run_root))  # what ``prepare`` of the generator calls
@@ -587,8 +540,6 @@ def _variant_step() -> dict:
 def test_the_autotest_step_loses_no_machine_value_of_any_target_source_or_assertion() -> None:
     """FaT-AV (старшая 3): every leaf of operation, inputs, outputs, assertions and blockers (without blocker provenance)
     is in the bytes of the view — a body target keeps its pointer, a secret input its handle and safe label."""
-    from tools.review_view import _autotest_step
-
     step = _variant_step()
     block = "\n".join(_autotest_step(step))
     machine = {key: step[key] for key in ("operation", "inputs", "outputs", "expectations")}
@@ -603,8 +554,6 @@ def test_the_autotest_step_loses_no_machine_value_of_any_target_source_or_assert
 
 def test_the_autotest_view_keeps_the_canonical_requirements_the_cases_link() -> None:
     """FaT-AV (старшая 3): the testing-work constraints live in the canonical requirements (automation contract)."""
-    from tools.review_view import render
-
     document = _example()
     view = render(document, profile="autotest").decode("utf-8")
     section = view.split("\n## Требования\n", 1)[1].split("\n## Операции (capabilities)\n", 1)[0]  # a text may hold its own headers
@@ -643,14 +592,10 @@ def _long(line: str) -> str:
 
 
 def test_the_view_of_the_generator_is_the_same_bytes_as_before() -> None:
-    from tools.review_view import render
-
     assert hashlib.sha256(render(_example(), profile="autotest")).hexdigest() == GENERATOR_VIEW_SHA256
 
 
 def test_the_short_form_turns_back_into_the_view_of_the_generator_byte_for_byte() -> None:
-    from tools.review_view import render
-
     document = _example()
     short = render(document, profile="autotest-review").decode("utf-8").split("\n")
     legend = [line for line in short if line.startswith("- Вид для ревьюера")]
@@ -661,8 +606,6 @@ def test_the_short_form_turns_back_into_the_view_of_the_generator_byte_for_byte(
 
 
 def test_a_form_other_than_the_two_the_short_form_knows_stays_as_it_is() -> None:
-    from tools.review_view import _autotest_step
-
     step = {"step_id": "STEP-X-1", "display_order": 1, "action": "a", "manual_only": False, "automation_blockers": [],
             "operation": {"kind": "project_action", "capability_id": "CAP-1", "extra": 1},
             "inputs": [], "outputs": [{"output_id": "n", "display_order": 1, "source": {"kind": "project_result", "name": "other"}, "semantic_type": {"kind": "json", "type": "integer"}}],

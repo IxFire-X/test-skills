@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tools.schema_validation import schema_diagnostics
+from tools.test_design_hints import _hint, capped_code_hints
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,9 +22,6 @@ def _receipt_with(warnings: list[dict]) -> dict:
 
 
 def test_capped_hints_of_both_groups_over_the_cap_pass_the_receipt_schema() -> None:
-    from tools.schema_validation import schema_diagnostics
-    from tools.test_design_hints import _hint, capped_code_hints
-
     hints = [{"code": "TD_VAGUE_EXPECTATION", "case_id": f"TC-B1-{index:03d}", "step_id": f"STEP-B1-{index:03d}-1",
               "detail": "только status = 200"} for index in range(60)]
     hints += [_hint("TD_NEGATIVE_MISSING", f"CREQ-B1-{index:03d}", None, "нет негативного кейса") for index in range(60)]
@@ -33,7 +33,5 @@ def test_capped_hints_of_both_groups_over_the_cap_pass_the_receipt_schema() -> N
 
 
 def test_an_unknown_group_label_is_still_refused_by_the_schema() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     receipt = _receipt_with([{"code": "TD_MORE", "detail": "и ещё 5 (прочее)"}])
     assert schema_diagnostics(receipt, ROOT / "schemas" / "assembly-receipt.schema.json", ROOT) != []

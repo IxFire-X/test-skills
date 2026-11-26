@@ -9,7 +9,16 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import answer_stage, prepare_stage, submit_stage
 from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
+from tests.test_batch_journal import _run
+from tools import pilot_state
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, canonical_bytes, fill_fragment_mechanics
+from tools.batch_assembly import normalize_fragment, validate_fragment
+from tools.canonical_document import validate_canonical_document_all
+from tools.pilot_state import derive_state, publish_context_selection, read_model_stage_artifact
+from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
+from tools.publish_test_case_bundle import build_bundle
 
 NS, CASE = "B1", "TC-B1-payment"
 SUFFIX = "B1-payment"
@@ -131,8 +140,6 @@ def _without_seal(fragment: dict) -> dict:
 # --- the fill ---------------------------------------------------------------------------------------------------------
 
 def test_the_lean_fragment_is_filled_into_the_full_one() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     plan, _header_, context = _synthetic()
     full = _full_fragment(plan, context)
     lean = _lean(full)
@@ -145,8 +152,6 @@ def test_the_lean_fragment_is_filled_into_the_full_one() -> None:
 
 
 def test_a_full_fragment_is_filled_into_itself_and_says_nothing() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     plan, _header_, context = _synthetic()
     full = _full_fragment(plan, context)
     filled, summary = fill_fragment_mechanics(copy.deepcopy(full))
@@ -154,8 +159,6 @@ def test_a_full_fragment_is_filled_into_itself_and_says_nothing() -> None:
 
 
 def test_the_value_of_the_model_is_kept_where_it_is_not_mechanics() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     plan, _header_, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     lean["test_cases"][0]["steps"][0]["inputs"][0]["semantic_type"] = {"kind": "json", "type": "number"}  # the model says number for 100
@@ -168,8 +171,6 @@ def test_the_value_of_the_model_is_kept_where_it_is_not_mechanics() -> None:
 
 
 def test_a_type_that_cannot_be_derived_is_not_made_up() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     plan, _header_, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     step = lean["test_cases"][0]["steps"][0]
@@ -183,8 +184,6 @@ def test_a_type_that_cannot_be_derived_is_not_made_up() -> None:
 
 
 def test_the_number_of_the_step_in_the_ids_is_the_position_in_the_case() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     plan, _header_, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     filled, _summary = fill_fragment_mechanics(lean)
@@ -196,17 +195,12 @@ def test_the_number_of_the_step_in_the_ids_is_the_position_in_the_case() -> None
 # --- the check of a fragment and the canon ------------------------------------------------------------------------------------
 
 def test_validate_fragment_accepts_the_lean_fragment_and_names_what_it_put() -> None:
-    from tools.batch_assembly import validate_fragment
-
     plan, header, context = _synthetic()
     result = validate_fragment(_lean(_full_fragment(plan, context)), plan, header, context)
     assert "/context_receipt" in result["filled"] and any(item.startswith("step_id ×") for item in result["filled"]), result  # accepted, and says what it put
 
 
 def test_the_canon_and_every_projection_of_the_lean_fragment_are_the_bytes_of_the_full_one() -> None:
-    from tools.batch_assembly import assemble_candidate
-    from tools.publish_test_case_bundle import build_bundle
-
     plan, header, context = _synthetic()
     full = _sealed(plan, _full_fragment(plan, context))
     full["context_receipt"] = context
@@ -221,9 +215,6 @@ def test_the_canon_and_every_projection_of_the_lean_fragment_are_the_bytes_of_th
 
 
 def test_a_secret_literal_without_sensitive_is_judged_as_when_the_model_wrote_false() -> None:
-    from tools.canonical_document import validate_canonical_document_all
-    from tools.batch_assembly import assemble_candidate
-
     plan, header, context = _synthetic()
     full = _full_fragment(plan, context)
     step = full["test_cases"][0]["steps"][0]
@@ -245,8 +236,6 @@ def test_a_secret_literal_without_sensitive_is_judged_as_when_the_model_wrote_fa
 
 
 def test_a_wrong_display_order_is_refused_with_the_fix_that_removes_the_field() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     full = _full_fragment(plan, context)
     full["test_cases"][0]["steps"][1]["display_order"] = 5
@@ -257,8 +246,6 @@ def test_a_wrong_display_order_is_refused_with_the_fix_that_removes_the_field() 
 
 
 def test_arguments_and_results_written_out_of_order_are_put_in_order_by_the_code() -> None:
-    from tools.batch_assembly import validate_fragment
-
     plan, header, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     for capability in lean["operation_capabilities"]:
@@ -269,8 +256,6 @@ def test_arguments_and_results_written_out_of_order_are_put_in_order_by_the_code
 
 
 def test_the_bytes_of_a_fragment_already_in_order_are_not_changed() -> None:
-    from tools.batch_assembly import canonical_bytes, normalize_fragment
-
     plan, _header_, context = _synthetic()
     full = _full_fragment(plan, context)
     done, names = normalize_fragment(copy.deepcopy(full))
@@ -278,8 +263,6 @@ def test_the_bytes_of_a_fragment_already_in_order_are_not_changed() -> None:
 
 
 def test_a_type_mismatch_names_the_type_written_and_the_type_of_the_source() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     full = _full_fragment(plan, context)
     full["test_cases"][0]["steps"][0]["inputs"][0]["semantic_type"] = {"kind": "json", "type": "object"}  # the literal of this input is not an object
@@ -290,8 +273,6 @@ def test_a_type_mismatch_names_the_type_written_and_the_type_of_the_source() -> 
 
 
 def test_a_collision_of_a_written_id_with_a_put_one_is_refused() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     lean["test_cases"][0]["steps"][2]["step_id"] = f"STEP-{SUFFIX}-01"  # step 1 is left to the code and gets exactly this id
@@ -301,8 +282,6 @@ def test_a_collision_of_a_written_id_with_a_put_one_is_refused() -> None:
 
 
 def test_a_reference_to_an_id_off_the_scheme_is_refused_with_the_scheme_in_the_fix() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     lean["test_cases"][0]["steps"][1]["inputs"][0]["source"]["step_id"] = "STEP-B1-first"
@@ -312,8 +291,6 @@ def test_a_reference_to_an_id_off_the_scheme_is_refused_with_the_scheme_in_the_f
 
 
 def test_a_missing_type_that_cannot_be_derived_says_so_in_the_fix() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     step = lean["test_cases"][0]["steps"][0]
@@ -329,8 +306,6 @@ def test_a_missing_type_that_cannot_be_derived_says_so_in_the_fix() -> None:
 
 
 def test_validate_fragment_puts_the_context_receipt_it_was_given_and_a_different_one_is_refused() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     plan, header, context = _synthetic()
     lean = _lean(_full_fragment(plan, context))
     validate_fragment(copy.deepcopy(lean), plan, header, context)
@@ -342,10 +317,6 @@ def test_validate_fragment_puts_the_context_receipt_it_was_given_and_a_different
 # --- submit ------------------------------------------------------------------------------------------------------
 
 def test_submit_stores_the_full_form_of_a_lean_answer_and_prints_the_summary(tmp_path: Path) -> None:
-    from tests.helpers import answer_stage
-    from tests.test_batch_journal import _run
-    from tools.pilot_state import read_model_stage_artifact
-
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     plan = json.loads(Path(run["plan"]).read_bytes())
     context = json.loads(Path(run["context"]).read_bytes())
@@ -364,12 +335,6 @@ def test_submit_stores_the_full_form_of_a_lean_answer_and_prints_the_summary(tmp
 def test_the_context_digest_named_by_the_answer_never_picks_the_receipt_the_code_puts(tmp_path: Path) -> None:
     """The receipt put into a lean answer is the one the published plan binds to the batch; a digest of another receipt of the run in the answer
     is a refusal of the digest binding, and nothing is stored."""
-    from tests.helpers import prepare_stage, submit_stage
-    from tests.test_batch_journal import _run
-    from tools import pilot_state
-    from tools.pilot_state import derive_state, publish_context_selection
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     root, attempt_id, project = Path(run["run_root"]), run["attempt_id"], run["project"]
     attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)

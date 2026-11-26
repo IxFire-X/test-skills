@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_context_batches import _generator_journal, _grouping, _number, _requirements, three  # noqa: F401 — the fixture
+from tests.test_marker_parts import _run
 from tools import pilot_state
 
 NAMED = ["src/part2.py:5 — наблюдение"]  # a file of the third context batch
@@ -86,8 +87,6 @@ def test_a_document_a_requirement_cites_is_read_first_whatever_the_tail_of_the_r
 
 
 def test_the_api_contract_is_read_first_though_the_marker_did_not_name_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_marker_parts import _run
-
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "openapi.yml").write_text("openapi: 3.0.1\ninfo: {title: x}\n", encoding="utf-8")
     root, attempt_id, baseline, receipts = _run(tmp_path, files=3)

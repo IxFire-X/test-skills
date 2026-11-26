@@ -5,6 +5,17 @@ import copy
 import json
 from pathlib import Path
 
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
+from tests.test_param_groups import grouped
+from tests.test_reviewer_protocol import _new_run
+from tools.batch_assembly import assemble_candidate, fill_fragment_mechanics
+from tools.canonical_document import document_sha256, validate_canonical_document
+from tools.orchestrate_test_case_revision import _mode_b
+from tools.publish_test_case_bundle import planned_receipt
+from tools.review_view import render
+from tools.test_case_projections import DEFAULT_PROFILE as PROFILE, render_html_preview_validated
+from tools.test_case_projections import render_markdown_validated, render_zephyr_csv
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 EXAMPLE_SHA256 = "sha256:0887cd3ee170c98bc945fe378c08af1985dc3d2a24aa466a3188061fa1c6aed7"  # of 1f11de6a, before the setup
@@ -40,14 +51,10 @@ def test_setup_needs_1_2_0() -> None:
 
 
 def test_a_document_without_setup_keeps_its_hash() -> None:
-    from tools.canonical_document import document_sha256
-
     assert document_sha256(_example()) == EXAMPLE_SHA256
 
 
 def test_a_setup_of_an_unknown_precondition_is_refused() -> None:
-    from tools.canonical_document import validate_canonical_document
-
     document = with_setup()
     document["test_cases"][1]["setup"][0]["precondition_index"] = 3
     assert [(row["code"], row["message"]) for row in validate_canonical_document(document)] == [
@@ -64,8 +71,6 @@ def test_a_step_expects_the_output_of_its_own_setup_only() -> None:
 
 
 def test_the_cases_of_a_group_share_one_setup() -> None:
-    from tests.test_param_groups import grouped
-
     document = grouped(version="1.2.0")
     members = [case for case in document["test_cases"] if case.get("param_group")]
     for number, case in enumerate(members):
@@ -78,14 +83,10 @@ def test_the_cases_of_a_group_share_one_setup() -> None:
 
 
 def test_the_zephyr_csv_is_the_same_with_and_without_setup() -> None:
-    from tools.test_case_projections import render_zephyr_csv
-
     assert render_zephyr_csv(with_setup()).payload == render_zephyr_csv(_example()).payload
 
 
 def test_the_precondition_an_autotest_prepares_has_the_tail_in_mode_b_only() -> None:
-    from tools.test_case_projections import DEFAULT_PROFILE as PROFILE, render_html_preview_validated, render_markdown_validated
-
     document = with_setup()
     document["test_cases"][1]["preconditions"] = ["Владелец создан"]  # its own line, not one of the common block
     for render in (render_html_preview_validated, render_markdown_validated):
@@ -94,16 +95,12 @@ def test_the_precondition_an_autotest_prepares_has_the_tail_in_mode_b_only() -> 
 
 
 def test_the_views_show_the_setup() -> None:
-    from tools.review_view import render
-
     document = with_setup()
     assert "подготовка [SETUP-B1-002-01], без проверок:" in render(document).decode("utf-8")
     assert "- Подготовка [SETUP-B1-002-01] к предусловию 0 (до первого шага, без проверок)" in render(document, "autotest").decode("utf-8")
 
 
 def test_the_code_fills_the_ids_and_orders_of_a_setup() -> None:
-    from tools.batch_assembly import fill_fragment_mechanics
-
     case = with_setup()["test_cases"][1]
     for key in ("setup_id", "display_order"):
         del case["setup"][0][key]
@@ -113,10 +110,6 @@ def test_the_code_fills_the_ids_and_orders_of_a_setup() -> None:
 
 
 def test_the_assembled_document_is_1_2_0_only_with_setup() -> None:
-    from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
-    from tools.batch_assembly import assemble_candidate
-    from tools.canonical_document import validate_canonical_document
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
@@ -131,10 +124,6 @@ def test_the_assembled_document_is_1_2_0_only_with_setup() -> None:
 
 
 def test_the_tail_comes_from_the_profile_of_the_attempt_not_from_setup(tmp_path: Path) -> None:
-    from tests.test_reviewer_protocol import _new_run
-    from tools.orchestrate_test_case_revision import _mode_b
-    from tools.publish_test_case_bundle import planned_receipt
-
     document = with_setup()
     document["test_cases"][1]["preconditions"] = ["Владелец создан"]  # its own line: the tail would show
     cases_only = _mode_b(*_new_run(tmp_path / "a"))

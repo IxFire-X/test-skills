@@ -8,7 +8,9 @@ import pytest
 
 from tests.test_generated_delta import _inputs
 from tests.test_project_native_pytest import automated_document, automation
+from tools import exec_commands, run_tests
 from tools.automation_validation import _java_name, validate_automation_artifact
+from tools.run_tests import _param_group_rows, validate_artifact_runner_compatibility
 
 
 @pytest.mark.parametrize("segment", ["con", "CON.py", "nul", "Aux.txt", "prn", "com1", "COM9.py", "lpt3"])
@@ -32,16 +34,12 @@ def test_the_literals_of_java_are_no_method_names(name: str) -> None:
 
 
 def test_a_bare_csv_source_is_a_group_without_readable_rows_not_an_error() -> None:
-    from tools.run_tests import _param_group_rows
-
     text = 'class T {\n  @ParameterizedTest(name = "[{index}] {0}")\n  @CsvSource\n  void m(String id) {}\n}\n'
     assert _param_group_rows(text, "m") is None
 
 
 @pytest.mark.parametrize("error", [RecursionError, MemoryError, ValueError])
 def test_a_python_file_the_parser_cannot_take_is_no_test_file(monkeypatch, error) -> None:
-    from tools import exec_commands
-
     def broken(*_args, **_kwargs):
         raise error("x")
 
@@ -53,9 +51,6 @@ def test_a_python_file_the_parser_cannot_take_is_no_test_file(monkeypatch, error
 
 @pytest.mark.parametrize("error", [RecursionError, MemoryError, ValueError])
 def test_a_python_test_file_the_parser_cannot_take_is_refused_by_the_review_of_the_runner(tmp_path, monkeypatch, error) -> None:
-    from tools import run_tests
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     document = automated_document()
     artifact = automation(document)
 

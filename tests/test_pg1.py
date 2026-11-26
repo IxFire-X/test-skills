@@ -24,6 +24,9 @@ from tests.test_batch_assembly import _context_receipt, _fragment, _header, _pla
 from tests.helpers import answer_stage, prepare_stage, submit_stage
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_requested import _generated_run, _journal
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+from tools.canonical_document import param_groups, validate_canonical_document_all
+from tools.orchestrate_test_case_revision import journal_assembly
 
 HEADER = dict(_header(), schema_version="1.1.0")  # param_group is of the 1.1.0 canon
 EXPECTED = {
@@ -88,9 +91,6 @@ def _group_rows(rows: list[dict]) -> list[tuple[str, str, str]]:
 
 @pytest.mark.parametrize("edit", sorted(EXPECTED))
 def test_validate_fragment_refuses_a_group_error_of_the_batch_with_the_rows_of_the_document_audit(edit: str) -> None:
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-    from tools.canonical_document import validate_canonical_document_all
-
     plan, context = _split()
     with pytest.raises(BatchAssemblyError) as refused:
         validate_fragment(_grouped(_fragment(plan, context, 0), edit), plan, HEADER, context)
@@ -106,8 +106,6 @@ def test_validate_fragment_refuses_a_group_error_of_the_batch_with_the_rows_of_t
 
 @pytest.mark.parametrize("edit", sorted(EXPECTED))
 def test_assemble_still_refuses_a_group_error_with_its_code(edit: str) -> None:
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate
-
     plan, context = _split()
     with pytest.raises(BatchAssemblyError) as refused:
         assemble_candidate(HEADER, plan, [_grouped(_fragment(plan, context, 0), edit), _fragment(plan, context, 1)])
@@ -115,9 +113,6 @@ def test_assemble_still_refuses_a_group_error_with_its_code(edit: str) -> None:
 
 
 def test_a_right_group_in_each_batch_passes_validate_fragment_and_assembles() -> None:
-    from tools.batch_assembly import assemble_candidate, validate_fragment
-    from tools.canonical_document import param_groups
-
     plan, context = _split()
     first = _grouped(_fragment(plan, context, 0))
     second = _grouped(_fragment(plan, context, 1), group="PG-refund-amount")
@@ -131,9 +126,6 @@ def test_a_right_group_in_each_batch_passes_validate_fragment_and_assembles() ->
 def test_a_group_name_an_earlier_batch_took_is_refused_at_the_later_batch() -> None:
     """One name in two batches is one group of the document, and its cases cannot share requirement_ids: the audit refuses
     it (SEMANTIC_PARAM_GROUP_MISMATCH). Batch 2 is refused with that code before its answer is written; its fix is a name."""
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-    from tools.canonical_document import validate_canonical_document_all
-
     plan, context = _split()
     first = _grouped(_fragment(plan, context, 0))
     with pytest.raises(BatchAssemblyError) as refused:
@@ -168,7 +160,6 @@ def test_a_group_error_is_refused_by_submit_before_the_write_and_the_retry_assem
     assert code == 0, answered
 
     assert answer_stage(run["run_root"], second, run["fragments"][1])[0] == 0
-    from tools.orchestrate_test_case_revision import journal_assembly
 
     candidate = journal_assembly(run["run_root"], run["attempt_id"])[0]
     assert [case.get("param_group") for case in candidate["test_cases"]] == ["PG-amount", "PG-amount", None]
@@ -199,8 +190,6 @@ def _plain_split() -> tuple[dict, dict, dict, list[dict]]:
 
 
 def test_the_last_batch_is_refused_a_rule_of_the_whole_document_and_one_russian_batch_is_enough() -> None:
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-
     plan, header, context, fragments = _plain_split()
     assert len(plan["batches"]) == 2
     assert validate_fragment(copy.deepcopy(fragments[0]), plan, header, context) is None  # batch 1: another batch may have it
@@ -232,6 +221,5 @@ def test_the_last_batch_without_russian_is_refused_by_submit_before_the_write_an
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))
     code, answered = submit_stage(run["run_root"], second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
-    from tools.orchestrate_test_case_revision import journal_assembly
 
     assert journal_assembly(run["run_root"], run["attempt_id"])[0]["test_cases"]  # the journal's answers assemble

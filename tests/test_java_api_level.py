@@ -11,6 +11,12 @@ from pathlib import Path
 import pytest
 
 from tests.test_automation_revision_budget import automated_document, automation
+from tests.test_finish import _project
+from tools import discover_project
+from tools.discover_project import java_api_level, junit_params_available
+from tools.ready import java_level_rows
+from tools.run_tests import _java_api_level_diagnostics, validate_artifact_runner_compatibility
+from tools.step_size import request_files
 
 # The shape of the jsoup pom: no level in properties, the compiler level in executions and profiles, a Java 8 signature
 # that checks the test classes, a JDK 11+ profile that compiles an overlay with release 11.
@@ -45,8 +51,6 @@ def _pom(body: str = "", *, parent: str = "", modules: str = "") -> str:
 
 
 def test_the_jsoup_shape_is_java_8_from_the_compiler_and_the_test_signature(tmp_path: Path) -> None:
-    from tools.discover_project import java_api_level
-
     (tmp_path / "pom.xml").write_text(JSOUP_POM, encoding="utf-8")
     level = java_api_level(tmp_path)
     assert level["level"] == 8, level
@@ -71,16 +75,12 @@ def test_the_jsoup_shape_is_java_8_from_the_compiler_and_the_test_signature(tmp_
     ("<properties><maven.compiler.release>${external.level}</maven.compiler.release></properties>", "", None),
 ])
 def test_maven_levels(tmp_path: Path, body: str, parent: str, expected: int | None) -> None:
-    from tools.discover_project import java_api_level
-
     (tmp_path / "pom.xml").write_text(_pom(body, parent=parent), encoding="utf-8")
     level = java_api_level(tmp_path)
     assert (level and level["level"]) == expected, level
 
 
 def test_a_reactor_parent_gives_its_properties_and_an_outside_pom_is_never_read(tmp_path: Path) -> None:
-    from tools.discover_project import java_api_level
-
     parent = "<parent><groupId>g</groupId><artifactId>root</artifactId><version>1</version></parent>"
     (tmp_path / "pom.xml").write_text(_pom("<properties><maven.compiler.release>8</maven.compiler.release></properties>",
                                            modules="<modules><module>core</module></modules>"), encoding="utf-8")
@@ -109,8 +109,6 @@ def _reactor(tmp_path: Path, relative: str) -> tuple[Path, Path, Path]:
 
 
 def test_a_relative_path_inside_the_project_is_followed_to_the_reactor_parent(tmp_path: Path) -> None:
-    from tools.discover_project import java_api_level, junit_params_available
-
     project, core, _ = _reactor(tmp_path, "../pom.xml")
     (project / "pom.xml").write_text(_pom(RELEASE_8, modules="<modules><module>core</module></modules>"), encoding="utf-8")
     assert java_api_level(core, project_root=project)["level"] == 8
@@ -122,8 +120,6 @@ def test_a_relative_path_inside_the_project_is_followed_to_the_reactor_parent(tm
 @pytest.mark.parametrize("kind", ["dotdot", "absolute", "link", "unc"])
 def test_a_relative_path_out_of_the_project_is_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     """V4b: the pom the parent points at is read only inside the project - never a file outside, however the path leaves it."""
-    from tools import discover_project
-
     project, core, outside_pom = _reactor(tmp_path, "../../outside/pom.xml")
     relative = {"dotdot": "../../outside/pom.xml", "absolute": str(outside_pom), "link": "../exit/pom.xml", "unc": "\\\\host\\share\\pom.xml"}[kind]
     if kind == "link":
@@ -141,8 +137,6 @@ def test_a_relative_path_out_of_the_project_is_not_read(tmp_path: Path, monkeypa
 
 
 def test_without_a_project_the_reactor_parent_is_not_followed(tmp_path: Path) -> None:
-    from tools.discover_project import java_api_level
-
     project, core, _ = _reactor(tmp_path, "../pom.xml")
     (project / "pom.xml").write_text(_pom(RELEASE_8, modules="<modules><module>core</module></modules>"), encoding="utf-8")
     assert java_api_level(core) is None  # no marker (.skillsrc, .pilot-runs, .git) up the tree: no boundary, no parent
@@ -155,8 +149,6 @@ def test_without_a_project_the_reactor_parent_is_not_followed(tmp_path: Path) ->
     ("build.gradle", "plugins { id 'java' }", None),
 ])
 def test_gradle_levels(tmp_path: Path, name: str, text: str, expected: int | None) -> None:
-    from tools.discover_project import java_api_level
-
     (tmp_path / name).write_text(text, encoding="utf-8")
     level = java_api_level(tmp_path)
     assert (level and level["level"]) == expected, level
@@ -184,8 +176,6 @@ JAVA_11_BODY = """    List<String> names = List.of("a", "b");
 
 
 def test_the_static_review_rejects_newer_api_with_its_replacement(tmp_path: Path) -> None:
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     (tmp_path / "pom.xml").write_text(JSOUP_POM, encoding="utf-8")
     document, artifact = _java_artifact(JAVA_11_BODY)
     result = validate_artifact_runner_compatibility(tmp_path, "java", document, artifact, materialized=False)
@@ -202,8 +192,6 @@ def test_the_static_review_rejects_newer_api_with_its_replacement(tmp_path: Path
 
 
 def test_java_8_api_comments_and_strings_pass(tmp_path: Path) -> None:
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     (tmp_path / "pom.xml").write_text(JSOUP_POM, encoding="utf-8")
     body = ("    // List.of(\"a\") and var x = 1 in a comment\n"
             "    String text = \"Map.of(1, 2).orElseThrow() isBlank()\";\n"
@@ -228,8 +216,6 @@ def test_java_8_api_comments_and_strings_pass(tmp_path: Path) -> None:
     ('    String text = "List.of(1)".formatted();\n    String other = "%s".formatted(name);', {"String.formatted"}),
 ])
 def test_the_rules_are_narrowed_by_arguments_and_receiver(tmp_path: Path, body: str, expected: set) -> None:
-    from tools.run_tests import _java_api_level_diagnostics
-
     names = {row["message"].split(" — ", 1)[0] for row in _java_api_level_diagnostics("/f", body, {"level": 8, "evidence": ["pom.xml"]})}
     assert names == expected, names
 
@@ -243,8 +229,6 @@ def test_the_rules_are_narrowed_by_arguments_and_receiver(tmp_path: Path, body: 
      {"Files.readString/writeString", "Predicate.not"}),
 ])
 def test_an_imported_class_of_the_same_name_turns_its_rule_off(imports: str, body: str, expected: set) -> None:
-    from tools.run_tests import _java_api_level_diagnostics
-
     text = f"package sample;\n{imports}class T {{\n  void t() {{\n{body}\n  }}\n}}\n"
     names = {row["message"].split(" — ", 1)[0] for row in _java_api_level_diagnostics("/f", text, {"level": 8, "evidence": ["pom.xml"]})}
     assert names == expected, names
@@ -252,8 +236,6 @@ def test_an_imported_class_of_the_same_name_turns_its_rule_off(imports: str, bod
 
 @pytest.mark.parametrize("pom", [_pom("<properties><maven.compiler.release>17</maven.compiler.release></properties>"), None])
 def test_a_newer_or_unknown_level_does_not_restrict(tmp_path: Path, pom: str | None) -> None:
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     if pom:
         (tmp_path / "pom.xml").write_text(pom, encoding="utf-8")
     document, artifact = _java_artifact(JAVA_11_BODY)
@@ -261,8 +243,6 @@ def test_a_newer_or_unknown_level_does_not_restrict(tmp_path: Path, pom: str | N
 
 
 def test_ready_names_the_module_level(tmp_path: Path) -> None:
-    from tools.ready import java_level_rows
-
     module = {"id": "root", "root": ".", "stack": {"language": "java"}}
     (tmp_path / "pom.xml").write_text(JSOUP_POM, encoding="utf-8")
     [row] = java_level_rows(tmp_path, module)
@@ -275,9 +255,6 @@ def test_ready_names_the_module_level(tmp_path: Path) -> None:
 
 
 def test_the_automation_step_inputs_carry_the_level(tmp_path: Path) -> None:
-    from tests.test_finish import _project
-    from tools.step_size import request_files
-
     project, run_root, _attempt_id, _values = _project(tmp_path)
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
         assert "java_level" not in request_files(run_root, stage)

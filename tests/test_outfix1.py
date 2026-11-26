@@ -9,7 +9,10 @@ import pytest
 from tests.test_param_groups import EXAMPLE, grouped
 from tests.test_review_stage import _answer as _review_answer, _opened, _submit
 from tests.test_rework_selection import _answer, _first, r1_document
+from tools.quarantine import failure_note
 from tools.review_view import render
+from tools.revision_selection import SelectionError, check_rework
+from tools.step_size import plan_view_bytes
 
 BLANKS = ("Anna", "", "   ")
 
@@ -68,7 +71,6 @@ def test_a_case_without_a_group_has_no_param_group_line() -> None:
 
 def test_the_refusal_of_a_rework_names_the_place_of_the_error() -> None:
     document = r1_document()
-    from tools.revision_selection import SelectionError, check_rework
 
     with pytest.raises(SelectionError) as raised:
         check_rework(document, _first(document, 3), _answer(document, 3, steps=[]))
@@ -83,8 +85,6 @@ def test_an_empty_evidence_list_is_refused_and_the_fix_says_to_remove_the_key(tm
 
 
 def test_the_plan_view_does_not_tell_the_generator_to_copy_a_key_the_fragment_has_not() -> None:
-    from tools.step_size import plan_view_bytes
-
     text = json.loads(plan_view_bytes({"source_requirements": [{"source_requirement_id": "SREQ-1", "text": "t"}]}))["texts"]
     assert "source_requirements фрагмента" not in text and "context-marker" in text
 
@@ -95,12 +95,8 @@ def test_the_fragment_schema_has_no_source_requirements_key() -> None:
 
 
 def test_an_assertj_label_in_brackets_is_the_ref_and_not_the_message() -> None:
-    from tools.quarantine import failure_note
-
     assert failure_note("[ASSERT-B1-001-02-1-1] \nExpecting:\n <1>\nto be equal to:\n <2>") == ("ASSERT-B1-001-02-1-1", "")
 
 
 def test_an_assertj_label_in_brackets_keeps_the_text_after_it() -> None:
-    from tools.quarantine import failure_note
-
     assert failure_note("[ASSERT-a-1] expected: <2> but was: <3>") == ("ASSERT-a-1", "expected: _2_ but was: _3_")

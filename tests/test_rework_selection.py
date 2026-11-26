@@ -7,8 +7,11 @@ import copy
 
 import pytest
 
+from tests.test_param_groups import grouped
 from tests.test_partial_acceptance import _finding, _grouped, _group_ids, _outcome, _real, _report, r1_document
-from tools.revision_selection import SelectionError, check_rework, rework_final, rework_request
+from tools import canonical_document
+from tools.revision_selection import SelectionError, check_rework, rework_final, rework_request, coverage_gaps
+from tools.revision_selection import finding_code, partial_is_bound, rework_review_request
 
 
 def _answer(document: dict, *numbers: int, **change) -> dict:
@@ -49,8 +52,6 @@ def test_the_code_of_a_finding_in_the_view_is_a_code_or_OTHER() -> None:
 @pytest.mark.parametrize("code, kept", [("MISSING_ASSERTION", True), ("A", True), ("X" * 64, True), ("X" * 65, False), ("1ABC", False), ("lower_case", False),
                                         ("TWO WORDS", False), ("Кириллица", False), ("", False), (None, False), (7, False)])
 def test_a_finding_code_is_a_code_only_of_capitals_digits_and_underscores_up_to_64(code, kept: bool) -> None:
-    from tools.revision_selection import finding_code
-
     assert finding_code(code) == (code if kept else "OTHER")
 
 
@@ -90,8 +91,6 @@ def test_the_identity_refusal_names_the_field_that_differs() -> None:
 
 
 def test_a_reworked_case_cannot_leave_a_requirement_without_a_case() -> None:
-    from tools.revision_selection import coverage_gaps
-
     document = r1_document()
     outcome = _first(document, 1)  # the three requirements only TC-B1-001 covered are gaps of r2
     r3 = check_rework(document, outcome, _answer(document, 1))
@@ -151,8 +150,6 @@ def test_the_second_round_takes_no_fix_and_no_successor(verdict: str, successor)
 
 
 def test_the_set_after_the_second_round_is_validated_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import canonical_document
-
     document, calls, real = r1_document(), [], canonical_document.validate_canonical_document
 
     def second_time_bad(value: dict) -> list:
@@ -178,8 +175,6 @@ def test_a_variant_of_a_group_that_left_with_its_sibling_comes_back_when_the_sib
 
 def _pair() -> tuple[dict, list[str]]:
     """A group of two variants: the first is rejected, the second goes out with it."""
-    from tests.test_param_groups import grouped
-
     document = grouped(names=("Иван", "Пётр"))
     document["revision"], document["parent_sha256"] = 1, None
     return document, _group_ids(document)
@@ -232,8 +227,6 @@ def test_a_variant_taken_out_with_its_group_is_no_case_of_the_rework() -> None:
 # ---- the second round: the view and the binding of the set to the two answers --------------------------------------------------------------
 
 def test_the_view_of_the_second_round_holds_the_reworked_cases_the_first_findings_and_what_they_stand_on() -> None:
-    from tools.revision_selection import rework_review_request
-
     document = r1_document()
     outcome = _outcome(document, [_finding("BLOCKING", ["TC-B1-003"], "Нет проверки состояния.")])
     answer = _answer(document, 3)
@@ -244,8 +237,6 @@ def test_the_view_of_the_second_round_holds_the_reworked_cases_the_first_finding
 
 
 def test_the_set_is_bound_to_what_the_two_answers_give_and_to_nothing_else() -> None:
-    from tools.revision_selection import partial_is_bound
-
     document = r1_document()
     findings = _real(document, 3, 4)
     outcome, report1 = _outcome(document, findings), _report(document, *findings)

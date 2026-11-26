@@ -16,7 +16,15 @@ from pathlib import Path
 
 import pytest
 
+import tests.test_project_native_pytest as native
+from tests.p4_flow import run_the_build
 from tests.test_automation_revision_budget import automated_document, automation
+from tests.test_finish import _project
+from tools.automation_validation import validate_automation_artifact
+from tools.canonical_document import blocked_cases, blocker_count, document_sha256, validate_canonical_document
+from tools.finalize_attempt import split_cases
+from tools.pilot_state import _result_facts, read_terminal_result
+from tools.review_view import render
 
 pytestmark = pytest.mark.contract
 
@@ -88,8 +96,6 @@ def _codes(artifact: dict, doc: dict) -> list[str]:
 
 
 def test_the_fixture_document_is_valid_and_its_blocked_cases_are_the_one_reading() -> None:
-    from tools.canonical_document import blocked_cases, blocker_count, validate_canonical_document
-
     doc = document((2, 3))
     assert validate_canonical_document(doc) == []
     assert blocked_cases(doc) == [{"case_id": "TC-batch-a-002", "steps": [{"step_id": "STEP-batch-a-002", "codes": ["UNRESOLVED_OPERATION"]}]},
@@ -161,9 +167,6 @@ def test_case_2() -> None:
 def partial_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:
     """The test_finish fixture project with the three-case document and its partial automation, statically reviewed."""
 
-    import tests.test_project_native_pytest as native
-    from tests.test_finish import _project
-
     doc = document((3,))
     with monkeypatch.context() as patched:
         patched.setattr(native, "automated_document", lambda: copy.deepcopy(doc))
@@ -180,9 +183,6 @@ def partial_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
 @pytest.mark.slow
 def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                      capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import run_the_build
-    from tools.pilot_state import read_terminal_result
-
     project, run_root, attempt_id = partial_project(tmp_path, monkeypatch)
     capsys.readouterr()
     code, output = run_the_build(project, run_root, capsys)
@@ -233,9 +233,6 @@ def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: P
 
 
 def test_the_autotest_view_names_the_manual_cases_only_when_there_are_blockers() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.review_view import render
-
     view = render(document((3,)), "autotest").decode("utf-8")
     assert "## Кейсы с блокерами — вручную, в excluded_cases" in view and "- TC-batch-a-003: STEP-batch-a-003 UNRESOLVED_OPERATION" in view
     assert "автоматизируется 2 из 3 кейсов" in view
@@ -246,8 +243,6 @@ def test_the_autotest_view_names_the_manual_cases_only_when_there_are_blockers()
 
 def test_automation_partial_is_only_a_pass_of_the_subset(tmp_path: Path) -> None:
     """Only a PASS of the subset is AUTOMATION_PARTIAL; the tuple check refuses it anywhere else."""
-    from tools.pilot_state import _result_facts
-
     base = {"run_id": "a" * 32, "attempt_id": "b" * 32, "attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "FAIL",
             "coverage": "FULL", "reason_code": "AUTOMATION_PARTIAL", "prior_stage_cause": "EXECUTION_FAIL"}
     with pytest.raises(ValueError):
@@ -274,10 +269,6 @@ def _evidence(*, blocker_count: int) -> dict:
 
 
 def test_a_case_of_manual_only_steps_is_manual_too_and_the_counts_add_up() -> None:
-    from tools.automation_validation import validate_automation_artifact
-    from tools.canonical_document import validate_canonical_document
-    from tools.finalize_attempt import split_cases
-
     doc = document((3,))
     step = doc["test_cases"][1]["steps"][0]
     step.update(manual_only=True, manual_reason="Проверяется глазами на стенде.", operation=None, inputs=[], outputs=[])
@@ -297,8 +288,6 @@ def test_a_case_of_manual_only_steps_is_manual_too_and_the_counts_add_up() -> No
 
 
 def test_an_expressible_blocker_is_a_warning_in_the_view_and_the_reviewer_skill() -> None:
-    from tools.review_view import render
-
     view = render(document((3,)), "autotest").decode("utf-8")
     assert "замечание WARNING: вопрос к следующему прогону, автоматизацию не отклоняет" in view and "BLOCKING" not in view
     skill = (Path(__file__).resolve().parents[1] / "skills" / "autotest-reviewer" / "SKILL.md").read_text(encoding="utf-8")

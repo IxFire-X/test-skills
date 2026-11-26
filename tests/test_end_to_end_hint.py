@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_review_view import _example
+from tools import build_context, review_view, run_report
+from tools.batch_assembly import canonical_bytes, plan_batches, requirement_groups
+from tools.review_view import NO_END_TO_END, end_to_end_hint, linking_cases, render
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fat-bo"
 
 
@@ -26,40 +31,29 @@ GROUPS = {"SREQ-1": "prefix:O", "SREQ-2": "prefix:P", "SREQ-3": "prefix:V", "SRE
 
 
 def test_no_case_linking_two_groups_is_a_hint_with_counts_only() -> None:
-    from tools.review_view import NO_END_TO_END, end_to_end_hint
-
     document = _document({"TC-1": ["CREQ-O1"], "TC-2": ["CREQ-P1"], "TC-3": ["CREQ-V1"]}, SOURCES)
     assert end_to_end_hint(document, GROUPS) == {"code": NO_END_TO_END, "groups": 4, "linking_cases": 0}
 
 
 def test_one_case_through_two_groups_removes_the_hint() -> None:
-    from tools.review_view import end_to_end_hint, linking_cases
-
     document = _document({"TC-0": ["CREQ-O1", "CREQ-P1", "CREQ-V1"], "TC-1": ["CREQ-O1"], "TC-2": ["CREQ-P1"]}, SOURCES)
     assert end_to_end_hint(document, GROUPS) is None and linking_cases(document, GROUPS) == ["TC-0"]
 
 
 def test_a_constraint_group_every_case_cites_links_nothing() -> None:
     """Common constraints cited by every case (FR/NFR, «Общие») are not a step of a process."""
-    from tools.review_view import end_to_end_hint, linking_cases
-
     document = _document({"TC-1": ["CREQ-O1", "CREQ-G1"], "TC-2": ["CREQ-P1", "CREQ-G1"], "TC-3": ["CREQ-V1", "CREQ-G1"]}, SOURCES)
     assert linking_cases(document, GROUPS) == []
     assert end_to_end_hint(document, GROUPS)["groups"] == 3
 
 
 def test_one_group_or_requirements_without_groups_give_no_hint() -> None:
-    from tools.review_view import end_to_end_hint
-
     document = _document({"TC-1": ["CREQ-O1"], "TC-2": ["CREQ-P1"]}, SOURCES)
     assert end_to_end_hint(document, dict.fromkeys(GROUPS, "prefix:O")) is None
     assert end_to_end_hint(document, dict.fromkeys(GROUPS)) is None
 
 
 def test_batches_holding_one_group_each_give_no_hint_and_a_line_in_the_plan_notes() -> None:
-    from tools.batch_assembly import plan_batches
-    from tools.review_view import end_to_end_hint
-
     document = _document({"TC-B1-1": ["CREQ-O1"], "TC-B2-1": ["CREQ-P1"]}, SOURCES)
     groups = {"SREQ-1": "prefix:O", "SREQ-2": "prefix:P"}
     assert end_to_end_hint(document, groups, [["SREQ-1"], ["SREQ-2"]]) is None
@@ -82,8 +76,6 @@ def test_batches_holding_one_group_each_give_no_hint_and_a_line_in_the_plan_note
     ("microservices", 0, 0, "0b5fe5c03ea47148d905eb296009844dcf2c878ff70a4fde4c20a56939a21488", 1),
 ])
 def test_plan_batches_with_the_shared_group_rule_gives_the_same_batches(project, window, input_bytes, expected, count) -> None:
-    from tools.batch_assembly import canonical_bytes, plan_batches
-
     recorded = _load(f"{project}-plan.json")
     plan = plan_batches(recorded["source_requirements"], _load(f"{project}-grouping.json"), window_bytes=window, input_bytes=input_bytes)
     assert hashlib.sha256(canonical_bytes(plan)).hexdigest() == expected and len(plan["batches"]) == count
@@ -103,8 +95,6 @@ def _sources(texts: list[str]) -> list[dict]:
 
 
 def test_requirement_groups_by_letter_prefix_and_by_document_section(tmp_path: Path) -> None:
-    from tools.batch_assembly import requirement_groups
-
     texts = ["O01. Создать владельца", "P01. Добавить питомца"]
     project, receipt = _project(tmp_path, "\n".join(texts))
     assert requirement_groups(_sources(texts), project, receipt) == {"SREQ-1": "prefix:O", "SREQ-2": "prefix:P"}
@@ -115,9 +105,6 @@ def test_requirement_groups_by_letter_prefix_and_by_document_section(tmp_path: P
 
 
 def test_requirement_groups_by_the_skillsrc_id_pattern(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import build_context
-    from tools.batch_assembly import requirement_groups
-
     monkeypatch.setattr(build_context, "_project_id_pattern", lambda _project: r"(?P<group>\d+)\.\d+\s")
     texts = ["3.1 Первое", "3.2 Второе", "4.1 Третье"]
     project, receipt = _project(tmp_path, "\n".join(texts))
@@ -125,9 +112,6 @@ def test_requirement_groups_by_the_skillsrc_id_pattern(tmp_path: Path, monkeypat
 
 
 def test_render_without_groups_is_byte_identical_and_with_them_shows_the_hint() -> None:
-    from tests.test_review_view import _example
-    from tools.review_view import NO_END_TO_END, render
-
     document = _example()
     assert hashlib.sha256(render(document)).hexdigest() == "df245643eca8b66e8cc49f2c7fb1756465d9f9000cf78c79b654bf5d4a2a2b82"  # de0f96a
     before = json.dumps(document, ensure_ascii=False, sort_keys=True)
@@ -135,7 +119,6 @@ def test_render_without_groups_is_byte_identical_and_with_them_shows_the_hint() 
     case_requirements = [set(case["requirement_ids"]) for case in document["test_cases"]]
     view = render(document, "review", alone).decode("utf-8")
     hinted = NO_END_TO_END in view
-    from tools.review_view import end_to_end_hint
 
     assert hinted is (end_to_end_hint(document, alone) is not None)
     assert render(document, "review", dict.fromkeys(alone)) == render(document)  # no groups — no hint, same bytes
@@ -143,8 +126,6 @@ def test_render_without_groups_is_byte_identical_and_with_them_shows_the_hint() 
 
 
 def test_run_report_names_the_hint_by_counts_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from tools import review_view, run_report
-
     document = _document({"TC-1": ["CREQ-O1"], "TC-2": ["CREQ-P1"]}, SOURCES)
     monkeypatch.setattr(review_view, "run_requirement_groups", lambda *_args: (GROUPS, None))
     assert run_report.end_to_end(tmp_path, "a" * 32, document) == {"code": "CV_NO_END_TO_END", "groups": 4, "linking_cases": 0}

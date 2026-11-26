@@ -7,6 +7,7 @@ may start a process, the package may not), ``ingest`` takes the reports.  A test
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,6 +44,4 @@ def run_the_build(project: Path, run_root: Path, capsys: pytest.CaptureFixture[s
 
 
 def _json_of(capsys: pytest.CaptureFixture[str]) -> dict:
-    import json
-
     return json.loads(capsys.readouterr().out)

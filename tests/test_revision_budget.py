@@ -1,12 +1,11 @@
 from copy import deepcopy
 
 from tests.test_requirement_traceability import canonical_fixture
+from tools.canonical_document import document_sha256
+from tools.revision_selection import validate_successor
 
 
 def test_only_r1_to_complete_r2_successor_is_allowed_and_traceability_is_preserved():
-    from tools.canonical_document import document_sha256
-    from tools.revision_selection import validate_successor
-
     candidate = canonical_fixture()
     successor = deepcopy(candidate)
     successor["revision"] = 2
@@ -26,9 +25,6 @@ def test_only_r1_to_complete_r2_successor_is_allowed_and_traceability_is_preserv
 
 
 def test_successor_cannot_swap_case_requirements_or_rewrite_confirmed_machine_semantics():
-    from tools.canonical_document import document_sha256
-    from tools.revision_selection import validate_successor
-
     candidate = canonical_fixture()
     successor = deepcopy(candidate)
     successor["revision"] = 2

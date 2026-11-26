@@ -7,8 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_cases_import import CSV
 from tests.test_cases_import_docs import LINKS, _changed, _fragment, _to_plan
 from tests.test_cases_import_new import _autofix, _receipt, _rework, _submit
+from tools import cases_import
+from tools.cases_import import OBSOLETE_LABEL, imported_value
+from tools.orchestrate_test_case_revision import _imported_human_changes
+from tools.run_report import row_ranges
 
 REWRITE = [{"row": 2, "source_requirement_ids": ["SREQ-0001", "SREQ-0003"], "verdict": "rewrite", "reason": "документ требует двоеточие"}, LINKS[1]]
 FITS_WITH_DOUBT = [{**LINKS[0], "reason": "не уверена, что склейка — то же требование"}, LINKS[1]]
@@ -24,9 +29,6 @@ def test_the_skeleton_keeps_the_verdict_of_a_case_and_its_reason(tmp_path: Path,
 
 
 def test_a_skeleton_without_verdicts_has_no_verdict_keys() -> None:
-    from tests.test_cases_import import CSV
-    from tools.cases_import import imported_value
-
     links = [{"row": 2, "source_requirement_ids": ["SREQ-0001"]}, {"row": 3, "source_requirement_ids": []}]
     cases = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), links, [{"source_requirement_id": "SREQ-0001", "text": "x"}])["cases"]
     assert not [key for case in cases for key in case if key.startswith(("verdict", "removed"))]
@@ -81,8 +83,6 @@ def test_the_review_may_not_fix_the_text_of_a_case_that_fits(tmp_path: Path, mon
 
 
 def test_the_review_and_the_rework_keep_the_priority_of_a_rewritten_case() -> None:
-    from tools.orchestrate_test_case_revision import _imported_human_changes
-
     case = {"case_id": "TC-1", "requirement_ids": ["CREQ-1"], "title": "a", "objective": "b", "preconditions": [], "priority": "HIGH", "steps": []}
     mappings = [{"source_requirement_id": "SREQ-0001", "canonical_requirement_ids": ["CREQ-1"]}]
     imported = {"cases": [{"source_requirement_ids": ["SREQ-0001"], "verdict": "rewrite"}], "gaps": []}
@@ -162,8 +162,6 @@ def test_a_case_that_fits_with_a_doubt_is_to_check_by_hand(tmp_path: Path, monke
 
 
 def test_an_obsolete_case_is_not_asked_about_as_a_case_outside_the_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import cases_import
-
     monkeypatch.setattr(cases_import, "check_requirements_answer", lambda *_args, **_kwargs: None)  # a delta that removes a requirement is no part of this fixture
     gone = {"row": 3, "source_requirement_ids": [], "verdict": "obsolete", "reason": "требование удалено", "removed": {"capability": "catalog", "name": "Refuse"}}
     report, markdown, questions = _report(tmp_path, monkeypatch, [LINKS[0], gone])
@@ -172,8 +170,6 @@ def test_an_obsolete_case_is_not_asked_about_as_a_case_outside_the_documents(tmp
 
 
 def test_the_rows_of_a_group_are_written_as_ranges() -> None:
-    from tools.run_report import row_ranges
-
     assert row_ranges([2, 3, 4, 12, 15, 16, 117]) == "2–4, 12, 15–16, 117" and row_ranges([]) == ""
 
 
@@ -194,23 +190,16 @@ GONE = {"row": 3, "source_requirement_ids": [], "verdict": "obsolete", "reason":
 
 
 def _obsolete_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    from tools import cases_import
-
     monkeypatch.setattr(cases_import, "check_requirements_answer", lambda *_args, **_kwargs: None)  # a delta that removes a requirement is no part of this fixture
     return _plan(tmp_path, monkeypatch, [LINKS[0], GONE])
 
 
 def test_code_puts_the_label_of_an_obsolete_case_into_its_skeleton_row_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.cases_import import OBSOLETE_LABEL
-
     fits, gone = _receipt(_obsolete_plan(tmp_path, monkeypatch))["cases"]
     assert gone["management"]["labels"] == [OBSOLETE_LABEL] and fits["management"]["labels"] == []
 
 
 def test_a_skeleton_differs_from_the_one_without_the_verdict_in_the_label_of_the_obsolete_row_only() -> None:
-    from tests.test_cases_import import CSV
-    from tools.cases_import import imported_value
-
     requirements = [{"source_requirement_id": "SREQ-0001", "text": "x"}]
     plain = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), [LINKS[0], {"row": 3, "source_requirement_ids": []}], requirements)["cases"]
     judged = imported_value("cases/zephyr.csv", CSV.encode("utf-8"), [LINKS[0], GONE], requirements)["cases"]
@@ -220,9 +209,6 @@ def test_a_skeleton_differs_from_the_one_without_the_verdict_in_the_label_of_the
 
 
 def test_the_label_is_not_put_twice_into_a_case_that_has_it() -> None:
-    from tests.test_cases_import import CSV
-    from tools.cases_import import imported_value
-
     lines = CSV.split("\r\n")
     data = "\r\n".join([lines[0] + ",Labels", lines[1] + ",", lines[2] + ',"smoke, Устарел"', lines[3] + ","]).encode("utf-8")
     cases = imported_value("cases/zephyr.csv", data, [LINKS[0], GONE], [{"source_requirement_id": "SREQ-0001", "text": "x"}])["cases"]
@@ -250,16 +236,12 @@ def test_the_model_may_not_put_the_label_on_a_case_that_fits(tmp_path: Path, mon
 
 
 def test_the_report_has_no_label_text_besides_the_name_of_the_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import cases_import
-
     monkeypatch.setattr(cases_import, "check_requirements_answer", lambda *_args, **_kwargs: None)
     report, markdown, _questions = _report(tmp_path, monkeypatch, [LINKS[0], GONE])
     assert markdown.replace("устарели", "").count("устарел") == 0 and "устарел" not in json.dumps({**report, "import": {**report["import"], "verdicts": {}}}, ensure_ascii=False)
 
 
 def test_the_texts_name_the_label_of_an_obsolete_case_as_the_constant_has_it() -> None:
-    from tools.cases_import import OBSOLETE_LABEL
-
     root = Path(__file__).resolve().parents[1]
     how_to = " ".join((root / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
     import_md = (root / "skills" / "orchestrate" / "references" / "import.md").read_text(encoding="utf-8")

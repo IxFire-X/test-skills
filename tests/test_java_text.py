@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools.java_text import mask_java_noncode
+from tools.run_tests import _java_class, _java_node
 
 BLOCK = 'String s = """\n  { } // /* @Test\n  more\n  """;\n'
 
@@ -33,8 +34,6 @@ def test_code_after_the_block_is_code_again() -> None:
 
 @pytest.mark.parametrize("inside", ["}", "{ }", "// c", "/* c", "@Test"])
 def test_the_class_and_the_test_after_a_text_block_are_found(inside: str) -> None:
-    from tools.run_tests import _java_class, _java_node
-
     text = f'package p;\nclass T {{\n  String s = """\n  {inside}\n  """;\n  @Test void one() {{}}\n}}\n'
     parsed = _java_class(Path("T.java"), text)
     assert parsed is not None and _java_node(parsed, {"kind": "java_class_method", "class_fqn": "p.T", "method_name": "one"}) == "one"

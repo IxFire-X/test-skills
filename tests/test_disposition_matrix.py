@@ -1,6 +1,11 @@
 import hashlib
 
+import pytest
+
 from tests.test_generated_delta import _inputs
+from tools import generated_delta
+from tools.confined_output import OutputConfinementError
+from tools.finalize_attempt import FinalizationError, decide_dispositions, disposition_receipt
 
 
 def _delta(tmp_path, *, two=False, fail_after=None):
@@ -31,8 +36,6 @@ def _delta(tmp_path, *, two=False, fail_after=None):
 
 
 def test_pass_retains_complete_owned_set_only_after_valid_pretrace(tmp_path):
-    from tools.finalize_attempt import decide_dispositions, disposition_receipt
-
     delta, run_root, attempt_id = _delta(tmp_path)
     result = decide_dispositions(tmp_path, delta, "PASS", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
     assert [row["disposition"] for row in result["files"]] == ["RETAINED"]
@@ -41,8 +44,6 @@ def test_pass_retains_complete_owned_set_only_after_valid_pretrace(tmp_path):
 
 
 def test_pass_with_invalid_trace_cleans_exact_owned_file_instead_of_retaining_it(tmp_path):
-    from tools.finalize_attempt import decide_dispositions
-
     delta, run_root, attempt_id = _delta(tmp_path)
     generated = tmp_path / "tests" / "test_products.py"
 
@@ -56,9 +57,6 @@ def test_pass_with_invalid_trace_cleans_exact_owned_file_instead_of_retaining_it
 
 
 def test_unknown_never_cleans_and_records_drift_as_content_conflict(tmp_path):
-    import pytest
-    from tools.finalize_attempt import FinalizationError, decide_dispositions
-
     delta, run_root, attempt_id = _delta(tmp_path)
     with pytest.raises(FinalizationError, match="execution-unknown evidence"):
         decide_dispositions(tmp_path, delta, "UNKNOWN", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
@@ -75,8 +73,6 @@ def test_unknown_never_cleans_and_records_drift_as_content_conflict(tmp_path):
 
 
 def test_unknown_missing_file_still_gets_complete_conflict_disposition(tmp_path):
-    from tools.finalize_attempt import decide_dispositions
-
     delta, run_root, attempt_id = _delta(tmp_path)
     (tmp_path / "tests" / "test_products.py").unlink()
 
@@ -91,10 +87,6 @@ def test_unknown_missing_file_still_gets_complete_conflict_disposition(tmp_path)
 
 
 def test_unknown_unsafe_file_still_gets_complete_conflict_disposition(tmp_path, monkeypatch):
-    from tools import generated_delta
-    from tools.confined_output import OutputConfinementError
-    from tools.finalize_attempt import decide_dispositions
-
     delta, run_root, attempt_id = _delta(tmp_path)
     original_read = generated_delta.read_confined_bytes
 

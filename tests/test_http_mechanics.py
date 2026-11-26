@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from tests.test_automation_revision_budget import automated_document
-from tools.batch_assembly import fill_fragment_mechanics
+from tools.batch_assembly import _body_rows, _http_body_template, fill_fragment_mechanics
 from tools.canonical_document import _human_http_alignment, validate_canonical_document
 
 _BASE = {"kind": "environment", "name": "BASE_URL", "provenance": ["test"]}
@@ -109,16 +109,12 @@ def test_a_pointer_the_step_takes_into_an_output_stays_in_the_block() -> None:
 
 
 def test_a_row_the_descendants_imply_is_not_shown() -> None:
-    from tools.batch_assembly import _body_rows, _http_body_template
-
     length = {"operator": "length_equals", "actual": {"kind": "http_body", "pointer": "/items"}, "expected": {"kind": "literal", "value": 2}}
     template = _http_body_template(_body_rows({}, [_body("/items", "exists"), length, _body("/items/0/name"), _body("/items/1/name")]))
     assert template is not None and template.count("<значение присутствующего поля>") == 2
 
 
 def test_a_length_the_indexes_below_do_not_give_is_left_to_the_check() -> None:
-    from tools.batch_assembly import _body_rows, _http_body_template
-
     length = {"operator": "length_equals", "actual": {"kind": "http_body", "pointer": "/items"}, "expected": {"kind": "literal", "value": 3}}
     assert _http_body_template(_body_rows({}, [length, _body("/items/0/name"), _body("/items/1/name")])) is None
 

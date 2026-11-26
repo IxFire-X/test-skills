@@ -3,14 +3,14 @@ A report without tests is FAIL by ``exec_runner`` (``test_project_native_pytest.
 
 from pathlib import Path
 
+from tools.run_tests import RunnerCompatibility, classify_evidence, match_junit_cases, parse_junit_bytes
+
 
 def _rows(*statuses: str) -> list[dict]:
     return [{"status": status} for status in statuses]
 
 
 def test_exact_framework_timeout_and_failure_are_fail_from_authoritative_reports():
-    from tools.run_tests import classify_evidence, match_junit_cases, parse_junit_bytes
-
     root = Path(__file__).parent / "fixtures" / "reports"
     for name in ("pytest-timeout.xml", "junit5-timeout.xml"):
         statuses = [case.status for case in parse_junit_bytes((root / name).read_bytes()).cases]
@@ -21,8 +21,6 @@ def test_exact_framework_timeout_and_failure_are_fail_from_authoritative_reports
 
 
 def test_clean_authoritative_report_is_pass():
-    from tools.run_tests import classify_evidence, parse_junit_bytes
-
     root = Path(__file__).parent / "fixtures" / "reports"
     statuses = [case.status for case in parse_junit_bytes((root / "pytest-pass.xml").read_bytes()).cases]
     assert classify_evidence(_rows(*statuses), controller_timed_out=False) == "PASS"
@@ -30,23 +28,17 @@ def test_clean_authoritative_report_is_pass():
 
 def test_controller_timeout_cannot_be_overridden_by_a_clean_report():
     """After the controller terminates a process, PASS is not authoritative."""
-    from tools.run_tests import classify_evidence
-
     assert classify_evidence(_rows("PASSED"), controller_timed_out=True) == "UNKNOWN"
 
 
 def test_skipped_exact_selector_is_not_a_successful_execution():
     """A runner must not turn an xfail/skip into a passing reviewed test."""
-    from tools.run_tests import classify_evidence
-
     assert classify_evidence(_rows("PASSED", "SKIPPED"), controller_timed_out=False) == "UNKNOWN"
     assert classify_evidence(_rows("SKIPPED", "FAILED"), controller_timed_out=False) == "FAIL"
 
 
 def test_pytest_class_method_nodeid_is_matched_without_java_style_path_rewrite():
     """pytest emits module.Class for a method; it must match module.py::Class::method (moved from classify_execution)."""
-    from tools.run_tests import RunnerCompatibility, classify_evidence, match_junit_cases, parse_junit_bytes
-
     pair = ("file-a", "symbol-a")
     compatibility = RunnerCompatibility("READY", (pair,), {pair: {
         "path": Path("tests/test_class.py"), "relative_path": "tests/test_class.py",

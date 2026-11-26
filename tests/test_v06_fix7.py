@@ -7,8 +7,11 @@ from pathlib import Path
 import pytest
 
 from tests.helpers import prepare_stage, submit_stage
+from tests.test_batch_assembly import _refresh
+from tests.test_batch_size_split import _evidence, _requirement
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_requested import _generated_run
+from tools.batch_assembly import assemble_candidate, plan_batches, with_digest
 
 PET_ADD = {"capability_id": "CAP-pet-add", "adapter": "native", "action": "add-pet", "arguments": [], "results": [], "provenance": ["source:cap"]}
 OWNER_CREATE = dict(PET_ADD, capability_id="CAP-owner-create", action="create-owner")
@@ -33,7 +36,6 @@ def test_a_later_batch_with_a_smaller_new_capability_id_is_accepted_in_canon_ord
     assert prepare_stage(root, stage_two)[0] == 0
     code, out = submit_stage(root, stage_two, _with_capabilities(second, [OWNER_CREATE, PET_ADD] if copy_of_batch_one else [OWNER_CREATE]))
     assert code == 0, out
-    from tools.batch_assembly import assemble_candidate, with_digest
 
     header = {key: value for key, value in json.loads(Path(run["header"]).read_bytes()).items() if key != "digest"}
     document, _receipt = assemble_candidate(header, json.loads(Path(run["plan"]).read_bytes()), [with_digest(first), with_digest(second)])
@@ -76,9 +78,6 @@ def test_two_cases_that_differ_only_in_their_own_ids_are_still_a_possible_duplic
 
 
 def test_a_member_of_an_over_budget_group_that_is_over_the_budget_alone_has_its_own_note() -> None:
-    from tests.test_batch_size_split import _evidence, _requirement
-    from tools.batch_assembly import plan_batches
-
     requirements = [_requirement(number, f"FR-{number} " + ("б" * 5000 if number == 3 else "а" * 400)) for number in range(1, 6)]
     requirements.append(_requirement(6, "NFR-1 " + "в" * 400))
     plan = plan_batches(requirements, _evidence(), window_bytes=400_000, input_bytes=100_000)
@@ -94,8 +93,6 @@ def test_a_member_of_an_over_budget_group_that_is_over_the_budget_alone_has_its_
 ])
 def test_the_candidate_of_an_already_valid_document_keeps_its_bytes(capability_of_batch_two: str | None, digest: str) -> None:
     """The digests were taken on the code before fix7 (ddb8074): a valid document lay in canon order already, the sort changes nothing."""
-    from tools.batch_assembly import assemble_candidate
-
     if capability_of_batch_two is None:
         from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
 
@@ -109,7 +106,6 @@ def test_the_candidate_of_an_already_valid_document_keeps_its_bytes(capability_o
 
 def test_two_cases_that_differ_only_in_the_ids_of_their_own_outputs_are_a_possible_duplicate() -> None:
     header, plan, fragments = _operation_case_fragments("CAP-pet-add")
-    from tests.test_batch_assembly import _refresh
 
     for fragment, name in zip(fragments, ["id_one", "id_two"]):
         fragment["test_cases"][0]["steps"][0]["outputs"] = [{"output_id": name, "display_order": 1, "source": {"kind": "project_result", "name": "failed"},

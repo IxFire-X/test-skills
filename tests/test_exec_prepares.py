@@ -10,6 +10,10 @@ import pytest
 from tests.test_finish import _module_python
 from tests.test_project_native_pytest import _reviewed_inputs
 from tests.helpers import MODULE_PYTHON
+from tools import exec_commands, execution_core, pilot_state, project_inventory
+from tools.exec_commands import cmd_materialize
+from tools.execution_adapters import PYTEST
+from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact, read_terminal_result
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -49,8 +53,6 @@ def _has(run_root: Path, attempt_id: str, kind: str) -> bool:
 @pytest.mark.slow
 def test_materialize_after_the_static_review_prepares_its_inputs_and_the_ingest_of_the_run_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import flow_args, run_the_build
-    from tools import exec_commands
-    from tools.pilot_state import read_terminal_result
 
     project, run_root, attempt_id = _project(tmp_path)
     assert not _has(run_root, attempt_id, "execution-inputs") and not _has(run_root, attempt_id, "generated-delta")
@@ -66,7 +68,6 @@ def test_materialize_after_the_static_review_prepares_its_inputs_and_the_ingest_
 @pytest.mark.slow
 def test_materialize_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import run_the_build
-    from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact
 
     project, run_root, attempt_id = _project(tmp_path)
     events = [event for event in derive_state(run_root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id]
@@ -80,7 +81,6 @@ def test_materialize_finishes_a_half_done_preparation(tmp_path: Path, capsys: py
 
 def test_materialize_without_an_accepted_static_review_names_the_step(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import flow_args
-    from tools.exec_commands import cmd_materialize
 
     project, run_root, attempt_id = _project(tmp_path, publish_static_review=False)
     code = cmd_materialize(flow_args(project, run_root))
@@ -93,7 +93,6 @@ def test_materialize_without_an_accepted_static_review_names_the_step(tmp_path: 
 @pytest.mark.slow
 def test_materialize_after_a_static_review_that_is_not_accepted_materializes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import flow_args
-    from tools.exec_commands import cmd_materialize
 
     project, run_root, attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     before = sorted(path.relative_to(project).as_posix() for path in project.rglob("*") if ".pilot-runs" not in path.parts)
@@ -115,9 +114,6 @@ def test_the_text_of_mode_b_says_materialize_right_after_the_static_review() -> 
 @pytest.mark.parametrize(("local", "has_report", "kept"), [(True, False, False), (False, True, False), (True, True, True)])
 def test_a_prestart_rejection_keeps_the_request_only_when_it_is_local_and_has_a_report_path(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local: bool, has_report: bool, kept: bool) -> None:
-    from tools import exec_commands, execution_core, pilot_state, project_inventory
-    from tools.execution_adapters import PYTEST
-
     taken: list = []
 
     def report(*_args, request=None, **_kwargs):

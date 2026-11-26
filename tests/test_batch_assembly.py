@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, canonical_bytes, validate_fragment
+from tools.canonical_document import validate_canonical_document
+from tools.schema_validation import schema_diagnostics
+
 
 def _digest(letter: str) -> str:
     return "sha256:" + letter * 64
@@ -86,8 +90,6 @@ def _refresh(fragment: dict) -> None:
 
 
 def test_generator_envelope_validates_nested_context_receipt(pack_root: Path):
-    from tools.schema_validation import schema_diagnostics
-
     context = _context_receipt()
     fragment = _fragment(_plan(_header(), context), context, 0)
     output = {"schema_version": "5.0.0", "stage": "tc-generator",
@@ -101,9 +103,6 @@ def test_generator_envelope_validates_nested_context_receipt(pack_root: Path):
 
 
 def test_assemble_candidate_is_byte_identical_for_shuffled_fragments_and_keeps_duplicate_warning():
-    from tools.batch_assembly import assemble_candidate, canonical_bytes, validate_fragment
-    from tools.canonical_document import validate_canonical_document
-
     header = _header()
     context = _context_receipt()
     plan = _plan(header, context)
@@ -129,8 +128,6 @@ def test_assemble_candidate_is_byte_identical_for_shuffled_fragments_and_keeps_d
     ],
 )
 def test_validate_fragment_rejects_identity_and_cross_batch_requirement_conflicts(mutation, code):
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header = _header()
     context = _context_receipt()
     plan = _plan(header, context)
@@ -142,8 +139,6 @@ def test_validate_fragment_rejects_identity_and_cross_batch_requirement_conflict
 
 
 def test_assemble_candidate_rejects_same_capability_id_with_different_semantics():
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
@@ -154,8 +149,6 @@ def test_assemble_candidate_rejects_same_capability_id_with_different_semantics(
 
 
 def test_assemble_candidate_rejects_a_canonical_requirement_reused_across_batches():
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate
-
     header = _header()
     context = _context_receipt()
     plan = _plan(header, context)
@@ -170,8 +163,6 @@ def test_assemble_candidate_rejects_a_canonical_requirement_reused_across_batche
 
 
 def test_validate_fragment_fails_closed_for_schema_drift_namespace_and_tampered_context_receipt():
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     fragment = _fragment(plan, context, 0)
@@ -196,8 +187,6 @@ def test_validate_fragment_fails_closed_for_schema_drift_namespace_and_tampered_
 
 
 def test_duplicate_mapping_is_partition_conflict(tmp_path: Path):
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     duplicate = _fragment(plan, context, 0)

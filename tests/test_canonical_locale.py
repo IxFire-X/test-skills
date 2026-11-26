@@ -4,8 +4,11 @@ from copy import deepcopy
 
 import pytest
 
+from tests.test_automation_revision_budget import automated_document
 from tests.test_requirement_traceability import canonical_fixture
-from tools.canonical_document import validate_canonical_document
+from tools.canonical_document import validate_canonical_document, _MISSING, CanonicalDocumentError
+from tools.canonical_document import _human_http_alignment, _json_value_at
+from tools.publish_test_case_bundle import build_bundle
 
 
 def test_canonical_document_requires_exact_v1_and_russian_human_corpus() -> None:
@@ -54,9 +57,6 @@ def test_canonical_document_has_no_fixed_case_count_ceiling() -> None:
 
 
 def test_short_native_case_remains_valid_and_renders_observable_expected() -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tools.publish_test_case_bundle import build_bundle
-
     assert validate_canonical_document(automated_document()) == []
     document = canonical_fixture()
     document["operation_capabilities"] = [{
@@ -80,10 +80,6 @@ def test_short_native_case_remains_valid_and_renders_observable_expected() -> No
 
 
 def test_service_only_expected_in_last_step_is_rejected_before_publication() -> None:
-    import pytest
-
-    from tools.canonical_document import CanonicalDocumentError
-    from tools.publish_test_case_bundle import build_bundle
 
     document = canonical_fixture()
     steps = document["test_cases"][0]["steps"]
@@ -96,7 +92,6 @@ def test_service_only_expected_in_last_step_is_rejected_before_publication() -> 
     assert "TC-batch-a-001 / STEP-last" in diagnostic["message"]
     with pytest.raises(CanonicalDocumentError, match="SEMANTIC_HUMAN_EXPECTED_PLACEHOLDER"):
         build_bundle(document)
-    from tests.test_automation_revision_budget import automated_document
 
     http_document = automated_document()
     http_document["test_cases"][0]["steps"][0]["expectations"][0]["text"] = "Проверено автотестом\n\nHTTP 200 OK"
@@ -105,8 +100,6 @@ def test_service_only_expected_in_last_step_is_rejected_before_publication() -> 
 
 
 def test_a_path_that_is_not_in_the_human_json_is_missing() -> None:
-    from tools.canonical_document import _MISSING, _json_value_at
-
     assert _json_value_at({"a": [10]}, ("a", "0")) == 10
     assert all(_json_value_at(value, tokens) is _MISSING for value, tokens in [({"a": 1}, ("b",)), ({"a": 1}, ("0",)), ([1], ("5",)), ([1], ("x",))])
 
@@ -119,8 +112,6 @@ def _exists_step(response: str) -> dict:
 
 @pytest.mark.parametrize(("value", "codes"), [('"<идентификатор>"', []), ('"abc"', ["SEMANTIC_HUMAN_EXPECTATION_PLACEHOLDER"])])
 def test_an_exists_assertion_wants_a_placeholder_in_the_human_response(value: str, codes: list[str]) -> None:
-    from tools.canonical_document import _human_http_alignment
-
     diagnostics: list[dict] = []
     _human_http_alignment(_exists_step('{\n  "id": ' + value + "\n}"), (), diagnostics)
     assert [item["code"] for item in diagnostics] == codes

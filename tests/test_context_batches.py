@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_batch_size_split import _requirement
+from tests.test_marker_parts import _run
 from tools import pilot_state
+from tools.batch_assembly import WINDOW_SHARE, plan_batches_for_project
+from tools.review_view import run_context_note
+from tools.step_size import step_window
 
 pytestmark = pytest.mark.contract
 
@@ -18,8 +23,6 @@ HEADER = "sha256:" + "c" * 64
 
 
 def _requirements() -> list[dict]:
-    from tests.test_batch_size_split import _requirement
-
     return [_requirement(1, "REQ-1 Оплата " + "а" * 1000), _requirement(2, "REQ-2 Возврат " + "б" * 1000)]
 
 
@@ -36,8 +39,6 @@ def _number(plan, pattern: str) -> int:
 
 @pytest.fixture
 def three(tmp_path: Path):
-    from tests.test_marker_parts import _run
-
     (tmp_path / "tests").mkdir()  # a project test, for the map of existing tests (FaT-EC)
     (tmp_path / "tests" / "test_part0.py").write_text("from part0 import X\n\n\ndef test_x():\n    assert X == 1\n", encoding="utf-8")
     root, attempt_id, baseline, receipts = _run(tmp_path, files=3)
@@ -155,9 +156,6 @@ def test_the_reviewer_view_says_which_context_batches_the_generator_saw(three) -
 
 
 def test_with_one_context_batch_the_reviewer_view_has_no_context_line(tmp_path: Path) -> None:
-    from tests.test_marker_parts import _run
-    from tools.review_view import run_context_note
-
     found = _run(tmp_path, files=1)
     assert len(found[3]) == 1
     root, attempt_id, *_rest = _generator_journal((tmp_path, *found), found[3])
@@ -171,9 +169,6 @@ CAMPAIGN = Path(os.environ.get("TRASSA_LIVE_DIR") or Path(__file__).resolve().pa
 def test_a_campaign_run_with_two_context_batches_takes_both_and_fits(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read only: the jpetstore-6 run of 28.10 — its requirements, its two context receipts, its project (before FaT-AU3
     the generator saw one: 261 563 of 488 714 B); its two batches stay two."""
-    from tools.batch_assembly import WINDOW_SHARE, plan_batches_for_project
-    from tools.step_size import step_window
-
     project = CAMPAIGN / "jpetstore-6"
     # The campaign keeps the YAML .skillsrc of the version before P5, which the package no longer reads. Its settings, as JSON:
     # no limits and no requirements.id_pattern, so every default applies exactly as it did.

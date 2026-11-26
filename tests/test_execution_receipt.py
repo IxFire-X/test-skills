@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
+import tools.pilot_state as pilot_state
 from tests.helpers import MODULE_PYTHON
 
 from tests.test_project_native_pytest import _reviewed_inputs
@@ -18,6 +19,7 @@ from tools.pilot_state import (
     publish_run_artifact_bytes,
     read_attempt_receipt,
 )
+from tools.run_tests import ProcessOutcome, _durable_execution_artifacts
 from tools.schema_validation import schema_diagnostics
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
@@ -260,9 +262,6 @@ def test_prestart_receipt_is_rejected_after_execution_was_claimed(tmp_path: Path
 def test_runner_output_writer_and_helper_share_one_canonical_utf8_representation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import tools.pilot_state as pilot_state
-    from tools.run_tests import ProcessOutcome, _durable_execution_artifacts
-
     canonicalize = getattr(pilot_state, "_canonical_runner_output", None)
     assert callable(canonicalize)
     source = (
@@ -314,8 +313,6 @@ def test_runner_output_writer_and_helper_share_one_canonical_utf8_representation
 def test_durable_native_report_keeps_junit_semantics_without_output_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tools.run_tests import ProcessOutcome, _durable_execution_artifacts
-
     source = (Path(__file__).parent / "fixtures" / "reports" / "junit-with-output.xml").read_bytes()
     source_path = tmp_path / "test-results" / "pytest.xml"
     captured: dict[str, bytes] = {}
@@ -356,8 +353,6 @@ def test_durable_native_report_keeps_junit_semantics_without_output_payload(
 def test_durable_native_report_limit_fails_closed_before_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tools.run_tests import ProcessOutcome, _durable_execution_artifacts
-
     testcase = b'<testcase classname="tests.test_sample" name="test_one"/>'
     source = b'<testsuite tests="20000">' + testcase * 20000 + b"</testsuite>"
     published: list[str] = []
@@ -392,8 +387,6 @@ def test_durable_native_report_limit_fails_closed_before_publication(
 def test_execution_receipt_loader_rejects_noncanonical_runner_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import tools.pilot_state as pilot_state
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     runner_output = publish_run_artifact_bytes(
         run_root, attempt_id, "runner-output.txt", b"safe output\r\n",

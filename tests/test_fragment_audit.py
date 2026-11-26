@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
+from tools.batch_assembly import DOCUMENT_WIDE_CODES, assemble_candidate, normalize_fragment, validate_fragment
+from tools.canonical_document import validate_canonical_document_all
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fat-vf"
 PRECEDENCE = ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]
 
@@ -36,8 +40,6 @@ def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code(tmp_path: Path)
     """run-doc-only c1f13463…: the check of the fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER.
     P1: the order is the code's work — the check of a fragment (and submit) put the categories in V3 order and say so; the rule
     stays in the document audit; P1-fix2: assemble puts the same file in the same order."""
-    from tools.batch_assembly import normalize_fragment, validate_fragment
-
     fragment, plan, header = _load("doc-only-fragment-1.json"), _load("doc-only-plan.json"), _load("doc-only-header.json")
     fragment.pop("digest", None)
     result = validate_fragment(fragment, plan, header, fragment["context_receipt"])
@@ -48,8 +50,6 @@ def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code(tmp_path: Path)
 
 
 def _synthetic() -> tuple[dict, dict, dict, dict]:
-    from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
-
     context = _context_receipt()
     header = _header()
     plan = _plan(header, context)
@@ -58,9 +58,6 @@ def _synthetic() -> tuple[dict, dict, dict, dict]:
 
 @pytest.mark.parametrize("broken", ["categories", "requirement_ids"])
 def test_validate_fragment_puts_an_order_error_in_order_and_assemble_takes_the_same_file(broken: str) -> None:
-    from tests.test_batch_assembly import _fragment
-    from tools.batch_assembly import assemble_candidate, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     bad = copy.deepcopy(fragment)
     case = bad["test_cases"][0]
@@ -79,9 +76,6 @@ def test_validate_fragment_puts_an_order_error_in_order_and_assemble_takes_the_s
 
 
 def test_a_valid_split_still_assembles_and_document_wide_rules_stay_in_assemble() -> None:
-    from tests.test_batch_assembly import _fragment
-    from tools.batch_assembly import DOCUMENT_WIDE_CODES, assemble_candidate, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     validate_fragment(fragment, plan, header, context)
     candidate, _receipt = assemble_candidate(header, plan, [fragment, _fragment(plan, context, 1)])
@@ -94,10 +88,6 @@ def test_a_valid_split_still_assembles_and_document_wide_rules_stay_in_assemble(
 def test_the_audit_of_the_canon_still_catches_a_wrong_order_in_an_assembled_candidate(broken: str) -> None:
     """P1-fix2: assemble puts the order in itself, so the one thing that catches a hand-edited candidate with a wrong order
     is the audit validate-canonical runs — here on a candidate assembled right and then turned around."""
-    from tests.test_batch_assembly import _fragment
-    from tools.batch_assembly import assemble_candidate
-    from tools.canonical_document import validate_canonical_document_all
-
     fragment, plan, header, context = _synthetic()
     case = fragment["test_cases"][0]
     second = dict(fragment["requirements"][0], requirement_id=fragment["requirements"][0]["requirement_id"] + "-B", display_order=100)

@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
+import tests.test_reviewer_protocol as protocol
 from tests import snapshots
+from tests.test_review_requested import _build_is_patched, _generated_run
+from tests.test_rework_stage import _reviewed
+from tests.test_run_report import _finished_run
+from tools import run_journal
+from tools.run_pipeline import main
 
 
 def _build(project: Path) -> dict:
@@ -38,9 +44,6 @@ def test_a_snapshot_that_differs_from_the_build_is_refused(tmp_path: Path) -> No
 
 def test_a_restored_run_is_new_files_and_status_reads_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The run facts keep no file identity (st_ino, st_ctime): a copy with new inodes at the same path is the same run."""
-    from tests.test_run_report import _finished_run
-    from tools.run_pipeline import main
-
     first = (_finished_run(tmp_path) / "events.jsonl").stat().st_ino
     snapshots._HOLDER.pop("finished-run")
     run_root = _finished_run(tmp_path)
@@ -62,31 +65,21 @@ def test_a_second_run_of_one_key_in_one_test_is_a_fresh_build_beside_the_first(t
 
 
 def test_a_test_that_patched_a_function_of_the_build_gets_a_build_of_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import tests.test_reviewer_protocol as protocol
-    from tests.test_review_requested import _generated_run
-
     real = protocol._new_run
     monkeypatch.setattr(protocol, "_new_run", lambda project: real(project))
     assert _generated_run(tmp_path)["project"] == tmp_path / "project"
 
 
 def test_a_patch_in_the_module_that_defines_a_function_of_the_build_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _build_is_patched
-    from tools import run_journal
-
     real = run_journal.derive_state
     monkeypatch.setattr(run_journal, "derive_state", lambda *args, **kwargs: real(*args, **kwargs))
     assert _build_is_patched()
 
 
 def test_a_test_that_patched_anything_before_the_review_gets_a_review_of_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_rework_stage import _reviewed
-
     monkeypatch.setenv("C4_ANY_PATCH", "1")
     assert not _reviewed(tmp_path, monkeypatch)[0]["project"].parent.name.startswith("reviewed-")
 
 
 def test_a_test_that_patched_nothing_gets_the_snapshot(tmp_path: Path) -> None:
-    from tests.test_review_requested import _generated_run
-
     assert _generated_run(tmp_path)["project"].parent.name.startswith("generated-run-")

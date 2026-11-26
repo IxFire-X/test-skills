@@ -11,6 +11,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_param_groups import grouped
+from tests.test_partial_automation import _evidence
+from tools.api import _cmd_validate_canonical
+from tools.batch_assembly import BatchAssemblyError, _document
+from tools.canonical_document import document_sha256, validate_canonical_document
+from tools.pilot_state import _result_facts
+from tools.revision_selection import candidate_rows, check_subtraction, coverage_gaps, effective_review_is_bound
+from tools.revision_selection import partial_is_bound, validate_successor
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 
@@ -108,8 +117,6 @@ def test_the_share_of_removed_cases_is_a_boundary(count: int, share: int, kind: 
 
 
 def _grouped() -> dict:
-    from tests.test_param_groups import grouped
-
     document = grouped()
     document["revision"], document["parent_sha256"] = 1, None
     return document
@@ -144,9 +151,6 @@ def test_a_case_dragged_out_with_its_group_counts_for_the_share() -> None:
 # --- the subtraction ------------------------------------------------------------------------------
 
 def test_the_subtraction_is_valid_and_names_the_requirements_it_left_without_a_case() -> None:
-    from tools.canonical_document import validate_canonical_document
-    from tools.revision_selection import check_subtraction, coverage_gaps
-
     document = r1_document()
     effective = _outcome(document, _real(document, 1))["effective"]
     assert validate_canonical_document(effective) == [] and (effective["revision"], effective["test_cases"][0]["display_order"]) == (2, 2)
@@ -155,8 +159,6 @@ def test_the_subtraction_is_valid_and_names_the_requirements_it_left_without_a_c
 
 
 def test_a_kept_case_that_differs_by_one_byte_is_refused() -> None:
-    from tools.revision_selection import check_subtraction
-
     document = r1_document()
     effective = _outcome(document, _real(document, 1))["effective"]
     effective["test_cases"][3]["title"] += "."
@@ -164,24 +166,18 @@ def test_a_kept_case_that_differs_by_one_byte_is_refused() -> None:
 
 
 def test_a_case_taken_out_that_was_not_rejected_is_refused() -> None:
-    from tools.revision_selection import check_subtraction
-
     document = r1_document()
     effective = _outcome(document, _real(document, 1, 2))["effective"]
     assert check_subtraction(document, effective, ["TC-B1-001"])[0]["code"] == "SUBTRACTION_REMOVED_SET"
 
 
 def test_a_rejected_case_put_back_is_refused() -> None:
-    from tools.revision_selection import check_subtraction
-
     document = r1_document()
     effective = _outcome(document, _real(document, 1))["effective"]
     assert check_subtraction(document, effective, ["TC-B1-001", "TC-B1-002"])[0]["code"] == "SUBTRACTION_REMOVED_SET"
 
 
 def test_the_subtraction_changes_nothing_but_the_cases_and_the_lineage() -> None:
-    from tools.revision_selection import check_subtraction
-
     document = r1_document()
     effective = _outcome(document, _real(document, 1))["effective"]
     effective["requirements"][0]["text"] += "."
@@ -189,8 +185,6 @@ def test_the_subtraction_changes_nothing_but_the_cases_and_the_lineage() -> None
 
 
 def test_the_binding_of_a_partial_effective_needs_exactly_the_rejected_set() -> None:
-    from tools.revision_selection import partial_is_bound
-
     document = r1_document()
     report = _report(document, *_real(document, 1))
     effective = _outcome(document, _real(document, 1))["effective"]
@@ -202,8 +196,6 @@ def test_the_binding_of_a_partial_effective_needs_exactly_the_rejected_set() -> 
 # --- the validator clauses and the guards ---------------------------------------------------------
 
 def test_a_revision_one_document_keeps_the_contiguous_order_and_the_coverage_rule() -> None:
-    from tools.canonical_document import validate_canonical_document
-
     document = r1_document()
     del document["test_cases"][0]
     assert {row["code"] for row in validate_canonical_document(document)} >= {"CANONICAL_DISPLAY_ORDER"}
@@ -229,9 +221,6 @@ def _forged(gap: str) -> dict:
 
 @pytest.mark.parametrize("gap", ["uncovered", "order"])
 def test_the_forged_candidate_passes_the_validator_but_no_candidate_input(gap: str) -> None:
-    from tools.canonical_document import validate_canonical_document
-    from tools.revision_selection import candidate_rows
-
     forged = _forged(gap)
     assert validate_canonical_document(forged) == []  # the clause is by content: the guards are the inputs'
     assert candidate_rows(forged)[0]["code"] == "CANDIDATE_REVISION"
@@ -239,22 +228,15 @@ def test_the_forged_candidate_passes_the_validator_but_no_candidate_input(gap: s
 
 
 def test_the_validate_canonical_command_refuses_a_candidate_that_is_not_revision_one(tmp_path: Path) -> None:
-    from tools.api import _cmd_validate_canonical
-
     assert _cmd_validate_canonical(type("Args", (), {"document": _forged("uncovered")})())[0]["code"] == "CANDIDATE_REVISION"
 
 
 def test_the_header_of_assemble_cannot_claim_a_revision() -> None:
-    from tools.batch_assembly import BatchAssemblyError, _document
-
     with pytest.raises(BatchAssemblyError, match="revision"):
         _document({"revision": 2, "parent_sha256": "sha256:" + "a" * 64}, {"source_requirements": []}, [])
 
 
 def test_an_auto_fix_successor_cannot_renumber_a_case_or_add_a_requirement() -> None:
-    from tools.canonical_document import document_sha256
-    from tools.revision_selection import validate_successor
-
     document = r1_document()
     successor = copy.deepcopy(document)
     successor["revision"], successor["parent_sha256"] = 2, document_sha256(document)
@@ -277,9 +259,6 @@ def _event(report: dict) -> dict:
 
 def test_a_ledger_that_accepts_an_answer_the_code_sends_back_whole_binds_no_effective() -> None:
     """The read side of the ledger event: ACCEPTED beside a report with a case-less blocking finding is bound to no effective document (r1 or r2)."""
-    from tools.canonical_document import document_sha256
-    from tools.revision_selection import effective_review_is_bound
-
     document = r1_document()
     digest, subtracted = document_sha256(document), _outcome(document, _real(document, 1))["effective"]
     whole = _report(document, *_real(document, 1), _finding("BLOCKING", ["CREQ-B1-002"]))
@@ -291,9 +270,6 @@ def test_a_ledger_that_accepts_an_answer_the_code_sends_back_whole_binds_no_effe
 
 def test_partial_accepted_is_a_reason_of_a_review_that_accepted_a_set_and_never_an_accepted_attempt() -> None:
     """Mode B: a PASS over r2 closes PARTIAL / PARTIAL_ACCEPTED with accepted=false; the tuple check refuses it without one accepting verdict."""
-    from tests.test_partial_automation import _evidence
-    from tools.pilot_state import _result_facts
-
     base = {"run_id": "a" * 32, "attempt_id": "b" * 32, "attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "PASS", "coverage": "FULL",
             "reason_code": "PARTIAL_ACCEPTED", "prior_stage_cause": "EXECUTION_COMPLETE", **_evidence(blocker_count=0)}
     facts, accepted = _result_facts(base, "local-pilot-v1", external_cause_available=False)

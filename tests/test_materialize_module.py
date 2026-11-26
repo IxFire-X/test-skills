@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from tests.helpers import MODULE_PYTHON
-from tools import exec_commands
+from tools import exec_commands, project_inventory
 from tools.run_pipeline import HostStop
 
 
@@ -72,8 +72,6 @@ def test_materialize_settles_the_module_before_it_writes_the_tests(tmp_path: Pat
 
 
 def test_a_rejection_that_cannot_be_persisted_says_to_start_a_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import project_inventory
-
     def unreadable(*_args: object) -> None:
         raise ValueError("no baseline")
 

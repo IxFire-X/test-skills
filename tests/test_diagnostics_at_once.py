@@ -11,7 +11,21 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import answer_stage
 from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan, _refresh
+from tests.test_marker_parts import AUTHORIZATION
+from tests.test_pg1 import _plain_split
+from tests.test_scope_pause import _paused_run, _submit_plan
+from tests.test_step_inputs import _generator_run, _request
+from tools import pilot_state, run_pipeline, step_size
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, canonical_bytes, fill_fragment_bindings
+from tools.batch_assembly import normalize_fragment, validate_fragment
+from tools.fixes import FIXES, fix_for
+from tools.json_cli import JsonArgumentParser, error_envelope, error_fields
+from tools.pilot_state import create_run, read_model_stage_artifact
+from tools.run_pipeline import HostStop
+from tools.run_report import step_sizes
+from tools.test_case_projections import _reject_unknown_profile
 
 pytestmark = pytest.mark.contract
 
@@ -48,8 +62,6 @@ def _batch_one_violations() -> tuple[dict, dict, dict, dict]:
 
 
 def test_one_validate_fragment_shows_every_diagnostic_each_with_a_fix() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     fragment, plan, header, context = _batch_one_violations()
     with pytest.raises(BatchAssemblyError) as refused:
         validate_fragment(fragment, plan, header, context)
@@ -76,8 +88,6 @@ def _empty_expectation(fragment: dict, *blockers: tuple[str, str]) -> None:
 
 
 def test_an_empty_expectation_in_a_blocked_step_needs_the_blocker_that_names_it() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     _empty_expectation(fragment, ("UNRESOLVED_INPUT_BINDING", "/inputs"))
     with pytest.raises(BatchAssemblyError) as refused:
@@ -86,16 +96,12 @@ def test_an_empty_expectation_in_a_blocked_step_needs_the_blocker_that_names_it(
 
 
 def test_an_empty_expectation_with_its_own_blocker_passes() -> None:
-    from tools.batch_assembly import validate_fragment
-
     fragment, plan, header, context = _synthetic()
     _empty_expectation(fragment, ("UNRESOLVED_ASSERTION", "/expectations/0/assertions"))
     validate_fragment(fragment, plan, header, context)
 
 
 def test_the_bindings_stay_fatal_and_first() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     fragment, plan, header, context = _batch_one_violations()
     fragment["batch_id"] = "BATCH-unknown"
     with pytest.raises(BatchAssemblyError) as refused:
@@ -110,8 +116,6 @@ def test_the_bindings_stay_fatal_and_first() -> None:
 
 
 def test_a_wrong_plan_digest_says_remove_the_field_and_an_empty_one_passes() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     wrong = copy.deepcopy(fragment)
     wrong["plan_digest"] = "sha256:" + "9" * 64
@@ -128,8 +132,6 @@ def test_a_wrong_plan_digest_says_remove_the_field_and_an_empty_one_passes() -> 
 
 
 def test_a_given_self_digest_that_does_not_match_says_remove_the_field() -> None:
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     fragment["digest"] = "sha256:" + "8" * 64
     with pytest.raises(BatchAssemblyError) as refused:
@@ -141,8 +143,6 @@ def test_a_given_self_digest_that_does_not_match_says_remove_the_field() -> None
 
 
 def test_a_shuffled_order_passes_names_what_it_normalized_and_the_canon_is_byte_equal() -> None:
-    from tools.batch_assembly import canonical_bytes, fill_fragment_bindings, normalize_fragment, validate_fragment
-
     fragment, plan, header, context = _synthetic()
     second = dict(fragment["requirements"][0], requirement_id=fragment["requirements"][0]["requirement_id"] + "-B", display_order=100)
     fragment["requirements"].append(second)
@@ -166,9 +166,7 @@ def test_a_shuffled_order_passes_names_what_it_normalized_and_the_canon_is_byte_
 
 def test_submit_stores_the_normalized_answer_and_names_it(tmp_path: Path) -> None:
     """submit and its dry run share one normalization: the stored canon has the order assemble wants."""
-    from tests.helpers import answer_stage
     from tests.test_batch_journal import _run
-    from tools.pilot_state import read_model_stage_artifact
 
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     stage = f"tc-generator:{fragments[0]['batch_id']}"
@@ -197,8 +195,6 @@ def _calls(names: set[str]):
 
 
 def test_the_fix_table_covers_every_code_of_the_three_error_families() -> None:
-    from tools.fixes import FIXES
-
     missing: set[str] = set()
     for path, node, name in _calls({"BatchAssemblyError", "OrchestrationError", "HostStop"}):
         code = node.args[0] if node.args else None
@@ -211,8 +207,6 @@ def test_the_fix_table_covers_every_code_of_the_three_error_families() -> None:
 
 
 def test_the_fix_table_covers_the_codes_of_the_work() -> None:
-    from tools.fixes import FIXES, fix_for
-
     from_work = ["SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING", "SEMANTIC_HUMAN_BODY_UNBOUND", "SEMANTIC_BODY_TARGET_OVERLAP", "SEMANTIC_BLOCKER_PATH",
                  "SEMANTIC_MISSING_ASSERTION_BLOCKER", "SEMANTIC_SPURIOUS_BLOCKER", "CANONICAL_REQUIREMENT_ID_ORDER", "CANONICAL_CATEGORY_ORDER",
                  "SCHEMA_ENUM", "SCHEMA_ONE_OF", "SCHEMA_REQUIRED", "BATCH_UNCOVERED_REQUIREMENT", "MODEL_REQUEST_INVALID", "MODEL_INPUTS_MISMATCH",
@@ -225,8 +219,6 @@ def test_the_fix_table_covers_the_codes_of_the_work() -> None:
 
 
 def test_every_code_the_canonical_audit_emits_has_a_fix() -> None:
-    from tools.fixes import fix_for
-
     codes = set()
     for name in ("canonical_document.py", "schema_validation.py"):
         codes |= set(re.findall(r'"((?:SEMANTIC|CANONICAL)_[A-Z0-9_]+)"', (ROOT / "tools" / name).read_text(encoding="utf-8")))
@@ -234,15 +226,11 @@ def test_every_code_the_canonical_audit_emits_has_a_fix() -> None:
 
 
 def test_the_blocker_codes_share_one_rule_with_an_example() -> None:
-    from tools.fixes import FIXES
-
     one = {FIXES[code] for code in ("SEMANTIC_BLOCKER_PATH", "SEMANTIC_MISSING_ASSERTION_BLOCKER", "SEMANTIC_SPURIOUS_BLOCKER")}
     assert len(one) == 1 and "field_path" in next(iter(one)) and "UNRESOLVED_" in next(iter(one))
 
 
 def test_the_envelope_takes_the_fix_from_the_table_when_the_error_has_none() -> None:
-    from tools.json_cli import error_envelope
-
     class Refused(ValueError):
         code = "ATTEMPT_TERMINAL"
 
@@ -252,8 +240,6 @@ def test_the_envelope_takes_the_fix_from_the_table_when_the_error_has_none() -> 
 
 
 def test_host_stop_without_a_fix_gets_the_table_one() -> None:
-    from tools.run_pipeline import HostStop
-
     assert HostStop("FINISH_FACT_UNDETERMINED", "no attempt").fix
     assert HostStop("FINISH_FACT_UNDETERMINED", "no attempt", "свой").fix == "свой"
     assert HostStop("NO_SUCH_STOP", "x").fix is None
@@ -264,9 +250,6 @@ def test_host_stop_without_a_fix_gets_the_table_one() -> None:
 # --------------------------------------------------------------------------------------
 
 def test_an_unknown_zephyr_profile_is_a_coded_refusal() -> None:
-    from tools.json_cli import error_envelope
-    from tools.test_case_projections import _reject_unknown_profile
-
     with pytest.raises(ValueError) as refused:
         _reject_unknown_profile("v9")
     envelope = error_envelope(refused.value)
@@ -275,8 +258,6 @@ def test_an_unknown_zephyr_profile_is_a_coded_refusal() -> None:
 
 def test_the_ledger_of_a_closed_attempt_is_refused_with_attempt_terminal(tmp_path: Path, monkeypatch) -> None:
     from tests.test_marker_parts import _run
-    from tools import pilot_state
-    from tools.json_cli import error_envelope
 
     root, attempt_id, _baseline, _receipts = _run(tmp_path, files=1)
     real = pilot_state.derive_state
@@ -299,9 +280,6 @@ def test_the_ledger_of_a_closed_attempt_is_refused_with_attempt_terminal(tmp_pat
 # --------------------------------------------------------------------------------------
 
 def test_a_request_writes_a_step_measurement_for_the_stages_the_journal_resolves(tmp_path: Path) -> None:
-    from tests.test_step_inputs import _generator_run, _request
-    from tools.run_report import step_sizes
-
     root, attempt_id, _baseline, receipts, marker, plan, header, *_rest = _generator_run(tmp_path)
     steps = lambda: [json.loads(line)["step"] for line in (root / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()]  # noqa: E731
     assert steps() == ["context-marker:baseline"]  # a part of the marker is measured, the merge by the code (controller:) is not a model step
@@ -313,7 +291,6 @@ def test_a_request_writes_a_step_measurement_for_the_stages_the_journal_resolves
 
 def test_a_failed_measurement_is_named_in_the_output_and_never_refuses_the_request(tmp_path: Path, monkeypatch) -> None:
     from tests.test_marker_parts import _run
-    from tools import pilot_state, step_size
 
     root, attempt_id, baseline, receipts = _run(tmp_path, files=1)
 
@@ -348,10 +325,6 @@ def test_a_refusal_with_a_run_root_is_one_line_with_five_fields(tmp_path: Path, 
 
 
 def test_run_pipeline_refusals_of_a_named_run_go_to_the_same_journal(tmp_path: Path, capsys) -> None:
-    from tests.test_marker_parts import AUTHORIZATION
-    from tools import run_pipeline
-    from tools.pilot_state import create_run
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     assert run_pipeline.main(["finish", "--project", str(tmp_path), "--run", root.name]) == 2
     capsys.readouterr()
@@ -361,8 +334,6 @@ def test_run_pipeline_refusals_of_a_named_run_go_to_the_same_journal(tmp_path: P
 
 
 def test_the_fix_of_the_call_site_beats_the_table_and_the_errors_own_beats_both() -> None:
-    from tools.json_cli import error_fields
-
     class Refused(ValueError):
         code = "INVENTORY_INVALID"
 
@@ -393,8 +364,6 @@ def _others(plan: dict, context: dict) -> list[dict]:
 
 
 def test_assemble_accepts_the_file_validate_fragment_accepted() -> None:
-    from tools.batch_assembly import assemble_candidate, validate_fragment
-
     mixed, plan, header, context = _shuffled_batch_one()
     assert validate_fragment(copy.deepcopy(mixed), plan, header, context)["normalized"]
     candidate, _receipt = assemble_candidate(header, plan, [mixed, *_others(plan, context)])
@@ -403,8 +372,6 @@ def test_assemble_accepts_the_file_validate_fragment_accepted() -> None:
 
 
 def test_assemble_of_the_agents_file_and_of_the_recorded_answer_is_the_same_candidate_and_receipt() -> None:
-    from tools.batch_assembly import assemble_candidate, fill_fragment_bindings, normalize_fragment
-
     mixed, plan, header, context = _shuffled_batch_one()
     recorded = fill_fragment_bindings(normalize_fragment(copy.deepcopy(mixed))[0], plan)  # what submit writes to the journal
     others = _others(plan, context)
@@ -414,8 +381,6 @@ def test_assemble_of_the_agents_file_and_of_the_recorded_answer_is_the_same_cand
 
 
 def test_assemble_does_not_change_the_files_it_was_given() -> None:
-    from tools.batch_assembly import assemble_candidate
-
     mixed, plan, header, context = _shuffled_batch_one()
     before = copy.deepcopy(mixed)
     assemble_candidate(header, plan, [mixed, *_others(plan, context)])
@@ -423,10 +388,6 @@ def test_assemble_does_not_change_the_files_it_was_given() -> None:
 
 
 def test_a_refusal_of_the_canonical_audit_in_assemble_gives_all_rows_and_its_own_fix() -> None:
-    from tests.test_pg1 import _plain_split
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-    from tools.json_cli import error_fields
-
     # Russian prose anywhere in the document is the rule of the whole document (PG1: checked at the last batch, test_pg1)
     plan, header, context, fragments = _plain_split()
     assert validate_fragment(copy.deepcopy(fragments[0]), plan, header, context) is None  # batch 1: another batch may have it
@@ -440,15 +401,11 @@ def test_a_refusal_of_the_canonical_audit_in_assemble_gives_all_rows_and_its_own
 
 
 def test_the_fix_of_a_canonical_order_says_the_code_lays_it_out() -> None:
-    from tools.fixes import fix_for
-
     for code in ("CANONICAL_REQUIREMENT_ID_ORDER", "CANONICAL_CATEGORY_ORDER"):
         assert "submit ставит порядок сам" in fix_for(code), code
 
 
 def test_a_scope_pause_is_not_a_refusal_of_the_journal(tmp_path: Path, capsys) -> None:
-    from tests.test_scope_pause import _paused_run, _submit_plan
-
     root, *_ = _paused_run(tmp_path)
     code, payload = _submit_plan(capsys, root)
     assert code == 2 and payload["code"] == "SCOPE_PENDING", payload
@@ -456,8 +413,6 @@ def test_a_scope_pause_is_not_a_refusal_of_the_journal(tmp_path: Path, capsys) -
 
 
 def test_the_fix_of_an_invalid_argument_names_the_module_that_refused(capsys) -> None:
-    from tools.json_cli import JsonArgumentParser
-
     for prog, module in (("python -m tools.api", "tools.api"), ("run_pipeline.py", "tools.run_pipeline")):
         parser = JsonArgumentParser(prog=prog)
         parser.add_argument("--known")

@@ -2,9 +2,18 @@
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
+
+from tests.test_batch_assembly import _fragment, _header, _header_digest, _refresh
+from tests.test_phase2_scan import _skillsrc
+from tools.batch_assembly import ANSWER_PER_TEXT_BYTE, BatchAssemblyError, _plan_batches, assemble_candidate
+from tools.batch_assembly import canonical_bytes, plan_batches, plan_batches_for_project, prior_capabilities
+from tools.batch_assembly import validate_fragment, with_digest
+from tools.init_skillsrc import _payload
+from tools.skillsrc_manifest import parse_skillsrc_bytes
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fat-bo"
 
@@ -28,8 +37,6 @@ def _owners(plan: dict) -> dict[str, int]:
 
 @pytest.mark.parametrize("project", ["petclinic", "microservices"])
 def test_campaign_single_batch_plan_reads_byte_identical_without_budget(project):
-    from tools.batch_assembly import _plan_batches, canonical_bytes, plan_batches
-
     recorded = _load(f"{project}-plan.json")
     plan = plan_batches(recorded["source_requirements"], _load(f"{project}-grouping.json"))
 
@@ -38,8 +45,6 @@ def test_campaign_single_batch_plan_reads_byte_identical_without_budget(project)
 
 
 def test_project_that_fits_keeps_the_one_batch_plan_byte_identical():
-    from tools.batch_assembly import canonical_bytes, plan_batches
-
     recorded = _load("microservices-plan.json")
     plan = plan_batches(recorded["source_requirements"], _load("microservices-grouping.json"),
                         window_bytes=1_000_000, input_bytes=198_000)
@@ -49,8 +54,6 @@ def test_project_that_fits_keeps_the_one_batch_plan_byte_identical():
 
 
 def test_removed_independence_evidence_no_longer_splits():
-    from tools.batch_assembly import plan_batches
-
     evidence = dict(_evidence(), complete=True, independence_proven=True, groups=[
         {"group_id": "a", "source_requirement_ids": ["SREQ-0001"], "independence_evidence": ["target:a"]},
         {"group_id": "b", "source_requirement_ids": ["SREQ-0002"], "independence_evidence": ["target:b"]},
@@ -61,8 +64,6 @@ def test_removed_independence_evidence_no_longer_splits():
 
 
 def test_petclinic_campaign_answer_is_split_into_two_batches_covering_every_requirement_once():
-    from tools.batch_assembly import plan_batches
-
     recorded = _load("petclinic-plan.json")
     plan = plan_batches(recorded["source_requirements"], _load("petclinic-grouping.json"),
                         window_bytes=1_000_000, input_bytes=385_000)
@@ -75,8 +76,6 @@ def test_petclinic_campaign_answer_is_split_into_two_batches_covering_every_requ
 
 
 def test_id_groups_are_never_torn_between_batches():
-    from tools.batch_assembly import plan_batches
-
     recorded = _load("microservices-plan.json")
     texts = {item["source_requirement_id"]: item["text"] for item in recorded["source_requirements"]}
     plan = plan_batches(recorded["source_requirements"], _load("microservices-grouping.json"),
@@ -90,8 +89,6 @@ def test_id_groups_are_never_torn_between_batches():
 
 
 def test_group_over_the_batch_budget_is_its_own_batch_with_a_warning():
-    from tools.batch_assembly import plan_batches
-
     requirements = [_requirement(1, "A01. " + "а" * 400), _requirement(2, "B01. " + "б" * 4000), _requirement(3, "C01. " + "в" * 400)]
     plan = plan_batches(requirements, _evidence(), window_bytes=200_000, input_bytes=40_000)
 
@@ -100,8 +97,6 @@ def test_group_over_the_batch_budget_is_its_own_batch_with_a_warning():
 
 
 def test_zero_window_disables_the_split():
-    from tools.batch_assembly import plan_batches
-
     requirements = [_requirement(1, "A01. " + "а" * 40000), _requirement(2, "B01. " + "б" * 40000)]
     plan = plan_batches(requirements, _evidence(), window_bytes=0, input_bytes=900_000)
 
@@ -109,9 +104,6 @@ def test_zero_window_disables_the_split():
 
 
 def test_id_pattern_with_a_named_group_defines_the_group():
-    import re
-
-    from tools.batch_assembly import plan_batches
 
     requirements = [_requirement(1, "3.1 Первое " + "а" * 1000), _requirement(2, "3.2 Второе " + "а" * 1000),
                     _requirement(3, "4.1 Третье " + "а" * 1000), _requirement(4, "4.2 Четвёртое " + "а" * 1000)]
@@ -122,8 +114,6 @@ def test_id_pattern_with_a_named_group_defines_the_group():
 
 
 def test_ids_without_a_letter_group_fall_back_to_document_sections():
-    from tools.batch_assembly import plan_batches
-
     body = "а" * 1000
     texts = [f"REQ-1 Оплата {body}", f"REQ-2 Отмена {body}", f"REQ-3 Возврат {body}", f"REQ-4 Отчёт {body}"]
     document = "# Платежи\n\n## Оплата\n\n" + texts[0] + "\n\n" + texts[1] + "\n\n## Возвраты\n\n" + texts[2] + "\n\n" + texts[3] + "\n"
@@ -136,8 +126,6 @@ def test_ids_without_a_letter_group_fall_back_to_document_sections():
 
 
 def test_requirement_outside_every_group_is_named_in_the_notes():
-    from tools.batch_assembly import plan_batches
-
     requirements = [_requirement(1, "REQ-1 " + "а" * 3000), _requirement(2, "REQ-2 " + "б" * 3000), _requirement(3, "REQ-3 " + "в" * 3000)]
     plan = plan_batches(requirements, _evidence(), window_bytes=400_000, input_bytes=100_000, documents={})
 
@@ -172,9 +160,6 @@ def _split_fragments(capability_ids):
 
 
 def test_split_assembly_keeps_duplicate_warning_and_refuses_an_uncovered_requirement():
-    from tests.test_batch_assembly import _refresh
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-
     header, context, plan, fragments = _split_fragments(["CAP-shared", "CAP-shared"])
     document, receipt = assemble_candidate(header, plan, fragments)
     assert len(document["test_cases"]) == 2
@@ -192,9 +177,6 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
     (project / "docs").mkdir(parents=True)
     document = "# Требования\n\n## Оплата\n\nREQ-1 Оплата " + "а" * 3000 + "\n\n## Возвраты\n\nREQ-2 Возврат " + "б" * 3000 + "\n"
     (project / "docs" / "req.md").write_text(document, encoding="utf-8")
-    from tests.test_phase2_scan import _skillsrc
-    from tools.init_skillsrc import _payload
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
 
     manifest = parse_skillsrc_bytes(_skillsrc())
     manifest["limits"] = {"step_window_bytes": 1_000_000}
@@ -215,7 +197,6 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
     (run_tmp / "grouping.json").write_text(json.dumps({"header_digest": "sha256:" + "c" * 64, "context_receipt_digest": receipt["digest"]}), encoding="utf-8")
     (run_tmp / "context.json").write_text(json.dumps(receipt, ensure_ascii=False), encoding="utf-8")
 
-    from tools.batch_assembly import plan_batches_for_project
 
     plan = plan_batches_for_project(requirements, {"header_digest": "sha256:" + "c" * 64, "context_receipt_digest": receipt["digest"]}, project, [marker], receipt, None, None)
 
@@ -224,7 +205,6 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
 
 
 def _three_batch_fragments():
-    from tests.test_batch_assembly import _fragment, _header, _header_digest
     from tools.batch_assembly import plan_batches
 
     header, context = _header(), _context_receipt()
@@ -236,9 +216,6 @@ def _three_batch_fragments():
 
 
 def test_prior_capabilities_are_the_capabilities_of_the_earlier_batches_with_a_self_digest():
-    from tests.test_batch_assembly import _refresh
-    from tools.batch_assembly import BatchAssemblyError, prior_capabilities, with_digest
-
     header, context, plan, fragments = _three_batch_fragments()
     extra = dict(fragments[1]["operation_capabilities"][0], capability_id="CAP-other", action="other")
     fragments[1]["operation_capabilities"].append(extra)
@@ -258,9 +235,6 @@ def test_prior_capabilities_are_the_capabilities_of_the_earlier_batches_with_a_s
 
 
 def test_a_later_batch_must_reuse_the_capabilities_of_the_earlier_ones_before_the_answer_is_recorded():
-    from tests.test_batch_assembly import _refresh
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     header, context, plan, fragments = _three_batch_fragments()
     validate_fragment(fragments[1], plan, header, context, [fragments[0]])
     with pytest.raises(BatchAssemblyError, match="accepted fragments of the earlier batches"):
@@ -281,8 +255,6 @@ def test_a_later_batch_must_reuse_the_capabilities_of_the_earlier_ones_before_th
 
 
 def test_group_of_several_requirements_over_the_budget_is_cut_in_order_into_batches_under_the_budget():
-    from tools.batch_assembly import ANSWER_PER_TEXT_BYTE, plan_batches
-
     requirements = [_requirement(number, f"FR-{number} " + "а" * 1500) for number in range(1, 7)]
     requirements.append(_requirement(7, "NFR-1 " + "б" * 1500))
     plan = plan_batches(requirements, _evidence(), window_bytes=400_000, input_bytes=100_000)

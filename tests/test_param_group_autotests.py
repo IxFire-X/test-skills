@@ -10,9 +10,19 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
+
+from tests.test_run_report import _finished_run
+from tools import canonical_document, run_tests
+from tools.discover_project import junit_params_available
+from tools.exec_commands import _mismatch_way_out
+from tools.execution_adapters import command_for
+from tools.generated_delta import plan_quarantine
+from tools.run_report import build_report, render_markdown
+from tools.run_tests import _param_group_rows, junit_method_name, match_junit_cases, parse_junit_bytes
 
 FIXTURES = Path(__file__).parent / "fixtures" / "param-groups"
 IDS = ["TC-B1-001", "TC-B1-002", "TC-B1-003"]
@@ -62,8 +72,6 @@ def test_literal_rows_in_the_same_class_give_the_case_ids_in_order(text: str) ->
 
 
 def test_an_unnamed_method_source_uses_the_method_s_own_name() -> None:
-    from tools.run_tests import _param_group_rows
-
     method = METHOD.replace('@MethodSource("rows")', "@MethodSource")
     provider = VALID.replace("rows()", "tc_group_age()")
     assert _param_group_rows(_class(method, provider), "tc_group_age") == IDS
@@ -108,7 +116,6 @@ def _artifact(pairs: dict[str, tuple[str, str]]) -> dict:
 def document(monkeypatch: pytest.MonkeyPatch):
     import tools.review_view  # noqa: F401, E501  (imported before the patch: review_view and test_case_projections bind param_groups at import, and would keep the stub for the rest of the process)
     import tools.test_case_projections  # noqa: F401
-    from tools import canonical_document
 
     group = {"group_id": "PG-age", "parameter": None, "cases": [{"case_id": case_id} for case_id in IDS]}
     monkeypatch.setattr(canonical_document, "param_groups", lambda _document: [group])
@@ -182,8 +189,6 @@ def _dependency(artifact: str) -> str:
     ("build.gradle", "dependencies { testImplementation 'junit:junit:4.13.2' }", False),
 ])
 def test_junit_params_are_read_from_the_build(tmp_path: Path, name: str, text: str, available: bool) -> None:
-    from tools.discover_project import junit_params_available
-
     (tmp_path / name).write_text(text, encoding="utf-8")
     assert junit_params_available(tmp_path) is available
 
@@ -275,8 +280,6 @@ def test_a_testcase_of_another_class_is_not_called_a_display_name() -> None:
 
 
 def test_a_report_named_by_text_gets_no_advice_to_run_the_same_command_again() -> None:
-    from tools.exec_commands import _mismatch_way_out
-
     assert _mismatch_way_out(["unmatched JUnit testcase", "testcase of a reviewed class is named by text, not by a method: @DisplayName on a method"], "запустите ещё раз")         .startswith("тесты после materialize не правят")
     assert _mismatch_way_out(["unmatched JUnit testcase"], "запустите ещё раз") == "запустите ещё раз"
 
@@ -293,8 +296,6 @@ def test_a_gradle_row_naming_another_case_id_is_an_error() -> None:
 
 
 def test_a_failed_row_quarantines_the_method_and_names_the_rows() -> None:
-    from tools.generated_delta import plan_quarantine
-
     content = _class(METHOD, VALID)
     files = [{"file_id": PAIR[0], "path": "src/test/java/p/GroupTest.java", "content": content}]
     symbols = [{"file_id": PAIR[0], "symbol_id": PAIR[1],
@@ -315,9 +316,6 @@ def test_a_failed_row_quarantines_the_method_and_names_the_rows() -> None:
 
 
 def test_the_report_names_the_passed_rows_disabled_with_the_method(tmp_path: Path) -> None:
-    from tests.test_run_report import _finished_run
-    from tools.run_report import build_report, render_markdown
-
     run_root = _finished_run(tmp_path)
     project = run_root.parents[1]
     report = build_report(project, run_root.name)[0]
@@ -340,9 +338,6 @@ _M2 = Path.home() / ".m2" / "repository"
                     or not (_M2 / "org/apache/maven/plugins/maven-surefire-plugin/3.5.2").is_dir(),
                     reason="needs TEST_SKILLS_JAVA_HOME, mvn and junit-jupiter 5.10.2 / surefire 3.5.2 in ~/.m2 (offline)")
 def test_real_maven_runs_the_group_by_its_selector_and_gives_each_row(tmp_path: Path) -> None:
-    from tools.execution_adapters import command_for
-    from tools.run_tests import _param_group_rows, match_junit_cases, parse_junit_bytes
-
     project = tmp_path / "real"
     (project / "src/test/java/p").mkdir(parents=True)
     pinned = "".join(f"<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>{name}</artifactId><version>{version}</version></plugin>"
@@ -376,17 +371,12 @@ def test_real_maven_runs_the_group_by_its_selector_and_gives_each_row(tmp_path: 
 ])
 def test_one_reading_of_a_testcase_name_for_the_evidence_and_the_hint(name: str, method: str) -> None:
     """Audit U4: the evidence (_case_matches_pair) and the run_pipeline hint (_report_mismatch) read a name the same way."""
-    from tools.run_tests import junit_method_name
-
     assert junit_method_name(name) == method
 
 
 # --- FaT-R4: the rows of a group are read in linear time up to the runner-compat limit --------------------------------
 
 def test_a_degenerate_class_of_200_kb_reads_its_rows_in_under_5_s() -> None:
-    import time
-
-    from tools.run_tests import _param_group_rows
 
     text = ("class A {\n" + "  int test(int a)\n" * 12_000
             + "  @ParameterizedTest(name = \"[{index}] {0}\")\n  @CsvSource({\"TC-1, a\", \"TC-2, b\"})\n  void test(String id, String v) {}\n}\n")
@@ -414,8 +404,6 @@ def _walk_from(masked: str, start: int) -> int:
 
 def test_rows_are_the_same_with_the_memo_as_with_a_walk_from_each_declaration() -> None:
     """The memoised region of a member equals the plain backward walk on the PT3 shapes."""
-    from tools import run_tests
-
     text = ("class A {\n  static Stream<Arguments> rows() { return Stream.of(Arguments.of(\"TC-1\", 1), Arguments.of(\"TC-2\", 2)); }\n"
             "  @Test void other() { test(1); }\n  @ParameterizedTest(name = \"[{index}] {0}\")\n  @MethodSource(\"rows\")\n  void test(String id, int v) {}\n"
             "  @ParameterizedTest(name = \"[{index}] {0}\") @CsvSource({\"TC-3, x\", \"TC-4, y\"}) void csv(String id, String v) {}\n}\n")

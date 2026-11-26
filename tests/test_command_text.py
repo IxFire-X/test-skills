@@ -16,6 +16,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_exec_prepares import _has, _project
+from tests.test_p4_ingest import _args, _out
+from tools import exec_commands
+from tools.exec_commands import command_text, command_text_powershell, command_token, printed_forms
 from tools.run_pipeline import HostStop
 
 PLAIN = ["mvnw", "-Dtest=pkg.A#m,pkg.B#n", "-Pdefault", "tests/test_a.py::TestA::test_a", "./mvnw", "a_b-c.d:e+f", "junit_suite_name=PILOT-0123abcd",
@@ -37,30 +41,22 @@ REFUSED = ["a%b", "%PATH%", "a^b", 'a"b', "a!b", "$HOME", "a`b", "a&b", "a|b", "
 
 @pytest.mark.parametrize("token", PLAIN)
 def test_a_plain_token_is_printed_as_it_is(token: str) -> None:
-    from tools.exec_commands import command_token
-
     assert command_token(token) == token
 
 
 @pytest.mark.parametrize(("token", "printed"), QUOTED)
 def test_a_token_with_a_space_a_bracket_or_a_backslash_is_in_double_quotes(token: str, printed: str) -> None:
-    from tools.exec_commands import command_token
-
     assert command_token(token) == printed
 
 
 @pytest.mark.parametrize("token", REFUSED)
 def test_a_token_that_quotes_cannot_hold_is_not_printed_and_the_fix_names_the_character(token: str) -> None:
-    from tools.exec_commands import command_token
-
     with pytest.raises(HostStop) as stopped:
         command_token(token)
     assert stopped.value.code == "COMMAND_NOT_PRINTABLE" and stopped.value.fix and "переимен" in stopped.value.fix
 
 
 def test_the_text_of_a_command_joins_its_tokens() -> None:
-    from tools.exec_commands import command_text
-
     assert command_text(["mvnw", "-B", "C:\\Program Files (x86)\\x"]) == 'mvnw -B "C:\\Program Files (x86)\\x"'
     with pytest.raises(HostStop):
         command_text(["mvnw", "%X%"])
@@ -68,8 +64,6 @@ def test_the_text_of_a_command_joins_its_tokens() -> None:
 
 def test_the_printed_text_reaches_the_program_as_the_tokens_through_the_shell_of_the_machine(tmp_path: Path) -> None:
     """One short run through cmd.exe (Windows) or sh: the program gets exactly the tokens.  The test starts the process, not the package."""
-    from tools.exec_commands import command_text
-
     script = tmp_path / "argv.py"
     script.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8")
     tokens = [*PLAIN, *(token for token, _printed in QUOTED)]
@@ -79,10 +73,6 @@ def test_the_printed_text_reaches_the_program_as_the_tokens_through_the_shell_of
 
 
 def test_materialize_in_a_project_whose_path_cannot_be_printed_refuses_before_it_writes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_exec_prepares import _has, _project
-    from tests.test_p4_ingest import _args, _out
-    from tools import exec_commands
-
     project, run_root, attempt_id = _project(tmp_path / "100%done")
     before = sorted(path.relative_to(project).as_posix() for path in project.rglob("*") if path.is_file())
     code = exec_commands.cmd_materialize(_args(project, run_root))
@@ -93,10 +83,6 @@ def test_materialize_in_a_project_whose_path_cannot_be_printed_refuses_before_it
 
 
 def test_the_next_line_of_materialize_quotes_the_project_like_the_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_exec_prepares import _project
-    from tests.test_p4_ingest import _args, _out
-    from tools import exec_commands
-
     project, run_root, _attempt_id = _project(tmp_path / "Иван Петров")
     code = exec_commands.cmd_materialize(_args(project, run_root))
     output = _out(capsys)
@@ -108,8 +94,6 @@ def test_the_next_line_of_materialize_quotes_the_project_like_the_command(tmp_pa
 
 
 def test_the_powershell_form_starts_with_the_call_operator_and_quotes_every_token() -> None:
-    from tools.exec_commands import command_text_powershell
-
     assert command_text_powershell(["C:\\Program Files (x86)\\Maven\\mvn.cmd", "-Dfoo.bar=baz", "-Dtest=A#m,B", "x"]) == (
         '& "C:\\Program Files (x86)\\Maven\\mvn.cmd" "-Dfoo.bar=baz" "-Dtest=A#m,B" "x"')
     for token in REFUSED:
@@ -120,8 +104,6 @@ def test_the_powershell_form_starts_with_the_call_operator_and_quotes_every_toke
 @pytest.mark.skipif(shutil.which("powershell") is None and shutil.which("pwsh") is None, reason="no PowerShell here")
 def test_the_powershell_form_reaches_the_program_as_the_tokens_through_powershell(tmp_path: Path) -> None:
     """One short run through PowerShell (-EncodedCommand carries the text unchanged).  An empty token is left out: PowerShell before 7.3 drops it."""
-    from tools.exec_commands import command_text_powershell
-
     script = tmp_path / "argv.py"
     script.write_text("import json, sys" + chr(10) + "print(json.dumps(sys.argv[1:]))" + chr(10), encoding="utf-8")
     tokens = [*PLAIN, *(token for token, _printed in QUOTED if token)]
@@ -146,8 +128,6 @@ def _wrapper_in(module: Path) -> tuple[str, list[str]]:
 
 
 def test_the_printed_forms_name_the_wrapper_by_its_absolute_path_and_the_array_keeps_it_relative(tmp_path: Path) -> None:
-    from tools.exec_commands import printed_forms
-
     module = tmp_path / "svc"
     module.mkdir()
     name, command = _wrapper_in(module)
@@ -159,8 +139,6 @@ def test_the_printed_forms_name_the_wrapper_by_its_absolute_path_and_the_array_k
 
 @pytest.mark.skipif(shutil.which("powershell") is None, reason="no PowerShell here")
 def test_the_powershell_form_starts_the_wrapper_of_the_module_from_its_directory(tmp_path: Path) -> None:
-    from tools.exec_commands import printed_forms
-
     _name, command = _wrapper_in(tmp_path)
     done = subprocess.run([shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-Command", printed_forms(tmp_path.parent, tmp_path.name, command)[1]],
                           cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=120)
@@ -169,8 +147,6 @@ def test_the_powershell_form_starts_the_wrapper_of_the_module_from_its_directory
 
 def test_the_plain_form_starts_the_wrapper_of_the_module_where_the_current_directory_is_not_searched(tmp_path: Path) -> None:
     """cmd.exe with NoDefaultCurrentDirectoryInExePath, or sh: a bare name is not found in the current directory."""
-    from tools.exec_commands import printed_forms
-
     _name, command = _wrapper_in(tmp_path)
     env = {**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"}
     done = subprocess.run(printed_forms(tmp_path.parent, tmp_path.name, command)[0], shell=True, cwd=tmp_path, env=env, capture_output=True, text=True,

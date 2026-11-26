@@ -1,8 +1,10 @@
 """v0.7.2 t3: what status and finish say to a person — the outcome of a set of cases in a line, and the refusal that stopped a run before its attempt."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from tests.test_review_canaries import _answer, _generated_run, _open, _select
 from tools import json_cli, pilot_state, run_pipeline
 
 AUTHORIZATION = {"request_id": "request-1", "execution_requested": False}
@@ -56,15 +58,11 @@ def test_an_accepted_set_whose_csv_is_gone_says_so() -> None:
 
 
 def _command(capsys, *argv: str) -> dict:
-    import json
-
     run_pipeline.main(list(argv))
     return json.loads(capsys.readouterr().out)
 
 
 def test_status_and_finish_of_a_reviewed_cases_only_run_say_the_outcome(tmp_path: Path, capsys, monkeypatch) -> None:
-    from tests.test_review_canaries import _answer, _generated_run, _open, _select
-
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     _select(run, _answer(run, "ПРИНЯТО"))
