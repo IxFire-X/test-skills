@@ -94,7 +94,7 @@ def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:
 # (``batch_assembly._context_documents``, ``step_size``, ``style_samples.known_text``) or through the inventory (``confined_files``); ``template_path`` is the field of
 # ``zephyr-import.json`` that no journal event binds: ``output_guard.project_file`` before the digest is taken.
 PATH_FIELDS = {
-    "batch_assembly.py": {"project_path"}, "cases_import.py": {"project_path"}, "existing_tests.py": {"project_path"},
+    "batch_assembly.py": {"project_path"}, "cases_import.py": {"project_path"}, "code_skeleton.py": {"project_path"}, "existing_tests.py": {"project_path"},
     "generated_delta.py": {"project_path"}, "model_inputs.py": {"project_path"}, "model_records.py": {"project_path"},
     "orchestrate_test_case_revision.py": {"project_path"},
     "project_inventory.py": {"project_path"}, "ready.py": {"project_path"}, "run_pipeline.py": {"project_path"},

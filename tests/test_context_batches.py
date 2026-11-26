@@ -202,7 +202,8 @@ def test_a_campaign_run_with_two_context_batches_takes_both_and_fits(monkeypatch
     assert taken == len(receipts) == 2 and len(result["batches"]) == len(one["batches"]), result.notes
     step = int(re.search(r"вход шага (\d+) Б", " ".join(result.notes)).group(1)) if "вход шага" in " ".join(result.notes) else None
     assert step is None or step < step_window(project) * WINDOW_SHARE, result.notes
-    assert any(f"видит {taken} из {len(receipts)}" in note for note in result.notes), result.notes
+    assert result["context_skeleton"] in (True, False), result.notes  # v0.8: every new plan; a plan that names its files has no «видит» line
+    assert "context_files" in result or any(f"видит {taken} из {len(receipts)}" in note for note in result.notes), result.notes
 
 
 def _campaign_requirements(root: Path, attempt: str) -> list[dict]:

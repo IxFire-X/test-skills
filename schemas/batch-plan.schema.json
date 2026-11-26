@@ -12,6 +12,7 @@
     "context_receipt_digest": {"$ref": "#/$defs/digest"},
     "context_receipt_digests": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}, "description": "FaT-AU3: every context receipt each batch reads, in batch_index order; the first is context_receipt_digest; absent for one context batch"},
     "context_files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "q5: the files of those receipts the generator reads, the files the marker named first; absent when it reads every file of them"},
+    "context_skeleton": {"type": "boolean", "description": "v0.8 (rnd/20): every new plan; true — the code files of the receipts not in context_files go to the generator as their skeleton (tools/code_skeleton.py), none without context_files; false — that skeleton did not fit beside the files read whole; absent in the plans before"},
     "batches": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/batch"}},
     "out_of_scope": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/out_of_scope_item"}, "description": "FaT-P3: the source requirements the human excluded after the marker; no batch owns them and they are not in source_requirements; absent without an exclusion"},
     "digest": {"$ref": "#/$defs/digest"}

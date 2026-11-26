@@ -319,3 +319,20 @@ def test_existing_tests_calls_with_unpaired_closing_brackets_are_linear() -> Non
         BODY = 'get("/a" + x]]' * 7000
         def run(): _calls(BODY)
     """, 1.0)
+
+
+def test_the_skeleton_of_hostile_code_is_linear_in_every_language() -> None:
+    """code_skeleton.skeleton: a declaration is told by string operations, never a regular expression over the line — the DECL of
+    rnd/scripts/q3_variants.py ran a class with a blank and then a blank run over the line, polynomial on a long line of words.  The
+    hostile code of v08/skeleton_redos_probe2.py, about 1.4 MB per language (≈ 0.05 s each on 26.11)."""
+    _time("""
+        from tools.code_skeleton import skeleton
+        BODY = (("int a" + " b" * 500 + "(x) {\\n") * 200 + ("public" + " w" * 500 + "\\n") * 200 + ("(" * 1000 + "\\n") * 200
+                + "@A\\n" * 20000 + ("x " * 1500 + "{(\\n") * 100 + ("{" * 1000 + "\\n") * 200 + "class A {\\n" * 2000
+                + ('"' + "\\\\" * 999 + "\\n") * 200)
+        PY = "class A:\\n" + "".join(" " * (i % 400 + 1) + "def f(): pass\\n" for i in range(2000)) + "@d\\n" * 20000
+        def run():
+            for suffix in (".java", ".kt", ".swift", ".ts"):
+                skeleton(BODY, suffix)
+            skeleton(PY, ".py")
+    """, 1.0)

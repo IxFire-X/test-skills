@@ -377,7 +377,8 @@ def in_scope_requirements(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, 
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
                  documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None,
-                 out_of_scope: Sequence[Mapping[str, Any]] | None = None, context_files: Sequence[str] | None = None) -> BatchPlan:
+                 out_of_scope: Sequence[Mapping[str, Any]] | None = None, context_files: Sequence[str] | None = None,
+                 context_skeleton: bool | None = None) -> BatchPlan:
     """Create one complete partition: one batch unless the expected answer does not fit the window.
 
     A grouping with more than one context receipt (``context_receipt_digests``, the first one is
@@ -412,6 +413,8 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
         body["context_receipt_digests"] = contexts
     if context_files:  # the plan bytes stay those of a plan that reads every file of its receipts
         body["context_files"] = list(context_files)
+    if context_skeleton is not None:  # every plan of v0.8 and later: true — the other code files go as their skeleton; false — it did not fit
+        body["context_skeleton"] = context_skeleton
     if out_of_scope:  # without an exclusion the plan bytes stay those of a plan with no out_of_scope
         body["out_of_scope"] = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": " ".join(str(row["reason"]).split())}
                                 for row in sorted(out_of_scope, key=lambda row: order[row["source_requirement_id"]])]
@@ -461,7 +464,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     value = imported.get("imported", imported) if imported is not None else None
     window, pattern = step_window(project), _grouping_pattern(project)
 
-    def plan_for(taken: list[dict[str, Any]], named: list[str] | None = None) -> BatchPlan:
+    def plan_for(taken: list[dict[str, Any]], named: list[str] | None = None, skeleton: int | None = 0) -> BatchPlan:
         taken = generator_receipts(receipts, named) if named else taken  # named files: every receipt of the attempt, only those files
         files: list[Path] = []
         documents: dict[str, str] = {}
@@ -470,20 +473,20 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
             files.extend(paths)
             documents.update(texts)
         maps = len(view_bytes(for_context(project, taken)))  # one map of all the receipts the batch reads
-        step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps)["bytes"]
+        step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps + (skeleton or 0))["bytes"]
         evidence = {key: item for key, item in grouping_evidence.items() if key != "context_receipt_digests"}
         if len(taken) > 1:
             evidence["context_receipt_digests"] = [str(receipt["digest"]) for receipt in taken]
         return plan_batches(source_requirements, evidence, window_bytes=window, input_bytes=step_input, id_pattern=pattern,
-                            documents=documents, imported=value, out_of_scope=out_of_scope, context_files=named)
+                            documents=documents, imported=value, out_of_scope=out_of_scope, context_files=named, context_skeleton=skeleton is not None)
 
     def plan_with(taken: list[dict[str, Any]]) -> BatchPlan:
         plan = plan_for(taken)
         picked = pick_context(project, receipts, len(taken), source_requirements, sources)
         if picked is None:
             return plan
-        named, missed, total = picked
-        marked = plan_for(taken, named)
+        named, missed, total, skeleton = picked
+        marked = plan_for(taken, named, skeleton)
         if len(marked["batches"]) > len(plan["batches"]):  # never more batches (model calls) than the whole receipts
             return plan
         marked.notes.extend([missed_note(missed, total)] if missed else [])  # every file the marker named is read: no line
@@ -509,27 +512,30 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
 
 
 def pick_context(project: Path, receipts: Sequence[Mapping[str, Any]], taken: int, requirements: Sequence[Mapping[str, Any]],
-                 sources: Sequence[str]) -> tuple[list[str], list[str], int] | None:
-    """``(files, the files the marker named that did not fit, how many it named)`` the generator reads instead of every file of the first ``taken`` receipts: the same
-    bytes, the API contract first, then the documents the requirements cite, the files the marker's sources name (the most cited first), the rest by
-    path; a file that does not fit is skipped.  None where every wanted file is read already (a small project, a marker that named nothing)."""
+                 sources: Sequence[str]) -> tuple[list[str], list[str], int, int | None] | None:
+    """``(files read whole, the files the marker named not among them, how many it named, the bytes of the skeleton view or None)`` of the
+    generator, in the bytes of the first ``taken`` receipts (rnd/20, proposal 2).  Whole: the API contract, the documents the requirements
+    cite, the files the marker named (the most cited first) — as many as fit, never fewer than before v0.8; no other file is read whole.  The
+    skeleton of every other code file of the receipts (``code_skeleton``) goes beside them when all of it fits in the rest, else None (the
+    plan says ``context_skeleton: false``).  None when no file is wanted whole (the marker named nothing)."""
     from tools.api_contract import is_api_contract
+    from tools.code_skeleton import skeleton_files, view_bytes
 
     sizes = {row["project_path"]: int(row["size"]) for receipt in receipts for row in receipt["files"]}
-    today = {row["project_path"] for receipt in receipts[:taken] for row in receipt["files"]}
     cited = Counter(re.sub(r":\d+(?:-\d+)?$", "", words[0]) for words in (str(source).split(None, 1) for source in sources) if words)  # a source: «path:line — text»
     cited = Counter({path: count for path, count in cited.items() if path in sizes})
     docs = {found.group(1) if (found := re.match(r"(.+?):(\d+)", str(item))) else str(item) for row in requirements for item in row["provenance"]}  # «path:line — text»; no line: the whole text
     named = set(cited) | {path for receipt in receipts[:1] for path in receipt.get("referenced") or ()}  # the files the marker named and the templates the code of --target names
     group = {path: 0 if is_api_contract(project, path) else 1 if path in docs else 2 if path in named else 3 for path in sizes}
-    if all(path in today for path in sizes if group[path] < 3):
-        return None
-    room, chosen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken]), []
-    for path in sorted(sizes, key=lambda path: (group[path], -cited[path], path)):
-        if sizes[path] <= room:
+    room, used, chosen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken]), 0, []
+    for path in sorted((path for path in sizes if group[path] < 3), key=lambda path: (group[path], -cited[path], path)):
+        if used + sizes[path] <= room:
             chosen.append(path)
-            room -= sizes[path]
-    return None if set(chosen) == today else (chosen, [path for path in cited if path not in chosen], len(cited))
+            used += sizes[path]
+    if not chosen:
+        return None
+    skeleton = len(view_bytes(project, skeleton_files(receipts, chosen)))  # the view prepare writes for this plan (step_size._skeleton)
+    return chosen, [path for path in cited if path not in chosen], len(cited), skeleton if used + skeleton <= room else None
 
 
 def generator_receipts(receipts: Sequence[Mapping[str, Any]], named: Sequence[str] | None) -> list[dict[str, Any]]:

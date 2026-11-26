@@ -34,7 +34,9 @@ def test_submit_plan_gives_the_events_and_the_plan_of_the_three_steps_of_before(
     digest = pilot_state.derive_state(old_root)["events"]
     answer = next(event["artifact_digest"] for event in digest if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED")
     marker = old_root / pilot_state.read_model_stage_artifact(old_root, old_attempt, "context-marker:baseline", answer)["path"]
-    old_plan = plan_batches_for_project(_marker_rows(), evidence, tmp_path / "old", [marker], old_receipts, None, None)
+    value = json.loads(marker.read_text(encoding="utf-8"))
+    sources = (value.get("artifact") or value)["artifacts"]["source_code_and_diff"]["sources"]  # v0.8: the files the marker named are read whole
+    old_plan = plan_batches_for_project(_marker_rows(), evidence, tmp_path / "old", [marker], old_receipts, None, None, sources)
     pilot_state.publish_generator_input(old_root, old_attempt, "plan", dict(old_plan))
     assert _shape(root) == _shape(old_root)
     assert plan["header_digest"] == header["digest"] == old_plan["header_digest"] and planned["result"]["plan"]["digest"] == plan["digest"]

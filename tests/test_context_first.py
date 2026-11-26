@@ -52,6 +52,11 @@ def test_the_files_it_reads_are_no_more_bytes_than_the_batches_it_takes_today(th
     assert sum(sizes[path] for path in plan["context_files"]) <= receipts[0]["byte_count"]
 
 
+def test_a_plan_that_reads_every_file_says_context_skeleton_too(three) -> None:  # v0.8: every new plan, the skeleton empty
+    plan = _plan(three, [])
+    assert ("context_files" in plan, plan["context_skeleton"]) == (False, True)
+
+
 def test_a_marker_that_names_nothing_leaves_the_plan_as_it_was(three, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools.batch_assembly import canonical_bytes
 
@@ -60,9 +65,9 @@ def test_a_marker_that_names_nothing_leaves_the_plan_as_it_was(three, monkeypatc
     assert "context_files" not in plan and canonical_bytes(plan) == canonical_bytes(_plan(three, []))
 
 
-def test_a_file_that_is_read_already_changes_nothing(three, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_file_that_is_read_already_is_the_only_file_read_whole(three, monkeypatch: pytest.MonkeyPatch) -> None:  # v0.8: the rest goes as its skeleton
     _narrow(monkeypatch, three[0], three[4])
-    assert "context_files" not in _plan(three, ["src/part0.py:5 — x"])
+    assert _plan(three, ["src/part0.py:5 — x"])["context_files"] == ["src/part0.py"]
 
 
 def test_the_plan_has_no_more_batches_than_without_the_marker(three, monkeypatch: pytest.MonkeyPatch) -> None:

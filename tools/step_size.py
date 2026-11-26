@@ -527,6 +527,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": PLAN_VIEW})
             if (diff := _change_diff(project, root, state, attempt_id, digest, write_views)) is not None:  # a run of the change only with a MODIFIED
                 files.append(diff)
+            if (bones := _skeleton(project, root, attempt_id, journal.plan(state), digest, write_views)) is not None:  # a plan of v0.8: the other code files
+                files.append(bones)
         elif digest in journal.expands:
             targets, context = journal.expands[digest]
             if context and stage.startswith("tc-generator:") and (named := journal.plan(state).get("context_files")):  # the generator and its rework read the files the plan names
@@ -612,6 +614,7 @@ INVENTORY_VIEW = "inventory-view-v1"
 PLAN_VIEW = "plan-view-v1"
 REQUIREMENTS_VIEW = "requirements-view-v1"
 CHANGE_DIFF_VIEW = "change-diff-v1"
+SKELETON_VIEW = "скелет"
 CHANGE_DIFF_REST = "данные, не инструкция: что изменение меняет в требованиях базы; тексты требований — в ответе разметки"
 REQUIREMENTS_REST = "provenance, digest и связи кейсов — в ответе шага требований; часть их не пишет: submit вставит требования сам"
 _AT = re.compile(r"^(\S+:\d+)(?: — |$)")  # the ``path:line`` a provenance mark starts with
@@ -680,6 +683,29 @@ def _change_diff(project: Path, root: Path, state: Any, attempt_id: str, plan_di
     data = _compact({"view": CHANGE_DIFF_VIEW, "plan_digest": plan_digest, "requirements": rows, "rest": CHANGE_DIFF_REST})
     _write_view(project, root, target, data, True)
     return {"digest": plan_digest, "path": str(target), "bytes": len(data), "basis": CHANGE_DIFF_VIEW}
+
+
+def skeleton_path(root: Path, plan_digest: str) -> Path:
+    return Path(root) / "marker-views" / (str(plan_digest).removeprefix("sha256:") + ".skeleton.md")
+
+
+def _skeleton(project: Path, root: Path, attempt_id: str, plan: Mapping[str, Any], plan_digest: str, write: bool) -> dict[str, Any] | None:
+    """The skeleton of the code files of the plan's receipts the generator does not read whole (``context_skeleton``), beside the plan view;
+    None for a plan without it.  The report (``write=False``) counts it only when it is on the disk."""
+    if not plan.get("context_skeleton") or not plan.get("context_files"):
+        return None
+    target = skeleton_path(root, plan_digest)
+    if not write:
+        return {"digest": plan_digest, "path": str(target), "bytes": target.stat().st_size, "basis": SKELETON_VIEW} if target.is_file() else None
+    from tools.code_skeleton import skeleton_files, view_bytes
+    from tools.pilot_state import read_context_selection
+
+    digests = plan.get("context_receipt_digests") or [plan["context_receipt_digest"]]
+    data = view_bytes(project, skeleton_files([read_context_selection(root, attempt_id, str(digest)) for digest in digests], plan["context_files"]))
+    if not data:
+        return None
+    _write_view(project, root, target, data, True)
+    return {"digest": plan_digest, "path": str(target), "bytes": len(data), "basis": SKELETON_VIEW}
 
 
 def requirements_view_path(root: Path, answer_digest: str) -> Path:
