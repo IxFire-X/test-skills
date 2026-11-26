@@ -23,12 +23,14 @@ from tools.pilot_state import (  # the names of the journal these bodies read (Ð
     derive_state,
     publish_bound,
     read_attempt_receipt_with_state as _read_attempt_receipt_with_state,
-    read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
     read_reviewer_session_ledger_with_state as _read_reviewer_session_ledger_with_state,
     receipt_target as _receipt_target,
     run_root_of as _run_root,
     self_review_accepted_at as _self_review_accepted_at,
     terminal_reviewer_evidence_with_state as _terminal_reviewer_evidence_with_state,
+)
+from tools.model_records import (  # the names of the records of a step these bodies read (ÐŸ1 of the cut of v0.8)
+    read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
 )
 
 

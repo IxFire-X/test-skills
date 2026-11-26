@@ -24,16 +24,16 @@ def test_a_miss_of_the_facade_with_the_journal_loaded_asks_no_finder(monkeypatch
 
 
 def test_a_patch_through_pilot_state_reaches_every_module_of_the_journal(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import effective_canonical, model_inputs, model_steps, run_closure, scenario_observations
+    from tools import effective_canonical, model_inputs, model_records, model_steps, run_closure, scenario_observations
 
     spy = object()
     monkeypatch.setattr(pilot_state, "derive_state", spy)
-    assert effective_canonical.derive_state is run_closure.derive_state is spy
+    assert model_records.derive_state is effective_canonical.derive_state is run_closure.derive_state is spy
     assert model_inputs.derive_state is model_steps.derive_state is scenario_observations.derive_state is spy
 
 
-@pytest.mark.parametrize("module", ["effective_canonical", "run_closure", "model_inputs", "model_steps", "scenario_observations",
-                                    "execution_journal"])
+@pytest.mark.parametrize("module", ["model_records", "effective_canonical", "run_closure", "model_inputs", "model_steps",
+                                    "scenario_observations", "execution_journal"])
 def test_a_module_of_the_journal_imports_first_in_a_fresh_interpreter(module: str) -> None:
     done = subprocess.run([sys.executable, "-X", "utf8", "-c", f"import tools.{module}"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr

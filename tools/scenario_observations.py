@@ -24,11 +24,13 @@ from tools.pilot_state import (  # the names of the journal these bodies read (�
     publish_artifact_value as _publish,
     read_artifact as _read_artifact,
     read_attempt_receipt,
-    read_model_request_with_state as _read_model_request_with_state,
-    read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
     read_run,
     run_root_of as _run_root,
     sealed as _sealed,
+)
+from tools.model_records import (  # the names of the records of a step these bodies read (П1 of the cut of v0.8)
+    read_model_request_with_state as _read_model_request_with_state,
+    read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
 )
 from tools.run_closure import (  # the names of the closure these bodies read (П1 of the cut of v0.8)
     read_closure_artifact_if_present,
