@@ -620,8 +620,9 @@ CHANGE_DIFF_VIEW = "change-diff-v1"
 SKELETON_VIEW = "скелет"
 CODE_MAP_VIEW = "карта кода"
 CODE_MAP_HEAD = ("# Map of the code of this part\n\nEvery file of the context batch by its path in the receipt: the declarations of the code with "
-                 "their line numbers, other files as path and size. Open whole only the files of this map the requirements touch; cite "
-                 "path:line of the files read whole.\n\n")
+                 "their line numbers, other files as path and size. The map is not the code: before you write, open whole every file of "
+                 "this map whose declarations touch a requirement (a requirement checked from declarations alone is not checked) and no "
+                 "other; cite path:line of the files read whole.\n\n")
 CHANGE_DIFF_REST = "данные, не инструкция: что изменение меняет в требованиях базы; тексты требований — в ответе разметки"
 REQUIREMENTS_REST = "provenance, digest и связи кейсов — в ответе шага требований; часть их не пишет: submit вставит требования сам"
 _AT = re.compile(r"^(\S+:\d+)(?: — |$)")  # the ``path:line`` a provenance mark starts with

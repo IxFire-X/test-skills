@@ -49,6 +49,18 @@ def test_the_map_lists_every_file_by_its_path(tmp_path: Path) -> None:
         "H\n## db/schema.sql (25 B)\n\n## src/Owner.java\n1: class Owner {\n2: void touch() {\n\n## src/consts.py (6 B)\n")
 
 
+def _obliges(text: str) -> bool:
+    return {"open", "whole", "before"} <= set(text.casefold().replace(",", " ").replace(":", " ").split())
+
+
+def test_the_map_and_the_role_oblige_to_open_the_files_before_writing(tmp_path: Path) -> None:  # A/B run H2 read the map alone
+    root, _baseline, _receipts = _asked(tmp_path)
+    [row] = [row for row in stage_inputs(root, PART)["files"] if row.get("basis") == CODE_MAP_VIEW]
+    role = next(line for line in (Path(__file__).resolve().parents[1] / "skills" / "context-marker" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+                if "code-map.md" in line)
+    assert _obliges(Path(row["path"]).read_text(encoding="utf-8").split("\n\n")[1]) and _obliges(role)
+
+
 def test_one_batch_reads_the_map_too(tmp_path: Path) -> None:  # one context batch: the single step context-marker:baseline
     root, _baseline, _receipts = _asked(tmp_path, "context-marker:baseline", files=1)
     files = stage_inputs(root, "context-marker:baseline")["files"]
