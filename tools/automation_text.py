@@ -20,7 +20,8 @@ _JAVA_TEST = re.compile(r"@\s*(?:org\s*\.\s*junit\s*\.\s*jupiter\s*\.\s*(?:api|p
 _NOW = re.compile(r"\bLocalDate\s*\.\s*now\s*\(")
 _FIND_ALL_STREAM = re.compile(r"\bfindAll\s*\(\s*\)\s*\.\s*stream\s*\(")
 _LITERAL = re.compile(r'"[^"\n]*"')  # a string of the masked text: its quotes kept, its content blank
-_UNIFORM = re.compile(r"(.)\1{49,}")  # one character 50 times or more: one comparison per character, linear
+_UNIFORM = re.compile(r"(.)\1{49,}")
+_TYPE_HEAD = re.compile(r"\b(?:class|interface|enum|record)\b")  # the head of a type: its annotations may have «)», it is no method  # one character 50 times or more: one comparison per character, linear
 
 
 def _symbols(rows: list[Any]) -> str | None:
@@ -92,13 +93,13 @@ def _view_parts(stem: str, text: str) -> list[tuple[str, str, bytes]]:
 
 def _methods(masked: str) -> list[tuple[int, int, bool]]:
     """``(start, end, is a test)`` of each method body of masked Java: a ``{`` outside a method whose head (since the last ``{``, ``}`` or ``;``)
-    has a ``)``; a lambda or a block inside a method stays the method's.  One pass over the braces."""
+    has a ``)`` and is no head of a type (``@SpringBootTest(…) class T {``); a lambda or a block inside a method stays the method's.  One pass over the braces."""
     methods: list[tuple[int, int, bool]] = []
     depth, head, opened = 0, 0, None
     for match in re.finditer(r"[{};]", masked):
         char = match.group()
         if char == "{":
-            if opened is None and ")" in masked[head:match.start()]:
+            if opened is None and ")" in masked[head:match.start()] and not _TYPE_HEAD.search(masked, head, match.start()):
                 opened = (match.start(), depth, _JAVA_TEST.search(masked, head, match.start()) is not None)
             depth += 1
         elif char == "}":

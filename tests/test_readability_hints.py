@@ -51,3 +51,10 @@ def test_the_hints_are_linear_on_a_hostile_file() -> None:
         TEXT = 'class T { String s = "' + "AB" * 50_000 + '"; ' + "void f() { " * 5_000 + "LocalDate.now(); " * 5_000 + "}" * 5_000 + " }"
         def run(): readability_hints([{"path": "T.java", "content": TEXT}])
     """, 1.0)
+
+
+def test_an_annotated_class_head_is_no_method() -> None:
+    code = ("@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)\nclass OwnerTests {\n"
+            "    @Test void one() { var a = LocalDate.now(); var b = LocalDate.now(); }\n"
+            "    @Test void two() { var c = LocalDate.now(); }\n}\n")
+    assert _hints(code, "src/test/java/a/OwnerTests.java") == ["- LocalDate.now() 2 раза в тесте OwnerTests.java:3 — одна дата на тест"]
