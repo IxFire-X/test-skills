@@ -15,15 +15,14 @@ share this module.  It only reads: no process, no network, no write.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import importlib.util
-import json
 import marshal
 import re
 import sys
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.digests import digest_bytes, json_bytes as canonical
 from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
 
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
@@ -64,14 +63,6 @@ DELIVERY_FILES = ("release/manifest.json",)
 ARCHIVE_SUFFIXES = (".7z", ".bz2", ".gz", ".jar", ".rar", ".tar", ".tgz", ".xz", ".zip")
 
 _PYC = re.compile(r"^(?P<module>[A-Za-z0-9_]+)\.(?P<tag>cpython-3\d+)(?:\.opt-(?P<opt>[12]))?\.pyc$")
-
-
-def canonical(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def digest_bytes(value: bytes) -> str:
-    return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
 def manifest_digest(value: Mapping[str, Any]) -> str:

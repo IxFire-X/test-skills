@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
+from tools.digests import json_digest
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 from tools.run_store import (  # the run store, below (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
@@ -101,7 +102,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
         raise ValueError("invalid reviewer session ledger")
     digest = value.get("digest")
     session_body = {key: item for key, item in value.items() if key != "digest"}
-    session_digest = "sha256:" + hashlib.sha256(json.dumps(session_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    session_digest = json_digest(session_body)
     if not _DIGEST.fullmatch(digest or "") or digest != session_digest:
         raise ValueError("invalid reviewer session ledger")
     ledger_root = root / "reviewer-session-ledgers" / attempt_id
@@ -133,7 +134,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
             ):
                 raise ValueError("invalid reviewer session ledger history")
             prior_body = {key: item for key, item in prior.items() if key != "digest"}
-            if prior.get("digest") != "sha256:" + hashlib.sha256(json.dumps(prior_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest():
+            if prior.get("digest") != json_digest(prior_body):
                 raise ValueError("invalid reviewer session ledger history")
             published = [event for event in recorded_published if event.get("artifact_digest") == prior["digest"]]
             read_back = [event for event in recorded_read_back if event.get("artifact_digest") == prior["digest"]]
@@ -225,7 +226,7 @@ def _read_reviewer_session_ledger_with_state(
     except (OutputConfinementError, OSError, UnicodeDecodeError, StrictJsonError) as error:
         raise ValueError("reviewer session ledger is unreadable") from error
     body = {key: item for key, item in value.items() if key != "digest"} if isinstance(value, Mapping) else {}
-    canonical_digest = "sha256:" + hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    canonical_digest = json_digest(body)
     if not isinstance(value, Mapping) or value.get("digest") != selected or canonical_digest != selected or schema_diagnostics(dict(value), _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT):
         raise ValueError("reviewer session ledger is invalid")
     boundary = _read_attempt_receipt_with_state(

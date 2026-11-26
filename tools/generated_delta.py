@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -22,6 +21,7 @@ from tools.automation_validation import (
     validate_automation_revision_chain,
 )
 from tools.canonical_document import validate_canonical_document
+from tools.digests import digest_bytes, json_bytes as _bytes
 from tools.pilot_state import closure_cached as _closure_cached
 
 
@@ -34,12 +34,8 @@ class GeneratedDeltaError(ValueError):
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-def _bytes(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-
-
 def _digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(value if isinstance(value, bytes) else _bytes(value)).hexdigest()
+    return digest_bytes(value if isinstance(value, bytes) else _bytes(value))
 
 
 def _seal(value: Mapping[str, Any]) -> dict[str, Any]:

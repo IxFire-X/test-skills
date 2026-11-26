@@ -11,7 +11,6 @@ import contextlib
 import contextvars
 import copy
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -21,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.digests import json_bytes as _canonical_bytes, json_digest as _digest
 from tools.scan_rules import INCLUDABLE_RULES, SECRET_DIRS, directory_reason, include_mode, is_source, path_reason
 from tools.stack_catalog import MANIFEST_LANGUAGES
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
@@ -119,14 +119,6 @@ _EXECUTION_SOURCE_SUFFIXES = frozenset({
     ".py", ".java", ".kt", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".cs",
 })
 _EXECUTION_CONFIG_SUFFIXES = frozenset({".json", ".toml", ".yaml", ".yml", ".xml", ".ini", ".cfg"})
-
-
-def _canonical_bytes(value: Mapping[str, Any] | list[Any]) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _digest(value: Mapping[str, Any] | list[Any]) -> str:
-    return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
 def build_skillsrc_authority_receipt(

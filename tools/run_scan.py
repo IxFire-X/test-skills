@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import difflib
-import hashlib
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import uuid
 from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
+from tools.digests import digest_bytes as _digest_bytes, json_digest
 from tools.existing_tests import own_tests
 from tools.fixes import fix_for
 from tools.run_facts import durable_status_facts as _durable_status_facts
@@ -79,10 +79,6 @@ def printed_or(value: object, template: str) -> str:
         return command_token(str(value))
     except HostStop:
         return template
-
-
-def _digest_bytes(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _slug(target: str | None, docs: list[str] | None) -> str:
@@ -906,9 +902,7 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
     )
     current["files"] = [row for row in current["files"] if row.get("project_path") not in generated_paths]
     body = {key: value for key, value in current.items() if key != "digest"}
-    current["digest"] = "sha256:" + hashlib.sha256(
-        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    current["digest"] = json_digest(body)
     if request is not None:
         # materialize/ingest: always against local-pilot-v1 with the runtime identity — never the baseline's own profile
         policy, adapter_id, build_profile, parameters = "local-pilot-v1", request.adapter_id, request.build_profile, dict(request.typed_parameters)

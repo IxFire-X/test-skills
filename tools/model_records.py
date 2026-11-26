@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
+from tools.digests import digest_bytes
 from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
@@ -56,7 +57,7 @@ def _model_stage_artifact_bytes(value: Mapping[str, Any]) -> bytes:
 
 
 def _model_stage_artifact_digest(value: Mapping[str, Any]) -> str:
-    return "sha256:" + hashlib.sha256(_model_stage_artifact_bytes(value)).hexdigest()
+    return digest_bytes(_model_stage_artifact_bytes(value))
 
 
 def _model_request_target(root: Path, attempt_id: str, request_digest: str) -> Path:

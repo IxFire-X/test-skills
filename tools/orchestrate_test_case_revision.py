@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
+from tools.digests import json_digest
 from tools.output_guard import run_output_directory
 from tools.publish_test_case_bundle import Receipt, partial_context, planned_receipt, publish_bundle, rejected_cases, status_payloads, verify_bundle
 from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUNDS, REWORK_REVIEW_STAGE, REWORK_STAGE, SelectionError, candidate_rows, check_rework,
@@ -163,12 +164,12 @@ def _validate_profile(profile: str) -> None:
 
 def _session_digest(value: Mapping[str, Any]) -> str:
     body = {key: item for key, item in value.items() if key != "digest"}
-    return "sha256:" + hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return json_digest(body)
 
 
 def _host_isolation_digest(value: Mapping[str, Any]) -> str:
     body = {key: item for key, item in value.items() if key != "evidence_digest"}
-    return "sha256:" + hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return json_digest(body)
 
 
 def _receipt_value(receipt: Receipt) -> dict[str, Any]:

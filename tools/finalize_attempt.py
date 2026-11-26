@@ -7,13 +7,13 @@ It deliberately does not run an executor or mutate prior receipts.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from tools import execution_gate, pilot_state
 from tools.canonical_document import blocker_count as canonical_blocker_count
+from tools.digests import digest_bytes
 from tools.pilot_state import closure_cached as _closure_cached
 
 
@@ -38,7 +38,7 @@ def _canonical(value: Mapping[str, Any]) -> bytes:
 
 def _digest(value: Mapping[str, Any]) -> str:
     data = value if isinstance(value, bytes) else _canonical(value)
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+    return digest_bytes(data)
 
 
 def _seal(value: Mapping[str, Any]) -> dict[str, Any]:

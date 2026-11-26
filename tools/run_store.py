@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.digests import digest_bytes
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import run_lock
@@ -69,7 +70,7 @@ def _parse_json_bytes(data: bytes, label: str) -> dict[str, Any]:
 
 
 def _digest(value: Mapping[str, Any]) -> str:
-    return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return digest_bytes(_canonical_bytes(value))
 
 
 def _sealed(value: Mapping[str, Any]) -> dict[str, Any]:

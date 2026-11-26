@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import html
 import os
 import re
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
+from tools.digests import digest_bytes as _digest
 from tools.schema_validation import classify_version
 from tools.test_case_projections import (
     DEFAULT_PROFILE as _PROFILE,
@@ -86,10 +86,6 @@ class BundlePublicationError(OSError):
     @property
     def code(self) -> str:
         return self._code
-
-
-def _digest(payload: bytes) -> str:
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _reject_unknown_profile(csv_profile: str, *, allow_historical: bool = False) -> None:

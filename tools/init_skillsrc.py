@@ -11,6 +11,8 @@ import sys
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
+from tools.digests import digest_bytes as _digest
+
 if __package__:
     from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
     from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
@@ -400,10 +402,6 @@ def _v2_unsupported_fields(document: Mapping[str, Any]) -> list[str]:
 
 def _payload(document: Mapping[str, Any]) -> bytes:
     return (json.dumps(dict(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-
-
-def _digest(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _structural_diff(existing: Any, proposed: Any, path: str = "") -> list[dict[str, str]]:

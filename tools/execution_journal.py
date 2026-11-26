@@ -9,13 +9,13 @@ its public names.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Any, Mapping
 
 from tools import execution_gate
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes
+from tools.digests import json_digest
 from tools.project_inventory import URL_CREDENTIALS_TEXT, token_signature_rule
 from tools.schema_validation import schema_diagnostics
 from tools.pilot_state import (  # noqa: F401  (a name per line of the journal this module reads)
@@ -173,7 +173,7 @@ def _phase5_disposition_rows(delta: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def _phase5_delta_digest(delta: Mapping[str, Any]) -> str:
     body = {key: value for key, value in delta.items() if key != "digest"}
-    return "sha256:" + hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return json_digest(body)
 
 
 def _validate_generated_delta_ownership(
@@ -202,7 +202,7 @@ def _validate_generated_delta_ownership(
         if not isinstance(row, Mapping) or not isinstance(owned, Mapping) or not isinstance(row.get("file_id"), str) or not isinstance(row.get("path"), str):
             raise ValueError("invalid generated delta receipt")
         path = row["path"].replace("\\", "/")
-        expected_ownership = "sha256:" + hashlib.sha256(json.dumps({"baseline": delta.get("baseline_digest"), "automation": delta.get("automation_digest"), "review": delta.get("review_digest"), "path": row["path"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        expected_ownership = json_digest({"baseline": delta.get("baseline_digest"), "automation": delta.get("automation_digest"), "review": delta.get("review_digest"), "path": row["path"]})
         if row["file_id"] in file_ids or path.casefold() in folded_paths or not path.startswith(prefix) or Path(path).is_absolute() or ".." in Path(path).parts or row.get("ownership_digest") != expected_ownership or any(row.get(key) != owned.get(key) for key in ("file_id", "path", "content_digest", "baseline_absent", "ownership_digest")) or any(row.get(key) != delta.get(key) for key in ("baseline_digest", "automation_digest", "review_digest")):
             raise ValueError("invalid generated delta receipt")
         file_ids.add(row["file_id"])
@@ -444,7 +444,7 @@ def _check_automation_review_boundary(project: Path, root: Path, attempt: Mappin
     }
     isolation = receipt.get("host_isolation")
     isolation_body = {key: value for key, value in isolation.items() if key != "evidence_digest"} if isinstance(isolation, Mapping) else {}
-    isolation_digest = "sha256:" + hashlib.sha256(json.dumps(isolation_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    isolation_digest = json_digest(isolation_body)
     try:
         effective = _read_effective_canonical_with_state(
             project, root, state, str(attempt["attempt_id"]),
@@ -806,7 +806,7 @@ def _check_ownership(project: Path, root: Path, attempt: Mapping[str, Any], kind
                 break
             path = row["path"].replace("\\", "/")
             identity = (row["file_id"], path.casefold())
-            expected_ownership = "sha256:" + hashlib.sha256(json.dumps({"baseline": payload.get("baseline_digest"), "automation": payload.get("automation_digest"), "review": payload.get("review_digest"), "path": row["path"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            expected_ownership = json_digest({"baseline": payload.get("baseline_digest"), "automation": payload.get("automation_digest"), "review": payload.get("review_digest"), "path": row["path"]})
             if identity in seen or not path.startswith(prefix) or Path(path).is_absolute() or ".." in Path(path).parts or row.get("ownership_digest") != expected_ownership:
                 invalid_file = True
                 break
@@ -1238,7 +1238,7 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
     effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
     reviewer = str(reviewer_invocation_id)
     isolation = {"fresh_context": fresh_context, "distinct_invocations": fresh_context and generator != reviewer}  # a session that is not fresh is no independent one, whatever its label
-    isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    isolation["evidence_digest"] = json_digest(isolation)
     return {
         "automation_digest": str(published[0]["artifact_digest"]), "automation_revision": revision,
         "reviewer_session_id": f"autotest-review-{attempt_id}-r{revision}", "generator_invocation_id": generator,

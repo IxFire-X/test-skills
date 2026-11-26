@@ -27,6 +27,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from tools.digests import digest_bytes as _digest_of, json_bytes as canonical_bytes
+
 CLASSES = ("assertion_removed", "boundary", "status", "state_check_removed")
 # the order the seeding takes the classes in: two of three are omissions (a removed line or a removed item of the checks) — the errors a
 # reviewer misses; a changed code or a shifted number is caught every time (R&D-01), so these are put less often
@@ -53,16 +55,8 @@ NOTE = ("канарейки — сигнал качества ревью, не �
         "«модели не показывается» значит «не входит в пакет ревью и в вид ревьюера»")
 
 
-def _digest_of(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
-
-
 def _rank(*parts: str) -> int:
     return int(hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest(), 16)
-
-
-def canonical_bytes(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def map_target(root: Path, candidate_digest: str) -> Path:

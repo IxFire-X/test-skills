@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
+from tools.digests import json_digest
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
     PACK_ROOT as _PACK_ROOT,
@@ -118,7 +119,7 @@ def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, 
         ledger_events = [event for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == reviewer_digest]
         ledger_body = {key: value for key, value in ledger.items() if key != "digest"} if isinstance(ledger, Mapping) else {}
         canonical_ledger_bytes = json.dumps(ledger, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") if isinstance(ledger, Mapping) else None
-        canonical_ledger_digest = "sha256:" + hashlib.sha256(json.dumps(ledger_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        canonical_ledger_digest = json_digest(ledger_body)
         boundary_events = [
             event for event in state["events"]
             if event.get("attempt_id") == attempt["attempt_id"]

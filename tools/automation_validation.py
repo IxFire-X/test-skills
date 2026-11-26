@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from tools.canonical_document import blocked_cases, document_sha256, validate_canonical_document
+from tools.digests import json_bytes as canonical_automation_bytes, json_digest
 from tools.schema_validation import classify_version, diagnostic as _diagnostic_row, schema_diagnostics  # validate_automation_artifact has a local diagnostic
 
 
@@ -100,29 +101,24 @@ class AutomationArtifactError(ValueError):
         return self._diagnostics
 
 
-def canonical_automation_bytes(artifact: Mapping[str, Any]) -> bytes:
-    """Serialize the complete automation artifact without reordering arrays."""
-    return json.dumps(artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
 def automation_sha256(artifact: Mapping[str, Any]) -> str:
     """Return the deterministic identity of the complete automation artifact."""
-    return "sha256:" + hashlib.sha256(canonical_automation_bytes(artifact)).hexdigest()
+    return json_digest(artifact)
 
 
 def implementation_relations_sha256(relations: Sequence[Mapping[str, Any]]) -> str:
     """Return the immutable physical-array identity for implementation relations."""
-    return "sha256:" + hashlib.sha256(canonical_automation_bytes(list(relations))).hexdigest()
+    return json_digest(list(relations))
 
 
 def autotest_review_sha256(review: Mapping[str, Any]) -> str:
     """Return the immutable identity used by a complete corrected automation version."""
-    return "sha256:" + hashlib.sha256(canonical_automation_bytes(review)).hexdigest()
+    return json_digest(review)
 
 
 def host_isolation_sha256(receipt: Mapping[str, Any]) -> str:
     """Return the controller receipt identity bound into an automation review."""
-    return "sha256:" + hashlib.sha256(canonical_automation_bytes(receipt)).hexdigest()
+    return json_digest(receipt)
 
 
 def portable_path_key(path: str) -> str:

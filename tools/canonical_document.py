@@ -12,6 +12,7 @@ from types import MappingProxyType
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from tools.digests import digest_bytes
 from tools.schema_validation import diagnostic as _diagnostic, schema_diagnostics
 
 
@@ -1069,7 +1070,7 @@ def canonical_bytes(document: dict[str, Any]) -> bytes:
 
 def document_sha256(document: dict[str, Any]) -> str:
     """Return the prefixed SHA-256 identity of bare canonical-document bytes."""
-    return "sha256:" + hashlib.sha256(canonical_bytes(document)).hexdigest()
+    return digest_bytes(canonical_bytes(document))
 
 
 # Public name for batch_assembly: the same object under a name without an underscore; a rename of the private name is then a rename here.

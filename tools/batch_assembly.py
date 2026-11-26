@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import json_blocks, json_type, line_opening_bracket, rfc6901_tokens, validate_canonical_document_all
+from tools.canonical_document import canonical_bytes, document_sha256 as _digest, json_blocks, json_type, line_opening_bracket, rfc6901_tokens, validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -42,14 +42,6 @@ class BatchAssemblyError(ValueError):
             # PF-1: the table fix of this code sends the agent to ``diagnostics``; a refusal with none says where its reason is
             self.fix = "причина названа в message — исправь её и повтори команду; других диагностик у этого отказа нет"
         super().__init__(f"{code}: {message}")
-
-
-def canonical_bytes(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-
-
-def _digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
 def with_digest(value: dict[str, Any]) -> dict[str, Any]:

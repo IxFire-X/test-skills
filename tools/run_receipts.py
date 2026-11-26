@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from tools import execution_gate
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.digests import json_digest
 from tools.run_store import (  # the run store, below (П1 of the cut of v0.8)
     CLOSURE_CACHE as _CLOSURE_CACHE,
     DIGEST as _DIGEST,
@@ -94,7 +95,7 @@ def _check_reviewer_session_boundary(project: Path, root: Path, attempt: Mapping
     }
     isolation = receipt.get("host_isolation")
     isolation_body = {key: value for key, value in isolation.items() if key != "evidence_digest"} if isinstance(isolation, Mapping) else {}
-    isolation_digest = "sha256:" + hashlib.sha256(json.dumps(isolation_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    isolation_digest = json_digest(isolation_body)
     if (
         set(receipt) != expected_keys
         or not identity_matches
