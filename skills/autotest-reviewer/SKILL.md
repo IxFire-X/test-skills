@@ -62,7 +62,7 @@ finalization evidence.
 
 Record violations in existing findings with code evidence and affected case/relation IDs.
 For acceptance keep corrections empty; findings may hold only `WARNING`/`INFO` trifles
-(naming, a comment, an imprecision that does not change what a test checks); `BLOCKING`
+(naming, a comment, an imprecision that does not change what a test checks; a line of `## подсказки кода (читаемость)`); `BLOCKING`
 with `ПРИНЯТО` is a schema error. A weak assertion, a wrong expected value, «any exception»
 instead of the specific refusal, or a false PASS (a test that passes on wrong behavior) is
 never a note: it is `ТРЕБУЕТ ДОРАБОТКИ` with a `BLOCKING` finding (a compile error too; `corrections` empty), or `AUTO_FIX_APPLIED`

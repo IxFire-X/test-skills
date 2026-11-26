@@ -9,3 +9,5 @@ and invokes only `maven-wrapper:selected-symbols-v1` or
 Every generated symbol has identity `(file_id, symbol_id)` and a `java_class_method` locator. Emit atomic operation/assertion relations for each covered canonical target; required pairs are AND-combined. A correction is a full second V5 artifact bound to the first automation and `AUTO_FIX_APPLIED` review digests; never emit a partial patch or regenerate after runtime `FAIL`.
 
 At the `http-binding-v1` boundary perform one transport attempt. Use no implicit redirects, no retries, no cookies, no implicit credentials, no default headers, and no decompression. Preserve ordered explicit headers and use only runtime secret handles. Do not claim execution from static generation.
+
+Readable Java tests: one `LocalDate today = LocalDate.now()` per test, passed to helpers; `findById`, not `findAll().stream()`; `"A".repeat(N)` for a long uniform literal (`java_level` ≥ 11); no `checks.add` on a step that only prepares data; `assertAll` only in an end-to-end test, else plain `assertThat`.
