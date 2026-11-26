@@ -16,6 +16,7 @@ import uuid
 from typing import Any, Mapping, Sequence
 
 from tools import execution_gate
+from tools.confined_output import is_reparse as _is_reparse
 from tools.digests import digest_bytes as _digest_bytes, json_digest
 from tools.existing_tests import own_tests
 from tools.fixes import fix_for
@@ -88,15 +89,6 @@ def _slug(target: str | None, docs: list[str] | None) -> str:
     if docs and len(docs) == 1:
         return re.sub(r"[^A-Za-z0-9._-]+", "-", Path(docs[0]).stem).strip("-") or "project"
     return "project"
-
-
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    attributes = getattr(details, "st_file_attributes", 0)
-    return bool(path.is_symlink() or attributes & 0x400)
 
 
 def _confined(project: Path, candidate: Path) -> Path:

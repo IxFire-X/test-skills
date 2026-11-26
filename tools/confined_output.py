@@ -19,6 +19,7 @@ __all__ = [
     "create_confined_directory_exclusive",
     "create_confined_bytes_exclusive",
     "ensure_project_child_directory",
+    "is_reparse",
     "open_confined_lock_descriptor",
     "read_confined_bytes",
     "remove_confined_bytes_if_equal",
@@ -35,6 +36,16 @@ _WINDOWS_RESERVED: Final = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{number
 
 def _details_are_link(details: os.stat_result) -> bool:
     return stat.S_ISLNK(details.st_mode) or bool(getattr(details, "st_file_attributes", 0) & _REPARSE)
+
+
+def is_reparse(path: Path) -> bool:
+    """A symbolic link or a Windows reparse point, for the readers.  A path whose stat fails is none here: the reader's next check
+    refuses it (project_inventory reads it as one)."""
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def _details_identity(details: os.stat_result) -> tuple[int, int, int | None]:

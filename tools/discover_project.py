@@ -23,6 +23,7 @@ if __package__:
     )
     from .schema_validation import StrictJsonError, load_json_strict
     from .module_ids import legacy_module_id, module_id_for
+    from .confined_output import is_reparse as _is_reparse
 else:
     from stack_catalog import (
         GO_FRAMEWORK_MARKERS,
@@ -40,6 +41,7 @@ else:
     )
     from schema_validation import StrictJsonError, load_json_strict
     from module_ids import legacy_module_id, module_id_for
+    from confined_output import is_reparse as _is_reparse
 
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
@@ -55,13 +57,6 @@ def _rel(root: Path, p: Path) -> str: return p.relative_to(root).as_posix() or "
 def _ok(root: Path, p: Path) -> bool:
     try: p.resolve().relative_to(root); return True
     except ValueError: return False
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    attributes = getattr(details, "st_file_attributes", 0)
-    return bool(path.is_symlink() or attributes & 0x400)
 def _usable_dir(root: Path, path: Path) -> bool:
     if _is_reparse(path):
         return False

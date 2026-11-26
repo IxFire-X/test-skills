@@ -243,7 +243,7 @@ def _is_reparse(path: Path) -> bool:
     try:
         details = os.stat(path, follow_symlinks=False)
     except OSError:
-        return True
+        return True  # fails closed: a failed stat is a link here, unlike confined_output.is_reparse (module_runtime_path relies on it)
     return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 

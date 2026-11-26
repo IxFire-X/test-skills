@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 
 if __package__:
+    from .confined_output import is_reparse as _is_reparse
     from .scan_rules import directory_reason, path_reason
 else:  # direct CLI execution of discover_project / init_skillsrc
+    from confined_output import is_reparse as _is_reparse
     from scan_rules import directory_reason, path_reason
 
 
@@ -23,14 +25,6 @@ def is_ignored_dir(parents: tuple[str, ...], name: str) -> bool:
 def is_ignored_path(parts: tuple[str, ...]) -> bool:
     """Any directory of ``parts`` left out in its place (the inventory rules plus the search-only ones)."""
     return any(part.casefold() in SEARCH_ONLY_DIRS for part in parts) or path_reason(parts) is not None
-
-
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 MANIFEST_LANGUAGES = {
     "pyproject.toml": "python", "requirements.txt": "python",

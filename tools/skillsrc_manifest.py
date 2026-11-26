@@ -9,9 +9,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
 
 try:
+    from tools.confined_output import is_reparse as _is_reparse
     from tools.schema_engine import Draft202012Validator
     from tools.schema_validation import StrictJsonError, loads_json_strict
 except ImportError:  # direct execution from tools/
+    from confined_output import is_reparse as _is_reparse
     from schema_engine import Draft202012Validator
     from schema_validation import StrictJsonError, loads_json_strict
 
@@ -338,14 +340,6 @@ def resolve_module_root(project_root: Path, module: Mapping[str, Any]) -> Path:
             [{"path": "/root", "message": "path escapes project root"}],
         )
     return resolved_module_root
-
-
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def _validate_unique_module_ids(document: Mapping[str, Any]) -> None:

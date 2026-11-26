@@ -14,13 +14,13 @@ from typing import Any, Mapping
 from tools.digests import digest_bytes as _digest
 
 if __package__:
-    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
+    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, is_reparse as _is_reparse, read_confined_bytes
     from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from .schema_validation import StrictJsonError, load_json_strict
     from .stack_catalog import is_ignored_path
     from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, parse_skillsrc_bytes
 else:
-    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, read_confined_bytes
+    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, atomic_write_confined_bytes_in_project, create_confined_bytes_exclusive, is_reparse as _is_reparse, read_confined_bytes
     from discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from schema_validation import StrictJsonError, load_json_strict
     from stack_catalog import is_ignored_path
@@ -568,14 +568,6 @@ def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
         return normalize_skillsrc(load_skillsrc(destination))["modules"]
     except (OSError, SkillsrcError, ValueError):
         return []
-
-
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def _resolve_explicit_target(root: Path, value: str | None) -> Path | None:

@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
-import os
 import re
 from contextlib import contextmanager
 from functools import lru_cache
@@ -21,7 +20,7 @@ from tools.digests import digest_bytes
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import run_lock
-from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, is_reparse as _is_reparse, read_confined_bytes, remove_confined_bytes_if_equal
 from tools.project_inventory import token_signature_rule
 from tools.schema_validation import _json_validation_key
 
@@ -117,14 +116,6 @@ def _validate_schema(name: str, value: Mapping[str, Any]) -> None:
         raise ValueError(f"schema validation failed: {name}")
     if key is not None:
         cache[key] = True
-
-
-def _is_reparse(path: Path) -> bool:
-    try:
-        details = os.stat(path, follow_symlinks=False)
-    except OSError:
-        return False
-    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def run_root_is_unsafe(project: Path) -> bool:
