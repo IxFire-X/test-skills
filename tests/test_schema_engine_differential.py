@@ -158,8 +158,8 @@ def _holds_a_line_terminator(text: str) -> bool:
     return any(char in text for char in "\r\u2028\u2029")
 
 
-def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
-    """True when the oracle accepts the instance. Appends one line per difference to *problems*.
+def _compare(name: str, instance: Any, label: str, problems: list[str], verdicts: list[tuple[bool, bool]] | None = None) -> bool:
+    """True when the oracle accepts the instance. Appends one line per difference to *problems* and (engine accepts, oracle accepts) to *verdicts*.
 
     Two named allowances. The oracle matches patterns with Python ``re.search``; the engine follows ECMA 262.
     ``ECMA_END_OF_STRING``: ``$`` also matches before a final newline in Python, it does not in ECMA.
@@ -175,6 +175,8 @@ def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
     except Exception as error:  # an engine crash is a difference too
         problems.append(f"{label} x {name}: engine raised {type(error).__name__}: {error}")
         return not expected
+    if verdicts is not None:  # the verdicts of the walks above: one more walk of the oracle is ~1 s on the 1.2 MB example
+        verdicts.append((not actual, not expected))
     if ENGINE[name].is_valid(instance) != (not actual):  # F8: the boolean walk is the verdict of the error walk, on every pair
         problems.append(f"{label} x {name}: is_valid says {ENGINE[name].is_valid(instance)}, the engine reports {len(actual)} errors")
     if actual != expected:
@@ -356,16 +358,16 @@ def test_the_named_allowance_ecma_end_of_string_is_exercised_and_is_nothing_more
     (the oracle accepts, the engine refuses), the allowance forgives them all, and no other difference is left."""
     forgiven_before = len(ECMA_END_OF_STRING)
     problems: list[str] = []
-    refused = 0
+    verdicts: list[tuple[bool, bool]] = []
     for label, instance in _fixture_instances():
         for name in RAW:
             if not _compare(name, instance, label, problems):
                 continue
             for tail in ("\n", "\r\n"):
                 for mutation, mutant in _final_newline_mutants(instance, tail):
-                    _compare(name, mutant, f"{label} [{mutation}]", problems)
-                    refused += (not ENGINE[name].is_valid(mutant)) and ORACLE[name].is_valid(mutant)
+                    _compare(name, mutant, f"{label} [{mutation}]", problems, verdicts)
     assert not problems, "\n".join(problems[:40])
+    refused = sum(oracle and not engine for engine, oracle in verdicts)
     assert refused >= 5 and len(ECMA_END_OF_STRING) - forgiven_before >= refused, (refused, len(ECMA_END_OF_STRING) - forgiven_before)
 
 
@@ -459,16 +461,16 @@ def test_the_named_allowance_nonfinite_bound_is_exercised_and_is_nothing_more() 
     engine refuses), the allowance forgives them all, the two walks of the engine agree on every pair, and no other difference is left."""
     forgiven_before = len(NONFINITE_BOUND)
     problems: list[str] = []
-    refused = 0
+    verdicts: list[tuple[bool, bool]] = []
     for label, instance in _fixture_instances():
         for name in RAW:
             if not _compare(name, instance, label, problems):
                 continue
             for mutation, mutant in _mutations(instance):
                 if mutation.startswith(("num-nan", "num-inf", "num--inf")):
-                    _compare(name, mutant, f"{label} [{mutation}]", problems)
-                    refused += (not ENGINE[name].is_valid(mutant)) and ORACLE[name].is_valid(mutant)
+                    _compare(name, mutant, f"{label} [{mutation}]", problems, verdicts)
     assert not problems, "\n".join(problems[:40])
+    refused = sum(oracle and not engine for engine, oracle in verdicts)
     # the fixtures' bounded numbers are integers, which NaN fails by type in both: the differences are in the errors (the engine adds the broken bound), not in the verdict
     assert len(NONFINITE_BOUND) - forgiven_before >= max(refused, 1), (refused, len(NONFINITE_BOUND) - forgiven_before)
 
