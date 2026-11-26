@@ -264,7 +264,7 @@ def publish_model_request(
         if known is None and stage in {"tc-to-autotest", "autotest-reviewer"}:
             known = _automation_inputs(project, root, state, attempt_id, stage_instance_id)
         inputs = [digest for digest, _source in known or ()]
-    label_fix = ("метка из букв, цифр и . _ : / - (до 256 знаков), например deepseek-v4 или context-1; "
+    label_fix = ("метка из букв, цифр и . _ : / - (до 256 знаков), например model-v4 или context-1; "
                  "без ключей, токенов и паролей")
     broken = next(((reason, fix) for failed, reason, fix in (
         (attempt is None, f"no attempt {attempt_id} in this run", "--attempt — attempt_id этого прогона из run_pipeline status"),
