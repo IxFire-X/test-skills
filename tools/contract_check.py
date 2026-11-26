@@ -314,9 +314,9 @@ def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, error
     if not isinstance(rows, list) or not rows:
         errors.append("published_artifacts missing")
         return
-    state = _tools_source(root, "pilot_state")
+    state = _tools_source(root, "run_receipts")
     if state is None:
-        errors.append("published_artifacts: tools/pilot_state.py unavailable")
+        errors.append("published_artifacts: tools/run_receipts.py unavailable")
         return
     directories = _receipt_directories(state[1])
     folders = set(_module_assignment(state[1], "_RECEIPT_FOLDERS") or ())
@@ -348,7 +348,7 @@ def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, error
             if kind in prefixes:
                 prefix = prefixes[kind]
                 if not isinstance(prefix, str) or not kind.startswith(prefix):
-                    errors.append(f"{label}: the prefix of the kind {kind} is not the one of pilot_state")
+                    errors.append(f"{label}: the prefix of the kind {kind} is not the one of run_receipts")
                 elif directories.get(kind) is None and first != prefix.removesuffix("-"):
                     errors.append(f"{label}: folder does not follow its kind")
             elif kind == "imported-cases":
