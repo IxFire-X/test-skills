@@ -319,7 +319,8 @@ def test_the_report_names_the_passed_rows_disabled_with_the_method(tmp_path: Pat
     from tools.run_report import build_report, render_markdown
 
     run_root = _finished_run(tmp_path)
-    report = build_report(tmp_path, run_root.name)[0]
+    project = run_root.parents[1]
+    report = build_report(project, run_root.name)[0]
     report["quarantine"] = [{"file": "GroupTest.java", "method": "tc_group_age", "ref": "FAIL", "failed_rows": ["TC-B1-002"],
                              "disabled_passed_rows": ["TC-B1-001", "TC-B1-003"]}]
     markdown = render_markdown(report)

@@ -23,7 +23,8 @@ def _generated(tmp_path: Path) -> dict:
 
 def test_the_header_tells_model_calls_from_code_steps_and_sreq_from_creq(tmp_path: Path) -> None:
     run_root = _finished_run(tmp_path)
-    report, markdown = _report(tmp_path, run_root)
+    project = run_root.parents[1]
+    report, markdown = _report(project, run_root)
     document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
     counts = report["counts"]
     assert counts["source_requirements"] == len(document["source_requirements"])
@@ -49,6 +50,7 @@ def test_a_controller_merge_is_counted_as_a_step_of_code(tmp_path: Path) -> None
 
 def test_no_measurements_say_so_and_the_tmp_folder_is_sized_not_removed(tmp_path: Path) -> None:
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     tmp = run_root / "tmp"
     tmp.mkdir(exist_ok=True)
     before = sum(path.stat().st_size for path in tmp.rglob("*") if path.is_file())
@@ -56,7 +58,7 @@ def test_no_measurements_say_so_and_the_tmp_folder_is_sized_not_removed(tmp_path
     measured = run_root / "step-sizes.jsonl"
     assert measured.is_file() and measured.stat().st_size > 0  # P1: prepare measures its steps itself
     measured.unlink()  # a run from before the measurements: none of them
-    report, markdown = _report(tmp_path, run_root)
+    report, markdown = _report(project, run_root)
     assert report["step_sizes"] == []
     section = markdown.split("## Размер входа шагов", 1)[1].split("\n## ", 1)[0]
     assert "замеров нет" in section and "| Шаг |" not in section
@@ -145,7 +147,8 @@ def test_a_v02_run_without_a_single_refusal_prints_zero(tmp_path: Path) -> None:
 
 def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> None:
     run_root = _finished_run(tmp_path)
-    report, markdown = _report(tmp_path, run_root)
+    project = run_root.parents[1]
+    report, markdown = _report(project, run_root)
     document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
     canon = report["canon"]
     cases = document["test_cases"]

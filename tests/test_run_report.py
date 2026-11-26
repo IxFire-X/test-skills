@@ -141,20 +141,30 @@ def test_model_calls_are_timed_from_request_to_response_and_show_attempts() -> N
     assert second["step_sec"] is None and second["transport_attempts"] == 1
 
 
-def _finished_run(tmp_path: Path):
+def build_finished_run(project: Path) -> Path:
+    """A failed execution of the three-function file with its dispositions decided, built in *project*; its run root."""
     from tests.test_quarantine import THREE_FUNCTIONS, _fail
     from tools.finalize_attempt import decide_dispositions
 
-    run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS)
-    decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
+    run_root, attempt_id, delta = _fail(project, content=THREE_FUNCTIONS)
+    decide_dispositions(project, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
     return run_root
+
+
+def _finished_run(tmp_path: Path) -> Path:
+    """The run of build_finished_run, built once per test process and restored in its own project folder (tests/snapshots.py);
+    the project is ``run_root.parents[1]``, not *tmp_path*."""
+    from tests.snapshots import restored
+
+    return restored(tmp_path, "finished-run", build_finished_run)[1]
 
 
 def test_the_report_has_steps_counts_and_no_project_content(tmp_path: Path) -> None:
     from tools.run_report import GUARANTEE, write_report
 
     run_root = _finished_run(tmp_path)
-    written = write_report(tmp_path, run_root.name)
+    project = run_root.parents[1]
+    written = write_report(project, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert sorted(Path(path).name for path in written) == ["questions-for-analyst.md", "report.json", "report.md"]
@@ -186,7 +196,8 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
     from tools.run_report import write_report
 
     run_root = _finished_run(tmp_path)
-    write_report(tmp_path, run_root.name)
+    project = run_root.parents[1]
+    write_report(project, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     assert "STEP_OVER_BUDGET" not in report["warnings"]  # P1: prepare measures its steps itself, none of them is over the budget
     rows = [{"step": "tc-reviewer:canonical", "bytes": 732886, "input_bytes": 700000, "role_bytes": 32886, "role": "tc-reviewer",
@@ -194,7 +205,7 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
             {"step": "context-marker", "bytes": 1000, "input_bytes": 900, "role_bytes": 100, "role": "context-marker",
              "files": 2, "tokens_est": 240, "budget_bytes": 500000, "fits": True, "warning": None, "at": "2026-10-28T00:59:00Z"}]
     (run_root / "step-sizes.jsonl").write_bytes(("".join(json.dumps(row) + "\n" for row in rows) + "not json\n").encode("utf-8"))
-    write_report(tmp_path, run_root.name)
+    write_report(project, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert [row["step"] for row in report["step_sizes"]] == ["tc-reviewer:canonical", "context-marker"]
@@ -209,11 +220,12 @@ def test_a_data_mismatch_is_in_the_report_by_id_and_count_without_the_values(tmp
     from tools.review_view import DATA_MISMATCH
 
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     document = json.loads((Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json").read_text(encoding="utf-8"))
     step = next(step for step in document["test_cases"][0]["steps"] if any(item["source"]["kind"] == "literal" for item in step["inputs"]))
     next(item for item in step["inputs"] if item["source"]["kind"] == "literal")["source"]["value"] = "Zebra-Street-77"
     monkeypatch.setattr(run_report, "_effective_document", lambda root, attempt_id: (document, False))
-    run_report.write_report(tmp_path, run_root.name)
+    run_report.write_report(project, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert DATA_MISMATCH in report["warnings"]
@@ -235,7 +247,8 @@ def test_report_is_a_pipeline_command(tmp_path: Path, capsys: pytest.CaptureFixt
     from tools.run_pipeline import main
 
     run_root = _finished_run(tmp_path)
-    assert main(["report", "--project", str(tmp_path), "--run", run_root.name]) == 0
+    project = run_root.parents[1]
+    assert main(["report", "--project", str(project), "--run", run_root.name]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["stage"] == "report" and out["report_md"].endswith("report.md")
 
@@ -279,13 +292,14 @@ def test_status_and_a_second_report_still_work_after_the_report(tmp_path: Path, 
     from tools.run_pipeline import main
 
     run_root = _finished_run(tmp_path)
-    assert main(["report", "--project", str(tmp_path), "--run", run_root.name]) == 0
+    project = run_root.parents[1]
+    assert main(["report", "--project", str(project), "--run", run_root.name]) == 0
     first = (run_root / "report.json").read_bytes()
     capsys.readouterr()
-    assert main(["status", "--project", str(tmp_path), "--run", run_root.name]) == 0
+    assert main(["status", "--project", str(project), "--run", run_root.name]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["evidence_errors"] == []
-    assert main(["report", "--project", str(tmp_path), "--run", run_root.name]) == 0
+    assert main(["report", "--project", str(project), "--run", run_root.name]) == 0
     assert json.loads((run_root / "report.json").read_bytes())["steps"] == json.loads(first)["steps"]
 
 
@@ -343,10 +357,11 @@ def test_the_report_runs_inside_one_closure_cache(tmp_path: Path, monkeypatch: p
     from tools.run_report import write_report
 
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     counts: collections.Counter = collections.Counter()
     original = pilot_state._derive_state
     monkeypatch.setattr(pilot_state, "_derive_state", lambda root: counts.update(["derive"]) or original(root))
-    write_report(tmp_path, run_root.name)
+    write_report(project, run_root.name)
     assert counts["derive"] <= 3, counts
 
 
@@ -381,6 +396,7 @@ def test_a_forged_copy_during_report_is_one_error_json(tmp_path: Path, monkeypat
     from tools.run_pipeline import main
 
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     copy = run_root / "events" / "0000000002.json"
     original = pilot_state._derive_state
     forged = {"done": False}
@@ -394,7 +410,7 @@ def test_a_forged_copy_during_report_is_one_error_json(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(pilot_state, "_derive_state", derive_then_forge)
     capsys.readouterr()
-    code = main(["report", "--project", str(tmp_path), "--run", run_root.name])
+    code = main(["report", "--project", str(project), "--run", run_root.name])
     out = capsys.readouterr()
     assert forged["done"] and code == 2 and "Traceback" not in out.out + out.err
     answer = json.loads(out.out)

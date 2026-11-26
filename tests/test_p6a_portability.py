@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _terminal_run(tmp_path: Path) -> Path:
-    from tests.test_run_report import _finished_run
+    from tests.test_run_report import build_finished_run  # built in this folder: the module fixture keeps it (no snapshot)
 
-    return _finished_run(tmp_path)
+    return build_finished_run(tmp_path)
 
 
 def _open_run(tmp_path: Path) -> Path:

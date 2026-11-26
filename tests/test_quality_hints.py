@@ -388,7 +388,8 @@ def test_the_report_counts_weak_assertions_of_the_run_automation(tmp_path: Path)
     from tools.run_report import write_report
 
     run_root = _finished_run(tmp_path)
-    write_report(tmp_path, run_root.name)
+    project = run_root.parents[1]
+    write_report(project, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     summary = report["autotest_assertions"]

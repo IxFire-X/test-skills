@@ -39,8 +39,9 @@ def test_an_expectation_hint_of_the_report_is_code_case_and_step_only(tmp_path: 
     weak = _step("STEP-x-3", [_assert(FREE, "exists")], method="POST")
     document = _document([_step("STEP-x-1", [_assert("failed", "equals", True)], method="GET")], [_step("STEP-x-2", REJECTED, method="POST")], [weak])
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     monkeypatch.setattr(run_report, "_effective_document", lambda root, attempt_id: (document, False))
-    run_report.write_report(tmp_path, run_root.name)
+    run_report.write_report(project, run_root.name)
     gaps = json.loads((run_root / "report.json").read_text(encoding="utf-8"))["expectations"]["gaps"]
     assert sorted(gap["code"] for gap in gaps) == ["TD_NEGATIVE_NO_STATE_CHECK", "TD_VAGUE_EXPECTATION", "TD_WEAK_SUCCESS"]
     assert all(set(gap) == {"code", "case_id", "step_id"} for gap in gaps), gaps
@@ -53,11 +54,12 @@ def test_a_measurement_row_with_free_text_is_counted_and_not_printed(tmp_path: P
     from tools.run_report import write_report
 
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     good = {"step": "tc-reviewer:canonical", "bytes": 10, "input_bytes": 9, "role_bytes": 1, "role": "tc-reviewer", "files": 2, "tokens_est": 3,
             "budget_bytes": 100, "fits": True, "warning": None, "at": "2026-10-28T01:00:00Z"}
     bad = {**good, "step": f"{FREE} | x\nстрока", "role": FREE, "warning": FREE, "at": FREE, "bytes": FREE, "tokens_est": [FREE], "fits": FREE, "files": FREE}
     (run_root / "step-sizes.jsonl").write_bytes("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in (good, bad)).encode("utf-8"))
-    write_report(tmp_path, run_root.name)
+    write_report(project, run_root.name)
     rows = json.loads((run_root / "report.json").read_text(encoding="utf-8"))["step_sizes"]
     assert rows[0] == good
     assert len(rows) == 2 and all(rows[1][key] is None for key in ("step", "role", "warning", "at", "bytes", "tokens_est", "fits", "files"))
@@ -143,9 +145,10 @@ def test_the_source_requirements_are_those_of_the_document_not_of_the_marker(tmp
     from tools import run_report
 
     run_root = _finished_run(tmp_path)
+    project = run_root.parents[1]
     document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
-    marked = run_report.build_report(tmp_path, run_root.name)[0]["counts"]["requirements"]
+    marked = run_report.build_report(project, run_root.name)[0]["counts"]["requirements"]
     document["source_requirements"] = document["source_requirements"][:-1]  # the plan of a run with an exclusion has no such requirement
     monkeypatch.setattr(run_report, "_effective_document", lambda root, attempt_id: (document, False))
-    counts = run_report.build_report(tmp_path, run_root.name)[0]["counts"]
+    counts = run_report.build_report(project, run_root.name)[0]["counts"]
     assert counts["source_requirements"] == len(document["source_requirements"]) and counts["requirements"] == marked

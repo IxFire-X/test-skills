@@ -33,6 +33,7 @@ def test_status_derives_once_validates_the_manifest_once_and_starts_no_process(
     from tools.run_pipeline import cmd_status
 
     run_root = make_run(tmp_path)
+    project = run_root.parents[1]
     capsys.readouterr()
     manifest_schema = (pilot_state._SCHEMA_ROOT / "run-manifest.schema.json").read_text(encoding="utf-8")
     counts: collections.Counter = collections.Counter()
@@ -55,7 +56,7 @@ def test_status_derives_once_validates_the_manifest_once_and_starts_no_process(
     monkeypatch.setattr(pilot_state, "_artifact_validator", counted_validator)
     monkeypatch.setattr(subprocess, "Popen", no_process)
 
-    assert cmd_status(SimpleNamespace(project=str(tmp_path), run=run_root.name)) == 0
+    assert cmd_status(SimpleNamespace(project=str(project), run=run_root.name)) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "ok" and output["run_id"] == run_root.name
     assert counts["derive"] == 1, counts
@@ -69,15 +70,16 @@ def test_status_still_checks_the_whole_journal_before_it_answers(tmp_path: Path,
     from tools.run_pipeline import main
 
     run_root = _terminal_run(tmp_path)
+    project = run_root.parents[1]
     capsys.readouterr()
     calls: collections.Counter = collections.Counter()
     full = pilot_state._events_full
     monkeypatch.setattr(pilot_state, "_events_full", lambda project, root: calls.update(["full"]) or full(project, root))
-    assert main(["status", "--project", str(tmp_path), "--run", run_root.name]) == 0
+    assert main(["status", "--project", str(project), "--run", run_root.name]) == 0
     assert calls["full"] >= 1
     capsys.readouterr()
 
     copy = run_root / "events" / "0000000001.json"
     copy.write_bytes(copy.read_bytes().replace(b'"seq":1', b'"seq":1 ', 1))
-    assert main(["status", "--project", str(tmp_path), "--run", run_root.name]) == 2
+    assert main(["status", "--project", str(project), "--run", run_root.name]) == 2
     assert json.loads(capsys.readouterr().out)["status"] == "error"
