@@ -448,7 +448,7 @@ def plan_of(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
 
     root = Path(run_root).resolve()
     try:
-        return pilot_state._generator_input(project_of(root), root, pilot_state.derive_state(root), attempt_id, "plan")
+        return pilot_state.generator_input(project_of(root), root, pilot_state.derive_state(root), attempt_id, "plan")
     except (pilot_state.ModelInputsMismatch, OSError, KeyError, ValueError, IndexError):
         return None
 

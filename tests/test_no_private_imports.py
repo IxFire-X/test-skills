@@ -63,28 +63,20 @@ def _is_exec_file(name: str) -> bool:
 
 # The uses outside the execution files that are left; every package that takes one away takes it off this list.
 EXCEPTIONS: dict[tuple[str, str, str], int] = {
-    ("automation_validation", "pilot_state", "_read_attempt_receipt_with_state"): 1,
-    ("automation_validation", "pilot_state", "_read_effective_canonical_with_state"): 1,
     ("automation_validation", "pilot_state", "_run_root"): 1,
     ("batch_assembly", "build_context", "_project_id_pattern"): 1,
     ("cases_import", "project_inventory", "_secret_value"): 1,
     ("contract_check", "render_contract_docs", "_rendered_files"): 1,
-    ("existing_tests", "pilot_state", "_context_selection_target"): 1,
-    ("generated_delta", "pilot_state", "_sealed"): 1,
     ("model_inputs", "project_inventory", "_digest"): 1,
-    ("model_records", "build_context", "_OPENSPEC_PATH"): 1,
     ("model_steps", "orchestrate_test_case_revision", "_run_imported"): 1,
     ("model_steps", "step_size", "_REQUEST_STAGES"): 1,
-    ("orchestrate_test_case_revision", "pilot_state", "_generator_input"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_imported_cases"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_run_root"): 4,
     ("output_guard", "pilot_state", "_run_root"): 1,
     ("review_canaries", "pilot_state", "_receipt_target"): 1,
     ("review_canaries", "pilot_state", "_run_root"): 5,
     ("review_canaries", "review_view", "_assertion"): 2,
-    ("run_facts", "pilot_state", "_generator_input"): 1,
     ("run_facts", "pilot_state", "_read_artifact"): 1,
-    ("run_facts", "pilot_state", "_read_attempt_receipt_with_state"): 1,
     ("run_facts", "pilot_state", "_receipt_target"): 2,
     ("run_pipeline", "pilot_state", "_frozen_inventory"): 1,
     ("run_scan", "project_inventory", "_secret_rule"): 1,
@@ -92,8 +84,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("run_report", "review_view", "_reference_counts"): 1,
     ("run_report", "step_size", "_requirement_files"): 1,
     ("run_store", "schema_validation", "_json_validation_key"): 1,
-    ("scope_pause", "pilot_state", "_generator_input"): 1,
-    ("step_size", "pilot_state", "_model_request_target"): 1,
 }
 
 

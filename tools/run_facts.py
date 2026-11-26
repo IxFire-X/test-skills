@@ -368,7 +368,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
                     named_receipts += 1
             continue
         try:
-            receipt = pilot._read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")
+            receipt = pilot.read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")
             value, facts = receipt["record"], {}
             if kind == "generated-delta" and value["delta"]["facts"]["completion"] != "COMPLETE":
                 next_artifact, facts["stop_reason"] = CLOSURE, "MATERIALIZATION_INCOMPLETE"
@@ -388,7 +388,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         # are named by their own path, a receipt of another kind (the journal does not say which) by its digest
         for generator_input, receipt_kind in (("plan", "batch-plan"), ("header", "generator-header")):
             try:
-                pilot._generator_input(project, root, state, attempt_id, generator_input)
+                pilot.generator_input(project, root, state, attempt_id, generator_input)
             except (OSError, KeyError, TypeError, ValueError):
                 unreadable(str(pilot._receipt_target(root, attempt_id, receipt_kind).relative_to(root)))
                 named_receipts += 1

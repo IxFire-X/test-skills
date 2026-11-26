@@ -140,7 +140,7 @@ def _context_marker_snapshots(
     receipts: Sequence[str] | None = None,
 ) -> list[dict[str, str]]:
     """The OpenSpec sources of the receipts the request binds (or of ``receipts``), each checked against its bytes."""
-    from tools.build_context import _OPENSPEC_PATH
+    from tools.build_context import OPENSPEC_PATH as _OPENSPEC_PATH
     from tools.project_inventory import read_execution_baseline
 
     baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))

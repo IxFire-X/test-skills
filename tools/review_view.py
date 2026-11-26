@@ -287,7 +287,7 @@ def run_style_hint(root: Path, attempt_id: str, document: Mapping[str, Any]) -> 
     selected = dict.fromkeys(str(event["artifact_digest"]) for event in derive_state(Path(root))["events"]
                              if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")
     files = [row for digest in selected for row in read_context_selection(Path(root), attempt_id, digest)["files"]]
-    return transferred(document, samples["cases"], known_text(Path(root).parent.parent, document, files))
+    return transferred(document, samples["cases"], known_text(project_of(root), document, files))
 
 
 def run_context_note(root: Path, attempt_id: str) -> str | None:

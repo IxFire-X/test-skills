@@ -601,7 +601,7 @@ def context_view(run_root: Path, context_digests: str | list[str], attempt_id: s
     """The map bytes of the context of one generator batch, built from the frozen inputs; the digests that are no context
     selection of the attempt are skipped, empty when none is or the project has no hits. The one source of these
     bytes for the list of reading of prepare and the run report; one map for all the context receipts the batch reads."""
-    from tools.pilot_state import _context_selection_target, derive_state, read_context_selection
+    from tools.pilot_state import context_selection_target as _context_selection_target, derive_state, read_context_selection
     from tools.run_store import project_of
 
     root = Path(run_root).resolve()

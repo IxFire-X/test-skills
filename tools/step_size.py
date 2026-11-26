@@ -446,7 +446,7 @@ def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str
     """The digest and the input digests of the last published request of ``stage``, from its journal slot. The bytes are the ones the journal
     sealed (the body hashes to the digest field and to the digest of the event); the predecessor check of ``read_model_request`` is not repeated
     — the request was checked when it was published."""
-    from tools.pilot_state import _model_request_target, check_sealed_value
+    from tools.pilot_state import check_sealed_value, model_request_target as _model_request_target
 
     requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
                  and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]

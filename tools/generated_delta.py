@@ -794,7 +794,7 @@ def apply_dispositions(
             key: row[key] for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent")
         } | {"operation": operation, "requested_disposition": expected})
     from tools.execution_journal import publish_phase5_receipt
-    from tools.pilot_state import _sealed as _seal_receipt, read_attempt_receipt
+    from tools.pilot_state import read_attempt_receipt, sealed as _seal_receipt
 
     execution_payload: Mapping[str, Any] = {}
     if verification in {"FAIL", "NOT_RUNNABLE"}:

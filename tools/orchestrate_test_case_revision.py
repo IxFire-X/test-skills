@@ -1727,7 +1727,7 @@ def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], d
     """``(candidate, assembly receipt, fragments)`` — ``assemble_candidate`` over the published plan and header
     and the tc-generator answers of the journal in plan order: the bytes the last ``submit`` of the generator checked (only reads)."""
     from tools.batch_assembly import assemble_candidate
-    from tools.pilot_state import _generator_input, _run_root, derive_state, read_model_stage_artifact
+    from tools.pilot_state import _run_root, derive_state, generator_input as _generator_input, read_model_stage_artifact
 
     project, root = _run_root(Path(run_root))
     state = derive_state(root)

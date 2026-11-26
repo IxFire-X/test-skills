@@ -471,7 +471,7 @@ def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], h
     state = None
     if run_root is not None and isinstance(attempt_id, str):
         try:
-            from tools.pilot_state import _read_attempt_receipt_with_state, _run_root, derive_state
+            from tools.pilot_state import _run_root, derive_state, read_attempt_receipt_with_state as _read_attempt_receipt_with_state
 
             project, root = _run_root(run_root)
             state = derive_state(root)
@@ -503,7 +503,7 @@ def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], h
         rows.append(_diagnostic("AUTOTEST_REVIEW_ISOLATION", "/artifacts/autotest_review/host_isolation_sha256"))
     if run_root is not None and isinstance(attempt_id, str):
         try:
-            from tools.pilot_state import _read_effective_canonical_with_state
+            from tools.pilot_state import read_effective_canonical_with_state as _read_effective_canonical_with_state
 
             if state is None:
                 raise ValueError("durable review state is unavailable")
