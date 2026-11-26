@@ -54,7 +54,7 @@ def test_v5_bytes_of_one_step() -> None:
     from tools.test_case_projections import render_zephyr_csv
 
     document = canonical_fixture()
-    header, row = _rows(render_zephyr_csv(document).payload)
+    header, row = _rows(render_zephyr_csv(document, V5).payload)
     step = document["test_cases"][0]["steps"][0]
     assert (row[header.index(STEP)], row[header.index(DATA)], row[header.index(EXPECTED)]) == (
         step["action"], step["test_data"], step["expectations"][0]["text"])
@@ -64,10 +64,10 @@ def test_v5_has_no_machine_lines_and_resolves_the_http_url_in_the_step() -> None
     from tools.test_case_projections import _human_action, render_zephyr_csv
 
     document = _example()
-    payload = render_zephyr_csv(document).payload.decode("utf-8-sig")
+    payload = render_zephyr_csv(document, V5).payload.decode("utf-8-sig")
     for marker in ("arg:", "Проверка:", "Выход:", "CAP-", "Действие проекта:", "Операция:", "body:/", "http_body:"):
         assert marker not in payload, marker
-    rows = _rows(render_zephyr_csv(document).payload)
+    rows = _rows(render_zephyr_csv(document, V5).payload)
     header, steps = rows[0], [step for case in document["test_cases"] for step in case["steps"]]
     for row, step in zip(rows[1:], steps):
         orders = next({item["step_id"]: item["display_order"] for item in case["steps"]} for case in document["test_cases"] if step in case["steps"])
@@ -108,7 +108,7 @@ def test_the_parse_of_a_v5_csv_gives_back_what_the_human_sees() -> None:
 
     for document in (_example(), _tricky(_example()), canonical_fixture()):
         assert validate_canonical_document(document) == []
-        cases = parse_zephyr_csv(render_zephyr_csv(document).payload)
+        cases = parse_zephyr_csv(render_zephyr_csv(document, V5).payload)
         assert [case["title"] for case in cases] == [case["title"] for case in document["test_cases"]]
         for parsed, case in zip(cases, document["test_cases"]):
             orders = {step["step_id"]: step["display_order"] for step in case["steps"]}

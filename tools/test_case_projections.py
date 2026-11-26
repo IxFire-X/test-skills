@@ -389,6 +389,149 @@ def _html_action(step: dict[str, Any], display_orders: dict[str, int] | None = N
     return _html_text(_human_action(step, display_orders))
 
 
+# The request block of an HTTP step in the v6 CSV and preview (texts approved by the user on 26.11, v09/postman-curl-plan.md §1):
+# built by the code from the machine layer — `http`, or a project action of the strict form — never written by the model.
+REQUEST_HEAD = "Запрос curl (Postman: Import → Raw text):"
+_VERBS = frozenset(("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
+_REQUEST_ARGS = frozenset(("method", "path", "body", "params", "parameters", "query", "headers", "session"))  # session: cookies, Postman keeps them
+_SECRET_HEADER = re.compile(r"authorization|cookie|token|secret|password|api[-_]?key", re.I)
+_TEMPLATE = re.compile(r"(?<!\{)\{[^{}]+\}(?!\})")  # a path template ``{name}`` left unfilled (not a ``{{variable}}``)
+
+
+def _shell(value: str) -> str:
+    """One bash argument: Postman's import reads the bash form of curl; a quote inside stays inside."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _variable(source: dict[str, Any], display_orders: dict[str, int], setups: dict[str, int], legend: dict[str, str]) -> str:
+    """The Postman variable of a value the file must not or cannot carry, with its line of the legend; never a secret."""
+    kind = source["kind"]
+    if kind == "step_output":
+        name, line = source["output_id"], f"{source['output_id']} из ответа шага {display_orders[source['step_id']]}"
+    elif kind == "setup_output":
+        name, line = source["output_id"], f"{source['output_id']} из подготовки к предусловию {setups[source['setup_id']] + 1}"
+    elif kind == "environment":
+        name, line = source["name"], f"переменная окружения {source['name']}"
+    elif kind == "fixture":
+        name, line = source["name"], f"фикстура {source['name']}"
+    else:
+        name, line = source["safe_label"], "секрет, в файл не попадает"
+    legend.setdefault(name, line)
+    return "{{" + name + "}}"
+
+
+def _secret_header(name: str, legend: dict[str, str]) -> str:
+    legend.setdefault(name, "секрет, в файл не попадает")
+    return "{{" + name + "}}"
+
+
+def _http_parts(step: dict[str, Any], display_orders: dict[str, int], setups: dict[str, int], legend: dict[str, str]) -> tuple[str, str, list[tuple[str, str]], str | None] | None:
+    """Method, URL, headers and JSON body of an ``http`` operation; None when its body cannot be put together from the pointers."""
+    operation = step["operation"]
+    base = operation["base_url_source"]["name"]
+    legend.setdefault(base, f"адрес стенда (переменная окружения {base})")
+    path, query, headers, body, sentinels = operation["path"], [], [], None, {}
+    for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
+        target, source = item["target"], item["source"]
+        literal = source["kind"] == "literal"
+        value = source["value"] if literal else _variable(source, display_orders, setups, legend)
+        if target["location"] == "path":
+            path = path.replace("{" + target["name"] + "}", quote(_literal_url_value(value), safe="") if literal else value)
+        elif target["location"] == "query":
+            query.append(urlencode([(target["name"], _literal_url_value(value))]) if literal else urlencode([(target["name"], "")]) + value)
+        elif target["location"] == "header":
+            headers.append((target["name"], _secret_header(target["name"], legend) if _SECRET_HEADER.search(target["name"]) else _literal_url_value(value) if literal else value))
+        else:
+            tokens = [token.replace("~1", "/").replace("~0", "~") for token in target["pointer"].split("/")[1:]]
+            if not literal:  # the variable goes into the body after the dump: bare for a number, quoted for a string
+                sentinels[f"{len(sentinels)}"] = value if item["semantic_type"].get("type", item["semantic_type"].get("representation")) != "string" else f'"{value}"'
+                value = list(sentinels)[-1]
+            if not tokens:
+                body = value
+                continue
+            if any(token.isdigit() for token in tokens) or body is not None and not isinstance(body, dict):
+                return None  # an array member or a body that is not an object: the code does not guess its shape
+            body = {} if body is None else body
+            holder = body
+            for token in tokens[:-1]:
+                holder = holder.setdefault(token, {})
+                if not isinstance(holder, dict):
+                    return None
+            holder[tokens[-1]] = value
+    if _TEMPLATE.search(path):
+        return None
+    text = None
+    if body is not None:
+        text = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        for sentinel, variable in sentinels.items():
+            text = text.replace(json.dumps(sentinel, ensure_ascii=False), variable)
+        headers.append(("Content-Type", "application/json"))
+    return operation["method"], "{{" + base + "}}" + path + ("?" + "&".join(query) if query else ""), headers, text
+
+
+def _action_parts(step: dict[str, Any], display_orders: dict[str, int], setups: dict[str, int], legend: dict[str, str]) -> tuple[str, str, list[tuple[str, str]], str | None, list[str]] | None:
+    """Method, URL, headers, body and form fields of a project action of the strict form; None for any other action (its helper builds the request)."""
+    args = {item["target"].get("name"): item["source"] for item in step["inputs"]}
+    if any(item["target"]["location"] != "arg" for item in step["inputs"]) or not {"method", "path"} <= set(args) or set(args) - _REQUEST_ARGS:
+        return None
+    method, path = args["method"], args["path"]
+    if method["kind"] != "literal" or method["value"] not in _VERBS or path["kind"] != "literal" or not isinstance(path["value"], str):
+        return None
+    if not path["value"].startswith("/") or _TEMPLATE.search(path["value"]):
+        return None
+    legend.setdefault("baseUrl", "адрес стенда")
+    query, form, headers, body = [], [], [], None
+    for name in ("params", "parameters", "query"):
+        source = args.get(name)
+        if source is None:
+            continue
+        if source["kind"] != "literal" or not isinstance(source["value"], dict):
+            return None
+        pairs = [(key, _literal_url_value(item)) for key, value in source["value"].items() for item in (value if isinstance(value, list) else [value])]
+        if name == "query" or method["value"] in {"GET", "HEAD"}:
+            query.append(urlencode(pairs))
+        else:
+            form.extend(f"{key}={value}" for key, value in pairs)  # --data-urlencode encodes the value itself
+    if "headers" in args:
+        if args["headers"]["kind"] != "literal" or not isinstance(args["headers"]["value"], dict):
+            return None
+        headers = [(key, _secret_header(key, legend) if _SECRET_HEADER.search(key) else _literal_url_value(value)) for key, value in args["headers"]["value"].items()]
+    if "body" in args:
+        source = args["body"]
+        if form or source["kind"] == "literal" and not isinstance(source["value"], (dict, list)):
+            return None
+        body = _compact_json(source["value"]) if source["kind"] == "literal" else _variable(source, display_orders, setups, legend)
+        headers.append(("Content-Type", "application/json"))
+    target = path["value"] + ("&" if "?" in path["value"] else "?") + "&".join(item for item in query if item) if any(query) else path["value"]
+    return method["value"], "{{baseUrl}}" + target, headers, body, form
+
+
+def request_block(step: dict[str, Any], display_orders: dict[str, int], case: dict[str, Any]) -> str | None:
+    """The approved block «Запрос curl …» of an HTTP step: the head, one curl line and the legend of its variables; None when the
+    machine layer does not say the whole request (no block is better than a wrong request)."""
+    operation = step["operation"]
+    if operation is None:
+        return None
+    setups = {item["setup_id"]: item["precondition_index"] for item in case.get("setup") or []}
+    legend: dict[str, str] = {}
+    if operation["kind"] == "http":
+        parts = _http_parts(step, display_orders, setups, legend)
+        form: list[str] = []
+        if parts is None:
+            return None
+        method, url, headers, body = parts
+    else:
+        action = _action_parts(step, display_orders, setups, legend)
+        if action is None:
+            return None
+        method, url, headers, body, form = action
+    line = ["curl", "-X", method, _shell(url), *(word for name, value in headers for word in ("-H", _shell(f"{name}: {value}")))]
+    line += ["--data-raw", _shell(body)] if body is not None else [word for field in form for word in ("--data-urlencode", _shell(field))]
+    # the address of the stand first, then the variables in the order of the request
+    names = sorted(legend, key=lambda name: not legend[name].startswith("адрес стенда"))
+    return "\n".join((REQUEST_HEAD, " ".join(line), "; ".join("{{" + name + "}} — " + legend[name] for name in names) + "."))
+
+
 def _html_test_data(step: dict[str, Any]) -> str:
     if SLOT in step["test_data"]:  # a slotted request is no JSON any more; shown as it is
         data = step["test_data"]
@@ -463,7 +606,9 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         ))
         display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
         for step_number, step in enumerate(case["steps"], 1):
-            rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step, display_orders)}</td><td>{_html_test_data(step)}</td><td>{_html_expected(step)}</td></tr>")
+            block = request_block(step, display_orders, case) if profile == _PROFILE_V6 and group is None else None
+            request = "" if block is None else f"<pre>{html.escape(block, quote=True)}</pre>"
+            rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step, display_orders)}</td><td>{_html_test_data(step)}{request}</td><td>{_html_expected(step)}</td></tr>")
         rows.append("</tbody></table>" + (_html_variants(group, variants) if group else "") + "</section>")
         if group:
             rows[start:] = [row.replace(SLOT, f"<code>&lt;{_html_text(group['parameter']['name'])}&gt;</code>") for row in rows[start:]]
@@ -715,7 +860,9 @@ def _render_zephyr_csv_validated(document: dict[str, Any], profile: str = _PROFI
                 # Human scenario only: the action with its resolved URL, the authored test data
                 # and the expectation prose.  No operation, binding or assertion model.
                 expected = "\n\n".join(item["text"] for item in step["expectations"])
-                record = list(record) + [_human_action(step, display_orders), step["test_data"], expected, "", ""]
+                block = request_block(step, display_orders, case) if profile == _PROFILE_V6 else None
+                data = step["test_data"] if block is None else step["test_data"] + "\n\n" + block
+                record = list(record) + [_human_action(step, display_orders), data, expected, "", ""]
                 records.append([_formula_safe(value) for value in record])
                 continue
             data = _step_data(step, display_orders) if profile == _PROFILE_V1 else _detailed_step_data(step, display_orders, capabilities)
