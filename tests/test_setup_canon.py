@@ -128,3 +128,16 @@ def test_the_assembled_document_is_1_2_0_only_with_setup() -> None:
     _refresh(fragments[0])
     document = assemble_candidate(header, plan, fragments)[0]
     assert document["schema_version"] == "1.2.0" and validate_canonical_document(document) == []
+
+
+def test_the_tail_comes_from_the_profile_of_the_attempt_not_from_setup(tmp_path: Path) -> None:
+    from tests.test_reviewer_protocol import _new_run
+    from tools.orchestrate_test_case_revision import _mode_b
+    from tools.publish_test_case_bundle import planned_receipt
+
+    document = with_setup()
+    document["test_cases"][1]["preconditions"] = ["Владелец создан"]  # its own line: the tail would show
+    cases_only = _mode_b(*_new_run(tmp_path / "a"))
+    plain, tailed = (planned_receipt(document, tmp_path, mode_b=mode).preview_sha256 for mode in (False, True))
+    assert (cases_only, _mode_b(*_new_run(tmp_path / "b", "local-pilot-v1"))) == (False, True)
+    assert planned_receipt(document, tmp_path, mode_b=cases_only).preview_sha256 == plain != tailed

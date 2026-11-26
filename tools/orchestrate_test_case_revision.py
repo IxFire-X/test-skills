@@ -63,7 +63,18 @@ def _plain(value: Any) -> Any:
 
 
 def _receipt_copy(value: Receipt) -> Receipt:
-    return Receipt(value.document_id, value.revision, value.csv_profile, value.json_path, value.preview_path, value.csv_path, value.document_sha256, value.preview_sha256, value.csv_sha256)
+    return Receipt(value.document_id, value.revision, value.csv_profile, value.json_path, value.preview_path, value.csv_path, value.document_sha256, value.preview_sha256, value.csv_sha256,
+                   value.mode_b)
+
+
+def _mode_b(run_root: Path, attempt_id: str) -> bool:
+    """A run of mode B: its set says which precondition lines its autotest prepares (canonical 1.2.0) — by the profile of the attempt,
+    never by the document (a set of cases only may carry setup too).  The receipt keeps it, so every later check rebuilds the same bytes."""
+    from tools.execution_gate import CASES_ONLY
+    from tools.pilot_state import derive_state
+
+    attempt = next((row for row in derive_state(Path(run_root))["attempts"] if row["attempt_id"] == attempt_id), None)
+    return attempt is not None and attempt.get("policy_profile") != CASES_ONLY
 
 
 @dataclass(frozen=True)
@@ -720,13 +731,14 @@ def _publish_final(run_root: Path, attempt_id: str, data: Mapping[str, Any], fin
     effective = final["effective"] if final else outcome["effective"]
     partial = None if final and final["kind"] == "ALL" else partial_context(candidate, outcome, {"state": "reviewed", "final": final} if final else {"state": rework_state(run_root, attempt_id)},
                                                                               _run_imported(run_root, attempt_id))
-    receipt = publish_bundle(effective, published, _PROFILE, partial=partial)
-    if verify_bundle(effective, published, _PROFILE, partial=partial) != receipt:
+    mode_b = _mode_b(run_root, attempt_id)
+    receipt = publish_bundle(effective, published, _PROFILE, partial=partial, mode_b=mode_b)
+    if verify_bundle(effective, published, _PROFILE, partial=partial, mode_b=mode_b) != receipt:
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
     files = []
     if partial is not None:
         shown, extras, intro = rejected_cases(candidate, partial, Path(run_root).name)
-        files = write_status_files(run_root, shown, published, _PROFILE, "REJECTED-CASES", extras=extras, intro=intro)
+        files = write_status_files(run_root, shown, published, _PROFILE, "REJECTED-CASES", extras=extras, intro=intro, mode_b=mode_b)
     publish_effective_canonical(Path(run_root), attempt_id, effective, _receipt_value(receipt), str(read_reviewer_session_ledger(Path(run_root), attempt_id)["digest"]))
     return files
 
@@ -1079,7 +1091,7 @@ def publish_unreviewed_candidate(
                 and event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
     if recorded and recorded[0] != digest:
         raise ValueError(f"assembled candidate already published: {recorded[0]}, not {digest}")
-    receipt = planned_receipt(value, output_dir, csv_profile)
+    receipt = planned_receipt(value, output_dir, csv_profile, mode_b=_mode_b(run_root, attempt_id))
     if _receipt_rows(receipt, value, output_dir, csv_profile):
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
     if not recorded:
@@ -1131,9 +1143,10 @@ def close_without_verdict(run_root: Path, attempt_id: str) -> list[str]:
 
         answer = recorded_answer(Path(run_root), attempt_id)
         if answer is not None:
-            write_status_files(run_root, candidate, published, _PROFILE, "REJECTED", _blocking_notes(answer["artifacts"]["validation_report"]), keep_existing=True)
+            write_status_files(run_root, candidate, published, _PROFILE, "REJECTED", _blocking_notes(answer["artifacts"]["validation_report"]), keep_existing=True,
+                               mode_b=_mode_b(run_root, attempt_id))
         return []
-    return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED")
+    return write_status_files(run_root, candidate, published, _PROFILE, "UNREVIEWED", mode_b=_mode_b(run_root, attempt_id))
 
 
 def _blocking_notes(report: Mapping[str, Any]) -> list[str]:
@@ -1263,7 +1276,7 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     if candidate_rows(candidate_value):
         raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/revision", "CANDIDATE_REVISION")])
     rows = _receipt_rows(candidate_receipt, candidate_value, output_dir, csv_profile)
-    if rows or planned_receipt(_plain(candidate_value), output_dir, csv_profile) != candidate_receipt:  # no file before the verdict
+    if rows or planned_receipt(_plain(candidate_value), output_dir, csv_profile, mode_b=candidate_receipt.mode_b) != candidate_receipt:  # no file before the verdict
         raise OrchestrationError("ORCHESTRATION_RECEIPT", rows or [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
     candidate_receipt = _receipt_copy(candidate_receipt)
     if review_value is None:
@@ -1302,7 +1315,7 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     successor_receipt = None
     if effective is not None and not dry_run:  # the accepted set — the files of the bundle, the import CSV among them — is written now
         try:
-            published_set = publisher(_plain(effective), output_dir, csv_profile, **extra)
+            published_set = publisher(_plain(effective), output_dir, csv_profile, **extra, mode_b=candidate_receipt.mode_b)
         except Exception:
             raise OrchestrationError("ORCHESTRATION_PUBLICATION", [_diag("", "ORCHESTRATION_PUBLICATION")], candidate_receipt) from None
         if second:
@@ -1312,16 +1325,17 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
             raise OrchestrationError("ORCHESTRATION_RECEIPT", rows, candidate_receipt, successor_receipt) from None
         if extra:  # the cases taken out, whole, with what the reviewer said of them — never a CSV
             shown, extras, intro = rejected_cases(candidate_value, extra["partial"], Path(run_root).name)
-            write_status_files(run_root, shown, output_dir, csv_profile, "REJECTED-CASES", extras=extras, intro=intro)
+            write_status_files(run_root, shown, output_dir, csv_profile, "REJECTED-CASES", extras=extras, intro=intro, mode_b=candidate_receipt.mode_b)
     if effective is None:
         if not dry_run:  # the rejected set with the blocking findings beside it — what the person has after a rejection
-            write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", _blocking_notes(report))
+            write_status_files(run_root, candidate_value, output_dir, csv_profile, "REJECTED", _blocking_notes(report), mode_b=candidate_receipt.mode_b)
         rework_facts = {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": "REWORK", "accepted": False, "reviewer_session_digest": facts["reviewer_session_digest"]}
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK", _freeze(rework_facts), ())
     if dry_run and second:  # the successor is not published: its bundle is checked when it is
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None if successor is None else _freeze(successor), None, _freeze(effective), None, "EFFECTIVE_SELECTED", _freeze({"reviewer_session_digest": facts["reviewer_session_digest"]}), ())
     try:
-        verified = planned_receipt(_plain(effective), output_dir, csv_profile, **extra) if dry_run else verifier(_plain(effective), output_dir, csv_profile, **extra)  # a dry run has no files to read
+        verified = (planned_receipt(_plain(effective), output_dir, csv_profile, **extra, mode_b=candidate_receipt.mode_b) if dry_run
+                    else verifier(_plain(effective), output_dir, csv_profile, **extra, mode_b=candidate_receipt.mode_b))  # a dry run has no files to read
     except Exception:
         raise OrchestrationError("ORCHESTRATION_VERIFICATION", [_diag("", "ORCHESTRATION_VERIFICATION")], candidate_receipt, successor_receipt) from None
     rows = _receipt_rows(verified, effective, output_dir, csv_profile)
@@ -1355,14 +1369,15 @@ def _readback_rows(receipt: Any, document: Mapping[str, Any]) -> list[dict[str, 
     if len({path.parent.resolve() for path in paths}) != 1:
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     try:
-        verified = planned_receipt(dict(document), paths[0].parent, receipt.csv_profile)
+        verified = planned_receipt(dict(document), paths[0].parent, receipt.csv_profile, mode_b=receipt.mode_b)
     except Exception:
         return [_diag("/receipt", "ORCHESTRATION_PUBLICATION_READBACK")]
     return [] if verified == receipt else [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")]
 
 
 def _receipt_json(receipt: Receipt | None) -> dict[str, Any] | None:
-    return None if receipt is None else {field: getattr(receipt, field) for field in ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")}
+    return None if receipt is None else {**{field: getattr(receipt, field) for field in ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")},
+                                         **({"mode_b": True} if receipt.mode_b else {})}  # only a set of mode B says so: the receipts of the others keep their bytes
 
 
 def publish_command(candidate: Mapping[str, Any], output_dir: Path, csv_profile: str, *, run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -1691,7 +1706,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     candidate = journal.get("candidate")
     if output_dir is not None and candidate is not None:
         try:
-            journal["candidate_receipt"] = planned_receipt(_plain(candidate), output_dir, csv_profile)
+            journal["candidate_receipt"] = planned_receipt(_plain(candidate), output_dir, csv_profile, mode_b=_mode_b(run_root, attempt_id))
         except (OSError, ValueError) as error:
             missing["candidate_receipt"] = f"bundle кандидата в {output_dir} не проверен ({error})"
     else:

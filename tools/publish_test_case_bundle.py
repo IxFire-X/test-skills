@@ -60,6 +60,7 @@ class Receipt:
     document_sha256: str
     preview_sha256: str
     csv_sha256: str
+    mode_b: bool = False  # canonical 1.2.0: a set of a run of mode B — its precondition lines an autotest prepares carry the tail
 
 
 class BundleMismatchError(ValueError):
@@ -109,11 +110,14 @@ def _validate_once(document: dict[str, Any], csv_profile: str, *, allow_historic
     require_valid_canonical_document(document)
 
 
-def build_bundle(document: dict[str, Any], csv_profile: str = _PROFILE, *, _allow_historical: bool = False, partial: dict[str, Any] | None = None) -> BundlePayloads:
+def build_bundle(document: dict[str, Any], csv_profile: str = _PROFILE, *, _allow_historical: bool = False, partial: dict[str, Any] | None = None,
+                 mode_b: bool = False) -> BundlePayloads:
     """Build all exact bytes after one canonical validation pass.  *partial* (``partial_context``): the set is a subtraction of the reviewer's set —
     its cases keep the numbers they had there, its header and its last section say what was taken out and which requirements are left without a case."""
     _validate_once(document, csv_profile, allow_historical=_allow_historical)
     extras = None if partial is None else {"labels": partial["labels"]}
+    if mode_b:  # the tail «готовит автотест» of a line a setup prepares: only a run of mode B has the autotest that does it
+        extras = {**(extras or {}), "setup_by_autotest": True}
     preview = _render_html_preview_validated(document, csv_profile, extras) if csv_profile in _CURRENT_PROFILES else _render_markdown_validated(document, csv_profile)
     csv = _render_zephyr_csv_validated(document, csv_profile)
     markdown = _render_markdown_validated(document, csv_profile, extras).payload if csv_profile in _CURRENT_PROFILES else b""
@@ -235,24 +239,25 @@ def _read_final(targets: tuple[tuple[str, Path], ...], bundle: BundlePayloads) -
     return tuple(values)  # type: ignore[return-value]
 
 
-def _receipt(document: dict[str, Any], csv_profile: str, targets: tuple[tuple[str, Path], ...], payloads: tuple[bytes, ...]) -> Receipt:
+def _receipt(document: dict[str, Any], csv_profile: str, targets: tuple[tuple[str, Path], ...], payloads: tuple[bytes, ...], mode_b: bool = False) -> Receipt:
     return Receipt(
         document_id=document["document_id"], revision=document["revision"], csv_profile=csv_profile,
         json_path=str(targets[0][1]), preview_path=str(targets[1][1]), csv_path=str(targets[2][1]),
-        document_sha256=_digest(payloads[0]), preview_sha256=_digest(payloads[1]), csv_sha256=_digest(payloads[2]),
+        document_sha256=_digest(payloads[0]), preview_sha256=_digest(payloads[1]), csv_sha256=_digest(payloads[2]), mode_b=mode_b,
     )
 
 
-def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None) -> Receipt:
+def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None,
+                   mode_b: bool = False) -> Receipt:
     """Recoverably publish a bundle by hard-linking complete local temporary files."""
-    bundle = build_bundle(document, csv_profile, partial=partial)
+    bundle = build_bundle(document, csv_profile, partial=partial, mode_b=mode_b)
     directory = _resolved_output_directory(output_dir, create=True)
     targets = _targets(document, directory, csv_profile)
     # Markdown is a derived companion; existing authoritative receipt fields stay unchanged.
     targets += (("markdown", directory / f"{document['document_id']}.r{document['revision']}.md"),)
     missing = _preflight(targets, bundle)
     if not missing:
-        return _receipt(document, csv_profile, targets, _read_final(targets, bundle))
+        return _receipt(document, csv_profile, targets, _read_final(targets, bundle), mode_b)
     _probe_hardlink(directory)
     temporary_paths = _write_temps(directory, missing, bundle)
     expected = dict(_payloads(bundle))
@@ -276,7 +281,7 @@ def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str],
                 if not _unlink_current(temporary):
                     raise BundlePublicationError("TARGET_INSTALL_FAILED")
                 temporary_paths.pop(label, None)
-        return _receipt(document, csv_profile, targets, _read_final(targets, bundle))
+        return _receipt(document, csv_profile, targets, _read_final(targets, bundle), mode_b)
     finally:
         cleanup_failed = False
         for temporary in temporary_paths.values():
@@ -285,11 +290,12 @@ def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str],
             raise BundlePublicationError("TARGET_INSTALL_FAILED") from None
 
 
-def planned_receipt(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None) -> Receipt:
+def planned_receipt(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None,
+                    mode_b: bool = False) -> Receipt:
     """The receipt of the bundle ``publish_bundle`` writes once the set is accepted — computed, nothing read or written."""
-    bundle = build_bundle(document, csv_profile, _allow_historical=True, partial=partial)
+    bundle = build_bundle(document, csv_profile, _allow_historical=True, partial=partial, mode_b=mode_b)
     targets = _targets(document, _resolved_output_directory(output_dir, create=False), csv_profile)
-    return _receipt(document, csv_profile, targets, tuple(payload for _label, payload in _payloads(bundle)[:3]))
+    return _receipt(document, csv_profile, targets, tuple(payload for _label, payload in _payloads(bundle)[:3]), mode_b)
 
 
 _STATUS_HEADERS = {"REJECTED": "ОТКЛОНЁН РЕВЬЮЕРОМ", "UNREVIEWED": "НЕ ПРОВЕРЕН РЕВЬЮЕРОМ", "REJECTED-CASES": "НЕ ПРИНЯТЫ РЕВЬЮЕРОМ"}
@@ -297,7 +303,7 @@ _MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]()#|>~])")
 
 
 def status_payloads(document: dict[str, Any], csv_profile: str, status: str, notes: Sequence[str] = (), *, extras: dict[str, Any] | None = None,
-                    intro: str = "") -> tuple[tuple[str, bytes], ...]:
+                    intro: str = "", mode_b: bool = False) -> tuple[tuple[str, bytes], ...]:
     """The ``.html`` and ``.md`` of a set that is not accepted, with a header that says so: ``(suffix, bytes)``.  Never a CSV.
     The notes are model text: HTML-escaped, one line each, markdown signs escaped — they cannot reach the markup around them.
     ``REJECTED-CASES``: the cases the review did not accept — a title and an introduction, with the numbers and notes of *extras*."""
@@ -311,6 +317,8 @@ def status_payloads(document: dict[str, Any], csv_profile: str, status: str, not
                        + ("<ul>" + "".join(f"<li>{line}</li>" for line in lines) + "</ul>" if lines else "") + "</div>")
         header_md = f"> **{title}**\n" + "".join("> - " + _MARKDOWN_SPECIAL.sub(lambda m: "\\" + m.group(1), line) + "\n" for line in lines) + "\n"
     _validate_once(document, csv_profile)
+    if mode_b:
+        extras = {**(extras or {}), "setup_by_autotest": True}
     page = _render_html_preview_validated(document, csv_profile, extras).payload.decode("utf-8")
     if "<body>" not in page:  # the header is the whole point of the file: a template without the tag is a refusal, not a file without it
         raise ValueError("STATUS_HEADER_NOT_PLACED: the HTML preview has no <body> tag to put the status header after")
@@ -318,9 +326,10 @@ def status_payloads(document: dict[str, Any], csv_profile: str, status: str, not
             ("md", header_md.encode("utf-8") + _render_markdown_validated(document, csv_profile, extras).payload))
 
 
-def verify_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None) -> Receipt:
+def verify_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, partial: dict[str, Any] | None = None,
+                  mode_b: bool = False) -> Receipt:
     """Read and verify the immutable bundle without creating or modifying anything."""
-    bundle = build_bundle(document, csv_profile, _allow_historical=True, partial=partial)
+    bundle = build_bundle(document, csv_profile, _allow_historical=True, partial=partial, mode_b=mode_b)
     directory = _resolved_output_directory(output_dir, create=False)
     targets = _targets(document, directory, csv_profile)
     expected = dict(_payloads(bundle))
@@ -340,7 +349,7 @@ def verify_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], 
         values.append(payload)
     if mismatches:
         raise BundleMismatchError(mismatches)
-    return _receipt(document, csv_profile, targets, tuple(values))  # type: ignore[arg-type]
+    return _receipt(document, csv_profile, targets, tuple(values), mode_b)  # type: ignore[arg-type]
 
 
 # --- partial acceptance: the files of a set the code took cases out of ----------------------------------------------------------
