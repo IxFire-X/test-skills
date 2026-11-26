@@ -212,3 +212,11 @@ def test_the_section_says_the_approved_texts() -> None:
         "требований, у которых ни один связанный класс не назван тестами: 1 из 2 (CREQ-2)", "",
         "| Класс или адрес | Тестов, прямо называющих | Проверяемые исходы | Связанные требования |", "|---|---|---|---|",
         "| Pet | — | — | CREQ-2 |", "| Owner | 2 | 201, 404 | CREQ-1 |", ""]
+
+
+def test_a_contract_path_with_a_backtick_stays_one_code_span() -> None:
+    from tools.run_report import _coverage_lines
+
+    lines = _coverage_lines({"existing_coverage": {"unreadable_contracts": [{"path": "api/we`ird.yml", "reason": "табы в отступах"}]}})
+    assert "### По контракту `` api/we`ird.yml ``" in lines
+

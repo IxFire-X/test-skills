@@ -1470,6 +1470,12 @@ def _some(items: list[str], shown: int) -> str:
     return ", ".join(items[:shown]) + (f" и ещё {len(items) - shown}" if len(items) > shown else "")
 
 
+def _code_span(text: str) -> str:
+    """``text`` as one Markdown code span whatever backticks it holds: the fence is one backtick longer than the longest run in it (CommonMark)."""
+    run = max((len(found) for found in re.findall(r"`+", text)), default=0)
+    return f"`{text}`" if run == 0 else f"{'`' * (run + 1)} {text} {'`' * (run + 1)}"
+
+
 def _contract_lines(table: Mapping[str, Any]) -> list[str]:
     """«По контракту»: the texts approved by the user on 26.11 (v09/coverage-contract-plan.md §2); the rows without a test, then those the
     tests disagree with, then by name, at most ``CONTRACT_ROWS``."""
@@ -1480,7 +1486,7 @@ def _contract_lines(table: Mapping[str, Any]) -> list[str]:
     cell = lambda row: (", ".join(row["checked"]) or "—") + (f" (тесты ждут {', '.join(row['extra'])} — не из контракта)" if row["extra"] else "")  # noqa: E731
     address = lambda row: escape_inline("`" + row["endpoint"] + "`")  # noqa: E731
     rest = len(rows) - CONTRACT_ROWS
-    return [f"### По контракту `{table['path']}`", "",
+    return [f"### По контракту {_code_span(table['path'])}", "",
             f"адресов без единого теста: {table['untested']} из {table['endpoints']}", "",
             f"проверенных пар «адрес + код ответа»: {table['checked_pairs']} из {table['pairs']}", "",
             f"тесты ждут код ответа, которого нет в контракте: {extra} {plural(extra, 'адрес', 'адреса', 'адресов')}", "",
@@ -1510,7 +1516,7 @@ def _coverage_lines(report: Mapping[str, Any]) -> list[str]:
     for table in found.get("contracts") or []:
         lines += _contract_lines(table)
     for unread in found.get("unreadable_contracts") or []:  # the line approved by the user on 26.11 (v09/coverage-contract-plan.md §8)
-        lines += [f"### По контракту `{unread['path']}`", "", f"контракт не прочитан: {unread['reason']} — таблицы по нему нет", ""]
+        lines += [f"### По контракту {_code_span(unread['path'])}", "", f"контракт не прочитан: {unread['reason']} — таблицы по нему нет", ""]
     return lines
 
 
