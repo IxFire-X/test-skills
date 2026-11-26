@@ -474,8 +474,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     of existing project tests (``basis: карта``).  ``tc-to-autotest:r2`` also reads the answer of r1 as the reviewer of r1 did
     (``код``, ``таблицы``, ``вид кейсов``; the whole view and the JSON — ``вид``, ``r1`` — only when those files cannot be built)
     and its review (``ревью r1``) — they bind the correction, not the request.  An input the journal does not bind is
-    ``unresolved`` (``not-in-journal``), never guessed.  ``write_views=False`` (the report) measures the map without
-    writing it; the report also passes its ``state`` and one ``journals`` cache for all its calls."""
+    ``unresolved`` (``not-in-journal``), never guessed.  ``write_views=False`` (the report) takes the map prepare
+    wrote, by its size on the disk (no file — no map), and writes nothing; the report also passes its ``state`` and one ``journals`` cache for all its calls."""
     from tools.pilot_state import derive_state
 
     root = Path(run_root).resolve()
@@ -593,7 +593,7 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
         # the map of existing project tests for the context — built (again, when its bytes differ) from the
         # frozen inventory and the receipts; no input digest of its own, like the autotest view. One map for
         # all the context receipts of the batch, named by the first
-        from tools.existing_tests import context_view, ensure_view, map_path
+        from tools.existing_tests import ensure_view, map_path
 
         named = journal.plan(state).get("context_files") or None  # the map is of the files the generator reads
         try:  # the map is a hint: a context the code cannot read back leaves it out, the step stays measured (as the report did)
@@ -601,8 +601,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
                 existing = ensure_view(root, contexts, named)
                 size = existing.stat().st_size if existing is not None else 0
             else:
-                size = len(context_view(root, contexts, attempt_id, named))
-                existing = map_path(root, contexts[0]) if size else None
+                existing = map_path(root, contexts[0])  # the map prepare wrote, as the model read it: a run without that file had no map
+                existing, size = (existing, existing.stat().st_size) if existing.is_file() else (None, 0)
         except (KeyError, OSError, TypeError, ValueError):
             existing = None
         if existing is not None:

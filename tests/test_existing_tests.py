@@ -93,6 +93,63 @@ def test_the_map_names_endpoints_classes_and_outcomes_without_code_or_data(tmp_p
     assert render_map(value) == render_map(copy.deepcopy(value))
 
 
+KOTLIN_TESTS = """package org.example.owner
+
+class OwnerServiceTest {
+    @Test
+    fun `adds an owner`() {
+        assertThrows<IllegalStateException> { OwnerService().add("") }
+    }
+
+    @Test
+    fun rejectsNegativeId() {
+        val expected = IllegalArgumentException::class
+        OwnerService().find(-1)
+    }
+}
+"""
+
+
+def _kotlin(tmp_path: Path) -> dict:
+    from tools.existing_tests import build_map
+
+    rows = [_write(tmp_path, "src/main/kotlin/org/example/owner/OwnerService.kt", "class OwnerService\n"),
+            _write(tmp_path, "src/test/kotlin/org/example/owner/OwnerServiceTest.kt", KOTLIN_TESTS)]
+    return build_map(tmp_path, {"files": rows}, ["src/main/kotlin/org/example/owner/OwnerService.kt"])
+
+
+def test_a_kotlin_class_a_test_names_is_a_key(tmp_path: Path) -> None:
+    assert set(_kotlin(tmp_path)) == {"OwnerService"}
+
+
+def test_a_kotlin_test_named_in_backticks_is_in_the_map(tmp_path: Path) -> None:
+    assert "adds an owner" in _kotlin(tmp_path)["OwnerService"]["OwnerServiceTest"]
+
+
+def test_kotlin_exception_checks_are_outcomes(tmp_path: Path) -> None:
+    assert _kotlin(tmp_path)["OwnerService"]["OwnerServiceTest"] == {"adds an owner": ["IllegalStateException"],
+                                                                      "rejectsNegativeId": ["IllegalArgumentException"]}
+
+
+def test_a_python_test_importing_a_class_from_the_package_root_names_its_module(tmp_path: Path) -> None:
+    from tools.existing_tests import build_map
+
+    rows = [_write(tmp_path, "src/marshmallow/schema.py", "class Schema:\n    pass\n"),
+            _write(tmp_path, "src/marshmallow/__init__.py", "from marshmallow.schema import Schema\n"),
+            _write(tmp_path, "tests/test_schema.py", "from marshmallow import Schema\n\n\ndef test_dump():\n    assert Schema()\n")]
+    value = build_map(tmp_path, {"files": rows}, ["src/marshmallow/schema.py", "src/marshmallow/__init__.py"])
+    assert value["schema"] == {"test_schema": {"test_dump": []}}
+
+
+def test_a_python_import_in_parentheses_over_lines_names_its_module(tmp_path: Path) -> None:
+    from tools.existing_tests import build_map
+
+    rows = [_write(tmp_path, "src/marshmallow/decorators.py", "def post_load(fn):\n    return fn\n"),
+            _write(tmp_path, "tests/test_hooks.py", "from marshmallow import (\n    Schema,\n    post_load as after,  # a hook\n)\n\n\n"
+                                                    "def test_hook():\n    assert after\n")]
+    assert "decorators" in build_map(tmp_path, {"files": rows}, ["src/marshmallow/decorators.py"])
+
+
 def test_a_test_file_changed_after_the_scan_and_a_generated_one_are_not_in_the_map(tmp_path: Path) -> None:
     from tools.existing_tests import build_map
 
@@ -245,3 +302,16 @@ def test_the_report_counts_the_map_in_the_generator_input_as_step_inputs_do(tmp_
     maps = sum(row["bytes"] for row in found["files"] if row.get("basis") == "карта")
     assert (maps > 0) is with_tests
     assert call["input_bytes"] == sum(row["bytes"] for row in found["files"]) + sum(row["bytes"] for row in found["bindings"]), (call, found)
+
+
+def test_the_report_takes_the_map_prepare_wrote_and_none_without_its_file(tmp_path: Path) -> None:
+    """A report of an old run is not measured by the map of a newer package: no map file, no map."""
+    from tools.existing_tests import map_path
+    from tools.step_size import request_files, stage_inputs
+
+    root, context = _generator_run_with_tests(tmp_path, with_tests=True)
+    maps = lambda found: [row for row in found["files"] if row.get("basis") == "карта"]  # noqa: E731
+    map_path(root, context).unlink(missing_ok=True)  # an old run: the package that ran it wrote no map
+    assert maps(stage_inputs(root, "tc-generator:BATCH-fixture", write_views=False)) == []
+    written = maps(request_files(root, "tc-generator:BATCH-fixture"))
+    assert written and maps(stage_inputs(root, "tc-generator:BATCH-fixture", write_views=False)) == written

@@ -1,8 +1,8 @@
 """The map of what the project's own tests already exercise — a hint to the case generator and its reviewer.
 
 Code reads only the test files of the frozen scan inventory (by their content digest) and never runs them.  A key is an
-HTTP endpoint the tests call (``МЕТОД /путь``, numbers and ``{x}`` as ``{}``) or a production class (Java) or module
-(Python) of the batch context that a test names.  Under a key: the test classes and up to ``NAMES`` method names, else
+HTTP endpoint the tests call (``МЕТОД /путь``, numbers and ``{x}`` as ``{}``) or a production class (Java, Kotlin) or module
+(Python: by its name, or by a class or function it defines that the test imports) of the batch context that a test names.  Under a key: the test classes and up to ``NAMES`` method names, else
 their count, and per method up to ``OUTCOMES`` outcomes — an HTTP status, a view name, an exception class.  No code, no
 test bodies, no data literals.  The map is cut at ``LIMIT`` bytes with a line «ещё N ключей».
 
@@ -38,13 +38,18 @@ _VIEW = re.compile(r"view\(\)\s*\.\s*name\s*\(\s*\"([^\"]+)\"\s*\)")
 # so a call that is never closed is tried once, not 2^k ways (16 names in quotes without commas — 3.3 s).
 _FIELD_ERRORS = re.compile(r"attributeHasFieldErrors\s*\(\s*\"\w+\"\s*,((?:\s*\"\w+\"(?:\s*,)?)+)(?:(?<=,)|(?<!,)\s*)\)"
                            r"|attributeHasFieldErrorsCode\s*\(\s*\"\w+\"\s*,(\s*\"\w+\")")
-_EXCEPTION = re.compile(r"\b([A-Z]\w*(?:Exception|Error))\s*\.\s*class\b|pytest\.raises\s*\(\s*([A-Z]\w*(?:Exception|Error))\b")
+_EXCEPTION = re.compile(r"\b([A-Z]\w*(?:Exception|Error))\s*(?:\.|::)\s*class\b"  # Java ``X.class``, Kotlin ``X::class``
+                        r"|(?:pytest\.raises\s*\(|assertThrows\s*<|assertFailsWith\s*<)\s*([A-Z]\w*(?:Exception|Error))\b")
 _NAMED_STATUS = {"isOk": 200, "isCreated": 201, "isAccepted": 202, "isNoContent": 204, "isFound": 302, "isBadRequest": 400,
                  "isUnauthorized": 401, "isForbidden": 403, "isNotFound": 404, "isConflict": 409, "OK": 200, "CREATED": 201,
                  "NO_CONTENT": 204, "FOUND": 302, "BAD_REQUEST": 400, "UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404,
                  "CONFLICT": 409}
+_KOTLIN_FUN = re.compile(r"\bfun\s+(?:`([^`\n]+)`|(\w+))\s*\(")  # a Kotlin test is often named in backticks, blanks and all
 _PY_TEST = re.compile(r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE)
-_PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w, ]+)|import\s+([\w., ]+))", re.MULTILINE)
+_PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import\s+(\([^)]*\)|[\w, ]+)|import\s+([\w., ]+))", re.MULTILINE)  # ``( … )`` over lines too
+_PY_DEFINED = re.compile(r"^(?:class|def|async\s+def)\s+([A-Za-z]\w*)", re.MULTILINE)  # the top level of a module: what a test imports by name
+_JVM = {".java", ".kt"}
+_TESTED = {".java", ".kt", ".py"}
 
 
 def _normal_path(path: str) -> str:
@@ -102,9 +107,9 @@ def _without_comments(text: str) -> str:
     return "".join(result)
 
 
-def _java_methods(text: str) -> Iterable[tuple[str, str]]:
+def _java_methods(text: str, kotlin: bool = False) -> Iterable[tuple[str, str]]:
     """(name, body) of each test method: from its annotation to the next test annotation (comments and strings of the
-    method head masked, its body kept for the quoted paths and view names)."""
+    method head masked, its body kept for the quoted paths and view names).  ``kotlin``: the name follows ``fun``, in backticks or not."""
     from tools.java_text import mask_java_noncode
 
     masked = mask_java_noncode(text)
@@ -114,7 +119,9 @@ def _java_methods(text: str) -> Iterable[tuple[str, str]]:
         end = marks[index + 1] if index + 1 < len(marks) else len(text)
         head = masked[start:end]
         brace = head.find("{")
-        name = _METHOD_NAME.findall(head[:brace] if brace >= 0 else head)
+        head = head[:brace] if brace >= 0 else head
+        fun = _KOTLIN_FUN.search(head) if kotlin else None
+        name = [fun.group(1) or fun.group(2)] if fun else _METHOD_NAME.findall(head)
         if name:
             yield name[-1], text[start:end]
 
@@ -129,7 +136,8 @@ def _python_tests(text: str) -> Iterable[tuple[str, str]]:
 def _python_names(text: str) -> set[str]:
     names: set[str] = set()
     for module, imported, plain in _PY_IMPORT.findall(text):
-        for part in (module.split(".") if module else []) + [item.strip() for item in imported.split(",")]:
+        items = re.sub(r"#[^\n]*", "", imported.strip("()")).split(",")  # «Schema as S» is Schema
+        for part in (module.split(".") if module else []) + [item.split()[0] for item in items if item.split()]:
             names.add(part.strip())
         for item in plain.split(","):
             names.update(item.strip().split(" ")[0].split("."))
@@ -173,17 +181,31 @@ def own_tests(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, st
     return {path: run for path, run in own.items() if kinds.get(path) == "test" and path.startswith(roots)}, unread
 
 
+def _python_defined(project: Path, inventory: Mapping[str, Any], in_context: set[str]) -> dict[str, set[str]]:
+    """``{name: {module, …}}``: the top-level classes and functions of the Python modules of the context, read as the scan saw
+    them.  A test that imports ``Schema`` from the package root names the module that defines it (``schema``), not only a module it
+    imports; a name two modules define names both — an upper estimate, as the whole map is."""
+    defined: dict[str, set[str]] = {}
+    for row in inventory.get("files") or []:
+        relative = str(row.get("project_path"))
+        if relative in in_context and row.get("kind") != "test" and Path(relative).suffix == ".py" and Path(relative).stem != "__init__":
+            for name in _PY_DEFINED.findall((held_bytes(project, row) or b"").decode("utf-8", errors="replace")):
+                defined.setdefault(name, set()).add(Path(relative).stem)
+    return defined
+
+
 def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str]) -> dict[str, dict[str, dict[str, list[str]]]]:
     """``{key: {test class: {method: [outcome, …]}}}`` from the test files of ``inventory`` whose bytes still match."""
     project = Path(project)
     in_context = {str(path) for path in context_paths}
-    sources = {Path(path).stem for path in in_context if Path(path).suffix in {".java", ".py"} and not Path(path).stem.startswith("test_")
+    sources = {Path(path).stem for path in in_context if Path(path).suffix in _TESTED and not Path(path).stem.startswith("test_")
                and not Path(path).stem.endswith(("Test", "Tests", "IT"))}
+    defined = _python_defined(project, inventory, in_context)
     hidden = {path for path in own_files(project, inventory)[0] if path not in in_context}  # an own test the model reads (the human put it in paths.include) is in the map
     result: dict[str, dict[str, dict[str, list[str]]]] = {}
     for row in sorted(inventory.get("files") or [], key=lambda item: str(item.get("project_path"))):
         relative = str(row.get("project_path"))
-        if row.get("kind") != "test" or Path(relative).suffix not in {".java", ".py"} or relative in hidden:
+        if row.get("kind") != "test" or Path(relative).suffix not in _TESTED or relative in hidden:
             continue
         try:
             raw = (project / relative).read_bytes()
@@ -193,13 +215,17 @@ def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterab
             continue  # a file changed after the scan is not the scanned project
         text = raw.decode("utf-8", errors="replace")
         test_class = Path(relative).stem
-        java = relative.endswith(".java")
-        methods = list(_java_methods(text)) if java else list(_python_tests(text))
-        named = set(re.findall(r"\b[A-Z]\w*\b", text)) if java else _python_names(text)
+        jvm = Path(relative).suffix in _JVM
+        methods = list(_java_methods(text, kotlin=relative.endswith(".kt"))) if jvm else list(_python_tests(text))
+        if jvm:
+            named = set(re.findall(r"\b[A-Z]\w*\b", text))
+        else:
+            imported = _python_names(text)
+            named = imported | {module for name in imported for module in defined.get(name, ())}
         for name, body in methods:
             outcomes = _outcomes(body)
             keys = {f"{verb.upper()} {_normal_path(path)}" for verb, path in _HTTP_CALL.findall(body)}
-            keys |= (set(re.findall(r"\b[A-Z]\w*\b", body)) if java else named) & sources
+            keys |= (set(re.findall(r"\b[A-Z]\w*\b", body)) if jvm else named) & sources
             for key in keys:
                 result.setdefault(key, {}).setdefault(test_class, {})[name] = outcomes
     return result
