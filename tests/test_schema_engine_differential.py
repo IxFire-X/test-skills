@@ -31,7 +31,7 @@ from tools.schema_validation import _error_code, _error_path, loads_json_strict 
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[1]
-LIVE = Path(os.environ.get("TRASSA_LIVE_DIR", r"D:\AI-Projects\live"))
+LIVE = Path(os.environ.get("TRASSA_LIVE_DIR") or ROOT.parent / "live")
 FULL = os.environ.get("TRASSA_DIFF_FULL") == "1"
 SAMPLE_PER_KIND = int(os.environ.get("TRASSA_DIFF_SAMPLE", "2"))
 MAX_MUTANTS = 60 if FULL else 20

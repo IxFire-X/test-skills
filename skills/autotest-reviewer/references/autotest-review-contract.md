@@ -37,7 +37,7 @@ oracle=<assertion location and observed Expected>.
 
 The string is an existing-contract evidence channel, not a new schema or acceptance
 predicate. Its syntax does not prove that the reviewer traced the code. The required
-Deepseek functional-vs-unit control calls must separately assess both verdict correctness
+functional-vs-unit control calls on the working model must separately assess both verdict correctness
 and preservation of these answers before claiming the contract sufficient in practice.
 
 Findings are static evidence only. A semantic issue, stale digest, missing declared content, invalid locator, absent pair, secret, or unconfirmed setup is rework. The review binds `automation_revision`, reviewer session/invocation IDs, the role policy, and the digest of the exact attempt-owned controller readback boundary (`automation-review-boundary-r1` or `-r2`). The controller validates that boundary against the active attempt; self-attested isolation is not accepted. There is one static reviewer invocation per version and at most two reviews: `AUTO_FIX_APPLIED` and `ТРЕБУЕТ ДОРАБОТКИ` return only to one complete, digest-bound revision 2 (or the agent finishes); never run an obsolete artifact or regenerate after runtime `FAIL`.

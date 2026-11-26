@@ -214,7 +214,7 @@ def test_without_project_tests_the_generator_inputs_are_the_ones_before(tmp_path
     assert not [row for row in found["files"] if row.get("basis")] and not list((root / "review-views").glob("*.existing-tests.md"))
 
 
-CAMPAIGN = Path(r"D:\AI-Projects\live\campaign-20261028")
+CAMPAIGN = Path(os.environ.get("TRASSA_LIVE_DIR") or Path(__file__).resolve().parents[2] / "live") / "campaign-20261028"
 WINDOW_TOKENS = 239_000
 WORST_BATCH_TOKENS = 201_000  # FaT-BO: the worst batch estimate of the campaign plans (Petclinic and rest)
 

@@ -4,6 +4,7 @@ the inputs and the bytes of before."""
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -163,7 +164,7 @@ def test_with_one_context_batch_the_reviewer_view_has_no_context_line(tmp_path: 
     assert run_context_note(root, attempt_id) is None
 
 
-CAMPAIGN = Path(r"D:\AI-Projects\live\campaign-20261028")
+CAMPAIGN = Path(os.environ.get("TRASSA_LIVE_DIR") or Path(__file__).resolve().parents[2] / "live") / "campaign-20261028"
 
 
 @pytest.mark.skipif(not (CAMPAIGN / "jpetstore-6").is_dir(), reason="the campaign of 28.10 is on the work machine only")

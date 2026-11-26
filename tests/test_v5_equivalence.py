@@ -98,7 +98,7 @@ def test_the_java_hints_of_the_examples_of_the_quality_hints_are_the_ones_found_
             assert _java_hints(autotest_hints, text, language) == _java_hints(OLD_HINTS, text, language)
 
 
-LIVE = Path(os.environ.get("TRASSA_LIVE_DIR", r"D:\AI-Projects\live"))
+LIVE = Path(os.environ.get("TRASSA_LIVE_DIR") or Path(__file__).resolve().parents[2] / "live")
 
 
 @pytest.mark.skipif(not LIVE.is_dir(), reason="no live/ directory on this machine")

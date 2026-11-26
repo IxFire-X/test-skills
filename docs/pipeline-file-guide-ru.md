@@ -351,15 +351,6 @@ flowchart TD
 [Открыть файл](../docs/presentation-notes-ru.md)
 
 
-### `docs/superpowers/plans/2026-08-26-portable-testing-skills-pilot-delivery.md`
-
-**История плана реализации.**
-
-Показывает, на какие этапы была разбита разработка, какие файлы планировалось менять и как проверять результат. Нужен для понимания причин принятых решений. Заново выполнять этот исторический план при каждом запуске не требуется.
-
-[Открыть файл](../docs/superpowers/plans/2026-08-26-portable-testing-skills-pilot-delivery.md)
-
-
 ### `docs/superpowers/specs/2026-08-26-portable-testing-skills-frozen-pilot-contract.md`
 
 **Подробные договорённости об устройстве пилота.**

@@ -1357,7 +1357,7 @@ MINIFIED_MIN_BYTES = 20 * 1024
 MINIFIED_LINE_CHARS = 5000
 _SIZE_FIX = ("исключите файл из контекста модели (.skillsrc paths.exclude модуля), сузьте контекст (--target) "
              "или поднимите .skillsrc limits.context_batch_bytes: бюджет шага limits.step_input_bytes — только предупреждение, "
-             "предел даёт окно модели (≈ 1 МБ на DeepSeek)")
+             "предел даёт окно модели (≈ 1 МБ у рабочей модели)")
 
 
 def _read_context_file(project_root: Path, project_path: str) -> bytes:
@@ -1449,7 +1449,7 @@ def context_filter(
                 raise ContextStop("CONTEXT_TASK_DOCUMENT_TOO_LARGE", f"{project_path}: {size} Б больше пачки {byte_budget} Б",
                                   "разбейте документ задачи на части (по функции на документ) или поднимите .skillsrc "
                                   "limits.context_batch_bytes выше размера документа: бюджет шага limits.step_input_bytes — "
-                                  "только предупреждение, предел даёт окно модели (≈ 1 МБ на DeepSeek)")
+                                  "только предупреждение, предел даёт окно модели (≈ 1 МБ у рабочей модели)")
             kept.append(opaque_id)
             continue
         if Path(project_path).name.casefold() == ".skillsrc" or Path(project_path).name.casefold() in _CLOSED_MANIFESTS:
