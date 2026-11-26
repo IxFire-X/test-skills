@@ -1207,6 +1207,10 @@ def _tokens_cell(call: Mapping[str, Any]) -> str:
     return "код" if call.get("by") == "code" else _dash(call.get("tokens_est"))
 
 
+# What the verdict of the review journal says in report.md: the set is published (whole or in part) or not — not the word of the reviewer.
+_REVIEW_VERDICT = {"ACCEPTED": "ACCEPTED (набор опубликован)", "REJECTED": "REJECTED (набор не опубликован)"}
+
+
 def _dash(value: Any) -> str:
     return "—" if value is None else str(value)
 
@@ -1424,7 +1428,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "## Числа", "",
         f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "
         f"исходных SREQ {_dash(counts['source_requirements'])}, канонических CREQ {_dash(counts['canonical_requirements'])}.", "",
-        *(f"- {key}: {_dash(value)}" for key, value in counts.items() if not (key == "accepted" and report["policy_profile"] == execution_gate.CASES_ONLY)),  # no run by the profile: `False` there reads as a contradiction of the first line
+        *(f"- {key}: {_dash(_REVIEW_VERDICT.get(value, value) if key == 'review_verdict' else value)}" for key, value in counts.items() if not (key == "accepted" and report["policy_profile"] == execution_gate.CASES_ONLY)),  # no run by the profile: `False` there reads as a contradiction of the first line
         *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа | Токены ответа (оценка) |", "|---|---|---|---|---|---|---|---|---|---|",
