@@ -58,12 +58,12 @@ def test_the_data_of_a_literal_path_is_a_template() -> None:
     assert linked_code({"test_cases": [_case("CREQ-1", {"inputs": inputs})]}, []) == {"DELETE /api/profiles/{}/follow": {"CREQ-1"}}
 
 
-def test_a_value_of_the_case_is_any_segment_of_a_test_but_not_the_other_way() -> None:
+def test_a_literal_route_beside_the_endpoint_does_not_name_it() -> None:
     from tools.existing_tests import coverage
 
-    value = {"GET /api/articles/{}": {"ArticleTests": {"readsArticle": ["200"]}}}
-    linked = {"GET /api/articles/{}": {"CREQ-1"}, "GET /api/articles/feed": {"CREQ-2"}}
-    assert coverage(DOCUMENT, value, linked)["unnamed"] == ["CREQ-2"]
+    value = {"GET /articles/feed": {"ArticleTests": {"readsFeed": ["200"]}}, "GET /vets": {"VetTests": {"listsVets": ["200"]}}}
+    linked = {"GET /api/articles/{}": {"CREQ-1"}, "GET /owners/{}": {"CREQ-2"}}
+    assert coverage(DOCUMENT, value, linked)["unnamed"] == ["CREQ-1", "CREQ-2"]
 
 
 def test_for_the_report_a_class_the_test_file_names_at_its_head_is_named_by_its_tests(tmp_path: Path) -> None:

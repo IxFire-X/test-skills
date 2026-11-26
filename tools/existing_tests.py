@@ -373,20 +373,11 @@ _ENDPOINT = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(/[^\s:;,)]*)")
 
 
 def _template(key: str) -> str:
-    """``МЕТОД /путь`` of a case with its data as ``{}``: a segment with a digit is a value (``/profiles/anna-b1-001`` is ``/profiles/{}``)."""
+    """``МЕТОД /путь`` of a case with its data as ``{}``: a segment with a digit is a value (``/profiles/anna-b1-001`` is ``/profiles/{}``).  A test
+    names it with the same segments only (``_same_endpoint``): ``{}`` of a case is not a literal route beside it (``/articles/feed``), and a test
+    that calls it with a value without a digit (``/profiles/jake``) is not seen — the limit of a map by the text."""
     method, _, path = key.partition(" ")
     return f"{method} /" + "/".join("{}" if any(char.isdigit() for char in part) else part for part in _segments(path))
-
-
-def _covers(case_key: str, test_key: str) -> bool:
-    """``_same_endpoint`` where a value of the case (``{}``) is any segment of the test (the test calls it with its own value); a ``{}`` of the
-    test is only a value of the case — ``/articles/feed`` is not ``/articles/{slug}``."""
-    case_method, _, case_path = case_key.partition(" ")
-    test_method, _, test_path = test_key.partition(" ")
-    case, test = _segments(case_path), _segments(test_path)
-    tail = min(len(case), len(test))
-    return (case_method == test_method and tail > 0
-            and all(one == other or one == "{}" for one, other in zip(case[len(case) - tail:], test[len(test) - tail:])))
 
 
 def linked_code(document: Mapping[str, Any], sources: Iterable[str]) -> dict[str, set[str]]:
@@ -417,7 +408,7 @@ def coverage(document: Mapping[str, Any], value: Mapping[str, Mapping[str, Mappi
     found: dict[str, tuple[dict[tuple[str, str], list[str]], set[str]]] = {}
     for key, requirements in linked.items():
         shown = key if " " in key else Path(key).stem
-        named = [classes for test_key, classes in value.items() if " " in test_key and _covers(key, test_key)] if " " in key else [value.get(shown) or {}]
+        named = [classes for test_key, classes in value.items() if _same_endpoint(key, test_key)] if " " in key else [value.get(shown) or {}]
         methods, owners = found.setdefault(shown, ({}, set()))
         methods.update({(test_class, name): items for classes in named for test_class, rows in classes.items() for name, items in rows.items()})
         owners.update(requirements)
