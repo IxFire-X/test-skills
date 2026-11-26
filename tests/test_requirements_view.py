@@ -103,6 +103,15 @@ def test_a_measurement_counts_the_view_it_does_not_write(tmp_path: Path) -> None
     assert not any("model-stage-artifacts" in str(path) for path in files)
 
 
+def test_a_measurement_of_a_part_asked_before_the_view_reads_the_answer(tmp_path: Path) -> None:
+    from tools.step_size import journal_inputs, requirements_view_path
+
+    root, answer = _asked_part(tmp_path)
+    requirements_view_path(root, answer["content_digest"]).unlink()  # a part asked before the view: no view on the disk
+    files, held = journal_inputs(root.parent.parent, root.name, "context-marker", 1)
+    assert held == 0 and any(path.name == answer["content_digest"].removeprefix("sha256:") + ".json" for path in files)
+
+
 def test_an_answer_outside_the_run_is_not_read(tmp_path: Path) -> None:
     from tools.step_size import _requirements_view_data
 

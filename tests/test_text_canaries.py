@@ -152,6 +152,16 @@ def test_one_machine_error_beside_five_text_ones_decides_nothing() -> None:
     assert rc.outcome(rows, _answer([_on(n, "BLOCKING") for n in range(2, 7)]))["status"] == "MOSTLY_CAUGHT"
 
 
+def test_two_machine_and_three_text_errors_none_caught_is_unreliable() -> None:
+    rows = [*({**_row("boundary", n), "field": "assertions"} for n in (1, 2)), *(_row("outcome", n) for n in (3, 4, 5))]
+    assert rc.outcome(rows, _answer())["status"] == "UNRELIABLE"
+
+
+def test_one_machine_and_one_text_error_none_caught_is_unreliable() -> None:
+    rows = [{**_row("boundary", 1), "field": "assertions"}, _row("outcome", 2)]
+    assert rc.outcome(rows, _answer())["status"] == "UNRELIABLE"
+
+
 def test_missed_text_errors_make_the_review_weak_not_unreliable() -> None:
     found = rc.outcome([_row("outcome", n) for n in (1, 2, 3)], _answer())
     assert (found["status"], found["warning"]) == ("WEAK", "REVIEW_WEAK")

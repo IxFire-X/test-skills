@@ -641,18 +641,19 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     missed = [row for row in canaries if row["canary_id"] not in hits]
     classes = sorted({row["class"] for row in missed})
     allowed = (seeded - 1) // THIRD  # misses that are no sign of a weak review: none up to 3 errors, a third of the rest
-    # UNRELIABLE (and accepted false) stands on the machine errors only: in v0.8 a text error counts towards WEAK and the report, not
-    # towards the acceptance — the flipped outcome and the dropped state were caught as BLOCKING 0 of 4 (R&D-13); the user decides on a measure
+    # UNRELIABLE (and accepted false) needs a machine error: in v0.8 text errors alone count towards WEAK and the report, not towards
+    # the acceptance — the flipped outcome and the dropped state were caught as BLOCKING 0 of 4 (R&D-13); the user decides on a measure
     machine = [row for row in canaries if row["class"] in CLASSES]
-    caught_machine = sum(1 for row in machine if row["canary_id"] in hits)
-    # beside text errors 1–2 machine ones are too few to decide alone (1 machine missed, 5 text caught is no unreliable review);
-    # a set of machine errors only keeps the rule of v0.7
-    decides = len(machine) >= MIN_CANARIES or len(machine) == seeded
-    if machine and decides and THIRD * caught_machine < len(machine):  # fewer than a third caught (none of 3, as before)
+    # beside text errors 1–2 machine ones are too few to decide alone: then the share of all the errors caught decides, as in v0.7 —
+    # the text ones can save a small machine set (1 machine missed, 5 text caught), never soften a review that caught almost nothing
+    # (2 machine and 3 text, none caught); a set of machine errors only, or of 3 and more, keeps the rule of v0.7 on the machine ones
+    counted = machine if len(machine) >= MIN_CANARIES or len(machine) == seeded else canaries
+    caught_counted = sum(1 for row in counted if row["canary_id"] in hits)
+    if machine and THIRD * caught_counted < len(counted):  # fewer than a third caught (none of 3, as before)
         status, warning = "UNRELIABLE", "REVIEW_UNRELIABLE"
-        got = "ни одна из" if not caught_machine else f"поймано {caught_machine} из"
-        note = (f"ревью ненадёжно (REVIEW_UNRELIABLE): {got} {len(machine)} контрольных ошибок {'не поймана' if not caught_machine else 'меньше трети'}, "
-                f"классы {', '.join(CLASS_NAMES[cls] for cls in sorted({row['class'] for row in machine if row['canary_id'] not in hits}))}")
+        got = "ни одна из" if not caught_counted else f"поймано {caught_counted} из"
+        note = (f"ревью ненадёжно (REVIEW_UNRELIABLE): {got} {len(counted)} контрольных ошибок {'не поймана' if not caught_counted else 'меньше трети'}, "
+                f"классы {', '.join(CLASS_NAMES[cls] for cls in sorted({row['class'] for row in counted if row['canary_id'] not in hits}))}")
     elif len(missed) > allowed:
         status, warning = "WEAK", "REVIEW_WEAK"
         note = f"ревью слабое: пропущено {len(missed)} из {seeded}, классы {', '.join(CLASS_NAMES[cls] for cls in classes)}"

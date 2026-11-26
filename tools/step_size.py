@@ -256,8 +256,9 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
 
 def journal_inputs(project: Path, run_id: str, stage: str, batch: int | None) -> tuple[list[Path], int]:
     """The input files of ``stage`` as the journal knows them before the call (context-marker only), and the bytes it reads beyond them:
-    the view of the requirements answer of a part not asked yet, measured in memory.  A measurement writes no view: on the disk a view
-    is the sign that a part was asked with it (``context_marker_parts.plan``, status and report read the run so)."""
+    the view of the requirements answer of a part not asked yet, measured in memory; a part asked with no view on the disk read the
+    answer whole.  A measurement writes no view: on the disk a view is the sign that a part was asked with it
+    (``context_marker_parts.plan``, status and report read the run so)."""
     if stage not in {"context-marker", "context-marker:requirements"}:
         raise ValueError("the journal knows the input of context-marker only; give --files for other steps")
     from tools.pilot_state import derive_state, read_context_selection
@@ -287,10 +288,14 @@ def journal_inputs(project: Path, run_id: str, stage: str, batch: int | None) ->
         source = root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json")
         target = requirements_view_path(root, answer)
         data = _requirements_view_data(project, root, answer, source)
+        asked = {str(event.get("stage_instance_id")) for event in derive_state(root)["events"]
+                 if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_REQUESTED"}
         if data is None:
             files.append(source)  # not the answer's bytes: the answer itself stands
         elif target.is_file() and target.read_bytes() == data:
             files.append(target)  # the view the request of the part wrote
+        elif not target.is_file() and f"context-marker:batch-{batch:03d}" in asked:
+            files.append(source)  # asked before the view (no view on the disk, as context_marker_parts.plan reads it): the answer whole
         else:
             held = len(data)  # not asked yet (or a view an agent changed, which the request rewrites): its bytes, no file
     else:
