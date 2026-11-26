@@ -204,3 +204,11 @@ def test_the_context_gives_no_requirement(tmp_path: Path, monkeypatch: pytest.Mo
 def test_the_context_is_no_size_of_the_documents() -> None:
     huge = _entry("openspec/specs/visits/spec.md", "## Requirements\n" + "x" * (1024 * 1024 + 1), context=True)
     build_context(Path("."), docs_snapshot=[_entry(BASE, SPEC, base=True), _entry(DELTA, "## ADDED Requirements\n" + SEARCH), huge])
+
+
+def test_how_to_use_has_the_approved_paragraphs_of_the_change_only() -> None:  # approved by the user on 26.11 (v08/change-only-howto-draft.md)
+    text = " ".join((Path(__file__).resolve().parents[1] / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
+    for needle in ("Одно изменение — достаточно назвать его папку.", "Называйте папку изменения целиком: дельты только части его областей — остановка до модели.",
+                   "В прогоне только по изменению такое требование не берётся, а прогон идёт дальше",
+                   "Повтор требования — остановка всегда.", "даже до кода; хватит `--docs openspec/changes/<имя>`"):
+        assert needle in text, needle
