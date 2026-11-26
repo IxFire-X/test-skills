@@ -42,15 +42,17 @@ from tools.pilot_state import (
 )
 
 # cli — the helpers of ``materialize`` and ``ingest``
+from tools.run_facts import (
+    quarantine_summary,
+    report_mismatch,
+    style_notes,
+)
 from tools.run_pipeline import (
     automation_split_fields,
     baseline_check,
     drift_report,
     print_payload,
-    quarantine_summary,
     read_run_coordinate,
-    report_mismatch,
-    style_notes,
 )
 
 # closure — the closing of the attempt
