@@ -361,7 +361,7 @@ def test_the_detector_of_writes_sees_a_renamed_tempfile(source: str) -> None:
 # module -> (number of write calls, why none of them is a write of the run of a command).  A module that is not here writes nothing
 # outside ``confined_output``; a new call, or a module, fails the test and has to be argued here.
 WRITES_OUTSIDE_CONFINED_OUTPUT = {
-    "pilot_state.py": (2, "rmdir of the empty directory of an attempt step the same code made, below the run"),
+    "run_journal.py": (2, "rmdir of the empty directory of an attempt step the same code made, below the run"),
     "publish_test_case_bundle.py": (6, "the bundle of the run: <run>/published only (orchestrate.published_dir asks output_guard.run_output_directory at every entry; a link out is refused), hard link install"),
     "render_contract_docs.py": (1, "maintainer command, the package's own documents"),
     "release_manifest.py": (2, "maintainer command, release/manifest.json of the package checkout"),

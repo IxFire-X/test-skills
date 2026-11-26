@@ -1722,7 +1722,7 @@ def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], d
         raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: candidate: нет ответа {absent[0]}; fix: сначала submit этой пачки")
     # the canon is assembled once per process — the plan, the header and the answers are append-only facts of the journal, so
     # one command (publish, package, the decision of the verdict) asks for the same candidate several times and gets one assembly
-    from tools.pilot_state import _CLOSURE_CACHE
+    from tools.run_store import CLOSURE_CACHE as _CLOSURE_CACHE
 
     kept = _CLOSURE_CACHE.get()
     key = ("journal_assembly", str(root), attempt_id, str(plan["digest"]), str(header["digest"]), tuple(answers[stage] for stage in stages))

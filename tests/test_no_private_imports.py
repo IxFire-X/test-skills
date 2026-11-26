@@ -76,7 +76,6 @@ EXCEPTIONS: dict[tuple[str, str, str], int] = {
     ("model_records", "build_context", "_OPENSPEC_PATH"): 1,
     ("model_steps", "orchestrate_test_case_revision", "_run_imported"): 1,
     ("model_steps", "step_size", "_REQUEST_STAGES"): 1,
-    ("orchestrate_test_case_revision", "pilot_state", "_CLOSURE_CACHE"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_generator_input"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_imported_cases"): 1,
     ("orchestrate_test_case_revision", "pilot_state", "_run_root"): 4,
