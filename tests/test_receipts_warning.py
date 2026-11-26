@@ -1,6 +1,6 @@
-"""A receipt of execution on the disk that does not read (handoff/v08/golden-mode-b-gap.md): status and report say so in one line, and
-«another version» only when the fingerprint of the run's package is not this one's.  The words wait for the user's approval and are
-not pinned here.  The run is built once a module (about a minute) and laid back at its own path before each test."""
+"""A receipt on the disk that does not read (handoff/v08/golden-mode-b-gap.md): status and report say so in one line, and «another
+version» only when the fingerprint of the run's package is not this one's.  The words are approved by the user (26.11) and pinned.
+The run is built once a module (about a minute) and laid back at its own path before each test."""
 from __future__ import annotations
 
 import json
@@ -70,11 +70,37 @@ def test_a_moved_project_is_told_by_project_moved_alone(run: tuple[Path, Path, s
     assert receipts_warning(moved, moved / ".pilot-runs" / root.name, attempt_id) is None
 
 
-def test_status_and_report_tell_it(run: tuple[Path, Path, str]) -> None:
+UNREADABLE = "RECEIPTS_UNREADABLE: квитанции прогона не прочитаны — часть итогов в отчёте может быть пустой"
+OTHER_VERSION = "RUN_OF_OTHER_VERSION: прогон сделан другой версией, квитанции не прочитаны — часть итогов в отчёте может быть пустой"
+
+
+def test_the_line_of_status_and_of_the_report(run: tuple[Path, Path, str]) -> None:
     from tools.run_pipeline import _status_result
-    from tools.run_report import build_report
+    from tools.run_report import build_report, render_markdown
 
     project, root, attempt_id = run
     _break(root, attempt_id)
-    assert [line for line in _status_result(project, root.name)["warnings"] if line.startswith("RECEIPTS_UNREADABLE: ")]
-    assert "RECEIPTS_UNREADABLE" in build_report(project, root.name)[0]["warnings"]
+    assert UNREADABLE in _status_result(project, root.name)["warnings"]
+    assert f"- {UNREADABLE}" in render_markdown(build_report(project, root.name)[0]).splitlines()
+
+
+def test_the_line_of_another_version(run: tuple[Path, Path, str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.run_pipeline import _status_result
+    from tools.run_report import _warning_line
+
+    project, root, attempt_id = run
+    _break(root, attempt_id)
+    monkeypatch.setattr(pilot_state, "skill_pack_digest", lambda: "sha256:" + "0" * 64)
+    assert OTHER_VERSION in _status_result(project, root.name)["warnings"]
+    assert _warning_line("RUN_OF_OTHER_VERSION", {}) == f"- {OTHER_VERSION}"
+
+
+def test_an_accepted_set_of_cases_only_that_does_not_read_is_told(tmp_path: Path) -> None:
+    from tests.test_finish import _cases_only_effective
+
+    root, attempt_id = _cases_only_effective(tmp_path)
+    target = pilot_state.receipt_target(root, attempt_id, "effective-canonical")
+    receipt = json.loads(target.read_text(encoding="utf-8"))
+    receipt["document"]["test_cases"] = []
+    target.write_text(json.dumps(receipt), encoding="utf-8")
+    assert receipts_warning(root.parent.parent, root, attempt_id) == "RECEIPTS_UNREADABLE"

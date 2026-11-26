@@ -620,9 +620,9 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-# a receipt of execution or disposition on the disk that does not read (run_pipeline.receipts_warning); the words wait for the user's approval
-RECEIPT_WARNINGS = {"RUN_OF_OTHER_VERSION": "прогон сделан другой версией, квитанции не прочитаны",
-                    "RECEIPTS_UNREADABLE": "квитанции прогона не прочитаны"}
+# a receipt on the disk that does not read (run_pipeline.receipts_warning); the words approved by the user on 26.11
+RECEIPT_WARNINGS = {"RUN_OF_OTHER_VERSION": "прогон сделан другой версией, квитанции не прочитаны — часть итогов в отчёте может быть пустой",
+                    "RECEIPTS_UNREADABLE": "квитанции прогона не прочитаны — часть итогов в отчёте может быть пустой"}
 _WARNING_TEXT = {**RECEIPT_WARNINGS, "CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
                  "REVIEW_UNRELIABLE": "ревью ненадёжно, accepted=false",

@@ -1949,12 +1949,15 @@ def _with_moved_note(payload: dict[str, Any], project: Path, root: Path) -> dict
     return {**payload, "warnings": [*payload.get("warnings", []), f"PROJECT_MOVED: {note['fix']}"], "project_moved": note}
 
 
-RECEIPT_KINDS = ("execution-receipt", "disposition-receipt")  # the receipts whose refused read status and report would pass in silence
+# the receipts whose refused read status and report would pass in silence: the accepted set (a run of cases only has no other), the
+# execution and the dispositions
+RECEIPT_KINDS = ("effective-canonical", "execution-receipt", "disposition-receipt")
 
 
 def receipts_warning(project: Path, root: Path, attempt_id: str | None) -> str | None:
-    """``RUN_OF_OTHER_VERSION`` or ``RECEIPTS_UNREADABLE``: a receipt of execution or disposition of the attempt is on the disk and its
-    strict read refuses it, so status and report show neither the findings nor the numbers of the run (handoff/v08/golden-mode-b-gap.md).
+    """``RUN_OF_OTHER_VERSION`` or ``RECEIPTS_UNREADABLE``: a receipt of the attempt (``RECEIPT_KINDS``) is on the disk and its strict
+    read refuses it, so status and report leave out what it holds — the outcome of the review, the findings, the numbers of the run
+    (handoff/v08/golden-mode-b-gap.md: 13 of 17 runs of cases only of the campaign do not read their accepted set).
     «Another version» only when the run recorded the fingerprint of its package (``skill_pack_digest`` of the marker's request) and it is
     not this package's; the same fingerprint, or none, says that the receipts are not read and not why (a changed or a broken file).
     Nothing when no such file is there, and nothing for a moved project: ``PROJECT_MOVED`` says why (a receipt binds its folder)."""
@@ -1966,7 +1969,10 @@ def receipts_warning(project: Path, root: Path, attempt_id: str | None) -> str |
     for kind in RECEIPT_KINDS:
         if pilot.receipt_target(root, attempt_id, kind).is_file():
             try:
-                pilot.read_attempt_receipt(root, attempt_id, kind, "ARTIFACT_READ_BACK")
+                if kind == "effective-canonical":  # its own reader: its events are the publication and the read-back
+                    pilot.read_effective_canonical(root, attempt_id)
+                else:
+                    pilot.read_attempt_receipt(root, attempt_id, kind, "ARTIFACT_READ_BACK")
             except (KeyError, OSError, TypeError, ValueError):
                 unread = True
     if not unread or pilot.run_project_move(project, root) is not None:
