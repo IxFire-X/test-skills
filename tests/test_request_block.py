@@ -63,7 +63,8 @@ def test_params_are_the_query_of_a_get_and_the_form_of_a_post() -> None:
 
 def test_an_action_whose_helper_builds_the_request_has_no_block() -> None:
     step = _action(_arg(1, "method", "GET"), _arg(2, "path", "/owners"), _arg(3, "ownerId", 7))
-    assert request_block(step, {}, CASE) is None
+    odd = _action(_arg(1, "method", {"verb": "GET"}), _arg(2, "path", "/owners"))
+    assert request_block(step, {}, CASE) is None and request_block(odd, {}, CASE) is None
 
 
 def test_a_secret_is_only_a_variable() -> None:

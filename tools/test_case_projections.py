@@ -475,7 +475,7 @@ def _action_parts(step: dict[str, Any], display_orders: dict[str, int], setups: 
     if any(item["target"]["location"] != "arg" for item in step["inputs"]) or not {"method", "path"} <= set(args) or set(args) - _REQUEST_ARGS:
         return None
     method, path = args["method"], args["path"]
-    if method["kind"] != "literal" or method["value"] not in _VERBS or path["kind"] != "literal" or not isinstance(path["value"], str):
+    if method["kind"] != "literal" or not isinstance(method["value"], str) or method["value"] not in _VERBS or path["kind"] != "literal" or not isinstance(path["value"], str):
         return None
     if not path["value"].startswith("/") or _TEMPLATE.search(path["value"]):
         return None
