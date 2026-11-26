@@ -402,6 +402,13 @@ def test_the_full_form_of_the_answer_of_the_rework_is_left_as_it_is_and_the_thin
     assert fill_rework_mechanics(filled) == (filled, [])  # written in full, the answer is the same one
 
 
+def test_the_categories_of_a_reworked_case_are_put_in_the_canonical_order() -> None:
+    from tools.batch_assembly import fill_rework_mechanics
+
+    filled, summary = fill_rework_mechanics({"test_cases": [{"case_id": "TC-1", "categories": ["negative", "positive"], "steps": []}]})
+    assert (filled["test_cases"][0]["categories"], summary) == (["positive", "negative"], ["categories ×1"])
+
+
 def test_a_reworked_case_without_its_own_display_order_is_refused_as_a_change_of_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     run, _done = _reviewed(tmp_path, monkeypatch)
     root = run["run_root"]

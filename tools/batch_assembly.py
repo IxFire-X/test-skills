@@ -971,7 +971,7 @@ def fill_fragment_mechanics(fragment: dict[str, Any]) -> tuple[dict[str, Any], l
 
 
 def fill_rework_mechanics(answer: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """The mechanics of the cases of the rework — those of a batch, by the same function.  What is the identity of a case (its own ``display_order``) and the form of the
+    """The mechanics of the cases of the rework — those of a batch, by the same function, and the order of their ``categories``.  What is the identity of a case (its own ``display_order``) and the form of the
     answer (no ``diagnostics``) stays as the model wrote it, for ``check_rework``."""
     if not isinstance(answer, dict) or not isinstance(answer.get("test_cases"), list):
         return answer, []
@@ -986,7 +986,12 @@ def fill_rework_mechanics(answer: dict[str, Any]) -> tuple[dict[str, Any], list[
     for given, case in zip(answer["test_cases"], filled["test_cases"]):
         if isinstance(given, dict) and "display_order" not in given:
             case.pop("display_order", None)
-    return filled, summary
+    rank, ordered = {category: index for index, category in enumerate(CATEGORY_PRECEDENCE)}, 0
+    for case in filled["test_cases"]:  # the order of the categories is the code's, as normalize_fragment does for a batch; an unknown one stays for the refusal
+        items = case.get("categories") if isinstance(case, dict) else None
+        if isinstance(items, list) and all(isinstance(item, str) and item in rank for item in items) and items != sorted(items, key=rank.__getitem__):
+            case["categories"], ordered = sorted(items, key=rank.__getitem__), ordered + 1
+    return filled, summary + ([f"categories ×{ordered}"] if ordered else [])
 
 
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
