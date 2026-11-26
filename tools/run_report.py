@@ -680,6 +680,15 @@ def existing_repeats(root: Path, attempt_id: str, document: Mapping[str, Any]) -
 
 
 @_document_hint
+def existing_coverage(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
+    """«Покрытие существующими тестами»: the classes and endpoints the accepted cases check, named by the project's own tests or not —
+    names, counts and IDs only; None in a run of cases only (its steps have no operations) and when the project has no tests of its own."""
+    from tools.existing_tests import run_coverage
+
+    return run_coverage(root, attempt_id, document)
+
+
+@_document_hint
 def reference(root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """``CV_REFERENCE`` of the run's case document against its reference cases — IDs and counts only."""
     from tools.pilot_state import read_reference_cases
@@ -1066,6 +1075,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
     mismatched = data_mismatch(document) if cases is not None else []
     path_hint = end_to_end(root, attempt_id, document) if cases is not None else None
     existing = existing_repeats(root, attempt_id, document) if cases is not None else None
+    covered = existing_coverage(root, attempt_id, document) if cases is not None else None
     compared = reference(root, attempt_id, document) if cases is not None else None
     source_count = len(document["source_requirements"]) if isinstance(document, Mapping) and isinstance(document.get("source_requirements"), list) else None
     canonical_count = len(document["requirements"]) if isinstance(document, Mapping) and isinstance(document.get("requirements"), list) else None
@@ -1140,6 +1150,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
                     + ([receipts] if (receipts := receipts_warning(project, root, attempt_id)) else []),
         **({"requirement_labels": labels} if labels else {}),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
+        **({"existing_coverage": covered} if covered else {}),  # only with the section: the reports of other runs keep their bytes
         "import": _with_restored(_import_summary(root, events), acceptance),
         "automation_split": _split(root, attempt_id),
         "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
@@ -1446,6 +1457,32 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+COVERAGE_TITLE = "## Покрытие существующими тестами (по тексту тестов)"
+COVERAGE_NOTE = ("Оценка по тексту тестов проекта, тесты не запускались. «Назван тестами» — класс или адрес прямо упомянут в тесте; "
+                 "класс может проверяться и косвенно, через другой класс.")
+COVERAGE_COLUMNS = "| Класс или адрес | Тестов, прямо называющих | Проверяемые исходы | Связанные требования |"
+
+
+def _some(items: list[str], shown: int) -> str:
+    return ", ".join(items[:shown]) + (f" и ещё {len(items) - shown}" if len(items) > shown else "")
+
+
+def _coverage_lines(report: Mapping[str, Any]) -> list[str]:
+    """«Покрытие существующими тестами»: the texts approved by the user on 26.11 (v09/coverage-map-plan.md §2)."""
+    from tools.test_case_projections import escape_inline
+
+    found = report.get("existing_coverage")
+    if not found or not found["rows"]:
+        return []
+    unnamed = found["unnamed"]
+    return [COVERAGE_TITLE, "", COVERAGE_NOTE, "",
+            f"требований, у которых ни один связанный класс не назван тестами: {len(unnamed)} из {found['linked']}"
+            + (f" ({_some(unnamed, 10)})" if unnamed else ""), "",
+            COVERAGE_COLUMNS, "|---|---|---|---|",
+            *(f"| {escape_inline(row['key'])} | {row['tests'] or '—'} | {escape_inline(', '.join(row['outcomes'])) or '—'} | "
+              f"{_some(row['requirements'], 5) or '—'} |" for row in found["rows"]), ""]
+
+
 def _warning_line(code: str, report: Mapping[str, Any]) -> str:
     """A line of «Предупреждения»; a weak or unreliable review says how many control errors of its view it caught (the numbers of the run, not a guess)."""
     canaries = report.get("review_canaries") or {}
@@ -1466,6 +1503,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *([f"- Дата заголовка: {report['header_date_note']}"] if report.get("header_date_note") else []),
         *([f"- Результат запуска тестов: {report['execution_source']['note']} (слово команды: {report['execution_source']['challenge']})"]
           if report.get("execution_source") else []), "",
+        *_coverage_lines(report),
         "## Числа", "",
         f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "
         f"исходных SREQ {_dash(counts['source_requirements'])}, канонических CREQ {_dash(counts['canonical_requirements'])}.", "",

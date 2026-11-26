@@ -194,8 +194,10 @@ def _python_defined(project: Path, inventory: Mapping[str, Any], in_context: set
     return defined
 
 
-def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str]) -> dict[str, dict[str, dict[str, list[str]]]]:
-    """``{key: {test class: {method: [outcome, …]}}}`` from the test files of ``inventory`` whose bytes still match."""
+def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str], file_level: bool = False) -> dict[str, dict[str, dict[str, list[str]]]]:
+    """``{key: {test class: {method: [outcome, …]}}}`` from the test files of ``inventory`` whose bytes still match.  ``file_level`` (the report,
+    not the generator): a Java or Kotlin class the test file names outside its methods too (``@WebMvcTest(OwnerController.class)``) is named
+    by every test of the file."""
     project = Path(project)
     in_context = {str(path) for path in context_paths}
     sources = {Path(path).stem for path in in_context if Path(path).suffix in _TESTED and not Path(path).stem.startswith("test_")
@@ -218,14 +220,14 @@ def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterab
         jvm = Path(relative).suffix in _JVM
         methods = list(_java_methods(text, kotlin=relative.endswith(".kt"))) if jvm else list(_python_tests(text))
         if jvm:
-            named = set(re.findall(r"\b[A-Z]\w*\b", text))
+            named = set(re.findall(r"\b[A-Z]\w*\b", _without_comments(text)))
         else:
             imported = _python_names(text)
             named = imported | {module for name in imported for module in defined.get(name, ())}
         for name, body in methods:
             outcomes = _outcomes(body)
             keys = {f"{verb.upper()} {_normal_path(path)}" for verb, path in _HTTP_CALL.findall(body)}
-            keys |= (set(re.findall(r"\b[A-Z]\w*\b", body)) if jvm else named) & sources
+            keys |= (named if file_level or not jvm else set(re.findall(r"\b[A-Z]\w*\b", body))) & sources
             for key in keys:
                 result.setdefault(key, {}).setdefault(test_class, {})[name] = outcomes
     return result
@@ -364,6 +366,95 @@ def hint_line(case_ids: list[str]) -> str | None:
     return (f"- {HINT}: кейсов {len(case_ids)} не добавляют нового сочетания «эндпоинт + исход» к тестам проекта — {shown}. "
             "Входных данных карта не видит, это верхняя оценка. Справка: кейс по требованию остаётся, требования к нему не "
             "снижаются; дубль без нового условия — замечание.")
+
+
+_CODE_PATH = re.compile(r"[\w./-]+\.(?:java|kt|py)\b")
+_ENDPOINT = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(/[^\s:;,)]*)")
+
+
+def _template(key: str) -> str:
+    """``МЕТОД /путь`` of a case with its data as ``{}``: a segment with a digit is a value (``/profiles/anna-b1-001`` is ``/profiles/{}``)."""
+    method, _, path = key.partition(" ")
+    return f"{method} /" + "/".join("{}" if any(char.isdigit() for char in part) else part for part in _segments(path))
+
+
+def _covers(case_key: str, test_key: str) -> bool:
+    """``_same_endpoint`` where a value of the case (``{}``) is any segment of the test (the test calls it with its own value); a ``{}`` of the
+    test is only a value of the case — ``/articles/feed`` is not ``/articles/{slug}``."""
+    case_method, _, case_path = case_key.partition(" ")
+    test_method, _, test_path = test_key.partition(" ")
+    case, test = _segments(case_path), _segments(test_path)
+    tail = min(len(case), len(test))
+    return (case_method == test_method and tail > 0
+            and all(one == other or one == "{}" for one, other in zip(case[len(case) - tail:], test[len(test) - tail:])))
+
+
+def linked_code(document: Mapping[str, Any], sources: Iterable[str]) -> dict[str, set[str]]:
+    """``{key: {requirement, …}}``: what the accepted cases of a requirement check by their steps — a file of ``sources`` and an endpoint
+    (``МЕТОД /путь``) that the provenance of a step's operation names anywhere in its text, and the endpoint of an HTTP step.  The setup of
+    a case links nothing: it prepares the data, it is not what the requirement checks."""
+    sources = set(sources)
+    capabilities = {str(row.get("capability_id")): row for row in document.get("operation_capabilities") or []}
+    linked: dict[str, set[str]] = {}
+    for case in document.get("test_cases") or []:
+        requirements = {str(item) for item in case.get("requirement_ids") or []}
+        keys = {_template(key) for key, _outcomes in _case_steps(case)}
+        for step in case.get("steps") or []:
+            for item in (capabilities.get(str((step.get("operation") or {}).get("capability_id"))) or {}).get("provenance") or []:
+                keys |= {path for path in _CODE_PATH.findall(str(item)) if path in sources}
+                keys |= {_template(f"{verb} {_normal_path(path)}") for verb, path in _ENDPOINT.findall(str(item))}
+        for key in keys:
+            linked.setdefault(key, set()).update(requirements)
+    return linked
+
+
+def coverage(document: Mapping[str, Any], value: Mapping[str, Mapping[str, Mapping[str, list[str]]]], linked: Mapping[str, set[str]]) -> dict[str, Any]:
+    """The rows of «Покрытие существующими тестами»: per class (the name of the file, as the map keys it) or endpoint of ``linked`` the
+    test methods that name it, their outcomes and the requirements; and the requirements none of whose classes and endpoints a test names.
+    The rows without a test first."""
+    order = {str(row.get("requirement_id")): index for index, row in enumerate(document.get("requirements") or [])}
+    ordered = lambda ids: sorted(ids, key=lambda item: (order.get(item, len(order)), item))  # noqa: E731
+    found: dict[str, tuple[dict[tuple[str, str], list[str]], set[str]]] = {}
+    for key, requirements in linked.items():
+        shown = key if " " in key else Path(key).stem
+        named = [classes for test_key, classes in value.items() if " " in test_key and _covers(key, test_key)] if " " in key else [value.get(shown) or {}]
+        methods, owners = found.setdefault(shown, ({}, set()))
+        methods.update({(test_class, name): items for classes in named for test_class, rows in classes.items() for name, items in rows.items()})
+        owners.update(requirements)
+    rows = [{"key": key, "tests": len(methods), "outcomes": sorted({item for items in methods.values() for item in items})[:OUTCOMES],
+             "requirements": ordered(owners)} for key, (methods, owners) in found.items()]
+    named_owners = {item for row in rows if row["tests"] for item in row["requirements"]}
+    every = {item for row in rows for item in row["requirements"]}
+    return {"rows": sorted(rows, key=lambda row: (row["tests"] > 0, row["key"])), "linked": len(every), "unnamed": ordered(every - named_owners)}
+
+
+def _profile(root: Path) -> str:
+    from tools import pilot_state
+
+    return str(pilot_state.read_run(root)["manifest"]["policy_profile"])
+
+
+def run_coverage(run_root: Path, attempt_id: str, document: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``coverage`` of the run's accepted cases against the project's own tests (not those the package wrote), from the inventory the run
+    froze; None for a run of cases only (the user, 26.11: only mode B — its steps have operations), and when the project has no tests of its
+    own or no case links a class or an endpoint."""
+    from tools import pilot_state
+    from tools.execution_gate import CASES_ONLY
+
+    root = Path(run_root).resolve()
+    if _profile(root) == CASES_ONLY:
+        return None
+    project = root.parent.parent
+    receipts = pilot_state.context_receipts(root, attempt_id, pilot_state.derive_state(root))
+    if not receipts:
+        return None
+    inventory = pilot_state.frozen_inventory(project, root, str(receipts[0]["inventory_digest"]))
+    files = [(str(row.get("project_path")), row.get("kind")) for row in inventory.get("files") or []]
+    own = own_files(project, inventory)[0]
+    if not any(kind == "test" and Path(path).suffix in _TESTED and path not in own for path, kind in files):
+        return None
+    linked = linked_code(document, [path for path, kind in files if kind == "source" and Path(path).suffix in _TESTED])
+    return coverage(document, build_map(project, inventory, [key for key in linked if " " not in key], file_level=True), linked) if linked else None
 
 
 def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]], root: Path | None = None) -> dict[str, Any]:
