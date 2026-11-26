@@ -34,6 +34,64 @@ from tools.model_records import (  # the names of the records of a step these bo
 )
 
 
+def _review_is_bound(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], document: Any, ledger: Any, package_binding: Any) -> bool:
+    """The review is bound to the effective document: the answer of ``tc-reviewer:canonical``, its edits less the canaries, the verdict
+    of the ledger and, for a set sent back, the candidate, the canaries and the rework (``effective_review_is_bound``).  A part of
+    ``_check_effective_canonical``, called inside its ``try``: what this raises, the check catches."""
+    from tools.revision_selection import effective_review_is_bound
+
+    reviewer_responses = [
+        event for event in state["events"]
+        if event.get("attempt_id") == attempt["attempt_id"]
+        and event.get("stage_instance_id") == "tc-reviewer:canonical"
+        and event.get("event_type") == "MODEL_RESPONSE_RECEIVED"
+    ]
+    reviewer_publication = _read_model_stage_artifact_with_state(
+        project, root, state, str(attempt["attempt_id"]), "tc-reviewer:canonical",
+        str(reviewer_responses[0].get("artifact_digest", "")),
+    ) if len(reviewer_responses) == 1 else None
+    reviewer_output = reviewer_publication.get("artifact") if isinstance(reviewer_publication, Mapping) else None
+    report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
+    successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
+    edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
+    if edits is not None:
+        # the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
+        # the edits of a canary text were dropped before the successor was made — they are dropped here too.
+        from tools.review_canaries import filter_edits, verify as verify_canaries
+        from tools.review_edits import edits_rebuild
+
+        edits = filter_edits(verify_canaries(root, str(attempt["attempt_id"])) or [], {"successor_edits": edits})[0].get("successor_edits")
+
+        successor = document if (
+            edits is not None and isinstance(document, Mapping) and isinstance(package_binding, Mapping)
+            and edits_rebuild(document, edits, str(package_binding.get("candidate_digest")))
+        ) else None
+    verdict_event = next(
+        (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
+        None,
+    ) if isinstance(ledger, Mapping) else None
+    partial: dict[str, Any] = {}
+    if isinstance(report, Mapping) and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted: bound to the candidate and the canaries of the journal
+        from tools.orchestrate_test_case_revision import journal_assembly
+        from tools.review_canaries import verify as verify_canaries
+
+        from tools.orchestrate_test_case_revision import rework_artifacts
+
+        partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or [],
+                   "rework": rework_artifacts(root, str(attempt["attempt_id"]))}  # the answer of the rework and the review of it, when the journal has both
+    return (
+        isinstance(package_binding, Mapping)
+        and effective_review_is_bound(
+            package_binding.get("candidate_digest"),
+            dict(document) if isinstance(document, Mapping) else document,
+            dict(report) if isinstance(report, Mapping) else report,
+            dict(successor) if isinstance(successor, Mapping) else successor,
+            dict(verdict_event) if isinstance(verdict_event, Mapping) else verdict_event,
+            **partial,
+        )
+    )
+
+
 def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
     expected_keys = common | {"document", "document_digest", "effective_bundle_receipt", "effective_bundle_receipt_digest", "reviewer_session_digest"}
     document = receipt.get("document")
@@ -42,7 +100,6 @@ def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, 
     terminal_reviewer = None
     try:
         from tools.canonical_document import document_sha256, validate_canonical_document
-        from tools.revision_selection import effective_review_is_bound
         from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
         reviewer_digest = str(receipt.get("reviewer_session_digest", ""))
@@ -57,56 +114,7 @@ def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, 
             "ARTIFACT_READ_BACK",
         )["record"]
         package_binding = ledger.get("package_binding") if isinstance(ledger, Mapping) else None
-        reviewer_responses = [
-            event for event in state["events"]
-            if event.get("attempt_id") == attempt["attempt_id"]
-            and event.get("stage_instance_id") == "tc-reviewer:canonical"
-            and event.get("event_type") == "MODEL_RESPONSE_RECEIVED"
-        ]
-        reviewer_publication = _read_model_stage_artifact_with_state(
-            project, root, state, str(attempt["attempt_id"]), "tc-reviewer:canonical",
-            str(reviewer_responses[0].get("artifact_digest", "")),
-        ) if len(reviewer_responses) == 1 else None
-        reviewer_output = reviewer_publication.get("artifact") if isinstance(reviewer_publication, Mapping) else None
-        report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
-        successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
-        edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
-        if edits is not None:
-            # the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
-            # the edits of a canary text were dropped before the successor was made — they are dropped here too.
-            from tools.review_canaries import filter_edits, verify as verify_canaries
-            from tools.review_edits import edits_rebuild
-
-            edits = filter_edits(verify_canaries(root, str(attempt["attempt_id"])) or [], {"successor_edits": edits})[0].get("successor_edits")
-
-            successor = document if (
-                edits is not None and isinstance(document, Mapping) and isinstance(package_binding, Mapping)
-                and edits_rebuild(document, edits, str(package_binding.get("candidate_digest")))
-            ) else None
-        verdict_event = next(
-            (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
-            None,
-        ) if isinstance(ledger, Mapping) else None
-        partial: dict[str, Any] = {}
-        if isinstance(report, Mapping) and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted: bound to the candidate and the canaries of the journal
-            from tools.orchestrate_test_case_revision import journal_assembly
-            from tools.review_canaries import verify as verify_canaries
-
-            from tools.orchestrate_test_case_revision import rework_artifacts
-
-            partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or [],
-                       "rework": rework_artifacts(root, str(attempt["attempt_id"]))}  # the answer of the rework and the review of it, when the journal has both
-        review_bound = (
-            isinstance(package_binding, Mapping)
-            and effective_review_is_bound(
-                package_binding.get("candidate_digest"),
-                dict(document) if isinstance(document, Mapping) else document,
-                dict(report) if isinstance(report, Mapping) else report,
-                dict(successor) if isinstance(successor, Mapping) else successor,
-                dict(verdict_event) if isinstance(verdict_event, Mapping) else verdict_event,
-                **partial,
-            )
-        )
+        review_bound = _review_is_bound(project, root, state, attempt, document, ledger, package_binding)
         ledger_events = [event for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == reviewer_digest]
         ledger_body = {key: value for key, value in ledger.items() if key != "digest"} if isinstance(ledger, Mapping) else {}
         canonical_ledger_bytes = json.dumps(ledger, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") if isinstance(ledger, Mapping) else None
