@@ -33,19 +33,31 @@ _REPARSE: Final = 0x400
 _WINDOWS_RESERVED: Final = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{number}" for number in range(1, 10)), *(f"LPT{number}" for number in range(1, 10))})
 
 
-def _is_link_or_reparse(path: Path) -> bool:
-    details = os.stat(path, follow_symlinks=False)
+def _details_are_link(details: os.stat_result) -> bool:
     return stat.S_ISLNK(details.st_mode) or bool(getattr(details, "st_file_attributes", 0) & _REPARSE)
 
 
-def _identity(path: Path) -> tuple[int, int, int | None]:
-    details = os.stat(path, follow_symlinks=False)
+def _details_identity(details: os.stat_result) -> tuple[int, int, int | None]:
     attributes = getattr(details, "st_file_attributes", None)
     if attributes is not None and stat.S_ISDIR(details.st_mode):
         # Windows may inconsistently report this directory bit (CPython #126253).
         # Preserve every other attribute, including FILE_ATTRIBUTE_REPARSE_POINT.
         attributes &= ~0x10000000
     return details.st_dev, details.st_ino, attributes
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    return _details_are_link(os.stat(path, follow_symlinks=False))
+
+
+def _identity(path: Path) -> tuple[int, int, int | None]:
+    return _details_identity(os.stat(path, follow_symlinks=False))
+
+
+def _link_and_identity(path: Path) -> tuple[bool, tuple[int, int, int | None]]:
+    """Both from one snapshot of *path*: whether it is a link or a reparse point, and its identity."""
+    details = os.stat(path, follow_symlinks=False)
+    return _details_are_link(details), _details_identity(details)
 
 
 def _relative_output(root: Path, value: str | Path) -> tuple[Path, tuple[str, ...]]:
@@ -76,8 +88,8 @@ def _close_guard(guard: int) -> None:
 
 
 def _open_directory_guard(path: Path) -> int:
-    before = _identity(path)
-    if _is_link_or_reparse(path):
+    link, before = _link_and_identity(path)  # the snapshot before the open
+    if link:
         raise OutputConfinementError("--output parent is a symlink or reparse point")
     if os.name == "nt":
         create_file = ctypes.windll.kernel32.CreateFileW
@@ -91,8 +103,8 @@ def _open_directory_guard(path: Path) -> int:
     else:
         guard = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
     try:
-        after = _identity(path)
-        if after != before or _is_link_or_reparse(path):
+        link, after = _link_and_identity(path)  # a second snapshot, after the open
+        if after != before or link:
             raise OutputConfinementError(
                 f"--output parent changed during validation (identity before={before!r}, after={after!r})"
             )
@@ -182,9 +194,9 @@ def _verify_output_parent(target: ConfinedOutputTarget) -> None:
         for index, part in enumerate((None, *target.relative_parent)):
             if part is not None:
                 current /= part
-            if _is_link_or_reparse(current):
+            link, path_identity = _link_and_identity(current)
+            if link:
                 raise OutputConfinementError("--output parent is a symlink or reparse point")
-            path_identity = _identity(current)
             guard_identity = target._guard_identities[index]
             handle_identity = guard_identity if os.name == "nt" else _descriptor_identity(target._guards[index])
             if path_identity != guard_identity or handle_identity != guard_identity:
