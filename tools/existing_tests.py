@@ -72,40 +72,11 @@ def _outcomes(body: str) -> list[str]:
 
 
 def _without_comments(text: str) -> str:
-    """Java text with comments blanked and string literals kept (the paths and view names are in strings)."""
-    result, index, state = list(text), 0, "code"
-    while index < len(text):
-        char = text[index]
-        if state == "code":
-            if text.startswith("//", index):
-                state = "line"
-                continue
-            if text.startswith("/*", index):
-                state = "block"
-                continue
-            if char == '"':
-                state = "string"
-        elif state == "string":
-            if char == "\\":
-                index += 2
-                continue
-            if char == '"' or char == "\n":
-                state = "code"
-        elif state == "line":
-            if char == "\n":
-                state = "code"
-            else:
-                result[index] = " "
-        elif state == "block":
-            if text.startswith("*/", index):
-                result[index:index + 2] = "  "
-                index += 2
-                state = "code"
-                continue
-            if char != "\n":
-                result[index] = " "
-        index += 1
-    return "".join(result)
+    """Java text with comments blanked and string literals kept (the paths and view names are in strings): the lexer of
+    ``java_text`` (W2.3)."""
+    from tools.java_text import mask_java_comments
+
+    return mask_java_comments(text)
 
 
 def _java_methods(text: str, kotlin: bool = False) -> Iterable[tuple[str, str]]:

@@ -19,6 +19,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from tools.java_text import mask_java_comments, mask_java_contents
 from tools.json_cli import JsonArgumentParser, emit_error
 from tools.test_design_hints import capped
 
@@ -59,42 +60,9 @@ _KEYWORDS = {"if", "for", "while", "switch", "catch", "synchronized", "return", 
 
 
 def _mask_java(text: str, *, strings: bool) -> str:
-    """Blank comments (and, with ``strings``, string and char contents) keeping every offset and line break."""
-    out = list(text)
-    index, length = 0, len(text)
-
-    def blank(start: int, end: int) -> None:
-        for position in range(start, end):
-            if out[position] != "\n":
-                out[position] = " "
-
-    while index < length:
-        if text.startswith("//", index):
-            end = text.find("\n", index)
-            end = length if end < 0 else end
-            blank(index, end)
-            index = end
-        elif text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            end = length if end < 0 else end + 2
-            blank(index, end)
-            index = end
-        elif text.startswith('"""', index):
-            end = text.find('"""', index + 3)
-            end = length if end < 0 else end + 3
-            if strings:
-                blank(index + 3, max(index + 3, end - 3))
-            index = end
-        elif text[index] in "\"'":
-            quote, end = text[index], index + 1
-            while end < length and text[end] != quote and text[end] != "\n":
-                end += 2 if text[end] == "\\" else 1
-            if strings:
-                blank(index + 1, min(end, length))
-            index = end + 1
-        else:
-            index += 1
-    return "".join(out)
+    """Blank comments (and, with ``strings``, string and char contents) keeping every offset and line break: the lexer of
+    ``java_text`` (W2.3)."""
+    return mask_java_contents(text) if strings else mask_java_comments(text)
 
 
 def _brace_pairs(code: str) -> dict[int, int]:
