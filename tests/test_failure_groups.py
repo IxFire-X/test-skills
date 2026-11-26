@@ -199,7 +199,8 @@ def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
     from tests.test_run_report import _finished_run
     from tools.run_report import build_report, render_markdown
 
-    report = build_report(tmp_path, _finished_run(tmp_path).name)[0]
+    run_root = _finished_run(tmp_path)
+    report = build_report(run_root.parents[1], run_root.name)[0]
     before = render_markdown({key: value for key, value in report.items() if key != "failure_groups"}).splitlines()
     after = render_markdown({**report, "failure_groups": failure_groups(report["quarantine"])}).splitlines()
     method = after.index(next(line for line in before if " :: " in line))
