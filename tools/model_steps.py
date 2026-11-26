@@ -15,9 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from tools.canonical_document import document_sha256
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes
-from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 from tools.fixes import RETRY_SPENT, REVIEW_CHAIN, delete_field_fix, human_for, spent_abandon
 from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
 from tools.schema_validation import StrictJsonError, loads_json_strict
@@ -155,6 +153,7 @@ def openspec_marker_by_code(run_root: Path) -> bool:
 def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Answer ``context-marker:requirements`` of such a run by code: the rows ``build_context`` composes from the receipts, no model call; again on an answered step changes nothing."""
     from tools.build_context import build_context
+    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 
     project, root = _run_root(run_root)
     state, stage = derive_state(root), "context-marker:requirements"
@@ -453,6 +452,7 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
     """The reviewer's decision against the requested candidate before the answer is written — select would refuse
     it after the ledger is closed, with no way out; here the stage keeps its one retry.  A run whose candidate the journal
     cannot assemble (in a run of an earlier version) is left to select as before."""
+    from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import OrchestrationError, _run_imported, journal_assembly, review_decision
 
     requested = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id

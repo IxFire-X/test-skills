@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
-from tools.context_marker_merge import merge_marker_artifacts, requirements_of
 from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
@@ -205,6 +204,7 @@ def _validate_context_marker_sources(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> None:
     from tools.build_context import openspec_diagnostics
+    from tools.context_marker_merge import merge_marker_artifacts, requirements_of
 
     stage_instance_id = str(request["stage_instance_id"])
     attempt_id = str(attempt["attempt_id"])

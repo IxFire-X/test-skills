@@ -17,7 +17,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 from tools import execution_gate
-from tools.canonical_document import document_sha256
 from tools.confined_output import OutputConfinementError, read_confined_bytes
 from tools.fixes import CLOSE_RUN_FIX, REVIEW_CHAIN
 from tools.schema_validation import StrictJsonError, loads_json_strict
@@ -722,6 +721,7 @@ def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_
                 same = False
             if not same:
                 return f"{kind} нового прогона иной, чем у источника"
+        from tools.canonical_document import document_sha256
         from tools.orchestrate_test_case_revision import journal_assembly
 
         try:
@@ -1250,6 +1250,7 @@ def _expected_model_inputs(
             basis = rework_basis(root, attempt_id)
         except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id} is asked for only after the first review sent cases back for a rework ({error}); fix: `status` names the next step") from error
+        from tools.canonical_document import document_sha256
 
         plan = _generator_input(project, root, state, attempt_id, "plan")
         contexts = list(dict.fromkeys([*basis["contexts"], *(_plan_contexts(plan) if plan.get("context_files") else [])]))  # the files the plan names lie in all its receipts

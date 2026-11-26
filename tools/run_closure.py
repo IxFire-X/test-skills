@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.canonical_document import blocker_count as canonical_blocker_count
 from tools.confined_output import OutputConfinementError, read_confined_bytes
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     CLOSURE_KINDS as _CLOSURE_KINDS,
@@ -395,6 +394,7 @@ def _validate_accepted_terminal_closure(
         ]
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("accepted terminal result lacks an effective canonical") from error
+    from tools.canonical_document import blocker_count as canonical_blocker_count
 
     blocker_count = canonical_blocker_count(document)
     manual_steps = sum(step["manual_only"] is True for _case_id, step in steps)
