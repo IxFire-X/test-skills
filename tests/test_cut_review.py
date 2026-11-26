@@ -15,6 +15,7 @@ from tests.test_review_open_recovery import _crash_once
 from tests.test_review_requested import build_generated_run, _generated_run, _journal, _put
 from tests.journal_helpers import assert_refused_once, refusal_log
 from tests.test_review_two_commands import _autofix, _cycle, _open, _select_verdict, _shape, _verdict
+from tests.test_f1 import _opened
 
 LEDGER = "reviewer-ledger-v1"
 
@@ -70,13 +71,6 @@ def _ledger_events(run: dict) -> list[str]:
     from tools import pilot_state
 
     return [row["event_type"] for row in pilot_state.read_reviewer_session_ledger(run["run_root"], run["attempt_id"])["events"]]
-
-
-def _opened(tmp_path: Path) -> dict:
-    run = _generated_run(tmp_path)
-    code, opened = _open(run)
-    assert code == 0, opened
-    return run
 
 
 # --------------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import pytest
 
 from tests.test_review_canaries import _answer, _boundary_and_removed, _fake_seed, _finding, _generated_run, _ids
 from tests.test_stage_steps import _call, _events, _put, _status
+from tests.test_rework_stage import _published
 from tools import pilot_state, review_canaries, stage_steps
 
 STAGE = "tc-reviewer:canonical"
@@ -39,11 +40,6 @@ def _opened(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, **kwargs) -
     run = _run(tmp_path, monkeypatch, **kwargs)
     assert _prepare(capsys, run, *(INDEPENDENT if not kwargs.get("self_review") else ("--fresh-context", "no")))[0] == 0
     return run
-
-
-def _published(run: dict) -> list[str]:
-    folder = run["run_root"] / "published"
-    return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
 
 
 def test_status_names_prepare_for_the_review_and_prepare_opens_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:

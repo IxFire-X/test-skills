@@ -12,13 +12,8 @@ from pathlib import Path
 import pytest
 
 from tests.test_phase2_scan import _args, _project
+from tests.test_scan_exclusions import _write
 from tools import run_pipeline
-
-
-def _write(root: Path, relative: str, text: str) -> None:
-    path = root / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _context_paths(payload: dict) -> set[str]:

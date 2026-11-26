@@ -5,13 +5,8 @@ import json
 from pathlib import Path
 
 from tests.helpers import prepare_stage
-from tests.test_autotest_cycle import GENERATOR, autotest_run
-
-
-def _held_run(tmp_path: Path) -> dict:
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_products.py").write_text("def test_old():\n    pass\n", encoding="utf-8")
-    return autotest_run(tmp_path)
+from tests.test_autotest_cycle import GENERATOR
+from tests.test_automation_path_held import _held_run
 
 
 def test_prepare_of_the_generator_names_the_held_path_and_the_rule(tmp_path: Path) -> None:

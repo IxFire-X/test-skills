@@ -97,8 +97,10 @@ def _known_boundaries_are_closed(value: object) -> bool:
     return True
 
 
-@pytest.mark.parametrize("name", ["pilot-common.schema.json", "run-manifest.schema.json", "event.schema.json", "attempt.schema.json", "run-authorization-receipt.schema.json", "terminal-result.schema.json", "finalization-receipt.schema.json"])
-def test_phase_one_schemas_are_versioned_draft_closed(pack_root: Path, name: str) -> None:
+@pytest.mark.parametrize("name", ["pilot-common.schema.json", "run-manifest.schema.json", "event.schema.json", "attempt.schema.json",
+                                  "run-authorization-receipt.schema.json", "terminal-result.schema.json", "finalization-receipt.schema.json",
+                                  "pre-finalization-trace.schema.json", "derived-terminal-trace.schema.json", "release-manifest.schema.json"])
+def test_the_versioned_schemas_of_the_run_and_its_closure_are_draft_and_closed(pack_root: Path, name: str) -> None:
     schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == f"schemas/{name}"
@@ -112,26 +114,6 @@ def test_phase_five_schemas_are_draft_identified_and_closed(pack_root: Path, nam
     schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == f"schemas/{name}"
-    assert _known_boundaries_are_closed(schema)
-
-
-@pytest.mark.parametrize("name", ["pre-finalization-trace.schema.json", "derived-terminal-trace.schema.json"])
-def test_phase_seven_closure_schemas_are_versioned_draft_closed(pack_root: Path, name: str) -> None:
-    schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
-    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-    assert schema["$id"] == f"schemas/{name}"
-    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
-    assert schema["additionalProperties"] is False
-    assert _known_boundaries_are_closed(schema)
-
-
-@pytest.mark.parametrize("name", ["release-manifest.schema.json"])
-def test_phase_eight_schemas_are_versioned_draft_closed(pack_root: Path, name: str) -> None:
-    schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
-    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-    assert schema["$id"] == f"schemas/{name}"
-    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
-    assert schema["additionalProperties"] is False
     assert _known_boundaries_are_closed(schema)
 
 

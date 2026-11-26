@@ -12,18 +12,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.test_p6a_portability import _open_run
 
 
 def _terminal_run(tmp_path: Path) -> Path:
     from tests.test_run_report import _finished_run
 
     return _finished_run(tmp_path)
-
-
-def _open_run(tmp_path: Path) -> Path:
-    from tests.test_review_notes import _selected_run, _two_notes
-
-    return _selected_run(tmp_path, _two_notes)[0]
 
 
 @pytest.mark.parametrize("make_run", [_terminal_run, _open_run], ids=["terminal", "open"])

@@ -411,11 +411,8 @@ def test_the_header_says_code_checked_structure_not_meaning() -> None:
     assert "Код проверил структуру и ссылки" in view and "не смысл" in view and "проверяешь ты" in view
 
 
-@pytest.mark.parametrize(("text", "value", "hinted"), [
-    ("Ввести возраст 18", 17, True), ("Ввести возраст 18", 18, False), ("Ввести возраст 18", "18", False),
-    ("Ввести возраст 170", 17, True), ("Ввести сумму 1.17", 17, True), ("Ввести 0", 0, False), ("Ввести 10", 0, True),
-])
-def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, hinted: bool) -> None:
+def _hinted(text: str, value) -> bool:
+    """Whether the review view hints at a data mismatch in a step whose action is *text* and whose one input has *value*."""
     from tools.review_view import data_mismatches
 
     document = _example()
@@ -424,7 +421,15 @@ def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, h
     item["source"]["value"] = value
     item["target"]["sensitive"] = False
     step.update(action=text, test_data="—", inputs=[item])
-    assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+    return bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]])
+
+
+@pytest.mark.parametrize(("text", "value", "hinted"), [
+    ("Ввести возраст 18", 17, True), ("Ввести возраст 18", 18, False), ("Ввести возраст 18", "18", False),
+    ("Ввести возраст 170", 17, True), ("Ввести сумму 1.17", 17, True), ("Ввести 0", 0, False), ("Ввести 10", 0, True),
+])
+def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, hinted: bool) -> None:
+    assert _hinted(text, value) is hinted
 
 
 @pytest.mark.parametrize(("text", "value", "hinted"), [
@@ -618,15 +623,7 @@ def test_the_autotest_view_keeps_the_canonical_requirements_the_cases_link() -> 
     ("Отправить форму", {"firstName": "   ", "city": "Zebra-City"}, True),  # a blank value is skipped, the other leaf still counts
 ])
 def test_blank_values_and_route_templates_are_not_false_mismatches(text: str, value, hinted: bool) -> None:
-    from tools.review_view import data_mismatches
-
-    document = _example()
-    _case, step = _mvc_step(document)
-    item = copy.deepcopy(step["inputs"][0])
-    item["source"]["value"] = value
-    item["target"]["sensitive"] = False
-    step.update(action=text, test_data="—", inputs=[item])
-    assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+    assert _hinted(text, value) is hinted
 
 
 # o2b: the short form of the view for the reviewer of the automation (the generator view stays as it was)

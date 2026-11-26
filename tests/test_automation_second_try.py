@@ -19,6 +19,14 @@ REWORK = "ТРЕБУЕТ ДОРАБОТКИ"
 SECOND = ("--invocation-id", "autotest-reviewer-subagent-2", "--fresh-context", "yes")  # one session reviews one revision
 
 
+def _sent_back(tmp_path: Path) -> dict:
+    """An automation run whose first revision the review sent back for rework."""
+    run = autotest_run(tmp_path)
+    run_generator(run)
+    run_reviewer(run, REWORK)
+    return run
+
+
 def _finish(run: dict, capsys, *flags: str) -> dict:
     from tools.run_pipeline import HostStop, cmd_finish
 
@@ -31,25 +39,19 @@ def _finish(run: dict, capsys, *flags: str) -> dict:
 
 
 def test_a_review_that_requires_rework_offers_the_second_revision(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     assert next_of(run) == ("automation", "prepare", "tc-to-autotest:r2")
 
 
 def test_the_second_revision_accepted_after_a_rework_verdict_leads_to_materialize(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     assert run_generator(run, 2)[0] == 0 and next_of(run) == ("automation_review", "prepare", "autotest-reviewer:r2")
     assert run_reviewer(run, "ПРИНЯТО", 2, *SECOND)[0] == 0
     assert next_of(run)[:2] == ("materialize", "materialize")
 
 
 def test_the_second_revision_that_the_review_rejects_is_the_last_one(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     run_generator(run, 2)
     run_reviewer(run, REWORK, 2, *SECOND)
     assert next_of(run)[:2] == ("closure", "finish")
@@ -57,17 +59,13 @@ def test_the_second_revision_that_the_review_rejects_is_the_last_one(tmp_path: P
 
 
 def test_finish_instead_of_the_second_revision_closes_as_before(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     closed = _finish(run, capsys)
     assert closed["reason_code"] == "AUTOMATION_REJECTED" and closed["accepted"] is False, closed
 
 
 def test_after_finish_the_second_revision_is_offered_no_more_and_is_refused_without_a_write(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     assert _finish(run, capsys)["reason_code"] == "AUTOMATION_REJECTED"
     assert next_of(run)[1:] != ("prepare", "tc-to-autotest:r2")
     def written() -> list:  # the refusal itself is journaled (COMMAND_REFUSED); nothing else is
@@ -79,18 +77,14 @@ def test_after_finish_the_second_revision_is_offered_no_more_and_is_refused_with
 
 
 def test_a_second_revision_that_was_taken_is_finished_or_given_up_with_the_code_of_the_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     assert prepare_stage(run["root"], "tc-to-autotest:r2")[0] == 0
     assert _finish(run, capsys)["code"] == "FINISH_FACT_UNDETERMINED"
     assert _finish(run, capsys, "STAGE_RETRY_EXHAUSTED")["reason_code"] == "STAGE_RETRY_EXHAUSTED"
 
 
 def test_a_repeated_prepare_of_the_second_revision_writes_nothing(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     prepare_stage(run["root"], "tc-to-autotest:r2")
     before = pilot_state.derive_state(run["root"])["events"]
     code, _out = prepare_stage(run["root"], "tc-to-autotest:r2")
@@ -100,9 +94,7 @@ def test_a_repeated_prepare_of_the_second_revision_writes_nothing(tmp_path: Path
 def test_the_second_revision_over_the_budget_of_the_step_is_a_measurement_not_a_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import step_size
 
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     monkeypatch.setattr(step_size, "step_budget", lambda project: 1000)
     code, out = prepare_stage(run["root"], "tc-to-autotest:r2")
     budget = out["result"]["budget"]
@@ -112,9 +104,7 @@ def test_the_second_revision_over_the_budget_of_the_step_is_a_measurement_not_a_
 def test_materialize_after_a_rework_verdict_names_the_second_revision_not_a_dead_end(tmp_path: Path) -> None:
     from tools.exec_commands import _not_prepared_fix
 
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    run_reviewer(run, REWORK)
+    run = _sent_back(tmp_path)
     assert "tc-to-autotest:r2" in _not_prepared_fix(run["root"], run["attempt"])
 
 

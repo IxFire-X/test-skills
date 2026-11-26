@@ -51,6 +51,13 @@ def _review(run: dict, monkeypatch: pytest.MonkeyPatch, findings, verdict: str, 
     return run, done
 
 
+def _prepared_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> tuple[dict, Path]:
+    """The first review sent a case back and the rework stage is prepared: the run and its root."""
+    run, _done = _reviewed(tmp_path, monkeypatch)
+    _call(capsys, "prepare", run["run_root"], STAGE)
+    return run, run["run_root"]
+
+
 def _reworked(run: dict, **change) -> dict:
     case = copy.deepcopy(_ids(run)[0])
     return {"schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "rework-1", "test_cases": [{**case, "title": "Доработанный кейс", **change}]}
@@ -93,9 +100,7 @@ def test_prepare_publishes_the_request_and_the_view_of_the_rejected_case(tmp_pat
 
 
 def test_the_answer_is_recorded_once_and_status_then_names_the_review_of_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _reworked(run))
     code, out = _call(capsys, "submit", root, STAGE)
     assert code == 0 and _events(root)[-2:] == [f"MODEL_RESPONSE_RECEIVED:{STAGE}", f"CANDIDATE_PUBLISHED:{STAGE}"]
@@ -110,9 +115,7 @@ def test_the_answer_is_recorded_once_and_status_then_names_the_review_of_it(tmp_
 ])
 def test_an_answer_that_changes_the_identity_of_the_case_is_refused_and_nothing_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                          capsys: pytest.CaptureFixture[str], change: dict, code: str) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _reworked(run, **change))
     before = _events(root)
     refused, out = _call(capsys, "submit", root, STAGE)
@@ -120,9 +123,7 @@ def test_an_answer_that_changes_the_identity_of_the_case_is_refused_and_nothing_
 
 
 def test_an_answer_that_holds_the_case_the_review_accepted_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     accepted = copy.deepcopy(_ids(run)[1])
     answer = _reworked(run)
     answer["test_cases"].append({**accepted, "title": "Чужой кейс изменён"})
@@ -133,9 +134,7 @@ def test_an_answer_that_holds_the_case_the_review_accepted_is_refused(tmp_path: 
 
 
 def test_an_answer_without_the_rejected_case_is_refused_and_the_one_retry_takes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, {**_reworked(run), "test_cases": []})
     assert _call(capsys, "submit", root, STAGE)[1]["code"] == "REWORK_CASE_SET"
     _put(root, STAGE, _reworked(run))
@@ -143,9 +142,7 @@ def test_an_answer_without_the_rejected_case_is_refused_and_the_one_retry_takes(
 
 
 def test_a_dry_run_checks_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _reworked(run))
     before = _events(root)
     code, out = _call(capsys, "submit", root, STAGE, "--dry-run")
@@ -153,9 +150,7 @@ def test_a_dry_run_checks_and_writes_nothing(tmp_path: Path, monkeypatch: pytest
 
 
 def test_an_answer_in_the_slot_of_another_stage_is_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, "tc-generator:BATCH-other", _reworked(run))  # a slot of a batch, not of the rework
     before = _events(root)
     code, out = _call(capsys, "submit", root, STAGE)
@@ -283,9 +278,7 @@ def test_finish_after_a_request_without_an_answer_says_the_rework_was_not_finish
 
 
 def test_finish_after_an_answer_nobody_reviewed_shows_the_case_of_r1_not_the_reworked_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _reworked(run))
     _call(capsys, "submit", root, STAGE)
     _out, rejected = _closed(run, capsys)
@@ -392,9 +385,7 @@ def test_a_reworked_case_with_new_steps_and_no_service_fields_is_accepted_and_re
                                                                                             capsys: pytest.CaptureFixture[str]) -> None:
     from tools.orchestrate_test_case_revision import rework_round_data
 
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _thin_answer(run))
     code, out = _call(capsys, "submit", root, STAGE, "--dry-run")
     assert code == 0, [row["message"] for row in out.get("diagnostics", [])]
@@ -430,9 +421,7 @@ def test_the_categories_of_a_reworked_case_are_put_in_the_canonical_order() -> N
 
 
 def test_a_reworked_case_without_its_own_display_order_is_refused_as_a_change_of_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     answer = _thin_answer(run)
     del answer["test_cases"][0]["display_order"]  # the code puts the order of the steps, not the place of the case
     _put(root, STAGE, answer)
@@ -471,9 +460,7 @@ def test_the_rework_given_up_publishes_the_set_as_for_an_unfinished_rework_and_t
 
 
 def test_the_rework_given_up_after_its_answer_is_recorded_is_refused_and_nothing_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    run, _done = _reviewed(tmp_path, monkeypatch)
-    root = run["run_root"]
-    _call(capsys, "prepare", root, STAGE)
+    run, root = _prepared_rework(tmp_path, monkeypatch, capsys)
     _put(root, STAGE, _reworked(run))
     assert _call(capsys, "submit", root, STAGE)[0] == 0
     before = _events(root)

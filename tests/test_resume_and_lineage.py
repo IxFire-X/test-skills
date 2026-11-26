@@ -9,6 +9,7 @@ from helpers import phase_two_baseline
 
 from tools import pilot_state
 from tools.pilot_state import append_event, create_attempt, create_run, derive_state, module_selection_digest
+from tests.test_pilot_state import _append_synthetic_terminal, _append_synthetic_unknown
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -28,24 +29,6 @@ def _identity(tmp_path: Path, **extra: object) -> dict:
 
 def _artifact_snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     return {str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
-
-
-def _append_synthetic_terminal(
-    root: Path, attempt_id: str, digest: str, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Test-only seam for exercising post-terminal lineage without closure setup."""
-    with monkeypatch.context() as gate:
-        gate.setattr(pilot_state, "_validate_terminal_transition", lambda *_args: None)
-        append_event(root, "ATTEMPT_TERMINAL", actor="controller", attempt_id=attempt_id, artifact_digest=digest)
-
-
-def _append_synthetic_unknown(root: Path, attempt_id: str, digest: str) -> None:
-    """Test only lineage/recovery reduction, not production UNKNOWN admission."""
-    project, resolved = pilot_state._run_root(root)
-    pilot_state._append_event(
-        project, resolved, "EXECUTION_UNKNOWN", actor="controller", attempt_id=attempt_id,
-        batch_id=None, artifact_digest=digest,
-    )
 
 
 def test_attempt_binds_baseline_and_new_process_reloads_waiting_without_regeneration(tmp_path: Path) -> None:

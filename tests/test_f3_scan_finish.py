@@ -9,22 +9,7 @@ import pytest
 
 from tests.test_review_requested import _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
-
-
-def _main(capsys, argv: list[str]) -> tuple[int, dict]:
-    from tools import api
-
-    code = api.main(argv)
-    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-
-
-def _pipeline(capsys, argv: list[str]) -> tuple[int, dict]:
-    from tools import run_pipeline
-
-    code = run_pipeline.main(argv)
-    out = capsys.readouterr().out
-    body = out.rsplit("\nrun_id: ", 1)[0] if "\nrun_id: " in out else out
-    return code, json.loads(body.strip())
+from tests.test_f1 import _main, _pipeline
 
 
 def _crash_nth(monkeypatch, owner, name: str, nth: int = 1) -> None:

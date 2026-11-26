@@ -330,36 +330,18 @@ def test_a_prepare_cut_short_is_finished_by_the_repeat(tmp_path: Path, monkeypat
     assert [event for event in _events(run["root"]) if event.startswith(("REVIEW_REQUESTED:autotest", "MODEL_REQUESTED:autotest"))] == [f"REVIEW_REQUESTED:{REVIEWER}", f"MODEL_REQUESTED:{REVIEWER}"]
 
 
-def test_a_fresh_context_without_a_label_is_refused_before_anything_is_written(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("flags", "refusal"), [
+    pytest.param(("--fresh-context", "yes"), "REVIEW_INVOCATION_REQUIRED", id="a-fresh-context-without-a-label"),
+    pytest.param(("--invocation-id", "tc-to-autotest-r1", "--fresh-context", "yes"), "INDEPENDENCE_UNVERIFIED", id="the-label-of-the-generator"),
+    pytest.param(("--invocation-id", "autotest-reviewer-subagent-1"), "FRESH_CONTEXT_REQUIRED", id="no-statement-of-the-context-without-self"),
+    pytest.param(("--fresh-context", "no"), "INDEPENDENCE_UNVERIFIED", id="the-same-session-without-self"),
+])
+def test_a_reviewer_call_that_is_not_independent_is_refused_before_anything_is_written(tmp_path: Path, flags: tuple, refusal: str) -> None:
     run = autotest_run(tmp_path)
     run_generator(run)
     before = _events(run["root"])
-    code, out = prepare_stage(run["root"], REVIEWER, "--fresh-context", "yes")
-    assert code == 2 and out["code"] == "REVIEW_INVOCATION_REQUIRED" and _events(run["root"]) == before
-
-
-def test_a_fresh_context_with_the_label_of_the_generator_is_refused(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    before = _events(run["root"])
-    code, out = prepare_stage(run["root"], REVIEWER, "--invocation-id", "tc-to-autotest-r1", "--fresh-context", "yes")
-    assert code == 2 and out["code"] == "INDEPENDENCE_UNVERIFIED" and _events(run["root"]) == before
-
-
-def test_no_statement_of_the_context_is_refused_in_a_run_without_self(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    before = _events(run["root"])
-    code, out = prepare_stage(run["root"], REVIEWER, "--invocation-id", "autotest-reviewer-subagent-1")
-    assert code == 2 and out["code"] == "FRESH_CONTEXT_REQUIRED" and _events(run["root"]) == before
-
-
-def test_the_same_session_is_refused_in_a_run_without_self(tmp_path: Path) -> None:
-    run = autotest_run(tmp_path)
-    run_generator(run)
-    before = _events(run["root"])
-    code, out = prepare_stage(run["root"], REVIEWER, "--fresh-context", "no")
-    assert code == 2 and out["code"] == "INDEPENDENCE_UNVERIFIED" and _events(run["root"]) == before
+    code, out = prepare_stage(run["root"], REVIEWER, *flags)
+    assert code == 2 and out["code"] == refusal and _events(run["root"]) == before
 
 
 # ---- SELF: a run that admitted it goes on in one session, and says so ----

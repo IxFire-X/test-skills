@@ -14,14 +14,8 @@ import pytest
 
 from tests.journal_helpers import assert_refused_in_order
 from tests.test_review_requested import build_generated_run, _generated_run, _journal
+from tests.test_f1 import _main  # noqa: F401  (other test files import it from here)
 from tests.test_review_two_commands import _cycle, _open, _select_verdict, _shape, _verdict
-
-
-def _main(capsys, argv: list[str]) -> tuple[int, dict]:
-    from tools import api
-
-    code = api.main(argv)
-    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
 def _crash_once(monkeypatch, owner, name: str, when=lambda *a, **k: True) -> None:
