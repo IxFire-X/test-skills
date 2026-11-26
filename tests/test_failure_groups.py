@@ -56,6 +56,11 @@ def test_the_place_of_the_check_is_cut() -> None:
     assert group["count"] == 2 and " at " not in group["cause"]
 
 
+def test_a_text_of_many_lines_gives_its_first_line() -> None:
+    text = "expected: <2> but was: <3>\n\tat org.example.OwnerTest.findsOwner"
+    assert failure_cause("assertion_failed", text, True) == ("text", "expected: <…> but was: <…>", None)
+
+
 def test_old_head_is_unknown() -> None:
     assert failure_cause("assertion_failed", "Multiple Failures (2 failures)", True)[0] == "unknown"
     assert failure_cause("assertion_failed", "Multiple Failures _2 failures_", False)[0] == "unknown"

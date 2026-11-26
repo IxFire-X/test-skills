@@ -64,7 +64,7 @@ def failure_note(message: str) -> tuple[str, str]:
     return (match.group(0) if match else "FAIL"), _SAFE.sub("_", first)[:NOTE_LIMIT].rstrip()
 
 
-# --- the causes of the failures (v0.8, handoff/v08/failure-groups-design.md) -------------------------------------------------------
+# --- the causes of the failures (handoff/v08/failure-groups-design.md) --------------------------------------------------------------
 
 # rule 2: the code of the answer, the expected and the actual one (``<201>`` of JUnit, ``_201_`` of a note); rule 3: the class of an error
 _STATUS = re.compile(r"expected:?\s*[<_]?\s*([1-5]\d\d)\s*[>_]?\s*but was:?\s*[<_]?\s*([1-5]\d\d)(?!\d)", re.IGNORECASE)
@@ -78,7 +78,8 @@ _LITERAL = re.compile(r""""[^"]*"|'[^']*'|<[^<>]*>""")  # a literal as AssertJ (
 CAUSE_LIMIT = 80
 CAUSE_RULES = ("status", "exception")  # the rules that name a cause (the code of the answer, the class); a text is a kind of mismatch
 ONE_CAUSE_MIN = 5  # «one cause» of the summary: at least this many methods and at least half of the failed ones
-UNKNOWN_CAUSE = "текст падения не сохранён (прогон до v0.7.2 или проверка без текста)"
+# no version number in the words: it lives in the contract only (tests/test_pack_profile.py)
+UNKNOWN_CAUSE = "текст падения не сохранён (прогон старой версии пакета или проверка без текста)"
 
 
 def _literal(match: re.Match[str]) -> str:
@@ -105,6 +106,7 @@ def failure_cause(kind: str, text: str, whole: bool) -> tuple[str, str, str | No
         return "exception", found[-1], None
     if not whole or not text or _HEAD.search(text):
         return "unknown", "", None
+    text = text.splitlines()[0].strip()  # the check, not a frame of the stack after it (a text not cut by failure_line)
     text = _DATE.sub("<дата>", _LITERAL.sub(_literal, _PLACE.sub("", text)))
     return "text", re.sub(r"\d{4,}", "#", text)[:CAUSE_LIMIT].rstrip(), None
 
