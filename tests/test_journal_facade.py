@@ -1,6 +1,6 @@
 """The facade of pilot_state: a miss takes a loaded journal of mode B from sys.modules and asks no finder (Р2 fix); a patch through
-it reaches every module that took the code of the journal (В1); every such module imports first in a fresh interpreter: none takes a
-moved name through the facade at its top (В2)."""
+it reaches every module that took the code of the journal (В1), the files of a run below the journal too (Р4); every such module
+imports first in a fresh interpreter: none takes a moved name through the facade at its top (В2)."""
 from __future__ import annotations
 
 import subprocess
@@ -32,7 +32,16 @@ def test_a_patch_through_pilot_state_reaches_every_module_of_the_journal(monkeyp
     assert model_inputs.derive_state is model_steps.derive_state is scenario_observations.derive_state is spy
 
 
-@pytest.mark.parametrize("module", ["model_records", "effective_canonical", "run_closure", "model_inputs", "model_steps",
+
+def test_a_patch_of_input_and_output_through_pilot_state_reaches_the_files_of_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import run_store
+
+    spy = object()
+    monkeypatch.setattr(pilot_state, "read_confined_bytes", spy)
+    assert run_store.read_confined_bytes is spy
+
+
+@pytest.mark.parametrize("module", ["run_store", "model_records", "effective_canonical", "run_closure", "model_inputs", "model_steps",
                                     "scenario_observations", "execution_journal"])
 def test_a_module_of_the_journal_imports_first_in_a_fresh_interpreter(module: str) -> None:
     done = subprocess.run([sys.executable, "-X", "utf8", "-c", f"import tools.{module}"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
