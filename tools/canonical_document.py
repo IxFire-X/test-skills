@@ -12,7 +12,7 @@ from types import MappingProxyType
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.schema_validation import schema_diagnostics
+from tools.schema_validation import diagnostic as _diagnostic, schema_diagnostics
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -30,10 +30,6 @@ class CanonicalDocumentError(ValueError):
 
 def _pointer(*parts: object) -> str:
     return "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
-
-
-def _diagnostic(path: str, code: str, message: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
 
 
 def _json_type(value: Any) -> dict[str, str]:

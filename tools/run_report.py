@@ -19,8 +19,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from tools import execution_gate, output_guard
+from tools.clock import parse_z
 from tools.openspec_scope import PARTIAL, QUESTIONS, SCOPE_HEADS
 from tools.openspec_scope import question as openspec_question
+from tools.run_store import project_of
 
 GUARANTEE = ("без кода, текста спеки и ответов модели; из кейсов — только строка предусловия, если её подготовка не удалась; "
              "есть пути тестовых файлов, имена методов, коды "
@@ -245,7 +247,7 @@ def review_notes(run_root: Path, attempt_id: str, review: str = "cases") -> dict
 
 def _time(value: Any) -> datetime | None:
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        return parse_z(str(value)) if value else None
     except ValueError:
         return None
 
@@ -849,12 +851,12 @@ def _zephyr_import(root: Path) -> Any:
     try:
         record = json.loads((root / "zephyr-import.json").read_text(encoding="utf-8"))
         shown = {key: record[key] for key in ("template_path", "template_digest", "columns_added", "rows")}
-        template = output_guard.project_file(Path(root).parent.parent, str(shown["template_path"]))  # its text and place first, then the bytes
+        template = output_guard.project_file(project_of(root), str(shown["template_path"]))  # its text and place first, then the bytes
         if "sha256:" + hashlib.sha256(template.read_bytes()).hexdigest() != shown["template_digest"]:
             return None
         from tools.zephyr_template_export import read_template
 
-        header, added = read_template(Path(root).parent.parent, shown["template_path"]).header, shown["columns_added"]
+        header, added = read_template(project_of(root), shown["template_path"]).header, shown["columns_added"]
         return {**shown, "columns_added": [column for column in added if column in header] if isinstance(added, list) else [],  # only names the checked template has
                 "rows": _count(shown["rows"]), "basis": ZEPHYR_BASIS,
                 **({"columns_added_other": other} if type(other := record.get("columns_added_other")) is int and other >= 0 else {})}  # the columns the export did not name: a number only

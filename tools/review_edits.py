@@ -18,14 +18,11 @@ import sys
 from typing import Any, Mapping, Sequence
 
 from tools.json_cli import JsonArgumentParser, cli_error
+from tools.schema_validation import diagnostic as _diagnostic
 
 EDITABLE = ("title", "objective", "precondition", "action", "test_data", "expectation")
 _CASE_FIELDS = {"title", "objective"}
 _STEP_FIELDS = {"action", "test_data"}
-
-
-def _diagnostic(path: str, code: str, message: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
 
 
 def _target(document: dict[str, Any], edit: Mapping[str, Any]) -> tuple[Any, Any, tuple[Any, ...]] | None:

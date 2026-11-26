@@ -92,6 +92,7 @@ from tools.model_inputs import (  # the names of the inputs of a step these bodi
     reuse_source as _reuse_source,
     skill_pack_digest,
 )
+from tools.run_store import project_of
 
 
 def _outside_sections(project: Path, root: Path, attempt: Mapping[str, Any], receipts: Sequence[str], rows: Sequence[Any]) -> list[str]:
@@ -496,7 +497,7 @@ def _spent_fix(run_root: Path, stage_instance_id: str) -> str:
     if cause is None:
         return RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
     root = Path(run_root).resolve()
-    return (RETRY_SPENT + f"закрой прогон одной командой: {printed(sys.executable)} -m tools.run_pipeline finish --project {printed(root.parents[1])} "
+    return (RETRY_SPENT + f"закрой прогон одной командой: {printed(sys.executable)} -m tools.run_pipeline finish --project {printed(project_of(root))} "
             f"--run {printed(root.name)} --abandon {cause} — она напечатает next_run.command; выполни его")
 
 

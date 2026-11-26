@@ -19,9 +19,9 @@ else:
 
 try:
     if __package__:
-        from .schema_validation import SchemaRegistryError, StrictJsonError, classify_version, load_json_strict, schema_diagnostics, validator_for
+        from .schema_validation import SchemaRegistryError, StrictJsonError, classify_version, diagnostic, load_json_strict, schema_diagnostics, validator_for
     else:  # direct CLI execution
-        from schema_validation import SchemaRegistryError, StrictJsonError, classify_version, load_json_strict, schema_diagnostics, validator_for
+        from schema_validation import SchemaRegistryError, StrictJsonError, classify_version, diagnostic, load_json_strict, schema_diagnostics, validator_for
 except ImportError as error:  # pragma: no cover
     SchemaRegistryError = StrictJsonError = Exception
     _SCHEMA_VALIDATION_IMPORT_ERROR = error
@@ -43,7 +43,7 @@ def _truncated(path: Path) -> tuple[int, dict[str, Any]] | None:
         return None
     if not looks_truncated(raw.decode("utf-8", "replace")):
         return None
-    return 2, {"status": "error", "errors": [{"path": "", "code": OUTPUT_TRUNCATED, "message": truncated_message(len(raw))}],
+    return 2, {"status": "error", "errors": [diagnostic("", OUTPUT_TRUNCATED, truncated_message(len(raw)))],
                "retry_prompt": (f"Твой ответ оборван на {len(raw)} Б: JSON не закрыт. Верни тот же ответ целиком одним JSON, "
                                 "компактно, без отступов и переносов строк; ничего не сокращай и не опускай."),
                "hint": TRUNCATED_HINT}
@@ -87,11 +87,7 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
     ):
         return 1, {
             "status": "invalid",
-            "errors": [{
-                "path": "/schema_version",
-                "code": "V2_1_BREAKING_CHANGE",
-                "message": "schema version 2.1.0 is incompatible with canonical model 3.0.0",
-            }],
+            "errors": [diagnostic("/schema_version", "V2_1_BREAKING_CHANGE", "schema version 2.1.0 is incompatible with canonical model 3.0.0")],
         }
     try:
         errors = schema_diagnostics(artifact, schema_file, root)

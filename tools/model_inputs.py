@@ -55,6 +55,7 @@ from tools.effective_canonical import (  # the names of the effective canonical 
     read_effective_canonical_if_present,
     read_effective_canonical_with_state as _read_effective_canonical_with_state,
 )
+from tools.run_store import project_of
 
 
 def _named_sections(project: Path, root: Path) -> dict[str, list[str]]:
@@ -478,7 +479,7 @@ def _new_run_fix(root: Path) -> str:
 
         request = read_run(root)["manifest"].get("scan_request")
         if isinstance(request, Mapping):
-            return "новый прогон того же запроса: " + _scan_command(root.parents[1], request, extra=("--new-run",))
+            return "новый прогон того же запроса: " + _scan_command(project_of(root), request, extra=("--new-run",))
     except (ImportError, KeyError, OSError, TypeError, ValueError):
         pass
     return "новый прогон: scan с теми же --module, --docs и --profile, что у этого прогона, и --new-run"
@@ -654,7 +655,7 @@ def _input_differences(source: Mapping[str, Any], root: Path, attempt: Mapping[s
     mine = frozen_baseline(root, attempt)
     theirs = _strict(source["run_id"], "baselines", lambda: frozen_baseline(source["root"], source["attempt"]))
     rows = [{"input": name, "given": get(mine), "source": get(theirs)} for name, get in _BASELINE_INPUTS.items() if get(mine) != get(theirs)]
-    same = lambda base, baseline: _comparable(root.parents[1], _frozen_inventory(root.parents[1], base, str(baseline["inventory_digest"])))  # noqa: E731  (the project: the run root is project/.pilot-runs/<id>)
+    same = lambda base, baseline: _comparable(project_of(root), _frozen_inventory(project_of(root), base, str(baseline["inventory_digest"])))  # noqa: E731
     try:
         by_composition = any(row["input"] == "inventory" for row in rows) and same(root, mine) == same(source["root"], theirs)
     except (ValueError, OSError, KeyError, TypeError):
@@ -1137,12 +1138,12 @@ def header_document_id(docs: Sequence[str], module: str) -> str:
 
 def document_texts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, str]:
     """The plain documents ``--docs`` names as the context receipts of the attempt hold them (path -> text, read by the digests of the receipts)."""
-    return _named_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
+    return _named_texts(project_of(root), root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
 
 
 def label_texts(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, str]:
     """The texts the labels of the documents are counted in (path -> text) as the context receipts of the attempt hold them: the step of the marker reads the numbers of these."""
-    return _label_texts(root.parents[1], root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
+    return _label_texts(project_of(root), root, _attempt_of(state, attempt_id), [str(item["digest"]) for item in context_receipts(root, attempt_id, state)])
 
 
 def plan_inputs(root: Path, attempt_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1171,7 +1172,7 @@ def plan_ask(root: Path, attempt_id: str, done: bool) -> dict[str, Any]:
     """``prepare --stage plan``: the plan that stands, or the form of the one answer and what the plan will be built from."""
     state = derive_state(root)
     if done:
-        return {"answered": True, "plan": plan_view(_generator_input(root.parents[1], root, state, attempt_id, "plan"))}
+        return {"answered": True, "plan": plan_view(_generator_input(project_of(root), root, state, attempt_id, "plan"))}
     found = plan_inputs(root, attempt_id, state)
     return {"answer": PLAN_FORM, "requirements": len(found["requirements"]), "out_of_scope": len(found["out_of_scope"] or []), "context_receipts": len(found["receipts"])}
 

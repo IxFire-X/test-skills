@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from tools.json_cli import JsonArgumentParser, emit_error
 from tools.openspec_scope import SCOPE_HEADS, SHOWN
 from tools.openspec_scope import lines as scope_lines
-from tools.schema_validation import schema_diagnostics
+from tools.schema_validation import diagnostic, schema_diagnostics
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SCHEMA = _ROOT / "schemas" / "context-marker-output.schema.json"
@@ -665,23 +665,23 @@ def openspec_diagnostics(context: dict[str, Any], docs_snapshot: list[dict[str, 
     diagnostics: list[dict[str, str]] = []
     for warning in warnings:
         if "; missing:" in warning and warning not in (context.get("warnings") or []):
-            diagnostics.append({"path": warning.split(" — ")[0], "code": "OPENSPEC_GAP_MISSING", "message": warning})
+            diagnostics.append(diagnostic(warning.split(" — ")[0], "OPENSPEC_GAP_MISSING", warning))
     for item in (context.get("artifacts") or {}).get("analytics_documentation", {}).get("requirements") or []:
         provenance = item.get("provenance") or []
         identities = [mark for mark in provenance if " — capability=" in mark and "; ### Requirement:" in mark]
         if not identities and any(_OPENSPEC_PATH.fullmatch(mark.split(" — ")[0].split(":")[0]) for mark in provenance):
-            diagnostics.append({"path": str(item.get("source_requirement_id", "")), "code": "OPENSPEC_EXTRA", "message": f"{provenance[0]} — normalized OpenSpec row has no requirement/scenario identity"})
+            diagnostics.append(diagnostic(str(item.get("source_requirement_id", "")), "OPENSPEC_EXTRA", f"{provenance[0]} — normalized OpenSpec row has no requirement/scenario identity"))
         for mark in provenance:
             if " — capability=" not in mark or "; ### Requirement:" not in mark:
                 continue
             actual.add(mark)
             row = marks.get(mark)
             if row and (item.get("digest") != row["digest"] or f"{row['path']} — {row['digest']}" not in provenance or not set(row["rename_provenance"]).issubset(provenance)):
-                diagnostics.append({"path": mark.split(" — ")[0], "code": "OPENSPEC_SOURCE_MISMATCH", "message": f"{mark} — normalized origin must retain exact source digest and rename provenance"})
+                diagnostics.append(diagnostic(mark.split(" — ")[0], "OPENSPEC_SOURCE_MISMATCH", f"{mark} — normalized origin must retain exact source digest and rename provenance"))
     for mark in sorted(marks.keys() - actual):
-        diagnostics.append({"path": mark.split(" — ")[0], "code": "OPENSPEC_MISSING", "message": f"{mark} — missing from normalized requirement/scenario set"})
+        diagnostics.append(diagnostic(mark.split(" — ")[0], "OPENSPEC_MISSING", f"{mark} — missing from normalized requirement/scenario set"))
     for mark in sorted(actual - marks.keys()):
-        diagnostics.append({"path": mark.split(" — ")[0], "code": "OPENSPEC_EXTRA", "message": f"{mark} — absent from final selected specification"})
+        diagnostics.append(diagnostic(mark.split(" — ")[0], "OPENSPEC_EXTRA", f"{mark} — absent from final selected specification"))
     return diagnostics
 
 

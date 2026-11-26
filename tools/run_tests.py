@@ -28,6 +28,7 @@ from tools.skillsrc_manifest import (
 )
 
 from tools.java_text import mask_java_noncode  # the Java lexer is shared with the map of existing tests
+from tools.schema_validation import diagnostic as _diag
 
 _mask_java_noncode = mask_java_noncode
 _ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +104,7 @@ def resolve_execution_context_document(
 class RunnerInputError(ValueError):
     def __init__(self, code: str, diagnostics: Sequence[Mapping[str, str]] | None = None) -> None:
         object.__setattr__(self, "code", code)
-        rows = diagnostics or ({"path": "/artifacts/automation_status", "code": code, "message": "Automation artifact is not directly runnable."},)
+        rows = diagnostics or (_diag("/artifacts/automation_status", code, "Automation artifact is not directly runnable."),)
         object.__setattr__(self, "diagnostics", tuple(MappingProxyType(dict(row)) for row in rows))
         super().__init__(code)
 
@@ -111,10 +112,6 @@ class RunnerInputError(ValueError):
         if name in {"code", "diagnostics"} and hasattr(self, name):
             raise AttributeError("RunnerInputError is immutable")
         super().__setattr__(name, value)
-
-
-def _diag(path: str, code: str, message: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
 
 
 def _compat(status: Literal["READY", "NOT_RUNNABLE"], pairs: Sequence[tuple[str, str]] = (),

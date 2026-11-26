@@ -21,6 +21,7 @@ from tools.revision_selection import (DEFAULT_REJECT_SHARE, DEFAULT_REWORK_ROUND
 from tools.review_edits import reviewer_successor
 from tools.schema_validation import classify_version, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
+from tools.run_store import project_of
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -332,7 +333,7 @@ def reviewer_session_start(
     isolation = {"fresh_context": fresh_context, "distinct_invocations": generator != reviewer,
                  "role_policy": "canonical-reviewer-v1"}
     isolation["evidence_digest"] = _host_isolation_digest(isolation)
-    reserve = _scan_context_budget({}, Path(run_root).resolve().parent.parent)
+    reserve = _scan_context_budget({}, project_of(Path(run_root).resolve()))
     return {
         "session_id": f"review-{attempt_id}", "generator_role": "generator", "reviewer_role": "canonical-reviewer",
         "generator_invocation_id": generator, "reviewer_invocation_id": reviewer, "host_isolation": isolation,
@@ -893,7 +894,7 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     if remaining <= 0:
         raise ValueError("REVIEW_CONTEXT_LIMIT: no context budget is left for evidence; abort the session with REVIEW_CONTEXT_LIMIT")
     attempt = next(row for row in derive_state(Path(run_root))["attempts"] if row["attempt_id"] == attempt_id)
-    inventory = read_inventory_receipt(Path(run_root).parent.parent, Path(run_root), Path(run_root) / "inventories" / (package["inventory_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(project_of(run_root), Path(run_root), Path(run_root) / "inventories" / (package["inventory_digest"].removeprefix("sha256:") + ".json"))
     by_path = {item["project_path"]: item["opaque_id"] for item in inventory["files"]}
     paths = sorted(set(project_paths))
     unknown = [path for path in paths if path not in by_path]
@@ -1111,7 +1112,7 @@ def write_status_files(run_root: Path, document: Mapping[str, Any], output_dir: 
     from tools.confined_output import create_confined_bytes_exclusive, read_confined_bytes
 
     root = Path(run_root).resolve(strict=True)  # <project>/.pilot-runs/<run>; the confinement refuses a target outside it
-    project = root.parent.parent
+    project = project_of(root)
     base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}.{status}"
     paths = []
     for suffix, data in status_payloads(dict(document), csv_profile, status, notes, **shown):

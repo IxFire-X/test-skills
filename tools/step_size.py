@@ -26,9 +26,11 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from tools.clock import utc_now_z
 from tools.json_cli import JsonArgumentParser, cli_error
 from tools.output_guard import OutputRefused, input_file, project_path, run_name
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE, REWORK_VIEW
+from tools.run_store import project_of
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -168,15 +170,13 @@ def truncated_message(byte_count: int) -> str:
 
 def record_output(project: Path, root: Path, step: str, response_digest: str, raw_bytes: int) -> None:
     """The raw answer size by its journal digest, for the report (only sizes; never fails the step)."""
-    from datetime import datetime, timezone
-
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     try:
         path = Path(root) / OUTPUT_SIZES
         before = path.read_bytes() if path.is_file() else b""
         row = {"step": step, "response_digest": response_digest, "raw_bytes": int(raw_bytes),
-               "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")}
+               "at": utc_now_z()}
         atomic_write_confined_bytes_at_root(Path(project), Path(root), path, before + json.dumps(row, sort_keys=True).encode("utf-8") + b"\n")
     except (OSError, ValueError):
         pass
@@ -476,7 +476,7 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     from tools.pilot_state import derive_state
 
     root = Path(run_root).resolve()
-    project = root.parent.parent
+    project = project_of(root)
     state = state if state is not None else derive_state(root)
     if not state["attempts"]:
         raise ValueError("the run has no attempt yet")
@@ -772,7 +772,7 @@ def compact_inputs(run_root: Path, stage: str, found: Mapping[str, Any]) -> dict
     from tools.confined_output import atomic_write_confined_bytes_at_root, create_confined_directory_exclusive
 
     root = Path(run_root).resolve()
-    project = root.parent.parent
+    project = project_of(root)
     files = list(found["files"])
     tmp = root / "tmp"
     if not tmp.is_dir():  # a run made before the scan made it
@@ -805,7 +805,7 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
     from tools.pilot_state import derive_state, frozen_baseline
 
     root = Path(run_root).resolve()
-    project = root.parent.parent
+    project = project_of(root)
     result = stage_inputs(root, stage)
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
         # the Java level of the module's build, so that the generator and its reviewer keep to its API
@@ -848,7 +848,7 @@ def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, stat
     batch = found["stage"].startswith("tc-generator:BATCH-")  # the stage that writes ``capability.adapter``
     if not batch and not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
         return found
-    project = (root := Path(root).resolve()).parent.parent
+    project = project_of(root := Path(root).resolve())
     attempt = next(item for item in (state or derive_state(root))["attempts"] if item["attempt_id"] == found["attempt_id"])
     if batch and not attempt.get("baseline_digest"):
         return found
@@ -897,8 +897,6 @@ def measure(project: Path, files: Iterable[Path], role: str | None = None, *, to
 
 def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str:
     """Append one measurement to ``<run>/step-sizes.jsonl`` (only the step, sizes and the code)."""
-    from datetime import datetime, timezone
-
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     project = Path(project).resolve()
@@ -910,7 +908,7 @@ def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str
         raise ValueError(f"unknown run: {run_id}")
     row = {key: report[key] for key in ("bytes", "input_bytes", "role_bytes", "role", "files", "tokens_est", "budget_bytes",
                                         "fits", "warning")}
-    row.update(step=step, at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    row.update(step=step, at=utc_now_z())
     path = root / RECORD
     before = path.read_bytes() if path.is_file() else b""
     line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"

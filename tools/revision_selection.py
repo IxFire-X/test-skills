@@ -11,10 +11,7 @@ from types import MappingProxyType
 from typing import Any, Sequence
 
 from tools.canonical_document import canonical_bytes, document_sha256
-
-
-def _diagnostic(path: str, code: str, message: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
+from tools.schema_validation import diagnostic as _diagnostic
 
 
 def _sorted(diagnostics: list[dict[str, str]]) -> list[dict[str, str]]:

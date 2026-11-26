@@ -1,6 +1,6 @@
 """The facts of a run: what its journal and receipts say, read only — the one computation that status, finish, the report and the
-execution commands show (v0.8, C1).  Nothing here prints, runs a step or names the next command: that is ``run_scan``
-(``_durable_status``) and ``tools.stages``."""
+execution commands show (v0.8, C1).  Nothing here prints, runs a step or names the next command: ``run_scan`` names it
+(``_durable_status``, with ``tools.stages``) and ``run_pipeline`` prints it."""
 
 from __future__ import annotations
 
@@ -21,11 +21,12 @@ def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, 
     from tools.pilot_state import frozen_baseline
     from tools.project_inventory import read_inventory_receipt
     from tools.scan_rules import exclusion_summary
+    from tools.run_store import project_of
 
     root = Path(run_root)
     try:
         baseline = frozen_baseline(root, attempt)
-        inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+        inventory = read_inventory_receipt(project_of(root), root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     except (KeyError, OSError, ValueError):
         return None
     return exclusion_summary(inventory["exclusions"], str(attempt.get("module") or "."))

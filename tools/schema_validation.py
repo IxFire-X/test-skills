@@ -423,3 +423,7 @@ def schema_diagnostics(instance: Any, schema_path: Path, root: Path) -> list[dic
     if not diagnostics and canonical:
         diagnostics.extend(semantic_diagnostics)
     return sorted(diagnostics, key=lambda item: (item["path"], item["code"], item["message"]))
+
+
+# The one form of a row of diagnostics ``{path, code, message}`` (Б4): the modules that build one take it from here (P1).
+diagnostic = _semantic_error

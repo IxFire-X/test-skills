@@ -534,9 +534,10 @@ def run_coverage(run_root: Path, attempt_id: str, document: Mapping[str, Any]) -
     from tools import pilot_state
     from tools.api_contract import LIMIT, ContractUnreadable, is_api_contract, read_contract
     from tools.execution_gate import CASES_ONLY
+    from tools.run_store import project_of
 
     root = Path(run_root).resolve()
-    project = root.parent.parent
+    project = project_of(root)
     receipts = pilot_state.context_receipts(root, attempt_id, pilot_state.derive_state(root))
     if not receipts:
         return None
@@ -601,6 +602,7 @@ def context_view(run_root: Path, context_digests: str | list[str], attempt_id: s
     selection of the attempt are skipped, empty when none is or the project has no hits. The one source of these
     bytes for the list of reading of prepare and the run report; one map for all the context receipts the batch reads."""
     from tools.pilot_state import _context_selection_target, derive_state, read_context_selection
+    from tools.run_store import project_of
 
     root = Path(run_root).resolve()
     attempt_id = attempt_id or str(derive_state(root)["attempts"][-1]["attempt_id"])
@@ -610,13 +612,14 @@ def context_view(run_root: Path, context_digests: str | list[str], attempt_id: s
     if not selected:
         return b""
     from tools.batch_assembly import generator_receipts
-    return view_bytes(for_context(root.parent.parent, generator_receipts([read_context_selection(root, attempt_id, digest) for digest in selected], named)))
+    return view_bytes(for_context(project_of(root), generator_receipts([read_context_selection(root, attempt_id, digest) for digest in selected], named)))
 
 
 def ensure_view(run_root: Path, context_digests: str | list[str], named: list[str] | None = None) -> Path | None:
     """Write (or rewrite, when the bytes differ) the map file of one batch context — named by its first context receipt;
     None when the project has no hits."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.run_store import project_of
 
     root = Path(run_root).resolve()
     data = context_view(root, context_digests, None, named)
@@ -629,5 +632,5 @@ def ensure_view(run_root: Path, context_digests: str | list[str], named: list[st
     except OSError:
         current = None
     if current != data:
-        atomic_write_confined_bytes_at_root(root.parent.parent, root, target, data)
+        atomic_write_confined_bytes_at_root(project_of(root), root, target, data)
     return target

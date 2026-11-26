@@ -35,6 +35,7 @@ from tools.execution_core import (
     process_evidence_row as _core_process_row,
 )
 from tools.run_tests import ProcessOutcome
+from tools.schema_validation import diagnostic
 
 
 def _resolve_host_context(
@@ -187,7 +188,7 @@ def _reject_prestart_execution(
         report = _report(
             "NOT_RUNNABLE", module_root, language, source,
             str(delta["automation_digest"]), str(delta["review_digest"]),
-            diagnostics=[{"path": "/execution", "code": reason, "message": message}],
+            diagnostics=[diagnostic("/execution", reason, message)],
             request=exact_request, run_root=root, attempt_id=attempt_id, ran_at=_attempt_time(root, attempt_id),
         )
         _publish_result_receipt(coordinates, report)
@@ -994,7 +995,7 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
     if verdict == "NOT_RUNNABLE":
         report = _core_report(
             "NOT_RUNNABLE", module_root, language, source, str(delta["automation_digest"]), str(delta["review_digest"]),
-            diagnostics=[{"path": "/execution", "code": reason, "message": f"{HUMAN_RESULT_NOTE}: {reason}"}],
+            diagnostics=[diagnostic("/execution", reason, f"{HUMAN_RESULT_NOTE}: {reason}")],
             request=request, run_root=root, attempt_id=attempt_id, execution_source=execution_source,
             ran_at=_printed_time(root, attempt_id),
         )

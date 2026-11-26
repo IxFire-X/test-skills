@@ -38,6 +38,7 @@ from tools.json_cli import JsonArgumentParser, cli_error
 from tools.reference_match import reference_match
 from tools.style_samples import hint_lines as style_hint_lines
 from tools.test_case_projections import SLOT, template_texts
+from tools.run_store import project_of
 
 VIEW_VERSION = "review-view-v2"
 AUTOTEST_VIEW_VERSION = "autotest-view-v1"
@@ -253,7 +254,7 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
     if found is None:
         return None
     plan, receipt = found
-    groups = requirement_groups(list(document["source_requirements"]), Path(root).parent.parent, dict(receipt))
+    groups = requirement_groups(list(document["source_requirements"]), project_of(root), dict(receipt))
     return groups, None if plan is None else [list(batch["owned_source_requirement_ids"]) for batch in plan["batches"]]
 
 
@@ -269,8 +270,8 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
         return {}
     plan, receipt = found
     if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
-        return for_context(Path(root).parent.parent, receipt, Path(root))
-    return for_context(Path(root).parent.parent, generator_receipts([read_context_selection(Path(root), attempt_id, str(digest))
+        return for_context(project_of(root), receipt, Path(root))
+    return for_context(project_of(root), generator_receipts([read_context_selection(Path(root), attempt_id, str(digest))
                                                                     for digest in plan["context_receipt_digests"]], plan.get("context_files")), Path(root))
 
 

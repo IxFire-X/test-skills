@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from tools.canonical_document import blocked_cases, document_sha256, validate_canonical_document
-from tools.schema_validation import classify_version, schema_diagnostics
+from tools.schema_validation import classify_version, diagnostic as _diagnostic_row, schema_diagnostics  # validate_automation_artifact has a local diagnostic
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -135,7 +135,7 @@ def _pointer(*parts: object) -> str:
 
 
 def _diagnostic(code: str, path: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": _MESSAGES[code]}
+    return _diagnostic_row(path, code, _MESSAGES[code])
 
 
 _WINDOWS_RESERVED = re.compile(r"(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", re.IGNORECASE)  # the device names: a file of that name cannot be made on Windows, with or without an extension
@@ -174,7 +174,7 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         return canonical
     version = classify_version(artifact)
     if version["code"] == "V2_1_BREAKING_CHANGE":
-        return [{"path": "/schema_version", "code": version["code"], "message": version["message"]}]
+        return [_diagnostic_row("/schema_version", version["code"], version["message"])]
     structural = schema_diagnostics(artifact, _SCHEMA, _ROOT)
     if structural:
         return structural
@@ -438,7 +438,7 @@ def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], h
     """Validate one static review against immutable automation and host evidence."""
     version = classify_version(review)
     if version["code"] == "V2_1_BREAKING_CHANGE":
-        return [{"path": "/schema_version", "code": version["code"], "message": version["message"]}]
+        return [_diagnostic_row("/schema_version", version["code"], version["message"])]
     structural = schema_diagnostics(review, _AUTOTEST_REVIEW_SCHEMA, _ROOT)
     if structural:
         return structural

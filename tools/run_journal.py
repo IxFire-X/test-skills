@@ -14,11 +14,11 @@ import hashlib
 import re
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools import run_lock
+from tools.clock import parse_z, utc_now_z
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 from tools.project_inventory import read_inventory_receipt
 from tools.run_store import (  # the files of a run, right below (П1 of the cut of v0.8)
@@ -383,7 +383,7 @@ def _checked_event_line(project: Path, root: Path, manifest: Mapping[str, Any], 
     if not isinstance(stamp, str) or not stamp.endswith("Z"):
         raise ValueError("invalid event journal")
     try:
-        datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        parse_z(stamp)
     except ValueError as error:
         raise ValueError("invalid event journal") from error
     return event
@@ -807,7 +807,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
             raise ValueError("terminal attempt is immutable")
     elif existing is not None:
         return existing
-    value: dict[str, Any] = {"schema_version": "1.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"), "prev_digest": events[-1]["digest"] if events else None}
+    value: dict[str, Any] = {"schema_version": "1.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": actor, "observed_at": utc_now_z(), "prev_digest": events[-1]["digest"] if events else None}
     if attempt_id is not None:
         value["attempt_id"] = attempt_id
     if batch_id is not None:

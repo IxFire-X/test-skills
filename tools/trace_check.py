@@ -8,16 +8,10 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.build_trace_document import safe_diagnostics as _safe, trace_diagnostic as _diag
+
 ROOT = Path(__file__).resolve().parents[1]
 TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"
-
-
-def _diag(path: str, code: str, message: str = "Trace input is invalid.") -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
-
-
-def _safe(rows: list[Mapping[str, Any]], default: str) -> list[dict[str, str]]:
-    return [_diag("" if str(row.get("code", "")) == "SCHEMA_ADDITIONAL_PROPERTIES" else str(row.get("path", "")), str(row.get("code", default))) for row in rows]
 
 
 def _summary(trace: Any) -> dict[str, int]:

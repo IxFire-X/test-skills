@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 
+from tools.clock import utc_now_z
 from tools.fixes import RETRY_SPENT, SPENT_HUMAN, fix_for, human_for
 
 
@@ -136,7 +137,6 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
     never changes the refusal the agent gets. The line is followed by a ``COMMAND_REFUSED`` event of the journal whose digest is
     the sha256 of the line's bytes — the report counts the events, the line only carries the detail."""
-    import datetime
     from pathlib import Path
 
     from tools.confined_output import atomic_write_confined_bytes_at_root
@@ -153,12 +153,12 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
             return
         stage = stage if isinstance(stage, str) and _LABEL.fullmatch(stage) else None
         batch = batch if isinstance(batch, str) and _LABEL.fullmatch(batch) else (stage.split(":", 1)[1] if stage and stage.startswith("tc-generator:") else None)
-        row = {"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), "command": str(command),
+        row = {"at": utc_now_z(), "command": str(command),
                "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent else {})}  # spent: the one retry of the stage was refused (a bool, no text)
         path = root / _REFUSALS
         before = path.read_bytes() if path.is_file() else b""
         line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        atomic_write_confined_bytes_at_root(root.parent.parent, root, path, before + line + b"\n")
+        atomic_write_confined_bytes_at_root(root.parent.parent, root, path, before + line + b"\n")  # = run_store.project_of: this leaf does not load run_store
     except (OSError, ValueError, KeyError, TypeError):
         return
     try:  # the fact of the refusal is an event of the journal, bound to its line by the digest; a journal that does not pass its checks takes none

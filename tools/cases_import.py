@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 from tools.fixes import FIXES
 from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv, require_human_csv
+from tools.run_store import project_of
 
 IMPORT_MODEL_ID = "controller:cases-import"
 _FIXES = {code: FIXES[code] for code in (
@@ -399,12 +400,12 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     if path is None:
         return None
     baseline = pilot_state.frozen_baseline(root, attempt)
-    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(project_of(root), root, root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     row = next((item for item in inventory["files"] if item["project_path"] == path), None)  # bytes bound by the inventory
     secret = next((item for item in inventory.get("exclusions") or [] if item.get("project_path") == path and item.get("reason_code") == "SECRET_SUSPECTED"), None)
     if row is None and secret is not None:  # left out by a secret rule — not a changed file
         raise CasesImportError("IMPORT_CSV_SECRET", f"{path}: правило секретов {secret.get('rule_id')} — файл не вошёл в опись")
-    data = (root.parents[1] / path).read_bytes()
+    data = (project_of(root) / path).read_bytes()
     if row is None or row["content_digest"] != "sha256:" + hashlib.sha256(data).hexdigest():
         raise CasesImportError("IMPORT_CSV_CHANGED", path)
     return path, data

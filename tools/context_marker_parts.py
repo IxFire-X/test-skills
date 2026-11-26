@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 from tools import pilot_state
 from tools.cases_import import cases_path, docs_run
+from tools.run_store import project_of
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
 
@@ -40,7 +41,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     from tools.step_size import requirements_view_bytes, requirements_view_path, role_files, step_budget
 
     root = Path(root).resolve()
-    project = root.parents[1]
+    project = project_of(root)
     state, attempt = _attempt(root)
     attempt_id = str(attempt["attempt_id"])
     baseline = pilot_state.frozen_baseline(root, attempt)

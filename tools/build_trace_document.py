@@ -216,3 +216,8 @@ def validate_trace_document(trace: Mapping[str, Any], document: Mapping[str, Any
     except TraceBuildError as error:
         return [dict(row) for row in error.diagnostics]
     return [] if dict(trace) == expected else [_diag("", "TRACE_MISMATCH", "Trace does not exactly match validated source artifacts.")]
+
+
+# The row and the rows of a trace's diagnostics, for trace_check (P1).
+trace_diagnostic = _diag
+safe_diagnostics = _safe

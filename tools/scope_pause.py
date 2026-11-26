@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.fixes import fix_for
+from tools.run_store import project_of
 
 DECISION_NAME = "scope-decision.json"
 DECISION_BATCH = "scope-decision-v1"  # the events of the decision carry it
@@ -221,7 +222,7 @@ def decision_file_unbound(root: Path, attempt_id: str, state: Mapping[str, Any] 
 
     root = Path(root).resolve()
     try:
-        raw = read_confined_bytes(root.parents[1], root, root / "artifacts" / attempt_id / DECISION_NAME)
+        raw = read_confined_bytes(project_of(root), root, root / "artifacts" / attempt_id / DECISION_NAME)
     except (OutputConfinementError, OSError):
         return False
     return raw is not None and not _bound(root, attempt_id, raw, state)
@@ -238,7 +239,7 @@ def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None =
     root = Path(root).resolve()
     target = root / "artifacts" / attempt_id / DECISION_NAME
     try:
-        raw = read_confined_bytes(root.parents[1], root, target)
+        raw = read_confined_bytes(project_of(root), root, target)
     except (OutputConfinementError, OSError) as error:
         raise ScopeRefused("SCOPE_DECISION_INVALID", f"{DECISION_NAME} не читается как файл прогона ({type(error).__name__}); "
                            "fix: не подменяй артефакты прогона; другое решение — новый прогон (scan --new-run)") from None
@@ -351,7 +352,7 @@ def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     target = root / "questions-for-analyst.md"  # the way the report writes it: confined, never through a link
-    atomic_write_confined_bytes_at_root(root.parents[1], root, target, draft_questions(marker).encode("utf-8"))
+    atomic_write_confined_bytes_at_root(project_of(root), root, target, draft_questions(marker).encode("utf-8"))
     return target
 
 
@@ -447,7 +448,7 @@ def plan_of(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
 
     root = Path(run_root).resolve()
     try:
-        return pilot_state._generator_input(root.parents[1], root, pilot_state.derive_state(root), attempt_id, "plan")
+        return pilot_state._generator_input(project_of(root), root, pilot_state.derive_state(root), attempt_id, "plan")
     except (pilot_state.ModelInputsMismatch, OSError, KeyError, ValueError, IndexError):
         return None
 

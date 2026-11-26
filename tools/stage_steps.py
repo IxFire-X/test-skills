@@ -17,6 +17,7 @@ from tools.fixes import human_for, spent_abandon
 from tools.json_cli import spent_stages
 from tools.project_inventory import read_inventory_receipt
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
+from tools.run_store import project_of
 
 SLOT_DIR = "incoming"
 
@@ -49,7 +50,7 @@ def _plan_steps(root: Path) -> list[dict[str, Any]]:
     skeletons come from the journal.  Published — the step stands as done and its slot is not read again."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    done = pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id) is not None
+    done = pilot_state.published_generator_inputs(project_of(root), root, state, attempt_id) is not None
     marked = any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == "context-marker:baseline"
                  for event in state["events"])  # the answer is there, readable or not: a changed context file is the plan's refusal, not an unknown stage
     return [{"stage": "plan", "waiting_for": "agent", "done": done,
@@ -69,7 +70,7 @@ def _generator_steps(root: Path) -> list[dict[str, Any]]:
     """The batches of the published plan in order; one waits for the answer of the batch before it (the order is the code's)."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    published = pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id)
+    published = pilot_state.published_generator_inputs(project_of(root), root, state, attempt_id)
     if published is None:
         return []
     done = {event.get("stage_instance_id") for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"}
@@ -100,7 +101,7 @@ def _rework_step(root: Path, attempt_id: str, answered: bool) -> dict[str, Any] 
 def _manual_share(root: Path, document: Mapping[str, Any]) -> dict[str, Any] | None:
     """The manual steps of a candidate of a project with code (the frozen inventory has a source or a test file) when they are over the share."""
     state = pilot_state.derive_state(root)
-    inventory = read_inventory_receipt(root.parent.parent, root, root / "inventories" / (str(pilot_state.frozen_baseline(root, state["attempts"][-1])["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(project_of(root), root, root / "inventories" / (str(pilot_state.frozen_baseline(root, state["attempts"][-1])["inventory_digest"]).removeprefix("sha256:") + ".json"))
     steps = [step for case in document["test_cases"] for step in case["steps"]]
     manual = sum(1 for step in steps if step["manual_only"])
     if not steps or manual / len(steps) <= MANUAL_SHARE_WARN or not any(row["kind"] in ("source", "test") for row in inventory["files"]):
@@ -120,10 +121,10 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
     still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``)."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    plan, header = (pilot_state.generator_input(root.parents[1], root, state, attempt_id, kind) for kind in ("plan", "header"))
+    plan, header = (pilot_state.generator_input(project_of(root), root, state, attempt_id, kind) for kind in ("plan", "header"))
     if stage != _batch_stage(max(plan["batches"], key=pilot_state.batch_ordinal)):
         return None
-    earlier = pilot_state.accepted_earlier_fragments(root.parents[1], root, state, attempt_id, plan, stage.split(":", 1)[1])
+    earlier = pilot_state.accepted_earlier_fragments(project_of(root), root, state, attempt_id, plan, stage.split(":", 1)[1])
     return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
 
 
@@ -208,7 +209,7 @@ def _automation_steps(root: Path, family: str) -> list[dict[str, Any]]:
             break
         answered = bool(_events(state, attempt_id, generator, "MODEL_RESPONSE_RECEIVED"))
         steps += [{"stage": generator, "input_digests": [], "done": answered, "invocation": f"tc-to-autotest-r{revision}",
-                   "before": lambda: review_view.ensure_autotest_view(root.parents[1], root, pilot_state.derive_state(root))},  # the view the generator reads, built before the size is measured
+                   "before": lambda: review_view.ensure_autotest_view(project_of(root), root, pilot_state.derive_state(root))},  # the view the generator reads, built before the size is measured
                   {"stage": reviewer, "input_digests": [], "done": bool(_events(state, attempt_id, reviewer, "MODEL_RESPONSE_RECEIVED")),
                    "open": lambda model_id, invocation_id, fresh, revision=revision: _open_automation_review(root, attempt_id, revision, model_id, invocation_id, fresh),
                    **({} if answered else {"waits": f"ждёт принятого ответа {generator}"})}]
@@ -238,7 +239,7 @@ def _automation_check(root: Path, stage: str, value: Mapping[str, Any]) -> None:
     language = "python" if adapter == adapters.PYTEST else "java" if adapter in {adapters.MAVEN, adapters.SYSTEM_MAVEN, adapters.GRADLE} else None
     if not rows and language is not None:
         compatibility = execution_gate.load_mode_b("run_tests").validate_artifact_runner_compatibility(
-            root.parents[1] / str(attempt["module"]), language, document, value, materialized=False)
+            project_of(root) / str(attempt["module"]), language, document, value, materialized=False)
         rows = list(compatibility.diagnostics)
     if not rows:  # a path of the project (the inventory of the run) is a refusal of ``materialize`` after two stages of the model: refused here, while the answer can be given again
         held = execution_gate.load_mode_b("generated_delta").held_indexes(frozen, value["artifacts"]["generated_files"])
@@ -288,7 +289,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
         raise ReviewRefused("REVIEW_INVOCATION_REQUIRED", "метка ревьюера та же, что у r1, а приём ревью такую цепочку отклонит; fix: ревью r2 — новой сессией: другая --invocation-id")
     from tools import review_view
 
-    effective = review_view.ensure_autotest_view(root.parents[1], root, pilot_state.derive_state(root))["document"]  # the generator's view: made again if it was changed (the reviewer reads the short form of it)
+    effective = review_view.ensure_autotest_view(project_of(root), root, pilot_state.derive_state(root))["document"]  # the generator's view: made again if it was changed (the reviewer reads the short form of it)
     boundary = boundary_of_revision(root, attempt_id, revision)
     if not boundary:
         from tools import execution_gate
@@ -300,7 +301,7 @@ def _open_automation_review(root: Path, attempt_id: str, revision: int, model_id
         raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью автотестов уже открыто с ревьюером {boundary['reviewer_invocation_id']} (fresh_context={boundary['host_isolation']['fresh_context']}); "
                             "fix: повтори prepare с теми же --invocation-id и --fresh-context или иди дальше: submit")
     digest = str(boundary["automation_digest"])
-    step_size.automation_text_rows(root.parents[1], root, [root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json")], digest, True, effective)  # the reviewer's files, before its request
+    step_size.automation_text_rows(project_of(root), root, [root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json")], digest, True, effective)  # the reviewer's files, before its request
     pilot_state.request_review(root, attempt_id, stage, str(boundary["automation_digest"]))
     asked = _events(pilot_state.derive_state(root), attempt_id, stage, "MODEL_REQUESTED")
     if not asked:
@@ -334,7 +335,7 @@ def _no_plan(root: Path, state: Mapping[str, Any], attempt_id: str) -> str | Non
     """A request of a batch is in the journal and the plan of the batches never was published: a run of an earlier version has no steps; the text says so."""
     asked = any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED" and str(event.get("stage_instance_id")).startswith("tc-generator:")
                 for event in state["events"])
-    if asked and pilot_state.published_generator_inputs(root.parents[1], root, state, attempt_id) is None:
+    if asked and pilot_state.published_generator_inputs(project_of(root), root, state, attempt_id) is None:
         return ("STAGE_NO_PLAN: в журнале есть запрос пачки, а плана пачек в прогоне нет (прогон начат версией без опубликованного плана); "
                 "fix: покажи это человеку — прогон не продолжается; новый прогон тем же scan с --new-run")
     return None
@@ -368,10 +369,10 @@ def _accepted(root: Path, stage: str) -> Mapping[str, Any]:
 def _budget(root: Path, step: Mapping[str, Any], found: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The size of the step against the budget: a step of the table has its bytes, a batch of the generator the files of its published request."""
     if "bytes" in step:
-        budget = {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(root.parents[1]), "fits": step["fits"], "hint": step["hint"]}
+        budget = {"bytes": step["bytes"]["total"], "budget_bytes": step_size.step_budget(project_of(root)), "fits": step["fits"], "hint": step["hint"]}
     else:
         found = found or step_size.stage_inputs(root, step["stage"], write_views=False)
-        report = step_size.measure(root.parents[1], [], step["stage"].split(":", 1)[0],  # the bytes are the rows' own: a view of the step that is not on the disk (status writes none) is no refusal
+        report = step_size.measure(project_of(root), [], step["stage"].split(":", 1)[0],  # the bytes are the rows' own: a view of the step that is not on the disk (status writes none) is no refusal
                                    extra_bytes=sum(row["bytes"] for row in (*found["files"], *found["bindings"])))
         budget = {key: report[key] for key in ("bytes", "budget_bytes", "fits", "hint")}
     return budget if budget["fits"] else {**budget, "human": human_for(step_size.OVER_BUDGET)}  # over the budget: the phrase for the tester beside the hint

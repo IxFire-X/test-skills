@@ -145,11 +145,16 @@ def _project_root(project: Path) -> Path:
     return resolved
 
 
+def project_of(run_root: Path | str) -> Path:
+    """The project of a run: the run root is ``<project>/.pilot-runs/<id>`` (no check and no ``resolve`` — the caller's)."""
+    return Path(run_root).parent.parent
+
+
 def _run_root(run_root: Path) -> tuple[Path, Path]:
     root = Path(run_root)
     if not root.exists() or not root.is_dir() or _is_reparse(root) or root.parent.name != ".pilot-runs":
         raise ValueError("invalid run root")
-    project = _project_root(root.parent.parent)
+    project = _project_root(project_of(root))
     resolved = root.resolve(strict=True)
     try:
         resolved.relative_to(project / ".pilot-runs")
