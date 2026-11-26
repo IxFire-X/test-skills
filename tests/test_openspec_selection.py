@@ -252,8 +252,10 @@ def test_a_row_of_an_area_not_named_is_refused(tmp_path: Path, monkeypatch: pyte
     assert code == 2 and "OPENSPEC_EXTRA" in out["message"], out
 
 
-def test_a_change_of_an_area_whose_spec_is_not_named_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stop = _scan(_project(tmp_path), monkeypatch, ["openspec/changes/add-search"], expect=2)
+def test_a_change_beside_a_plain_document_still_needs_the_spec_of_its_area(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    _write(project, NOTE, "A note about the owners page.\n")  # the model writes the requirements: no change only (decision of 26.11)
+    stop = _scan(project, monkeypatch, ["openspec/changes/add-search", NOTE], expect=2)
     assert stop["reason"] == "OPENSPEC_SOURCE_CONFLICT" and BASE in stop["fix"]
 
 
@@ -322,7 +324,9 @@ def test_ready_stops_on_a_file_of_a_folder_out_of_the_inventory_as_scan_does(tmp
 def test_ready_stops_with_the_exact_fix_where_scan_stops_on_an_area_not_named(tmp_path: Path) -> None:
     from tools import ready
 
-    report = ready.check(_project(tmp_path), ["openspec/changes/add-search"], "cases-only-v1", None)
+    project = _project(tmp_path)
+    _write(project, NOTE, "A note about the owners page.\n")  # with a plain document beside it: no change only
+    report = ready.check(project, ["openspec/changes/add-search", NOTE], "cases-only-v1", None)
     [row] = [row for row in report["checks"] if row["id"].startswith("context") and row["level"] == "STOP"]  # was a WARN «контекст не посчитан»: the report said READY
     assert report["status"] == "BLOCKED" and "OPENSPEC_SOURCE_CONFLICT" in row["message"] and BASE in row["fix"], row
 

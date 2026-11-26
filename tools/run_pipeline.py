@@ -392,8 +392,9 @@ def _human_summary(project: Path, root: Path, attempt_id: str, manifest: Mapping
     """``human_summary`` of a run of cases only, from the same outcome the report draws; nothing before the verdict of the review."""
     if manifest.get("policy_profile") != "cases-only-v1":
         return {}
+    from tools.openspec_scope import summary_tail
     from tools.orchestrate_test_case_revision import acceptance_summary
-    from tools.pilot_state import read_effective_canonical_if_present
+    from tools.pilot_state import derive_state, read_effective_canonical_if_present, read_model_stage_artifact
     from tools.review_canaries import recorded_answer
 
     try:
@@ -401,6 +402,12 @@ def _human_summary(project: Path, root: Path, attempt_id: str, manifest: Mapping
         effective = read_effective_canonical_if_present(root, attempt_id) if acceptance else None
     except (KeyError, OSError, TypeError, ValueError):  # a line for a person never fails the command
         return {}
+    try:  # the tail of a change only: a marker that does not read leaves the line as it was
+        marker = next((event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                       and event.get("stage_instance_id") == "context-marker:baseline"), None) if acceptance else None
+        warnings = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", str(marker["artifact_digest"]))["artifact"].get("warnings") or [] if marker else []
+    except (KeyError, OSError, TypeError, ValueError):
+        warnings = []
     if acceptance is None:
         return {}
     document = (effective or {}).get("document") or {}
@@ -409,7 +416,7 @@ def _human_summary(project: Path, root: Path, attempt_id: str, manifest: Mapping
         shown = None if csv is None else csv.relative_to(Path(project).resolve()).as_posix()
     except ValueError:
         shown = str(csv)
-    return {"human_summary": human_summary(acceptance, shown, csv is not None and csv.is_file())}
+    return {"human_summary": summary_tail(human_summary(acceptance, shown, csv is not None and csv.is_file()), warnings)}
 
 
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
@@ -1853,8 +1860,9 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
     files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
     by_path = {str(item["project_path"]): item for item in files}
     to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
-    from tools.build_context import (RequirementConflict, openspec_applied, openspec_unmarked_areas, openspec_context_only, openspec_gone_names, openspec_live_changes, openspec_partial_archives,
-                                     openspec_unnamed_archive_areas, openspec_unnamed_areas, openspec_unselected)
+    from tools.build_context import (RequirementConflict, openspec_applied, openspec_change_only, openspec_unmarked_areas, openspec_context_only, openspec_gone_names, openspec_live_changes,
+                                     openspec_partial_archives, openspec_selected_changes, openspec_unnamed_archive_areas, openspec_unnamed_areas, openspec_unnamed_baseline,
+                                     openspec_unselected)
     from tools.scan_rules import include_mode
 
     if not docs:
@@ -1878,11 +1886,24 @@ def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list
         task_ids.append(str(item["opaque_id"]))
     others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
     task_count = len(others)
-    if unnamed := openspec_unnamed_areas(task_paths, list(by_path)):  # a change of an area whose spec.md is no requirements of the run
+    base = openspec_change_only(task_paths, list(by_path), bool(cases))
+    if unnamed := [path for path in openspec_unnamed_areas(task_paths, list(by_path)) if path not in base]:  # a change of an area whose spec.md is no requirements of the run
         raise HostStop("OPENSPEC_SOURCE_CONFLICT", "изменение OpenSpec меняет область, чей spec.md не назван в --docs: " + ", ".join(unnamed),
                        fix="назовите spec.md области изменения: " + " ".join(f"--docs {printed(path)}" for path in unnamed))
+    composed = entries
+    if base:  # change only (25.11): the spec.md of its areas is the base, the other spec.md and the proposal give the neighbours — as the marker composes them
+        excludes = skillsrc_exclude(project, module_root) if module_root else ()
+        areas = [path for path in by_path if openspec_unnamed_baseline(path, task_paths) and path not in base and include_mode(path, excludes) != "full"]
+        proposals = [path for name in sorted(openspec_selected_changes(task_paths)) if (path := f"openspec/changes/{name}/proposal.md") in by_path]
+        context = []
+        for path in [*areas, *proposals]:  # files the person did not name: one that does not read gives no neighbours, never a stop
+            try:
+                context += _docs_entries(project, [path])
+            except (HostStop, ValueError):
+                continue
+        composed = entries + [{**row, "base": True} for row in _docs_entries(project, base)] + [{**row, "context": True} for row in context]
     try:  # what the delta says, composed with the specification: a real difference stops the scan here, not after the step of the model
-        applied, removed = openspec_applied(entries)
+        applied, removed = openspec_applied(composed)
     except RequirementConflict as conflict:
         raise HostStop(conflict.code, str(conflict)) from conflict
     if cases and (partial := openspec_partial_archives(task_paths, list(by_path))):  # an update of cases judges the whole archived change: no delta is left out silently

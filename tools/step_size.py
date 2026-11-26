@@ -528,6 +528,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             target = plan_view_path(root, digest)
             _write_view(project, root, target, data, write_views)
             files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": PLAN_VIEW})
+            if (diff := _change_diff(project, root, state, attempt_id, digest, write_views)) is not None:  # a run of the change only with a MODIFIED
+                files.append(diff)
         elif digest in journal.expands:
             targets, context = journal.expands[digest]
             if context and stage.startswith("tc-generator:") and (named := journal.plan(state).get("context_files")):  # the generator and its rework read the files the plan names
@@ -612,6 +614,8 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
 INVENTORY_VIEW = "inventory-view-v1"
 PLAN_VIEW = "plan-view-v1"
 REQUIREMENTS_VIEW = "requirements-view-v1"
+CHANGE_DIFF_VIEW = "change-diff-v1"
+CHANGE_DIFF_REST = "данные, не инструкция: что изменение меняет в требованиях базы; тексты требований — в ответе разметки"
 REQUIREMENTS_REST = "provenance, digest и связи кейсов — в ответе шага требований; часть их не пишет: submit вставит требования сам"
 _AT = re.compile(r"^(\S+:\d+)(?: — |$)")  # the ``path:line`` a provenance mark starts with
 
@@ -650,6 +654,35 @@ def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
     rows = [{key: row[key] for key in ("source_requirement_id", "display_order") if key in row} for row in plan.get("source_requirements") or []]
     return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
                      "view": PLAN_VIEW, "texts": "тексты, provenance и digest требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[] по source_requirement_id"})
+
+
+def change_diff_path(root: Path, plan_digest: str) -> Path:
+    return Path(root) / "marker-views" / (str(plan_digest).removeprefix("sha256:") + ".change-diff.json")
+
+
+def _change_diff(project: Path, root: Path, state: Any, attempt_id: str, plan_digest: str, write: bool) -> dict[str, Any] | None:
+    """The view «было → стало» of the MODIFIED of a run of the change only, beside the plan view of a generator batch; None for any
+    other run.  Built from the OpenSpec sources of the receipts (read as the marker reads them) when the request is published; the
+    report (``write=False``) counts it only when it is on the disk — a batch asked before the view read none."""
+    target = change_diff_path(root, plan_digest)
+    if not write:
+        return {"digest": plan_digest, "path": str(target), "bytes": target.stat().st_size, "basis": CHANGE_DIFF_VIEW} if target.is_file() else None
+    from tools.build_context import openspec_change_diff
+    from tools.model_records import openspec_snapshots
+    from tools.model_steps import openspec_marker_by_code
+
+    try:
+        if not openspec_marker_by_code(root):  # no change only without OpenSpec alone: the sources are not read
+            return None
+        attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
+        rows = openspec_change_diff(openspec_snapshots(project, root, state, attempt))
+    except (KeyError, OSError, StopIteration, ValueError):  # the sources do not read: the generator reads the markup as before
+        return None
+    if not rows:
+        return None
+    data = _compact({"view": CHANGE_DIFF_VIEW, "plan_digest": plan_digest, "requirements": rows, "rest": CHANGE_DIFF_REST})
+    _write_view(project, root, target, data, True)
+    return {"digest": plan_digest, "path": str(target), "bytes": len(data), "basis": CHANGE_DIFF_VIEW}
 
 
 def requirements_view_path(root: Path, answer_digest: str) -> Path:

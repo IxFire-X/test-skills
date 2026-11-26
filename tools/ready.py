@@ -358,27 +358,50 @@ def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
     return rels
 
 
-def check_openspec_base(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
-    """An area a change of OpenSpec touches whose spec.md has no «### Requirement:» — the line scan warns with, before any model; a docs row says a document that does not read."""
-    from tools.build_context import openspec_unmarked_areas
+def check_openspec_base(project: Path, docs: Sequence[str], paths: Sequence[str] = (), cases: bool = False, excludes: Sequence[str] = ()) -> list[dict[str, Any]]:
+    """An area a change of OpenSpec touches whose spec.md has no «### Requirement:» — the line scan warns with, before any model; a docs row says a document that does not read.
+    A run of the change only (``paths`` — the inventory, ``excludes`` — paths.exclude of .skillsrc): the lines of its scope, its neighbours and what does not apply, as scan says them."""
+    import hashlib
+
+    from tools.build_context import RequirementConflict, openspec_applied, openspec_change_only, openspec_selected_changes, openspec_unmarked_areas, openspec_unnamed_baseline
+    from tools.openspec_scope import DISPUTED, NEIGHBOURS, PARTIAL, SCOPE
     from tools.output_guard import OutputRefused, project_file
     from tools.run_pipeline import UNMARKED_BASELINE, expand_docs
+    from tools.scan_rules import include_mode
 
     root = Path(project).resolve()
     try:
         files = expand_docs(root, list(docs))
     except Exception:  # the docs rows and the context row say what does not read
         return []
-    entries = []
-    for rel in _docs_rels(root, files):  # inside the project only, as check_size reads; no link on the way (project_file), as scan reads
-        if not rel.startswith("openspec/"):
-            continue
-        try:
-            entries.append({"path": rel, "content": project_file(root, rel).read_text(encoding="utf-8")})
-        except (OSError, UnicodeDecodeError, OutputRefused):
-            continue
-    return [_row("openspec:unmarked", CASES, "WARN", UNMARKED_BASELINE.format(area=area), "это не стоп; чтобы был регресс области, владелец базы размечает требования разделами `### Requirement:`")
+    named = _docs_rels(root, files)
+
+    def read(rels: Sequence[str], **mark: bool) -> list[dict[str, Any]]:  # inside the project only, as check_size reads; no link on the way (project_file), as scan reads
+        found = []
+        for rel in rels:
+            try:
+                text = project_file(root, rel).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError, OutputRefused):
+                continue
+            found.append({"path": rel, "sha256": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(), "content": text, **mark})
+        return found
+
+    entries = read([rel for rel in named if rel.startswith("openspec/")])
+    rows = [_row("openspec:unmarked", CASES, "WARN", UNMARKED_BASELINE.format(area=area), "это не стоп; чтобы был регресс области, владелец базы размечает требования разделами `### Requirement:`")
             for area in openspec_unmarked_areas(entries)]
+    base = openspec_change_only(named, list(paths), cases)
+    if not base:
+        return rows
+    areas = [path for path in paths if openspec_unnamed_baseline(path, named) and path not in base and include_mode(path, excludes) != "full"]
+    proposals = [path for name in sorted(openspec_selected_changes(named)) if (path := f"openspec/changes/{name}/proposal.md") in paths]
+    try:
+        _applied, lines = openspec_applied(entries + read(base, base=True) + read([*areas, *proposals], context=True))
+    except RequirementConflict:  # the context row stops on it, as scan does
+        return rows
+    disputed = [line for line in lines if line.startswith(DISPUTED)]
+    for head, row_id, level in ((SCOPE, "openspec:scope", "OK"), (NEIGHBOURS, "openspec:neighbours", "WARN"), (PARTIAL, "openspec:partial", "WARN")):
+        rows += [_row(row_id, CASES, level, line, details={"disputed": disputed} if head == PARTIAL else None) for line in lines if line.startswith(head)]
+    return rows
 
 
 def check_size(project: Path, docs: Sequence[str], automation: bool) -> list[dict[str, Any]]:
@@ -640,6 +663,8 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     requested_profile = profile or execution_gate.default_profile()  # what this package can do
     profile, refused = execution_gate.resolve_profile(profile or None)  # "" is no profile, as before; a refused profile runs as cases-only: no execution rows
     rows: list[dict[str, Any]] = [check_python()]
+    paths: list[str] = []  # the inventory of the module and its paths.exclude, for the scope of a change only
+    excludes: Sequence[str] = ()
     if refused:
         rows.append(_row("profile", CASES, "STOP", refused, "запустите ready без --profile или с --profile cases-only-v1"))
     deps = check_deps()
@@ -679,6 +704,10 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
             try:
                 scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
+                paths = [str(item["project_path"]) for item in inventory.get("files", [])]
+                from tools.project_inventory import skillsrc_exclude
+
+                excludes = skillsrc_exclude(project, (project / str(selected.get("root") or ".")).resolve())
                 check_task_documents(rows, project, docs, inventory)
                 rows.append(check_context(project, selected, docs, inventory, target, cases_rel))
             except Exception as error:
@@ -708,7 +737,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                   "и предложит вернуть файлы или начать новый scan")
     rows.append(_row("run:freeze", CASES, "OK", freeze))
     if not any(row["id"] == "context:openspec" and row["level"] == "STOP" for row in rows):  # beside the stop of a MODIFIED the warning only confuses
-        rows.extend(check_openspec_base(project, typed))
+        rows.extend(check_openspec_base(project, typed, paths, bool(cases), excludes))
     rows.extend(check_size(project, typed, profile == "local-pilot-v1" and any(row["id"] == "execution:build" and row["level"] == "OK" for row in rows)))
     # a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     from tools.skillsrc_manifest import skillsrc_review_self

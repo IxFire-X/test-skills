@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from tools import execution_gate, output_guard
+from tools.openspec_scope import PARTIAL, QUESTIONS, SCOPE_HEADS
+from tools.openspec_scope import question as openspec_question
 
 GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
              "и ID требований, кейсов, параметров и классов")
@@ -79,6 +81,13 @@ def _merged_doubts(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]
     return [{**row, "source": f"{key[0]} ({key[1]}:{', '.join(map(str, sorted(lines)))})"} if key and len(lines) > 1 else row for row, key, lines in kept]
 
 
+def openspec_scope_lines(warnings: Iterable[Any]) -> list[str]:
+    """The lines of the scope of a run of the change only among the marker warnings, in the order of their heads (scope, neighbours,
+    incomplete, each not applied)."""
+    found = [str(line) for line in warnings if str(line).startswith(SCOPE_HEADS)]
+    return sorted(found, key=lambda line: next(index for index, head in enumerate(SCOPE_HEADS) if line.startswith(head)))
+
+
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
                       autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None,
                       unclear: Sequence[Mapping[str, Any]] = (), generated: Sequence[Mapping[str, Any]] = ()) -> str:
@@ -95,17 +104,25 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
     groups: dict[str, list[list[str]]] = {}
     loose: list[str] = []
     asked = {row["warning"] for row in unclear if "warning" in row}  # the questions of the marker have their own section
+    changed: list[str] = []  # a run of the change only: what did not apply, and an ADDED beside it (texts of 25.11)
     for warning in warnings:
         text = " ".join(str(warning).split())
+        if (said := openspec_question(text)) is not None:
+            changed.append(said)
+            continue
+        if text.startswith(SCOPE_HEADS):  # the scope itself is a line of the report, no question
+            continue
         parts = [part.strip() for part in text.split(SEPARATOR)]
         if len(parts) == 4 and all(parts):
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
         elif text and text not in asked and not _PART_NOTE.match(text):
             loose.append(text)
     checks = list((imported or {}).get("verdict_texts") or [])  # the cases an update of cases rewrote, made obsolete or doubts
-    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks and not unclear and not generated:
+    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside and not checks and not unclear and not generated and not changed:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
+    if changed:
+        lines += [QUESTIONS, "", *changed, ""]
     if checks:  # no question: what the update did to the old cases, for the analyst to check
         lines += ["## Проверьте: кейсы после обновления", ""]
         for row in checks:
@@ -386,7 +403,7 @@ _RUN_PLAN_SLOTS = ("generator-headers", "batch-plans")
 def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[str, int]:
     """The bytes ``stage_inputs`` found, by kind — requirement documents, project code, the answers of the marker, plan and
     header, the map of existing tests, the rest (each file is counted once, as ``input_size`` does)."""
-    from tools.step_size import _requirement_files
+    from tools.step_size import CHANGE_DIFF_VIEW, _requirement_files
 
     try:
         documents = {str(path.resolve()) for path in _requirement_files(project, root)}
@@ -401,7 +418,7 @@ def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[st
             kind = "map"
         elif row.get("basis") == "plan-view-v1":
             kind = "plan_header"
-        elif row.get("basis") == "requirements-view-v1":  # what a part of the marker reads of the requirements answer
+        elif row.get("basis") in ("requirements-view-v1", CHANGE_DIFF_VIEW):  # what a part of the marker reads of the requirements answer; the MODIFIED of a change only
             kind = "markup"
         elif str(target) in documents:
             kind = "documents"
@@ -1127,6 +1144,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "import": _with_restored(_import_summary(root, events), acceptance),
         "automation_split": _split(root, attempt_id),
         "scope": scope,  # the answer on the gaps and the excluded requirements with reasons
+        **({"openspec_scope": found} if (found := openspec_scope_lines(status.get("warnings") or [])) else {}),  # a run of the change only; none in any other run
         **_unconfirmed(root, attempt_id, state),  # the count and the numbers of the requirements asked about — no text
         **({"generator_questions": {"count": len(asked), "requirements": sorted({item for row in asked for item in map(_identifier, row["requirement_ids"]) if item})}}
            if (asked := _generator_questions(root, attempt_id)) else {}),  # what the generator asked instead of a case: the count and the requirements, no text
@@ -1341,6 +1359,25 @@ def _label_lines(report: Mapping[str, Any]) -> list[str]:
                                  "Сверьте, что ни одно требование не пропущено и не склеено.", ""]
 
 
+def _scope_lines(report: Mapping[str, Any]) -> list[str]:
+    """«Охват после разметки»: the scope of a run of the change only, then the answer of the human on the gaps of the marker."""
+    if not report.get("scope") and not report.get("openspec_scope"):
+        return []
+    from tools.test_case_projections import escape_inline
+
+    scope = report.get("scope")
+    lines = ["## Охват после разметки", "", *(f"- {escape_inline(line)}" for line in report.get("openspec_scope") or [])]
+    if not scope:
+        lines += [""]
+    elif "refused" in scope:
+        lines += [f"- {scope['refused']['code']}: ответ человека не читается как ответ человека, охват не определён; fix: {scope['refused']['fix']}", ""]
+    else:
+        lines += [f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
+                  *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]),
+                  *([f"- {scope['mismatch']}"] if scope.get("mismatch") else []), ""]
+    return lines
+
+
 def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     """The «Итог» block at the top: the outcome of the review in a line, the warning when the reviewer missed a control error and, for a partial
     acceptance, the numbers, the files to work with and the requirements left without a case."""
@@ -1366,6 +1403,7 @@ def _acceptance_lines(report: Mapping[str, Any]) -> list[str]:
     else:
         head = "**ТРЕБУЕТ ДОРАБОТКИ:** замечание ревьюера относится ко всему набору."
     lines = ["## Итог", "", head, ""]
+    lines += [escape_inline(line), ""] if (line := next((line for line in report.get("openspec_scope") or [] if line.startswith(PARTIAL)), None)) else []  # never a clean «ПРИНЯТ» with a scope not whole
     one = _one_cause(report)
     if one:
         lines += [f"**Одна причина у {one['count']} из {len(report['quarantine'])} упавших автотестов: {escape_inline(one['cause'])}.** Скорее всего это одно расхождение "
@@ -1461,15 +1499,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *_phase_lines(report), *_composition_lines(report), *_refusal_lines(report), *_canon_lines(report),
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
-    if report.get("scope"):
-        scope = report["scope"]
-        lines += ["## Охват после разметки", ""]
-        if "refused" in scope:
-            lines += [f"- {scope['refused']['code']}: ответ человека не читается как ответ человека, охват не определён; fix: {scope['refused']['fix']}", ""]
-        else:
-            lines += [f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
-                      *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]),
-                      *([f"- {scope['mismatch']}"] if scope.get("mismatch") else []), ""]
+    lines += _scope_lines(report)
     if report.get("unconfirmed"):
         unconfirmed = report["unconfirmed"]
         from tools.publish_test_case_bundle import plural

@@ -149,26 +149,46 @@ def _context_marker_snapshots(
     snapshots: dict[str, dict[str, str]] = {}
     if receipts is None:
         receipts = _context_marker_receipt_digests(project, root, state, str(attempt["attempt_id"]), stage_instance_id, inputs)
+    items: list[Mapping[str, Any]] = []
     for digest in receipts:
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if receipt["inventory_digest"] != baseline["inventory_digest"]:
             raise ValueError("context-marker receipt must bind the attempt inventory")
-        for item in receipt["files"]:
-            path = item["project_path"].replace("\\", "/")
-            if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/"):
-                continue
-            raw = read_confined_bytes(project, project / "openspec", project / path)  # the project itself is no confined root
-            if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != item["content_digest"]:
-                raise ValueError("context-marker OpenSpec source bytes drifted")
-            try:
-                content = raw.decode("utf-8")
-            except UnicodeDecodeError as error:
-                raise ValueError("context-marker OpenSpec source is not UTF-8") from error
-            snapshots[path] = {"path": path, "sha256": item["content_digest"], "content": content}
-    from tools.build_context import openspec_unnamed_baseline
+        items += receipt["files"]
+    from tools.build_context import openspec_change_only, openspec_selected_changes, openspec_unnamed_baseline
+    from tools.cases_import import cases_path
 
     named = _named_docs(project, root)
-    return [row for row in snapshots.values() if not (named and openspec_unnamed_baseline(row["path"], named))]  # the areas --docs does not name are context, no requirements
+    base = openspec_change_only(named, [str(item["project_path"]).replace("\\", "/") for item in items], cases_path(root) is not None)
+    proposals = {f"openspec/changes/{name}/proposal.md" for name in openspec_selected_changes(named)} if base else set()  # the «Impact» of a change only
+    for item in items:
+        path = item["project_path"].replace("\\", "/")
+        if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/") and path not in proposals:
+            continue
+        raw = read_confined_bytes(project, project / "openspec", project / path)  # the project itself is no confined root
+        if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != item["content_digest"]:
+            raise ValueError("context-marker OpenSpec source bytes drifted")
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError("context-marker OpenSpec source is not UTF-8") from error
+        snapshots[path] = {"path": path, "sha256": item["content_digest"], "content": content}
+    if not base:
+        return [row for row in snapshots.values() if not (named and openspec_unnamed_baseline(row["path"], named))]  # the areas --docs does not name are context, no requirements
+    # change only (decision of 25.11): the spec.md of an area of the change is the base of the composition, the other spec.md and the
+    # proposal give the neighbours — both marked, neither gives a requirement of the run; no mark at all in any other run
+    return [{**row, "base": True} if row["path"] in base else
+            {**row, "context": True} if row["path"] in proposals or openspec_unnamed_baseline(row["path"], named) else row for row in snapshots.values()]
+
+
+def openspec_snapshots(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The OpenSpec sources of the context receipts of ``attempt``, checked against their bytes, as the requirements step of the marker
+    composes them (the view «было → стало» of the generator reads the same)."""
+    from tools.pilot_state import frozen_baseline
+
+    baseline, stage = frozen_baseline(root, attempt), "context-marker:requirements"
+    return _context_marker_snapshots(project, root, state, attempt, stage, [baseline["requirements"]["digest"], baseline["inventory_digest"]],
+                                     _published_context_receipts(state, str(attempt["attempt_id"]), stage))
 
 
 def _named_docs(project: Path, root: Path) -> list[str]:

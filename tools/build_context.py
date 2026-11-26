@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.json_cli import JsonArgumentParser, emit_error
+from tools.openspec_scope import SCOPE_HEADS, SHOWN
+from tools.openspec_scope import lines as scope_lines
 from tools.schema_validation import schema_diagnostics
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -387,6 +389,17 @@ def openspec_unnamed_areas(docs: list[str], paths: list[str]) -> list[str]:
     return sorted(path for path in areas if path in paths and path not in docs)
 
 
+def openspec_change_only(docs: list[str], paths: list[str], cases: bool = False) -> list[str]:
+    """The baseline ``spec.md`` (of ``paths``) of a run of the change only: the areas of the deltas of the selected change that
+    ``docs`` names, whose spec.md ``docs`` does not name — the base of the composition and context, no requirements of the run.
+    Only where code writes the requirements (``docs`` OpenSpec alone, no ``--cases``; decision of 26.11); empty — the run is as before."""
+    if cases or not docs or not all(doc.startswith("openspec/") for doc in docs):
+        return []
+    selected = openspec_selected_changes(docs)
+    areas = {f"openspec/specs/{match.group(4)}/spec.md" for doc in docs if (match := _OPENSPEC_PATH.fullmatch(doc)) and match.group(3) in selected}
+    return sorted(path for path in areas if path in paths and path not in docs)
+
+
 _ARCHIVE_DELTA = re.compile(r"^openspec/changes/archive/([^/]+)/specs/(.+)/spec\.md$")
 
 
@@ -407,15 +420,74 @@ def _same(first: str, second: str) -> bool:
     return first.split() == second.split()
 
 
+def _close_names(baseline: Mapping[tuple[str, str], Any], key: tuple[str, str]) -> list[str]:
+    """Up to three requirements of the area of ``key`` in the specification whose names are nearest to the one the delta gave."""
+    return difflib.get_close_matches(key[1], [name for capability, name in baseline if capability == key[0] and name != key[1]], n=3, cutoff=0.4)
+
+
 def _close(baseline: Mapping[tuple[str, str], Any], key: tuple[str, str]) -> str:
-    """``; ближайшие имена …``: up to three requirements of the area of ``key`` in the specification whose names are nearest to the one the delta gave."""
-    names = difflib.get_close_matches(key[1], [name for capability, name in baseline if capability == key[0] and name != key[1]], n=3, cutoff=0.4)
+    """``; ближайшие имена …`` of ``_close_names``."""
+    names = _close_names(baseline, key)
     return f"; ближайшие имена в spec.md области: {', '.join(names)}" if names else ""
 
 
-def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+def _blocks(text: str, section: str = "") -> list[tuple[str, str]]:
+    """``(name, block)`` of every «### Requirement:» of a specification (of its ``## <section>`` only, when given)."""
+    headings = list(_OPENSPEC_HEADING.finditer(text))
+    found, current = [], ""
+    for index, heading in enumerate(headings):
+        title = heading.group().strip()
+        if title.startswith("## "):
+            current = title[3:].strip()
+        elif title.startswith("### Requirement:") and (not section or current == section):
+            stop = next((item.start() for item in headings[index + 1:] if not item.group().startswith("#### Scenario:")), len(text))
+            found.append((title[len("### Requirement:"):].strip(), text[heading.start():stop].strip()))
+    return found
+
+
+def _scenarios(block: str) -> tuple[list[str], dict[str, list[str]]]:
+    """The lines of a requirement before its first scenario, and the lines of each scenario by its title."""
+    head, *parts = re.split(r"^#### Scenario:[ \t]*", block, flags=re.M)
+    return ([line.strip() for line in head.splitlines()[1:] if line.strip()],
+            {part.splitlines()[0].strip(): [line.strip() for line in part.splitlines()[1:] if line.strip()] for part in parts})
+
+
+def openspec_change_diff(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each MODIFIED of a run of the change only (an entry ``base``) as «было → стало»: the scenarios added, removed and changed
+    (their lines before and after) and the changed statement; empty for any other run and for a MODIFIED the base lacks."""
+    if not any(entry.get("base") for entry in entries):
+        return []
+    was: dict[tuple[str, str], str] = {}
+    deltas: list[tuple[str, str]] = []
+    for entry in entries:
+        match = _OPENSPEC_PATH.fullmatch(entry["path"].replace("\\", "/"))
+        if match and match.group(1) and not entry.get("context"):
+            was.update({(match.group(2), name): block for name, block in _blocks(entry["content"])})
+        elif match and match.group(3):
+            deltas.append((match.group(4), entry["content"]))
+    found = []
+    for area, text in sorted(deltas):
+        for name, block in _blocks(text, "MODIFIED Requirements"):
+            if (area, name) not in was:
+                continue
+            (old_head, old), (new_head, new) = _scenarios(was[(area, name)]), _scenarios(block)
+            row: dict[str, Any] = {"area": area, "name": name, "added": [title for title in new if title not in old],
+                                   "removed": [title for title in old if title not in new],
+                                   "changed": [{"scenario": title, "was": old[title], "now": new[title]} for title in new if title in old and old[title] != new[title]]}
+            if old_head != new_head:
+                row["statement"] = {"was": old_head, "now": new_head}
+            found.append(row)
+    return found
+
+
+def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None = None, shown: int | None = None) -> tuple[list[dict[str, Any]], list[str]]:
     """Compose only standard spec documents explicitly present in authorized inputs.  ``applied`` counts, by change, what its delta
-    says and the specification already has (ADDED or MODIFIED with the same text, REMOVED gone, RENAMED under the new name)."""
+    says and the specification already has (ADDED or MODIFIED with the same text, REMOVED gone, RENAMED under the new name).
+
+    Change only (an entry ``base``: the spec.md of an area the run does not name): the requirements of that area the change does
+    not touch are context, no rows; a MODIFIED its spec.md lacks and an ADDED it has with another text leave the run as lines
+    (``openspec_scope``), not a stop.  Entries ``context`` (the other spec.md, the proposal) give the neighbours only.
+    ``shown`` cuts the list of the neighbours in the line (None: all of them)."""
     applied = Counter() if applied is None else applied
     baseline: dict[tuple[str, str], dict[str, Any]] = {}
     operations: list[tuple[str, tuple[str, str], dict[str, Any]]] = []
@@ -423,8 +495,17 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
     warnings: list[str] = []
     changes: set[str] = set()
     based: set[str] = set()  # the areas whose spec.md is among the entries, with requirements or without
+    based_only: set[str] = set()  # change only: the areas whose spec.md is the base of the change, no requirements of the run
+    pool: list[tuple[str, str, str]] = []  # change only: the requirements of the base the change does not touch (neighbours, never rows)
+    proposal = ""
     for entry in sorted(entries, key=lambda row: row["path"]):
         path = entry["path"].replace("\\", "/")
+        if entry.get("context"):
+            if path.endswith("/proposal.md"):
+                proposal = entry["content"]
+            elif (found := _OPENSPEC_PATH.fullmatch(path)) and found.group(1):
+                pool += [(found.group(2), name, block) for name, block in _blocks(entry["content"])]
+            continue
         if path.startswith("openspec/changes/archive/"):
             warnings.append(f"{path} — {entry['sha256']}; historical archived context, not reapplied to current requirements")
             continue
@@ -436,6 +517,8 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         is_baseline, capability, change, delta_capability = match.groups()
         if is_baseline:
             based.add(capability)
+            if entry.get("base"):
+                based_only.add(capability)
         if change:
             changes.add(change)
         capability = capability or delta_capability
@@ -474,10 +557,12 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
                 operations.append((operation, key, row))
     if len(changes) > 1:
         raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", "authorize one selected OpenSpec change, not multiple pending changes")
+    changed: dict[tuple[str, str], tuple[str, str]] = {}  # (operation, text) of the requirements of the change that give cases
     for key, new_name, path, digest in renames:
         new_key = (key[0], new_name)
         if key not in baseline and new_key in baseline:  # the specification already has it under the new name
             applied[path.split("/")[2]] += 1
+            changed[new_key] = ("RENAMED", baseline[new_key]["text"])
             continue
         if key not in baseline or new_key in baseline:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"rename does not match baseline: {path} — {key[1]} -> {new_name}{_close(baseline, key)}")
@@ -486,7 +571,9 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         row["text"] = re.sub(r"^### Requirement:[^\n]+", lambda _: "### Requirement: " + new_name, row["text"], count=1)
         row["rename_provenance"] = [f"{path} — RENAMED Requirement: {key[1]} -> {new_name}", f"{path} — {digest}"]
         baseline[new_key] = row
+        changed[new_key] = ("RENAMED", row["text"])
     seen: set[tuple[str, str]] = set()
+    disputed: list[tuple[str, str, str, str, str, int, str]] = []  # change only: what did not apply, and why (decision of 25.11)
     for operation, key, row in operations:
         where = f"{row['path']}:{row['line']} — {key[1]}"
         have = baseline.get(key)
@@ -494,8 +581,18 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"repeats a requirement of this change ({operation}): {where}")
         if operation == "MODIFIED" and have is None and key[0] in based and not any(area == key[0] for area, _name in baseline):  # the spec.md of the area is prose: no name to compare
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED on an unmarked baseline: {where}; в spec.md области {key[0]} нет ни одного «### Requirement:»")
+        if operation == "MODIFIED" and have is None and key[0] in based_only:
+            names = _close_names(baseline, key)
+            disputed.append((operation, *key, row["text"], row["path"], row["line"], f"в spec.md области {key[0]} нет требования с таким именем"
+                             + (f"; ближайшие: {', '.join(f'«{name}»' for name in names)}" if names else "")))
+            seen.add(key)
+            continue
         if operation == "MODIFIED" and have is None:
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"MODIFIED is not in the baseline: {where}{_close(baseline, key)}")
+        if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]) and key[0] in based_only:
+            disputed.append((operation, *key, row["text"], row["path"], row["line"], f"в spec.md то же требование с другим текстом: {have['path']}:{have['line']}"))
+            seen.add(key)
+            continue
         if operation == "ADDED" and have is not None and not _same(have["text"], row["text"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"ADDED has another text in the baseline: {where}; в spec.md: {have['path']}:{have['line']}")
         seen.add(key)
@@ -509,12 +606,20 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
             if have is not None:
                 row["rename_provenance"] = have["rename_provenance"]
             baseline[key] = row
-    rows = sorted(baseline.values(), key=lambda row: (row["path"], row["line"], row["name"]))
+            changed[key] = (operation, row["text"])
+    rows = sorted((row for key, row in baseline.items() if key[0] not in based_only or key in changed), key=lambda row: (row["path"], row["line"], row["name"]))
+    if based_only and not rows:  # change only: no case to write — nothing of the change applied, or it only removes
+        raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", "no requirement of the change applies: " + ("; ".join(
+            f"{operation} {name} ({path}:{line}) — {cause}" for operation, _area, name, _text, path, line, cause in disputed) or "the change only removes requirements"))
     for row in rows:
         if not row["scenarios"]:
             warnings.append(f"{row['path']}:{row['line']} — Requirement: {row['name']}; missing: scenario/observable outcome; blocks: complete scenario coverage; question: which conditions and result are required?")
         if len({name for name, _ in row["scenarios"]}) != len(row["scenarios"]):
             raise RequirementConflict("OPENSPEC_SOURCE_CONFLICT", f"duplicate scenario: {row['path']} — {row['name']}")
+    if based_only:
+        pool += [(*key, row["text"]) for key, row in baseline.items() if key[0] in based_only and key not in changed]
+        warnings += scope_lines(min(changes), sorted(based_only), [(operation, *key, text) for key, (operation, text) in changed.items()],
+                                disputed, pool, proposal, shown)
     return rows, warnings
 
 
@@ -527,10 +632,10 @@ def openspec_unmarked_areas(entries: list[dict[str, str]]) -> list[str]:
 
 def openspec_applied(entries: list[dict[str, str]]) -> tuple[dict[str, int], list[str]]:
     """By change, how many requirements its delta shows already written in the specification, and the lines of the REMOVED whose name the specification lacks
-    (whole files only); ``RequirementConflict`` when they do not compose."""
+    and of the scope of a change only (whole files only); ``RequirementConflict`` when they do not compose."""
     applied: Counter[str] = Counter()
-    warnings = _openspec_rows([row for row in entries if not row.get("section")], applied)[1]
-    return dict(applied), [line for line in warnings if " — REMOVED: " in line]
+    warnings = _openspec_rows([row for row in entries if not row.get("section")], applied, SHOWN)[1]
+    return dict(applied), [line for line in warnings if " — REMOVED: " in line or line.startswith(SCOPE_HEADS)]
 
 
 def openspec_gone_names(entries: list[dict[str, str]]) -> tuple[list[str], int]:
@@ -633,6 +738,9 @@ def build_context(
         data = text.encode("utf-8")
         if digest != "sha256:" + hashlib.sha256(data).hexdigest():
             raise ValueError(f"docs snapshot digest does not match content: {rel}")
+        if entry.get("context"):  # change only: the other spec.md and the proposal give the neighbours — no document of the run, no size of the documents
+            openspec_entries.append(entry)
+            continue
         if len(data) > _DOCS_MAX_FILE:
             raise RequirementConflict("NEED_DOCS_LIMIT", f"docs file exceeds 256KiB: {rel}")
         total_docs += len(data)

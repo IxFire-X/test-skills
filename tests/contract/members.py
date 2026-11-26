@@ -13,7 +13,7 @@ GROUPS = {
     "classes of the security review": ("test_sec_a", "test_secb", "test_sec_c1", "test_sec_c2"),
     "texts": ("test_cases_import", "test_clear_refusals", "test_documents_only", "test_exec_prepares", "test_generator_skill_operators",
               "test_isolation_contract", "test_partial_automation", "test_pt2", "test_quality_hints", "test_release_ways_out", "test_abandon_closure",
-              "test_failure_groups"),
+              "test_failure_groups", "test_openspec_change_only"),
 }
 MEMBERS = tuple(name for group in GROUPS.values() for name in group)
 
