@@ -17,7 +17,7 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 NIGHT = Path(os.environ.get("TRASSA_LIVE_DIR") or ROOT.parent / "live") / "petclinic-fat-night-20261027" / ".pilot-runs" / "7a71393605b2482b989c9a824cf30188" / "cases" / "TCDOC-owner-lifecycle-night-7a713936.r1.json"
-TARGET_BYTES = 322_200  # FaT-CV2: машинная часть шага для ревьюера, +61 КБ на ночном каноне; ради размера её не режем. +2 КБ: permissions в SKILL (P8a-2: develop 89b031c уже 320 594 Б) и строки роли про кодовое слово и свежую сессию (P7) +200: v08-canaries: строка роли про исход и состояние
+TARGET_BYTES = 322_241  # preconditions: +41 — the line of the reviewer role on setup (role +65 B, squeezed from +110; 24 B were free). FaT-CV2: машинная часть шага для ревьюера, +61 КБ на ночном каноне; ради размера её не режем. +2 КБ: permissions в SKILL (P8a-2: develop 89b031c уже 320 594 Б) и строки роли про кодовое слово и свежую сессию (P7) +200: v08-canaries: строка роли про исход и состояние
 TARGET_CASES = 52
 
 

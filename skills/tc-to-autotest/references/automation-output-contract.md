@@ -16,7 +16,7 @@ locators in the artifact. For Java, factor repeated request, readback or asserti
 into private helpers in the generated class (a helper-only file is refused: each file needs a test symbol) if that removes duplication;
 pass each assertion ID through to its failure message. Keep concrete scenario inputs,
 operation order and expected values visible at the call site. Preserve every selected
-canonical assertion and its atomic relation, including setup checks: excess canonical
+canonical assertion and its atomic relation: excess canonical
 coverage must be corrected before selection, never silently dropped by automation.
 Do not build a generic operation/assertion interpreter, split classes solely to meet a
 line limit, or replace independent persistence reads with managed-object comparisons.

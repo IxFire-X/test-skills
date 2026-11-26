@@ -72,6 +72,7 @@ ID transfer. Standalone linter recommendations do not by themselves justify rewo
 For baseline snapshots, verify that human fields identify the initial state from
 Preconditions or a concrete preceding action, and the captured data used later;
 “before this step” alone does not identify that state.
+A `setup` only prepares data: a check hidden in it is a finding.
 Check the shared rules on scenario-specific setup, helper controls in Test Data,
 object-specific preservation and an objective that adds meaning to the title. Trace a
 date/control dependency to the actual scenario, not just to a required helper argument.
