@@ -229,6 +229,7 @@ def _batch_stage(run: dict, index: int = 0) -> str:
     return f"tc-generator:{run['plan']['batches'][index]['batch_id']}"
 
 
+@pytest.mark.slow
 def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_checked_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.helpers import prepare_stage, submit_stage
     from tests.test_review_requested import _journal
@@ -424,6 +425,7 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
     assert read_terminal_result(root, attempt_id)["accepted"] is True
 
 
+@pytest.mark.slow
 def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The human fields of case A with the trace of case B would put A's autotest under B's requirement."""
     from tests.helpers import prepare_stage, submit_stage
@@ -468,6 +470,7 @@ def test_cells_no_answer_can_keep_are_refused_on_scan_by_row(tmp_path: Path, mon
     assert not (project / ".pilot-runs").exists() or not any((project / ".pilot-runs").iterdir())
 
 
+@pytest.mark.slow
 def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the_fragment_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_review_requested import _put
     from tools.run_report import build_report

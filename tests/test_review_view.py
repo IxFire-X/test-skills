@@ -519,6 +519,7 @@ def test_the_autotest_view_is_deterministic_and_is_not_the_review_view() -> None
         render(document, profile="other")
 
 
+@pytest.mark.slow
 def test_the_autotest_view_of_the_effective_document_is_written_by_the_code_and_the_cli_has_no_flag_for_it(tmp_path: Path) -> None:
     from tests.test_finish import _project
     from tools.pilot_state import derive_state, read_effective_canonical

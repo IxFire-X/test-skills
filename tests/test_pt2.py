@@ -172,6 +172,7 @@ def test_no_effective_document_before_the_verdict_is_an_answer_not_a_refusal_of_
         effective_canonical_or_reason(run_root, "f" * 32)
 
 
+@pytest.mark.slow
 def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_and_says_so(tmp_path: Path) -> None:
     from tests.test_review_requested import _generated_run
     from tools.run_report import build_report, render_markdown
@@ -198,6 +199,7 @@ def test_the_three_texts_say_the_same_about_scripts_and_none_contradicts() -> No
 
 # ---- "no effective document yet" is decided by the journal, not by a missing file ------------------------------------------------
 
+@pytest.mark.slow
 def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: Path) -> None:
     """The probe of orchestrator-3: the run has its accepted effective selection; its file is gone; the journal still says it was accepted."""
     from tests.test_finish import _project

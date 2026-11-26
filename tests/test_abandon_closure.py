@@ -51,6 +51,7 @@ def _scan_not_blocked(root: Path) -> None:
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("code_name", ["STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID"])
 def test_a_pending_automation_is_closed_by_the_abandon_its_fix_names(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                                      code_name: str) -> None:
@@ -131,6 +132,7 @@ def _failing_ownership(monkeypatch: pytest.MonkeyPatch, error: Exception) -> Non
     monkeypatch.setattr(pilot_state, "publish_phase5_receipt", publish)
 
 
+@pytest.mark.slow
 def test_d3_an_io_failure_of_the_preparation_says_repeat_materialize(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                               monkeypatch: pytest.MonkeyPatch) -> None:
     root, _attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])

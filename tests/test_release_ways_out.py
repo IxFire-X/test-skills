@@ -31,6 +31,7 @@ def _main(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, dic
     return code, json.loads(capsys.readouterr().out)
 
 
+@pytest.mark.slow
 def test_o2_the_stand_abandon_is_gone_with_the_stand_check_and_an_accepted_chain_is_closed_by_ingest(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """P4b: nobody asks the stand now (the person who runs the printed command brings it up), so ``STAND_UNAVAILABLE`` is not a way out:

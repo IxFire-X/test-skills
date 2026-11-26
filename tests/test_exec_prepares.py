@@ -90,6 +90,7 @@ def test_materialize_without_an_accepted_static_review_names_the_step(tmp_path: 
     assert not _has(run_root, attempt_id, "generated-delta")
 
 
+@pytest.mark.slow
 def test_materialize_after_a_static_review_that_is_not_accepted_materializes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import flow_args
     from tools.exec_commands import cmd_materialize
