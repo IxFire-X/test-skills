@@ -115,7 +115,8 @@ FIXES: dict[str, str] = {
     "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
     "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
                                    "ячейки CSV и повторите scan --cases --new-run",
-    "ZEPHYR_CSV_PROFILE": "профиль CSV — zephyr-scale-step-row-24-v5 (по умолчанию, текст человека) или zephyr-scale-step-row-24-v4 "
+    "ZEPHYR_CSV_PROFILE": "профиль CSV — zephyr-scale-step-row-24-v6 (по умолчанию, текст человека и запрос HTTP-шага), "
+                          "zephyr-scale-step-row-24-v5 (только текст человека) или zephyr-scale-step-row-24-v4 "
                           "(плюс машинные колонки шагов); профили v1–v3 только читаются; других значений нет",
     # --- the host (HostStop without a fix at its raise site) ---
     "FINISH_FACT_UNDETERMINED": "у прогона нет попытки: finish закрывает попытку, а её нет — сначала дойди до prepare "

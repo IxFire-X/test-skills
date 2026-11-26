@@ -178,7 +178,7 @@ def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, 
         or bundle.get("document_id") != document.get("document_id")
         or bundle.get("revision") != document.get("revision")
         or bundle.get("document_sha256") != receipt.get("document_digest")
-        or bundle.get("csv_profile") not in {"zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4"}
+        or bundle.get("csv_profile") not in {"zephyr-scale-step-row-24-v6", "zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4"}
         or any(not isinstance(bundle.get(key), str) or not bundle.get(key) for key in ("json_path", "preview_path", "csv_path"))
         or any(not _DIGEST.fullmatch(str(bundle.get(key, ""))) for key in ("document_sha256", "preview_sha256", "csv_sha256"))
         or receipt.get("effective_bundle_receipt_digest") != bundle_digest

@@ -13,6 +13,7 @@ PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not t
 V3 = "zephyr-scale-step-row-24-v3"
 V4 = "zephyr-scale-step-row-24-v4"
 V5 = "zephyr-scale-step-row-24-v5"
+V6 = "zephyr-scale-step-row-24-v6"
 
 
 def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(tmp_path: Path) -> None:
@@ -36,7 +37,7 @@ def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(t
     assert markdown.read_text(encoding="utf-8") == "Изменённая вручную копия"
 
 
-def test_new_projection_public_defaults_are_exact_v5_and_receipts_use_preview_names(tmp_path: Path) -> None:
+def test_new_projection_public_defaults_are_exact_v6_and_receipts_use_preview_names(tmp_path: Path) -> None:
     import inspect
 
     from tools.publish_test_case_bundle import build_bundle, publish_bundle
@@ -47,9 +48,9 @@ def test_new_projection_public_defaults_are_exact_v5_and_receipts_use_preview_na
     assert bundle.preview_bytes.startswith(b"<!doctype html>")
     assert bundle.csv_bytes == render_zephyr_csv(document).payload
     assert bundle.markdown_bytes.startswith(b"# ")
-    assert inspect.signature(build_bundle).parameters["csv_profile"].default == V5
+    assert inspect.signature(build_bundle).parameters["csv_profile"].default == V6
     receipt = publish_bundle(document, tmp_path)
-    assert receipt.csv_profile == V5
+    assert receipt.csv_profile == V6
     assert receipt.preview_path.endswith(".html")
     assert receipt.preview_sha256.startswith("sha256:")
     assert "markdown" not in " ".join(receipt.__dataclass_fields__)

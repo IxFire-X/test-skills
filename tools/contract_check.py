@@ -52,7 +52,7 @@ STAGE_ROWS = [
     {"stage": "autotest-reviewer", "role": "automation-reviewer", "role_policy": "autotest-static-reviewer-v1", "cardinality": "per_automation_revision", "profiles": ["local-pilot-v1"]},
 ]
 PROJECTION_ROWS = [
-    {"id": "zephyr-scale-step-row-24-v5", "format": "csv", "mode": "default", "tenant_status": "N_A"},
+    {"id": "zephyr-scale-step-row-24-v6", "format": "csv", "mode": "default", "tenant_status": "N_A"},
     {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
 ]
 RELEASE_QUALIFICATION = {  # package_version is the contract's own (the one place), checked by format

@@ -21,11 +21,12 @@ _PROFILE_V2 = "zephyr-scale-step-row-24-v2"
 _PROFILE_V3 = "zephyr-scale-step-row-24-v3"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
 _PROFILE_V5 = "zephyr-scale-step-row-24-v5"
-_PROFILE = _PROFILE_V5
-_PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROFILE_V5))
-# Profiles a new bundle may be published with: V5 is the human-only default, V4 keeps the
-# machine-model step columns as an explicit compatibility opt-in.  Their HTML/Markdown are identical.
-_PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
+_PROFILE_V6 = "zephyr-scale-step-row-24-v6"
+_PROFILE = _PROFILE_V6
+_PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROFILE_V5, _PROFILE_V6))
+# Profiles a new bundle may be published with: V6 is the default (V5 and the request block of an HTTP step), V5 the human-only
+# one of the sets before it, V4 keeps the machine-model step columns as an explicit compatibility opt-in.  Their Markdown is identical.
+_PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5, _PROFILE_V6))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
 # The company's Zephyr accepts only High/Normal/Low: CRITICAL goes out as High.
 _PRIORITIES = {"CRITICAL": "High", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
@@ -420,7 +421,7 @@ def render_html_preview(document: dict[str, Any], profile: str = _PROFILE) -> Pr
     """Render the current standalone three-column human preview."""
     _reject_unknown_profile(profile)
     if profile not in _PUBLISHABLE_PROFILES:
-        raise ValueError(f"HTML preview is only available for {_PROFILE_V5} and {_PROFILE_V4}")
+        raise ValueError(f"HTML preview is only available for {_PROFILE_V6}, {_PROFILE_V5} and {_PROFILE_V4}")
     require_valid_canonical_document(document)
     return _render_html_preview_validated(document, profile)
 
@@ -428,7 +429,7 @@ def render_html_preview(document: dict[str, Any], profile: str = _PROFILE) -> Pr
 def _render_html_preview_validated(document: dict[str, Any], profile: str = _PROFILE, extras: dict[str, Any] | None = None) -> Projection:
     """Render the current preview after the caller has validated the document."""
     if profile not in _PUBLISHABLE_PROFILES:
-        raise ValueError(f"HTML preview is only available for {_PROFILE_V5} and {_PROFILE_V4}")
+        raise ValueError(f"HTML preview is only available for {_PROFILE_V6}, {_PROFILE_V5} and {_PROFILE_V4}")
     metadata = document["metadata"]
     warnings: tuple[str, ...] = ()
     documentation = metadata["documentation"]
@@ -481,8 +482,8 @@ def render_markdown(document: dict[str, Any], profile: str = _PROFILE) -> Projec
 
 def _render_markdown_validated(document: dict[str, Any], profile: str, extras: dict[str, Any] | None = None) -> Projection:
     """Render Markdown after the public facade has accepted the canonical document."""
-    if profile == _PROFILE_V5:
-        profile = _PROFILE_V4  # the human Markdown companion is identical for both publishable profiles
+    if profile in {_PROFILE_V5, _PROFILE_V6}:
+        profile = _PROFILE_V4  # the human Markdown companion is identical for the publishable profiles
     metadata = document["metadata"]
     documentation = metadata["documentation"]
     warnings: tuple[str, ...] = ()
@@ -710,7 +711,7 @@ def _render_zephyr_csv_validated(document: dict[str, Any], profile: str = _PROFI
         metadata = _case_metadata(case)
         for step_index, step in enumerate(case["steps"]):
             record = metadata if step_index == 0 else [""] * 19
-            if profile == _PROFILE_V5:
+            if profile in {_PROFILE_V5, _PROFILE_V6}:
                 # Human scenario only: the action with its resolved URL, the authored test data
                 # and the expectation prose.  No operation, binding or assertion model.
                 expected = "\n\n".join(item["text"] for item in step["expectations"])

@@ -31,8 +31,9 @@ ASSEMBLY_RECEIPT_SCHEMA = ROOT / "schemas" / "assembly-receipt.schema.json"
 INVENTORY_RECEIPT_SCHEMA = ROOT / "schemas" / "inventory-receipt.schema.json"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
 _PROFILE_V5 = "zephyr-scale-step-row-24-v5"
-_PROFILE = _PROFILE_V5
-_PROFILES = frozenset({_PROFILE_V4, _PROFILE_V5})
+_PROFILE_V6 = "zephyr-scale-step-row-24-v6"
+_PROFILE = _PROFILE_V6
+_PROFILES = frozenset({_PROFILE_V4, _PROFILE_V5, _PROFILE_V6})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 

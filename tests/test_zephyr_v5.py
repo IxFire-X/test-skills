@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 V4 = "zephyr-scale-step-row-24-v4"
 V5 = "zephyr-scale-step-row-24-v5"
+V6 = "zephyr-scale-step-row-24-v6"
 V4_FIXTURE_SHA256 = "35465fd6ac1a04124093affcce6ad7f4ae8ca7e39a3d2aa385ac6e04def3e610"  # develop d6deda0, before FaT-Z5
 DATA, EXPECTED, STEP = ("Test Script (Step-by-Step) - Test Data", "Test Script (Step-by-Step) - Expected Result",
                         "Test Script (Step-by-Step) - Step")
@@ -37,14 +38,15 @@ def test_v4_bytes_are_unchanged_for_old_runs() -> None:
     assert hashlib.sha256(render_zephyr_csv(canonical_fixture(), V4).payload).hexdigest() == V4_FIXTURE_SHA256
 
 
-def test_v5_is_the_default_bundle_profile(tmp_path: Path) -> None:
+def test_v6_is_the_default_bundle_profile_and_v5_still_publishes(tmp_path: Path) -> None:
     from tools.publish_test_case_bundle import build_bundle, publish_bundle
     from tools.test_case_projections import render_zephyr_csv
 
     document = _example()
-    assert render_zephyr_csv(document).payload == render_zephyr_csv(document, V5).payload == build_bundle(document).csv_bytes
+    assert render_zephyr_csv(document).payload == render_zephyr_csv(document, V6).payload == build_bundle(document).csv_bytes
     receipt = publish_bundle(document, tmp_path)
-    assert receipt.csv_profile == V5 and receipt.preview_path.endswith(".html")
+    assert receipt.csv_profile == V6 and receipt.preview_path.endswith(".html")
+    assert publish_bundle(document, tmp_path / "v5", V5).csv_profile == V5  # the sets before v0.9 keep v5
     assert publish_bundle(document, tmp_path / "v4", V4).csv_profile == V4  # old runs keep publishing v4
 
 
