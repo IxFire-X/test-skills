@@ -15,6 +15,12 @@ _ID = re.compile(r"[^\s|=#]+\Z")  # an id a table line can hold
 _LOCATORS = {"java_class_method": ("class_fqn", "method_name"), "python_module_function": ("function_name",), "python_class_method": ("qualified_class_name", "method_name")}
 _ROW = {"operation": {"kind", "case_id", "step_id", "file_id", "symbol_id"}, "setup": {"kind", "case_id", "setup_id", "file_id", "symbol_id"}, "assertion": {"kind", "case_id", "step_id", "file_id", "symbol_id", "expectation_id", "assertion_id"}}
 _json = partial(json.dumps, ensure_ascii=False, separators=(",", ":"))
+# W4.2, readability of a Java test (a hint of the code for the reviewer, never a refusal): the rules of the role the text shows
+_JAVA_TEST = re.compile(r"@\s*(?:org\s*\.\s*junit\s*\.\s*jupiter\s*\.\s*(?:api|params)\s*\.\s*)?(?:Test|ParameterizedTest)\b")
+_NOW = re.compile(r"\bLocalDate\s*\.\s*now\s*\(")
+_FIND_ALL_STREAM = re.compile(r"\bfindAll\s*\(\s*\)\s*\.\s*stream\s*\(")
+_LITERAL = re.compile(r'"[^"\n]*"')  # a string of the masked text: its quotes kept, its content blank
+_UNIFORM = re.compile(r"(.)\1{49,}")  # one character 50 times or more: one comparison per character, linear
 
 
 def _symbols(rows: list[Any]) -> str | None:
@@ -84,6 +90,55 @@ def _view_parts(stem: str, text: str) -> list[tuple[str, str, bytes]]:
     return parts
 
 
+def _methods(masked: str) -> list[tuple[int, int, bool]]:
+    """``(start, end, is a test)`` of each method body of masked Java: a ``{`` outside a method whose head (since the last ``{``, ``}`` or ``;``)
+    has a ``)``; a lambda or a block inside a method stays the method's.  One pass over the braces."""
+    methods: list[tuple[int, int, bool]] = []
+    depth, head, opened = 0, 0, None
+    for match in re.finditer(r"[{};]", masked):
+        char = match.group()
+        if char == "{":
+            if opened is None and ")" in masked[head:match.start()]:
+                opened = (match.start(), depth, _JAVA_TEST.search(masked, head, match.start()) is not None)
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if opened is not None and depth == opened[1]:
+                methods.append((opened[0], match.end(), opened[2]))
+                opened = None
+        if opened is None:
+            head = match.end()
+    return methods
+
+
+def readability_hints(files: list[Mapping[str, Any]]) -> list[str]:
+    """The lines of ``## подсказки кода (читаемость)`` for the Java files of the answer (W4.2): ``LocalDate.now()`` in a helper or twice in
+    one test, ``findAll().stream()``, a literal of one character 50 times; none without a finding (the tables keep their bytes)."""
+    from tools.java_text import mask_java_noncode
+
+    lines: list[str] = []
+    for row in files:
+        if not str(row["path"]).endswith(".java"):
+            continue
+        name, text = Path(row["path"]).name, row["content"]
+        masked = mask_java_noncode(text, keep_quotes=True)
+        line = lambda position: masked.count("\n", 0, position) + 1  # noqa: E731
+        methods = _methods(masked)
+        for start, end, test in methods:
+            calls = [match.start() for match in _NOW.finditer(masked, start, end)]
+            if calls and not test:
+                lines.append(f"- LocalDate.now() в помощнике {name}:{line(calls[0])} — дата одна на тест: LocalDate today = LocalDate.now() в начале теста, помощнику — параметром")
+            elif len(calls) > 1:
+                lines.append(f"- LocalDate.now() {len(calls)} раза в тесте {name}:{line(calls[0])} — одна дата на тест")
+        lines += [f"- findAll().stream() в {name}:{line(match.start())} — findById" for match in _FIND_ALL_STREAM.finditer(masked)]
+        for literal in _LITERAL.finditer(masked):
+            run = _UNIFORM.search(text, literal.start() + 1, literal.end() - 1)
+            if run is not None:
+                lines.append(f"- литерал из {len(run.group())} одинаковых символов в {name}:{line(literal.start())} — "
+                             f'"{run.group(1)}".repeat({len(run.group())}) (Java 11+) или константа')
+    return lines
+
+
 def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any] | None = None) -> list[tuple[str, str, bytes]] | None:
     """``(file name, basis, bytes)`` of the files the reviewer reads instead of the JSON of the answer ``digest``; None leaves it whole.
     With the effective *document* the files hold its view of the cases in the short form too (the generator's view is not changed)."""
@@ -99,7 +154,8 @@ def render(artifact: Mapping[str, Any], digest: str, document: Mapping[str, Any]
     tables = "\n".join([f"# Автоматизация r{body['automation_revision']}, id полные; код — файлы {stem}.FILE-… байт в байт; символы: SYMBOL FILE вид класс#метод; связи: SYMBOL FILE TC STEP | "
                         "операция (capability), под ней `  EXP` и `    ASSERT актуальное оператор ожидаемое` — то, чего нет в виде кейсов (запись вида — в его части 1)\n",
                         f"## прочие поля (JSON)\n{_json(rest)}\n",
-                        *(f"## {title}\n{text}\n" if text is not None else f"## {title} (JSON)\n{_json(rows)}\n" for title, text, rows in parts)])
+                        *(f"## {title}\n{text}\n" if text is not None else f"## {title} (JSON)\n{_json(rows)}\n" for title, text, rows in parts),
+                        *(["## подсказки кода (читаемость)\n" + "\n".join(hints) + "\n"] if (hints := readability_hints(files)) else [])])
     moved = [key for row in body["implementation_relations"] if relations is not None and (key := _key(row)) in facts]  # what the tables hold, the view leaves out
     view = [] if document is None else _view_parts(stem, review_view.render(document, "autotest-review", moved=moved).decode("utf-8"))
     return [*((name, "код", row["content"].encode("utf-8")) for name, row in zip(names, files)), (f"{stem}.tables.txt", "таблицы", tables.encode("utf-8")), *view]
