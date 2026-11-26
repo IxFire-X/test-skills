@@ -194,6 +194,44 @@ def _python_defined(project: Path, inventory: Mapping[str, Any], in_context: set
     return defined
 
 
+_CAPITALIZED = re.compile(r"\b[A-Z]\w*\b")
+
+
+def _parsed_tests(project: Path, inventory: Mapping[str, Any]) -> tuple[dict[str, str], list[tuple[str, str, bool, frozenset[str], tuple]]]:
+    """The test files of ``inventory`` whose bytes still match, read and parsed once: ``(own files, [(path, test class, jvm, names of the file,
+    ((method, outcomes, endpoints, names of the body), …)), …])`` — nothing of it depends on the context.  Inside one ``closure_cache`` (the
+    report: the map of the generator's context for ``CV_EXISTING_TEST`` and the map of the coverage) an inventory with its digest is read once."""
+    from tools.run_store import CLOSURE_CACHE
+
+    kept = CLOSURE_CACHE.get()
+    key = ("existing-tests", str(Path(project).resolve()), str(inventory["digest"])) if inventory.get("digest") else None
+    if kept is not None and key is not None and key in kept:
+        return kept[key]
+    project = Path(project)
+    files = []
+    for row in sorted(inventory.get("files") or [], key=lambda item: str(item.get("project_path"))):
+        relative = str(row.get("project_path"))
+        if row.get("kind") != "test" or Path(relative).suffix not in _TESTED:
+            continue
+        try:
+            raw = (project / relative).read_bytes()
+        except OSError:
+            continue
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != row.get("content_digest"):
+            continue  # a file changed after the scan is not the scanned project
+        text = raw.decode("utf-8", errors="replace")
+        jvm = Path(relative).suffix in _JVM
+        methods = list(_java_methods(text, kotlin=relative.endswith(".kt"))) if jvm else list(_python_tests(text))
+        names = frozenset(_CAPITALIZED.findall(_without_comments(text)) if jvm else _python_names(text))
+        files.append((relative, Path(relative).stem, jvm, names, tuple(
+            (name, tuple(_outcomes(body)), frozenset(f"{verb.upper()} {_normal_path(found)}" for verb, found in _HTTP_CALL.findall(body)),
+             frozenset(_CAPITALIZED.findall(body)) if jvm else frozenset()) for name, body in methods)))
+    result = (own_files(project, inventory)[0], files)
+    if kept is not None and key is not None:
+        kept[key] = result
+    return result
+
+
 def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterable[str], file_level: bool = False) -> dict[str, dict[str, dict[str, list[str]]]]:
     """``{key: {test class: {method: [outcome, …]}}}`` from the test files of ``inventory`` whose bytes still match.  ``file_level`` (the report,
     not the generator): a Java or Kotlin class the test file names outside its methods too (``@WebMvcTest(OwnerController.class)``) is named
@@ -203,33 +241,15 @@ def build_map(project: Path, inventory: Mapping[str, Any], context_paths: Iterab
     sources = {Path(path).stem for path in in_context if Path(path).suffix in _TESTED and not Path(path).stem.startswith("test_")
                and not Path(path).stem.endswith(("Test", "Tests", "IT"))}
     defined = _python_defined(project, inventory, in_context)
-    hidden = {path for path in own_files(project, inventory)[0] if path not in in_context}  # an own test the model reads (the human put it in paths.include) is in the map
+    own, files = _parsed_tests(project, inventory)
     result: dict[str, dict[str, dict[str, list[str]]]] = {}
-    for row in sorted(inventory.get("files") or [], key=lambda item: str(item.get("project_path"))):
-        relative = str(row.get("project_path"))
-        if row.get("kind") != "test" or Path(relative).suffix not in _TESTED or relative in hidden:
+    for relative, test_class, jvm, names, methods in files:
+        if relative in own and relative not in in_context:  # an own test the model reads (the human put it in paths.include) is in the map
             continue
-        try:
-            raw = (project / relative).read_bytes()
-        except OSError:
-            continue
-        if "sha256:" + hashlib.sha256(raw).hexdigest() != row.get("content_digest"):
-            continue  # a file changed after the scan is not the scanned project
-        text = raw.decode("utf-8", errors="replace")
-        test_class = Path(relative).stem
-        jvm = Path(relative).suffix in _JVM
-        methods = list(_java_methods(text, kotlin=relative.endswith(".kt"))) if jvm else list(_python_tests(text))
-        if jvm:
-            named = set(re.findall(r"\b[A-Z]\w*\b", _without_comments(text)))
-        else:
-            imported = _python_names(text)
-            named = imported | {module for name in imported for module in defined.get(name, ())}
-        for name, body in methods:
-            outcomes = _outcomes(body)
-            keys = {f"{verb.upper()} {_normal_path(path)}" for verb, path in _HTTP_CALL.findall(body)}
-            keys |= (named if file_level or not jvm else set(re.findall(r"\b[A-Z]\w*\b", body))) & sources
-            for key in keys:
-                result.setdefault(key, {}).setdefault(test_class, {})[name] = outcomes
+        named = names if jvm else names | {module for name in names for module in defined.get(name, ())}
+        for name, outcomes, endpoints, body in methods:
+            for key in endpoints | ((named if file_level or not jvm else body) & sources):
+                result.setdefault(key, {}).setdefault(test_class, {})[name] = list(outcomes)
     return result
 
 

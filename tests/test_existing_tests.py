@@ -93,6 +93,33 @@ def test_the_map_names_endpoints_classes_and_outcomes_without_code_or_data(tmp_p
     assert render_map(value) == render_map(copy.deepcopy(value))
 
 
+def test_the_maps_of_one_reading_of_the_tests_are_the_maps_of_separate_readings(tmp_path: Path) -> None:
+    from tools.existing_tests import build_map
+    from tools.run_journal import closure_cache
+
+    project, inventory, context = _project(tmp_path)
+    inventory = {**inventory, "digest": "sha256:" + "a" * 64}
+    alone = [build_map(project, inventory, context), build_map(project, inventory, context, file_level=True)]
+    with closure_cache():  # the report: the map of the generator's context, then the map of the coverage
+        together = [build_map(project, inventory, context), build_map(project, inventory, context, file_level=True)]
+    assert together == alone
+
+
+def test_inside_one_closure_the_tests_of_an_inventory_are_read_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import existing_tests
+    from tools.run_journal import closure_cache
+
+    project, inventory, context = _project(tmp_path)
+    inventory = {**inventory, "digest": "sha256:" + "a" * 64}
+    reads = []
+    own_files = existing_tests.own_files
+    monkeypatch.setattr(existing_tests, "own_files", lambda *args: reads.append(1) or own_files(*args))
+    with closure_cache():
+        existing_tests.build_map(project, inventory, context)
+        existing_tests.build_map(project, inventory, context[:1], file_level=True)
+    assert len(reads) == 1
+
+
 KOTLIN_TESTS = """package org.example.owner
 
 class OwnerServiceTest {
