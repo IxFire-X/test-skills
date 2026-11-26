@@ -79,7 +79,7 @@ if `status` names `prepare tc-generator:rework-1` — one rework round (`tc-gene
 ## 5. Closing and report
 
 `python -m tools.run_pipeline finish --project <abs> --run <run_id>` goes through the closing itself; `FINISH_FACT_UNDETERMINED` names what is missing — do that step. The chain
-does not go on — `finish --abandon <code>` from `fix`. The result — `verification=NOT_APPLICABLE`, `accepted=false`: in a cases-only run this is the norm; tell the human `human_summary` as is, do not say «не принят». Read every field; never make a PASS out of manual coverage. An outcome with `FINALIZATION_INVALID` — the run is closed invalid, `accepted=false`: pass it to the human as is, do not repeat `finish` and do not edit files.
+does not go on — `finish --abandon <code>` from `fix`. The result — `verification=NOT_APPLICABLE`, `accepted=false` and exit code 1: in a cases-only run this is the norm; tell the human `human_summary` as is, do not say «не принят». Read every field; never make a PASS out of manual coverage. An outcome with `FINALIZATION_INVALID` — the run is closed invalid, `accepted=false`: pass it to the human as is, do not repeat `finish` and do not edit files.
 `projection.zephyr.template` is set — the export for Zephyr after the closing: [import.md](references/import.md).
 At the end, once, `python -m tools.run_pipeline report --project <abs> --run <id>` — `report.md`, `report.json`, `questions-for-analyst.md`; name the paths. `review_notes` — the number and the path in one line; do not change the cases, do not revise the verdict.
 

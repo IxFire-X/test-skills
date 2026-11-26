@@ -94,5 +94,5 @@ Compare candidate requirements with the input context without losing behavior cl
 Each relevant product-behavior warning needs either a testable canonical step or a concrete gap for
 missing oracle, input, access or setup. A known defect with a clear oracle stays testable.
 Every structured assertion must inspect the intended behavior; relations and warnings
-cannot stand in for coverage. The report binds the exact bare candidate digest, and a
+cannot stand in for coverage. The report binds the exact candidate digest, and a
 successor is validated as a whole, never merged with its candidate.

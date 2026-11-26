@@ -56,7 +56,7 @@ With one context batch the marker stays one call, as below.
    Rejected idea: what the document rejects or postpones («решили не делать») is context; what the system must not do is a requirement.
 3. Explicit authorized requirements define expected behavior; code and runtime reports describe the current implementation. Preserve both when they disagree, with a source-bound warning in one free sentence, not in the four fields of a gap (see the contract). Never replace a required outcome with the observed defect. When requirements leave an outcome undefined, trace its end-to-end control flow through reachable throws, exception translation, and HTTP mapping; label the observation and preserve an unresolved oracle as a warning.
 4. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
-5. Validate the 5.0.0 envelope before return: `python -m tools.validate_artifact schemas/context-marker-output.schema.json <answer.json>` (the file lies in the run: `incoming/`).
+5. Validate the 5.0.0 envelope before return: `python -m tools.validate_artifact schemas/context-marker-output.schema.json <answer.json>` (the file lies in the run: `incoming/`). A part `context-marker:batch-NNN` has no requirements of its own: check it with `submit --dry-run` (code puts them in), not `validate_artifact`.
 
 For standard OpenSpec, establish the actual version/schema, requested scope and exact
 authorized baseline documents before normalization. A selected change includes only that
