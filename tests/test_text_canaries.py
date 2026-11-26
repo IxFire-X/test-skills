@@ -2,8 +2,8 @@
 
 Five operators (outcome, state, literal, number, data) on expectations without assertions, as many harmless twins on other cases;
 a text error counts only when a BLOCKING finding stands on its place (or an edit of its text); a BLOCKING on a twin rejects its case
-as any finding and is counted; missed text errors make a review WEAK, never UNRELIABLE (v0.8: not the acceptance).  The exact lines for the
-tester wait for the user's approval and are not pinned here."""
+as any finding and is counted; missed text errors make a review WEAK, never UNRELIABLE (v0.8: not the acceptance).  The lines for the
+tester are approved by the user (26.11) and pinned at the end."""
 from __future__ import annotations
 
 import json
@@ -212,3 +212,27 @@ def test_a_map_with_a_data_row_validates() -> None:
 
     value = json.loads(rc.map_bytes(DIGEST, [_data_row()]))
     assert schema_diagnostics(value, ROOT / "schemas" / "review-canaries.schema.json", ROOT) == []
+
+
+# --- the lines for the tester, approved by the user on 26.11 ------------------------------------------------------------------------
+
+def test_the_names_of_the_text_errors() -> None:
+    assert [rc.CLASS_NAMES[cls] for cls in rc.TEXT_CLASSES] == [
+        "перевёрнут исход", "убрана проверка состояния", "текст в кавычках из требования", "число из требования", "данные шага из требования"]
+
+
+def test_the_line_of_a_warning_on_a_text_error() -> None:
+    assert ("текстовые контрольные ошибки (в ручных шагах) засчитываются только как BLOCKING: WARNING или INFO на них — пропуск"
+            in rc.outcome([_row("outcome", 1)], _answer())["note"])
+
+
+def test_the_line_of_the_twins() -> None:
+    note = rc.outcome([_row("number", 1), _row(rc.TWIN, 2, "TWIN-1")], _answer([_on(2, "BLOCKING")]))["note"]
+    assert ("двойников — безобидных перестановок в виде ревьюера: 1; BLOCKING на них: 1 — такой кейс отклонён, как по обычной находке: "
+            "это ложная тревога ревьюера или настоящий дефект исходного текста") in note
+
+
+def test_the_line_of_few_places() -> None:
+    rows = rc.Seeded([_row("outcome", 1)])
+    rows.wanted = 3
+    assert "в ручных кейсах мало мест, привязанных к требованию: контрольных ошибок 1 из 3 по размеру набора" in rc.outcome(rows, _answer())["note"]

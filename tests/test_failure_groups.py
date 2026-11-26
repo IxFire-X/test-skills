@@ -2,7 +2,8 @@
 
 The text of a failure keeps the lines of its first check («expected: 201 but was: 403»); the causes are the code of the answer, the
 class of an error, a text without the literals of the test data (the report leaves the company) or «no text»; the line «one cause» of
-«Итог» stands on a code or a class only.  The exact lines for the tester wait for the user's approval and are not pinned here."""
+«Итог» stands on a code or a class only.  The lines for the tester (4.1–4.5 of the design) are approved by the user (26.11) and pinned
+at the end; the mark of 4.4 is pinned in test_quarantine."""
 from __future__ import annotations
 
 import json
@@ -151,6 +152,45 @@ def test_failure_texts_ties_the_text_to_the_method() -> None:
 def test_failure_texts_of_another_automation_are_none() -> None:
     execution = {"automation_sha256": "sha256:" + "0" * 64, "failed_methods": [{"nodeid": "FILE-1::SYMBOL-1", "message": "boom"}]}
     assert failure_texts(execution, _automation()) == {}
+
+
+# --- the lines for the tester, approved by the user on 26.11 (4.1–4.3, 4.5 of handoff/v08/failure-groups-design.md) ----------------
+
+def _report(groups: list[dict], failed: int) -> dict:
+    """The fields of a report that the lines of the causes read; the rest as an empty report has them."""
+    rows = [{"file": "src/test/java/ApiTest.java", "method": f"m{index}", "ref": "ASSERT-1", "kind": "assertion_failed"} for index in range(failed)]
+    return {"failure_groups": groups, "quarantine": rows}
+
+
+def test_the_words_of_a_status_and_of_an_exception() -> None:
+    groups = _grouped(*["expected: 200 but was: 403"] * 2, "expected: 201 but was: 403", checks=STATUS_CHECK)
+    groups += _grouped("boom: java.lang.IllegalStateException: x", kind="error")
+    assert [group["cause"] for group in groups] == ["ответ 403 вместо ожидаемого 200 (2), 201 (1)", "исключение IllegalStateException"]
+
+
+def test_the_words_of_no_text() -> None:
+    cause = failure_groups([_row("m0", "Multiple Failures _2 failures_")])[0]["cause"]
+    assert cause == "текст падения не сохранён (прогон старой версии пакета или проверка без текста)"
+
+
+def test_the_block_of_the_causes() -> None:
+    from tools.run_report import _cause_lines
+
+    groups = _grouped(*["expected: 201 but was: 403"] * 5, checks=STATUS_CHECK)
+    assert _cause_lines(_report(groups, 5)) == ["Причины:", "- 5 — ответ 403 вместо ожидаемого 201 (5); тесты: m0, m1, m2 и ещё 2", ""]
+
+
+@pytest.mark.slow
+def test_the_summary_tells_the_causes(tmp_path: Path) -> None:
+    from tests.test_run_report import _finished_run
+    from tools.run_report import build_report, render_markdown
+
+    report = build_report(tmp_path, _finished_run(tmp_path).name)[0]
+    groups = _grouped(*["expected: 201 but was: 403"] * 6, "boom", "bang", checks=STATUS_CHECK)
+    summary = render_markdown({**report, **_report(groups, 8)}).split("## Итог", 1)[1].split("\n## ", 1)[0]
+    assert ("**Одна причина у 6 из 8 упавших автотестов: ответ 403 вместо ожидаемого 201 (6).** Скорее всего это одно расхождение "
+            "окружения или адреса, а не 6 дефектов — разберите её первой.") in summary.splitlines()
+    assert ", причин: 3" in summary
 
 
 @pytest.mark.slow
