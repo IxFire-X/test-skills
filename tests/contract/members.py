@@ -34,4 +34,5 @@ SLOW = (
     "test_p8b_git::test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it",  # 65
     "test_p8b_git::test_a_copy_of_the_mode_b_delivery_finalizes_and_publishes_the_observation_without_the_maintainer_files",  # 40
     "test_failure_groups::test_report_keeps_the_method_lines",  # 100 (26.11, the machine loaded; a whole run is built, as test_quality_hints)
+    "test_failure_groups::test_the_report_groups_a_failure_by_its_text_and_the_check_of_the_canon",  # 41 (26.11, the machine loaded; a whole run too)
 )

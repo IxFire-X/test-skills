@@ -33,22 +33,31 @@ _SEVERAL = re.compile(r"\(\d+ failures?\)$")  # the head of several failures: JU
 _EXCEPTION_CLASS = re.compile(r"^[\w.$]+(?:Error|Exception): ")
 # what ends the lines of one check in a failure of several: the next failure of AssertJ, an exception (the next check of JUnit) or a frame
 _CHECK_END = re.compile(r"^(?:-- failure \d+ --|[\w.$]+(?:Error|Exception)(?::|$)|at [\w.$<>]+\()")
+_ONLY_LABEL = re.compile(r"^(?:\[[^\]]*ASSERT-[^\]]*\]|ASSERT-[A-Za-z0-9_.:-]+)$")  # a line that is a label and nothing else
+
+
+def _check_lines(lines: Sequence[str], start: int) -> str:
+    """The line *start* without the class of its exception, with the lines of its check after it joined by a space — up to the next
+    label, ``-- failure N --``, an exception or a frame of the stack."""
+    rest = []
+    for line in lines[start + 1:]:
+        if _CHECK_END.match(line) or _ASSERT_REF.search(line):
+            break
+        rest.append(line)
+    return " ".join([_EXCEPTION_CLASS.sub("", lines[start]), *rest])
 
 
 def failure_line(text: str) -> str:
     """The line of a framework failure that names it: the first one; for several failures (whose head names no check) the line of the
     first ``ASSERT-…`` label, without its indent and the class of its exception, with the lines of that check after it («expected: 201»,
-    «but was: 403») joined by a space — up to the next label, ``-- failure N --``, an exception or a frame of the stack."""
+    «but was: 403»); the same for one failure whose first line is its label alone («[ASSERT-1] » of AssertJ ``as(…)``)."""
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     if lines and _SEVERAL.search(lines[0]):
         start = next((index for index, line in enumerate(lines) if index and _ASSERT_REF.search(line)), None)
         if start is not None:
-            rest = []
-            for line in lines[start + 1:]:
-                if _CHECK_END.match(line) or _ASSERT_REF.search(line):
-                    break
-                rest.append(line)
-            return " ".join([_EXCEPTION_CLASS.sub("", lines[start]), *rest])
+            return _check_lines(lines, start)
+    if lines and _ONLY_LABEL.match(_EXCEPTION_CLASS.sub("", lines[0])):
+        return _check_lines(lines, 0)
     return lines[0] if lines else ""
 
 
@@ -66,8 +75,14 @@ def failure_note(message: str) -> tuple[str, str]:
 
 # --- the causes of the failures (handoff/v08/failure-groups-design.md) --------------------------------------------------------------
 
-# rule 2: the code of the answer, the expected and the actual one (``<201>`` of JUnit, ``_201_`` of a note); rule 3: the class of an error
-_STATUS = re.compile(r"expected:?\s*[<_]?\s*([1-5]\d\d)\s*[>_]?\s*but was:?\s*[<_]?\s*([1-5]\d\d)(?!\d)", re.IGNORECASE)
+# rule 2: the code of the answer, the expected and the actual one — JUnit and AssertJ («expected: <201> but was: <403>», ``_201_`` of a
+# note), MockMvc («Status expected:<201> but was:<403>»), RestAssured («Expected status code <201> but was <403>»); pytest writes the
+# actual one first («assert 403 == 201»).  A code only when the check of the label reads a status in the canon (``status_checks``), or,
+# for a label the canon does not know, when a word of the status stands in the text: «expected: 255 but was: 256» of a counter is no answer
+_STATUS = re.compile(r"expected(?:\s+status\s+code)?:?\s*[<_]?\s*([1-5]\d\d)\s*[>_]?\s*,?\s*but was:?\s*[<_]?\s*([1-5]\d\d)(?!\d)",
+                     re.IGNORECASE)
+_PYTEST_STATUS = re.compile(r"\bassert\s+([1-5]\d\d)\s*==\s*([1-5]\d\d)(?!\d)")
+_STATUS_WORD = re.compile(r"status|\bHTTP\b|код ответа", re.IGNORECASE)  # status, statusCode, status_code, getStatus(), Status expected
 _EXCEPTION = re.compile(r"\b([A-Z]\w*(?:Exception|Error))\b")
 _NOT_A_CAUSE = frozenset({"MultipleFailuresError", "AssertionFailedError", "AssertionError"})  # the wrappers of the checks themselves
 _HEAD = re.compile(r"[(_]\d+ failures?[)_]$")  # the head of several failures that names no check, as the report wrote it or as a note
@@ -92,15 +107,17 @@ def _literal(match: re.Match[str]) -> str:
     return "<дата>" if close == ">" and _DATE.fullmatch(inner) else f"{value[0]}<дата>{close}" if _DATE.fullmatch(inner) else f"{value[0]}…{close}"
 
 
-def failure_cause(kind: str, text: str, whole: bool) -> tuple[str, str, str | None]:
+def failure_cause(kind: str, text: str, whole: bool, reads_status: bool | None = None) -> tuple[str, str, str | None]:
     """``(rule, key, expected code)`` of one failure, the first rule that fits: ``status`` — the actual code of the answer (the key)
-    and the expected one; ``exception`` — the last class of an error; ``text`` — the text without the literals, the dates, the place
-    of the check and long numbers; ``unknown`` — no text.  *whole*: the text is the one before the note, its quotes whole; a note has
-    its quotes as ``_`` already, a literal could not be cut out of it, so it gives the code and the class only."""
+    and the expected one, when *reads_status* (the check of the label in the canon reads a status) or, with no check in the canon
+    (``None``), when a word of the status is in the text; ``exception`` — the last class of an error; ``text`` — the text without the
+    literals, the dates, the place of the check and long numbers; ``unknown`` — no text.  *whole*: the text is the one before the note,
+    its quotes whole; a note has its quotes as ``_`` already, a literal could not be cut out of it, so it gives the code and the class only."""
     text = _LABEL.sub("", (text or "").strip())
     status = _STATUS.search(text)
-    if status:
-        return "status", status.group(2), status.group(1)
+    pytest_status = _PYTEST_STATUS.search(text)
+    if (status or pytest_status) and (reads_status if reads_status is not None else bool(_STATUS_WORD.search(text))):
+        return ("status", status.group(2), status.group(1)) if status else ("status", pytest_status.group(1), pytest_status.group(2))
     found = [name for name in _EXCEPTION.findall(text) if name not in _NOT_A_CAUSE]
     if kind == "error" and found:
         return "exception", found[-1], None
@@ -129,15 +146,36 @@ def failure_texts(execution: Mapping[str, Any], automation: Mapping[str, Any] | 
             if isinstance(row, Mapping) and row.get("nodeid") in names}
 
 
-def failure_groups(rows: Sequence[Mapping[str, Any]], texts: Mapping[tuple[str, str], str] | None = None) -> list[dict[str, Any]]:
-    """The failed methods of the findings (``file, method, kind, message``) grouped by cause, the biggest group first:
+def status_checks(document: Mapping[str, Any] | None) -> dict[str, bool]:
+    """``assertion_id -> reads a status`` of each check of the canon: its ``actual`` is ``http_status``, or a ``project_result``
+    whose name is the status («status», «statusCode» — R5–R8 read the code of the answer so, none has ``http_status``).  The label of
+    a failure is the ``assertion_id`` of its check; a label the canon does not know (an old run, no canon) is not here."""
+    checks: dict[str, bool] = {}
+    try:
+        for case in (document or {}).get("test_cases") or []:
+            for step in case.get("steps") or []:
+                for expectation in step.get("expectations") or []:
+                    for assertion in expectation.get("assertions") or []:
+                        actual = assertion.get("actual") or {}
+                        checks[str(assertion["assertion_id"])] = actual.get("kind") == "http_status" or (
+                            actual.get("kind") == "project_result" and bool(_STATUS_WORD.search(str(actual.get("name") or ""))))
+    except (AttributeError, KeyError, TypeError):
+        return {}
+    return checks
+
+
+def failure_groups(rows: Sequence[Mapping[str, Any]], texts: Mapping[tuple[str, str], str] | None = None,
+                   checks: Mapping[str, bool] | None = None) -> list[dict[str, Any]]:
+    """The failed methods of the findings (``file, method, ref, kind, message``) grouped by cause, the biggest group first:
     ``{"cause", "rule", "count", "methods"}``.  A status groups by the actual code, whatever was expected («all answered 403» is one
-    cause).  The text of a method comes from *texts* (``failure_texts``); without it the note decides by the code and the class only."""
-    texts = texts or {}
+    cause).  The text of a method comes from *texts* (``failure_texts``); without it the note decides by the code and the class only.
+    *checks* (``status_checks``): whether the check of the label reads a status, the same for a text and a note."""
+    texts, checks = texts or {}, checks or {}
     groups: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         whole = texts.get((str(row.get("file")), str(row.get("method"))))
-        rule, key, expected = failure_cause(str(row.get("kind") or ""), str(row.get("message") or "") if whole is None else whole, whole is not None)
+        rule, key, expected = failure_cause(str(row.get("kind") or ""), str(row.get("message") or "") if whole is None else whole,
+                                            whole is not None, checks.get(str(row.get("ref"))))
         group = groups.setdefault((rule, key), {"rule": rule, "key": key, "expected": collections.Counter(), "methods": []})
         group["methods"].append(str(row.get("method")))
         if expected:

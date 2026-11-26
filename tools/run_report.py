@@ -754,13 +754,14 @@ def render_expectations(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _failure_groups(rows: Sequence[Mapping[str, Any]], execution: Mapping[str, Any], automation: Any) -> dict[str, Any]:
+def _failure_groups(rows: Sequence[Mapping[str, Any]], execution: Mapping[str, Any], automation: Any, document: Any) -> dict[str, Any]:
     """``{"failure_groups": [...]}`` of the findings, nothing without findings (they are only in mode B): the causes of the failed
-    methods, the text of each one taken before its note from the execution receipt, so the literals of the test data are cut out."""
+    methods, the text of each one taken before its note from the execution receipt, so the literals of the test data are cut out; the
+    checks of the canon (*document*) tell which labels read the code of the answer."""
     if not rows:
         return {}
-    failure_texts, failure_groups = execution_gate.from_mode_b("quarantine", "failure_texts", "failure_groups")
-    return {"failure_groups": failure_groups(rows, failure_texts(execution, automation))}
+    failure_texts, status_checks, failure_groups = execution_gate.from_mode_b("quarantine", "failure_texts", "status_checks", "failure_groups")
+    return {"failure_groups": failure_groups(rows, failure_texts(execution, automation), status_checks(document))}
 
 
 def _one_cause(report: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -1155,7 +1156,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
         "execution_stats": execution.get("stats"),
         "quarantine": [{key: row[key] for key in ("file", "method", "ref", "kind", "failed_rows", "disabled_passed_rows") if key in row}
                        for row in status.get("quarantine") or []],
-        **_failure_groups(status.get("quarantine") or [], execution, automation),
+        **_failure_groups(status.get("quarantine") or [], execution, automation, document),
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
         "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,

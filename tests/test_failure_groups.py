@@ -5,35 +5,77 @@ class of an error, a text without the literals of the test data (the report leav
 «Итог» stands on a code or a class only.  The exact lines for the tester wait for the user's approval and are not pinned here."""
 from __future__ import annotations
 
+import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
 from tools.automation_validation import automation_sha256
-from tools.quarantine import failure_cause, failure_groups, failure_line, failure_texts, one_cause
+from tools.quarantine import failure_cause, failure_groups, failure_line, failure_texts, one_cause, status_checks
+from tools.run_tests import _failure_message
 
 pytestmark = pytest.mark.contract
+STATUS_CHECK = {"ASSERT-1": True}  # the check ASSERT-1 of the canon reads the code of the answer
+R6 = "[ASSERT-1] expected: 201 but was: 403"  # AssertJ as(…) leaves the label only, no word of the status
 
 
 def _row(method: str, text: str, kind: str = "assertion_failed") -> dict:
     return {"file": "src/test/java/ApiTest.java", "method": method, "ref": "ASSERT-1", "kind": kind, "message": text}
 
 
-def _grouped(*texts: str, kind: str = "assertion_failed") -> list[dict]:
+def _grouped(*texts: str, kind: str = "assertion_failed", checks: dict | None = None) -> list[dict]:
     """Groups of methods m0, m1, … whose texts before the note are *texts*."""
     rows = [_row(f"m{index}", "", kind) for index in range(len(texts))]
-    return failure_groups(rows, {(row["file"], row["method"]): text for row, text in zip(rows, texts)})
+    return failure_groups(rows, {(row["file"], row["method"]): text for row, text in zip(rows, texts)}, checks)
 
 
 def test_status_groups_by_actual_code() -> None:
-    groups = _grouped("[ASSERT-1] expected: 200 but was: 403", "[ASSERT-2] expected: 201 but was: 403", "[ASSERT-3] expected: 404 but was: 500")
+    groups = _grouped("[ASSERT-1] expected: 200 but was: 403", "[ASSERT-2] expected: 201 but was: 403", "[ASSERT-3] expected: 404 but was: 500",
+                      checks=STATUS_CHECK)
     assert [(group["rule"], group["count"], group["methods"]) for group in groups] == [("status", 2, ["m0", "m1"]), ("status", 1, ["m2"])]
     assert "403" in groups[0]["cause"] and "500" in groups[1]["cause"]
+
+
+def test_status_of_mockmvc_restassured_and_pytest() -> None:
+    for text in ("Status expected:<201> but was:<403>", "1 expectation failed. Expected status code <201> but was <403>.",
+                 "ASSERT-1 assert 403 == 201 +  where 403 = <Response [403]>.status_code"):
+        assert failure_cause("assertion_failed", text, True) == ("status", "403", "201"), text
+
+
+def test_without_canon_three_digits_without_a_word_of_the_status_are_no_status() -> None:
+    assert failure_cause("assertion_failed", R6, True)[0] == "text"
+
+
+def _canon(actual: dict) -> dict:
+    assertion = {"assertion_id": "ASSERT-1", "actual": actual}
+    return {"test_cases": [{"steps": [{"expectations": [{"assertions": [assertion]}]}]}]}
+
+
+def _cause_by_canon(actual: dict) -> str:
+    return failure_groups([_row("m0", "")], {(_row("m0", "")["file"], "m0"): R6}, status_checks(_canon(actual)))[0]["rule"]
+
+
+def test_an_http_status_check_of_the_canon_is_a_status() -> None:
+    assert _cause_by_canon({"kind": "http_status"}) == "status"
+
+
+def test_a_project_result_named_status_is_a_status() -> None:  # R5–R8 read the code so: {"kind": "project_result", "name": "status"}
+    assert _cause_by_canon({"kind": "project_result", "name": "status"}) == "status"
+
+
+def test_the_same_numbers_of_another_check_are_no_status() -> None:
+    assert _cause_by_canon({"kind": "project_result", "name": "ownerCount"}) == "text"
 
 
 def test_error_groups_by_exception_class() -> None:
     [group] = _grouped("Request processing failed: org.springframework.dao.DataIntegrityViolationException: could not execute", kind="error")
     assert group["rule"] == "exception" and "DataIntegrityViolationException" in group["cause"]
+
+
+def test_a_label_alone_joins_the_lines_of_its_check() -> None:
+    item = ET.fromstring('<testcase name="t"><failure message="[ASSERT-1] &#10;expected: 201&#10; but was: 403"/></testcase>')
+    assert failure_groups([_row("m0", "")], {(_row("m0", "")["file"], "m0"): _failure_message(item)}, STATUS_CHECK)[0]["rule"] == "status"
 
 
 def test_text_drops_literals() -> None:
@@ -72,12 +114,12 @@ def test_a_note_without_its_text_gives_no_text() -> None:
 
 
 def test_a_note_without_its_text_still_gives_the_code() -> None:
-    [group] = failure_groups([_row("m0", "expected: 201 but was: 403")])
+    [group] = failure_groups([_row("m0", "expected: 201 but was: 403")], checks=STATUS_CHECK)
     assert group["rule"] == "status"
 
 
 def test_six_of_eight_by_code_is_one_cause() -> None:
-    groups = _grouped(*["expected: 201 but was: 403"] * 6, "boom", "bang")
+    groups = _grouped(*["expected: 201 but was: 403"] * 6, "boom", "bang", checks=STATUS_CHECK)
     assert one_cause(groups, 8)["count"] == 6
 
 
@@ -87,7 +129,7 @@ def test_a_text_or_no_text_is_never_one_cause() -> None:
 
 
 def test_four_by_code_is_not_one_cause() -> None:
-    assert one_cause(_grouped(*["expected: 201 but was: 403"] * 4), 4) is None
+    assert one_cause(_grouped(*["expected: 201 but was: 403"] * 4, checks=STATUS_CHECK), 4) is None
 
 
 def test_the_frame_after_a_check_is_not_in_the_line() -> None:
@@ -124,3 +166,16 @@ def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
     method = after.index(next(line for line in before if " :: " in line))
     changes = [op for op in difflib.SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes() if op[0] != "equal"]
     assert changes and all(tag == "insert" and end <= method for tag, _i1, _i2, _start, end in changes)
+
+
+@pytest.mark.slow
+def test_the_report_groups_a_failure_by_its_text_and_the_check_of_the_canon(tmp_path: Path) -> None:
+    from tests.test_quarantine import THREE_FUNCTIONS, _fail
+    from tools.finalize_attempt import decide_dispositions
+    from tools.run_report import build_report
+
+    # the label is the check ASSERT-batch-a-001 of the canon of the fixture, an http_status; the text has no word of the status
+    run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS, message="ASSERT-batch-a-001 expected: <200> but was: <403>")
+    decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
+    [group] = build_report(tmp_path, run_root.name)[0]["failure_groups"]
+    assert (group["rule"], group["methods"]) == ("status", ["test_selected"]) and "403" in group["cause"]
