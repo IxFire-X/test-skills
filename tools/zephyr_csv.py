@@ -103,7 +103,7 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
             if not cases:
                 errors.append(f"строка {number}: шаг до первого кейса (строки с Name)")
                 continue
-            data = row.get(_DATA, "").split("\n\n" + REQUEST_HEAD + "\n", 1)[0]  # v6: the block «Запрос curl …» goes, the human text stays
+            data = re.split(r"\r?\n\r?\n" + re.escape(REQUEST_HEAD) + r"\r?\n", row.get(_DATA, ""), maxsplit=1)[0]  # v6, also with the CRLF of Excel: the block «Запрос curl …» goes, the human text stays
             cases[-1]["steps"].append({"row": number, "action": row[_STEP], "test_data": data, "expected": row.get(_EXPECTED, "")})
     errors += [f"строка {case['row']}: у кейса «{case['title']}» нет шагов" for case in cases if not case["steps"]]
     if errors:

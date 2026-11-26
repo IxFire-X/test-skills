@@ -395,6 +395,7 @@ REQUEST_HEAD = "Запрос curl (Postman: Import → Raw text):"
 _VERBS = frozenset(("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
 _REQUEST_ARGS = frozenset(("method", "path", "body", "params", "parameters", "query", "headers", "session"))  # session: cookies, Postman keeps them
 _SECRET_HEADER = re.compile(r"authorization|cookie|token|secret|password|api[-_]?key", re.I)
+_HTTP_TOKEN = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")  # RFC 9110 token: the name of a header or a form field, never «@», «=» or a space
 _TEMPLATE = re.compile(r"(?<!\{)\{[^{}]+\}(?!\})")  # a path template ``{name}`` left unfilled (not a ``{{variable}}``)
 
 
@@ -525,8 +526,12 @@ def request_block(step: dict[str, Any], display_orders: dict[str, int], case: di
         if action is None:
             return None
         method, url, headers, body, form = action
+    if not all(_HTTP_TOKEN.fullmatch(name) for name in [*(name for name, _value in headers), *(field.split("=", 1)[0] for field in form)]):
+        return None  # a name from the canon of the model: «@» before «=» or at the head of -H makes curl read a local file
     line = ["curl", "-X", method, _shell(url), *(word for name, value in headers for word in ("-H", _shell(f"{name}: {value}")))]
     line += ["--data-raw", _shell(body)] if body is not None else [word for field in form for word in ("--data-urlencode", _shell(field))]
+    if "\r" in " ".join(line) or "\n" in " ".join(line):
+        return None  # one curl line: a line break in a header, the path, the query or a form value would make another header or argument
     # the address of the stand first, then the variables in the order of the request
     names = sorted(legend, key=lambda name: not legend[name].startswith("адрес стенда"))
     return "\n".join((REQUEST_HEAD, " ".join(line), "; ".join("{{" + name + "}} — " + legend[name] for name in names) + "."))

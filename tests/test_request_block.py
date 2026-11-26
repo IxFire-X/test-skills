@@ -110,3 +110,23 @@ def test_the_preview_shows_the_block_outside_a_group_only() -> None:
     assert REQUEST_HEAD not in render_html_preview(document, V5).payload.decode("utf-8")
     rows = list(csv.reader(io.StringIO(render_zephyr_csv(document, V6).payload.decode("utf-8-sig"), newline="")))
     assert sum(REQUEST_HEAD in cell for row in rows for cell in row) > outside  # the CSV has the block of every variant too
+
+
+def test_a_name_that_is_no_token_has_no_block() -> None:
+    form = _action(_arg(1, "method", "POST"), _arg(2, "path", "/owners/new"), _arg(3, "params", {"@/etc/passwd": "x"}))
+    header = _action(_arg(1, "method", "GET"), _arg(2, "path", "/owners"), _arg(3, "headers", {"@headers.txt": "x"}))
+    assert request_block(form, {}, CASE) is None and request_block(header, {}, CASE) is None
+
+
+def test_a_line_break_in_a_header_or_the_path_has_no_block() -> None:
+    header = _action(_arg(1, "method", "GET"), _arg(2, "path", "/owners"), _arg(3, "headers", {"X-Trace": "a\r\nX-Evil: 1"}))
+    path = _action(_arg(1, "method", "GET"), _arg(2, "path", "/owners\nX"))
+    assert request_block(header, {}, CASE) is None and request_block(path, {}, CASE) is None
+
+
+def test_the_reader_drops_the_block_of_a_crlf_cell() -> None:
+    from tools.zephyr_csv import parse_zephyr_csv
+
+    payload = render_zephyr_csv(json.loads(EXAMPLE.read_text(encoding="utf-8")), V6).payload.decode("utf-8-sig")
+    crlf = payload.replace("\r\n", "\x00").replace("\n", "\r\n").replace("\x00", "\r\n").encode("utf-8-sig")  # Excel keeps CRLF inside a cell
+    assert REQUEST_HEAD.encode() in crlf and REQUEST_HEAD not in json.dumps(parse_zephyr_csv(crlf), ensure_ascii=False)
