@@ -32,7 +32,7 @@ from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE, REWORK_V
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
-DEFAULT_WINDOW = 1_000_000  # DeepSeek 239k tokens / 0.239 tok/B
+DEFAULT_WINDOW = 1_000_000  # the working model: 239k tokens / 0.239 tok/B
 OVER_BUDGET = "STEP_OVER_BUDGET"
 RECORD = "step-sizes.jsonl"
 OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
