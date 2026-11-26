@@ -24,13 +24,15 @@ from tools.pilot_state import (  # the names of the journal these bodies read (Ð
     publish_artifact_value as _publish,
     read_artifact as _read_artifact,
     read_attempt_receipt,
-    read_closure_artifact_if_present,
     read_model_request_with_state as _read_model_request_with_state,
     read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
     read_run,
-    read_terminal_result,
     run_root_of as _run_root,
     sealed as _sealed,
+)
+from tools.run_closure import (  # the names of the closure these bodies read (ÐŸ1 of the cut of v0.8)
+    read_closure_artifact_if_present,
+    read_terminal_result,
 )
 
 

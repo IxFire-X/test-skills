@@ -2531,23 +2531,6 @@ def _check_phase1_artifact(project: Path, root: Path, attempt: Mapping[str, Any]
         raise ValueError("invalid phase1 artifact")
 
 
-def _check_review_canaries(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:  # the digests of the canary map and of the reviewer's view, bound to the assembled candidate
-    from tools.review_canaries import MAX_CANARIES
-
-    digests = ("candidate_digest", "view_digest", "canary_map_digest")
-    if (
-        set(receipt) != common | {*digests, "canary_count"}
-        or not identity_matches
-        or any(not _DIGEST.fullmatch(str(receipt.get(name, ""))) for name in digests)
-        or type(receipt.get("canary_count")) is not int
-        or not 0 <= receipt["canary_count"] <= MAX_CANARIES
-        or not any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt["attempt_id"]
-                   and event.get("stage_instance_id") == "assembly" and event.get("artifact_digest") == receipt["candidate_digest"]
-                   for event in state["events"])
-    ):
-        raise ValueError("invalid review-canaries receipt")
-
-
 def _check_structured_result(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
     expected = terminal_result({
         "run_id": attempt["run_id"], "attempt_id": attempt["attempt_id"],
@@ -2589,153 +2572,6 @@ def _check_reviewer_session_boundary(project: Path, root: Path, attempt: Mapping
         raise ValueError("invalid reviewer session boundary")
 
 
-def _check_effective_canonical(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
-    expected_keys = common | {"document", "document_digest", "effective_bundle_receipt", "effective_bundle_receipt_digest", "reviewer_session_digest"}
-    document = receipt.get("document")
-    bundle = receipt.get("effective_bundle_receipt")
-    ledger = None
-    terminal_reviewer = None
-    try:
-        from tools.canonical_document import document_sha256, validate_canonical_document
-        from tools.revision_selection import effective_review_is_bound
-        from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
-
-        reviewer_digest = str(receipt.get("reviewer_session_digest", ""))
-        ledger_target = root / "reviewer-session-ledgers" / str(attempt["attempt_id"]) / (reviewer_digest.removeprefix("sha256:") + ".json")
-        ledger_bytes = read_confined_bytes(project, root, ledger_target)
-        ledger = loads_json_strict(ledger_bytes.decode("utf-8")) if ledger_bytes is not None else None
-        terminal_reviewer = _terminal_reviewer_evidence_with_state(
-            project, root, state, str(attempt["attempt_id"]),
-        )
-        reviewer_boundary = _read_attempt_receipt_with_state(
-            project, root, state, str(attempt["attempt_id"]), "reviewer-session-boundary",
-            "ARTIFACT_READ_BACK",
-        )["record"]
-        package_binding = ledger.get("package_binding") if isinstance(ledger, Mapping) else None
-        reviewer_responses = [
-            event for event in state["events"]
-            if event.get("attempt_id") == attempt["attempt_id"]
-            and event.get("stage_instance_id") == "tc-reviewer:canonical"
-            and event.get("event_type") == "MODEL_RESPONSE_RECEIVED"
-        ]
-        reviewer_publication = _read_model_stage_artifact_with_state(
-            project, root, state, str(attempt["attempt_id"]), "tc-reviewer:canonical",
-            str(reviewer_responses[0].get("artifact_digest", "")),
-        ) if len(reviewer_responses) == 1 else None
-        reviewer_output = reviewer_publication.get("artifact") if isinstance(reviewer_publication, Mapping) else None
-        report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
-        successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
-        edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
-        if edits is not None:
-            # the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
-            # the edits of a canary text were dropped before the successor was made — they are dropped here too.
-            from tools.review_canaries import filter_edits, verify as verify_canaries
-            from tools.review_edits import edits_rebuild
-
-            edits = filter_edits(verify_canaries(root, str(attempt["attempt_id"])) or [], {"successor_edits": edits})[0].get("successor_edits")
-
-            successor = document if (
-                edits is not None and isinstance(document, Mapping) and isinstance(package_binding, Mapping)
-                and edits_rebuild(document, edits, str(package_binding.get("candidate_digest")))
-            ) else None
-        verdict_event = next(
-            (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
-            None,
-        ) if isinstance(ledger, Mapping) else None
-        partial: dict[str, Any] = {}
-        if isinstance(report, Mapping) and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted: bound to the candidate and the canaries of the journal
-            from tools.orchestrate_test_case_revision import journal_assembly
-            from tools.review_canaries import verify as verify_canaries
-
-            from tools.orchestrate_test_case_revision import rework_artifacts
-
-            partial = {"candidate": journal_assembly(root, str(attempt["attempt_id"]))[0], "canaries": verify_canaries(root, str(attempt["attempt_id"])) or [],
-                       "rework": rework_artifacts(root, str(attempt["attempt_id"]))}  # the answer of the rework and the review of it, when the journal has both
-        review_bound = (
-            isinstance(package_binding, Mapping)
-            and effective_review_is_bound(
-                package_binding.get("candidate_digest"),
-                dict(document) if isinstance(document, Mapping) else document,
-                dict(report) if isinstance(report, Mapping) else report,
-                dict(successor) if isinstance(successor, Mapping) else successor,
-                dict(verdict_event) if isinstance(verdict_event, Mapping) else verdict_event,
-                **partial,
-            )
-        )
-        ledger_events = [event for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == reviewer_digest]
-        ledger_body = {key: value for key, value in ledger.items() if key != "digest"} if isinstance(ledger, Mapping) else {}
-        canonical_ledger_bytes = json.dumps(ledger, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") if isinstance(ledger, Mapping) else None
-        canonical_ledger_digest = "sha256:" + hashlib.sha256(json.dumps(ledger_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-        boundary_events = [
-            event for event in state["events"]
-            if event.get("attempt_id") == attempt["attempt_id"]
-            and event.get("artifact_digest") == reviewer_boundary.get("digest")
-            and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-        ]
-        ledger_bound = (
-            isinstance(ledger, Mapping)
-            and isinstance(reviewer_boundary, Mapping)
-            and isinstance(package_binding, Mapping)
-            and ledger.get("digest") == reviewer_digest
-            and ledger.get("digest") == canonical_ledger_digest
-            and ledger_bytes == canonical_ledger_bytes
-            and not schema_diagnostics(dict(ledger), _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT)
-            and [event["event_type"] for event in ledger_events] == ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-            and [event["event_type"] for event in boundary_events] == ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-            and ledger.get("boundary_digest") == reviewer_boundary.get("digest")
-            and ledger.get("session_id") == reviewer_boundary.get("session_id")
-            and ledger.get("generator_role") == reviewer_boundary.get("generator_role")
-            and ledger.get("reviewer_role") == reviewer_boundary.get("reviewer_role")
-            and ledger.get("generator_invocation_id") == reviewer_boundary.get("generator_invocation_id")
-            and ledger.get("reviewer_invocation_id") == reviewer_boundary.get("reviewer_invocation_id")
-            and ledger.get("host_isolation") == reviewer_boundary.get("host_isolation")
-            and ledger.get("context_budget_bytes") == reviewer_boundary.get("context_budget_bytes")
-            and package_binding.get("candidate_digest") == reviewer_boundary.get("canonical_branch_digest")
-            and package_binding.get("package_digest") == reviewer_boundary.get("package_digest")
-            and ledger.get("status") == "COMPLETED"
-            and terminal_reviewer.get("digest") == reviewer_digest
-            and terminal_reviewer.get("authoritative_verdict") == "ACCEPTED"
-            and isinstance(ledger.get("host_isolation"), Mapping)
-            and (
-                ledger["host_isolation"].get("fresh_context") is True
-                and ledger["host_isolation"].get("distinct_invocations") is True
-                or _self_review_accepted_at(project, root, state)
-            )
-            and ledger["host_isolation"].get("role_policy") == "canonical-reviewer-v1"
-            and isinstance(ledger.get("events"), list)
-            and sum(event.get("event_type") == "AUTHORITATIVE_VERDICT" for event in ledger["events"] if isinstance(event, Mapping)) == 1
-            and next(event for event in ledger["events"] if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT").get("verdict") == "ACCEPTED"
-            and bool(ledger["events"])
-            and isinstance(ledger["events"][-1], Mapping)
-            and ledger["events"][-1].get("event_type") == "REVIEW_SESSION_COMPLETED"
-        )
-    except (ImportError, UnicodeDecodeError, StrictJsonError, ValueError, OutputConfinementError, KeyError, TypeError, AttributeError):
-        ledger_bound = False
-    normalized_bundle_keys = ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")
-    normalized_bundle = {key: bundle.get(key) for key in normalized_bundle_keys} if isinstance(bundle, Mapping) else {}
-    bundle_digest = "sha256:" + hashlib.sha256(_canonical_bytes(normalized_bundle)).hexdigest()
-    if (
-        set(receipt) != expected_keys
-        or not identity_matches
-        or not isinstance(document, Mapping)
-        or bool(validate_canonical_document(dict(document)))
-        or receipt.get("document_digest") != document_sha256(dict(document))
-        or not isinstance(bundle, Mapping)
-        or set(bundle) != set(normalized_bundle_keys)
-        or bundle.get("document_id") != document.get("document_id")
-        or bundle.get("revision") != document.get("revision")
-        or bundle.get("document_sha256") != receipt.get("document_digest")
-        or bundle.get("csv_profile") not in {"zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4"}
-        or any(not isinstance(bundle.get(key), str) or not bundle.get(key) for key in ("json_path", "preview_path", "csv_path"))
-        or any(not _DIGEST.fullmatch(str(bundle.get(key, ""))) for key in ("document_sha256", "preview_sha256", "csv_sha256"))
-        or receipt.get("effective_bundle_receipt_digest") != bundle_digest
-        or not _DIGEST.fullmatch(str(receipt.get("reviewer_session_digest", "")))
-        or not ledger_bound
-        or not review_bound
-    ):
-        raise ValueError("invalid effective canonical receipt")
-
-
 def _validate_factual_receipt(
     project: Path,
     root: Path,
@@ -2744,10 +2580,10 @@ def _validate_factual_receipt(
     receipt: Mapping[str, Any],
     state: Mapping[str, Any],
 ) -> None:
-    """One factual receipt: the fields every kind has here, the rest by the check of its kind — ``_RECEIPT_CHECKS``, then the kinds of
-    cases of ``model_inputs`` (``RECEIPT_CHECKS``, then its families by prefix), then a kind of mode B by its module through the gate; a
-    kind of none is refused."""
-    from tools import model_inputs  # the kinds of cases: above the journal by layers, in either delivery
+    """One factual receipt: the fields every kind has here, the rest by the check of its kind — ``_RECEIPT_CHECKS``, then the
+    ``RECEIPT_CHECKS`` of the modules above the journal (``effective_canonical``, ``run_closure``, ``model_inputs``, then the families of
+    cases by prefix), then a kind of mode B by its module through the gate; a kind of none is refused."""
+    from tools import effective_canonical, model_inputs, run_closure  # the owners of kinds: above the journal by layers, in either delivery
 
     common = {"schema_version", "kind", "run_id", "attempt_id", "policy_profile", "digest"}
     identity_matches = (
@@ -2756,7 +2592,8 @@ def _validate_factual_receipt(
         and receipt.get("attempt_id") == attempt["attempt_id"]
         and receipt.get("policy_profile") == attempt["policy_profile"]
     )
-    check = (_RECEIPT_CHECKS.get(kind) or model_inputs.RECEIPT_CHECKS.get(kind)
+    check = (_RECEIPT_CHECKS.get(kind) or effective_canonical.RECEIPT_CHECKS.get(kind) or run_closure.RECEIPT_CHECKS.get(kind)
+             or model_inputs.RECEIPT_CHECKS.get(kind)
              or next((check for prefix, check in model_inputs.RECEIPT_FAMILIES if kind.startswith(prefix)), None))
     if check is None and kind in _MODE_B_KINDS:  # MODE_B_NOT_IN_PACKAGE in a delivery of cases
         check = execution_gate.from_mode_b("execution_journal", "RECEIPT_CHECKS")[0][kind]
@@ -3007,31 +2844,6 @@ def bind_bytes(run_root: Path, attempt_id: str, target: Path, data: bytes, *, di
     return {"created": created, "installed_identity": identity, "path": str(target.relative_to(root)).replace("\\", "/"), "digest": digest}
 
 
-def publish_effective_canonical(
-    run_root: Path, attempt_id: str, document: Mapping[str, Any], effective_bundle_receipt: Mapping[str, Any], reviewer_session_digest: str,
-) -> Mapping[str, Any]:
-    """Freeze the sole Phase-4 effective selection before any V5 input exists."""
-    bundle_fields = ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")
-    bundle = {key: effective_bundle_receipt.get(key) for key in bundle_fields}
-    try:
-        from tools.canonical_document import document_sha256
-
-        value = {
-            "document": dict(document), "document_digest": document_sha256(dict(document)),
-            "effective_bundle_receipt": bundle,
-            "effective_bundle_receipt_digest": "sha256:" + hashlib.sha256(_canonical_bytes(bundle)).hexdigest(),
-            "reviewer_session_digest": reviewer_session_digest,
-        }
-        published = publish_bound(run_root, attempt_id, "effective-canonical", value)
-    except (AttributeError, ValueError) as error:
-        if isinstance(error, ReceiptFileUnbound):
-            raise
-        raise ValueError("invalid effective canonical selection") from error
-    if any(published["record"].get(key) != value.get(key) for key in value):
-        raise ValueError("conflicting effective canonical selection")
-    return {key: item for key, item in published.items() if key != "installed_identity"}
-
-
 def _execution_inputs_frontier_closed(run_root: Path, attempt_id: str) -> bool:
     """Return whether any effect which requires read-back inputs already exists."""
     project, root = _run_root(run_root)
@@ -3103,95 +2915,6 @@ def read_resume_validation_if_present(
     return _recover_attempt_receipt_events(root, attempt_id, "resume-validation")["record"]
 
 
-def _read_effective_canonical_with_state(
-    project: Path,
-    root: Path,
-    state: Mapping[str, Any],
-    attempt_id: str,
-) -> Mapping[str, Any]:
-    readback = _read_attempt_receipt_with_state(
-        project, root, state, attempt_id,
-        "effective-canonical", "ARTIFACT_READ_BACK",
-    )
-    events = [
-        event for event in state["events"]
-        if event.get("attempt_id") == attempt_id
-        and event.get("artifact_digest") == readback["digest"]
-        and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-    ]
-    if [event["event_type"] for event in events] != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]:
-        raise ValueError("invalid effective canonical event binding")
-    return readback["record"]
-
-
-@closure_cached
-def read_effective_canonical(
-    run_root: Path,
-    attempt_id: str,
-) -> Mapping[str, Any]:
-    """Return only the fixed attempt-owned effective selection after read-back."""
-    project, root = _run_root(run_root)
-    return _read_effective_canonical_with_state(
-        project, root, derive_state(root), attempt_id,
-    )
-
-
-def read_effective_canonical_if_present(
-    run_root: Path,
-    attempt_id: str,
-) -> Mapping[str, Any] | None:
-    """Return the fixed selection only when its durable slot exists."""
-    project, root = _run_root(run_root)
-    target = _receipt_target(root, attempt_id, "effective-canonical")
-    try:
-        raw = read_confined_bytes(project, root, target)
-    except OutputConfinementError as error:
-        raise ValueError("unsafe effective-canonical path") from error
-    if raw is None:
-        return None
-    return read_effective_canonical(root, attempt_id)
-
-
-def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """PT2: what ``status`` and the report read — the effective selection, or ``{"effective": None, "reason": …}`` while the journal says there is none.
-
-    "None yet" is decided by the journal, never by a missing file: a file that is there is read as before (validated against its
-    events); a file that is gone or replaced where the journal recorded an accepting verdict is the refusal it always was.
-    Without a recorded verdict of the review: not yet.  With one that does not accept the candidate (REJECTED): never."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    if next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None) is None:
-        return _read_effective_canonical_with_state(project, root, state, attempt_id)  # unknown attempt: its refusal
-    if _receipt_target(root, attempt_id, "effective-canonical").exists():
-        return _read_effective_canonical_with_state(project, root, state, attempt_id)
-    recorded = any(event.get("event_type") == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id
-                   and event.get("stage_instance_id") == "tc-reviewer:canonical" for event in state["events"])
-    if not recorded:
-        return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (`submit --stage tc-reviewer:canonical`)"}
-    not_yet = {"effective": None, "reason": "ещё нет: ответ ревьюера записан, ревизия не выбрана — повтори `submit --stage tc-reviewer:canonical`"}
-    # the order of the writes of the selection (``submit`` of the review) decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
-    # canonical (orchestrate_revision: validate_reviewer_session, then publish_effective_canonical).  So a latest revision still waiting for its
-    # READ_BACK, a ledger still WAITING (no verdict), and a closed accepting ledger with no attempt-level receipt read back after it all mean the
-    # effective canonical was not published yet — a repeat of ``submit`` does it.  Only a published selection whose file is gone is a refusal.
-    try:
-        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None)
-        confirmed = True
-    except ValueError:
-        ledger, confirmed = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None, unconfirmed_ok=True), False  # unreadable too: the refusal
-    verdict = next((event.get("verdict") for event in ledger["events"] if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"), None)
-    if verdict == "REJECTED":
-        return {"effective": None, "reason": "effective нет: вердикт ТРЕБУЕТ ДОРАБОТКИ (REJECTED) не принимает кандидата"}
-    if verdict is None or not confirmed:
-        return not_yet
-    closed = next((event["seq"] for event in state["events"] if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id
-                   and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == ledger["digest"]), None)
-    selected = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") is None
-                   and closed is not None and event["seq"] > closed for event in state["events"])
-    if not selected:
-        return not_yet
-    return _read_effective_canonical_with_state(project, root, state, attempt_id)  # a published selection whose file is gone: the refusal
-
-
 def _recover_attempt_receipt_events(run_root: Path, attempt_id: str, kind: str) -> Mapping[str, Any]:
     """Repair only missing journal bindings for one exact fixed receipt."""
     project, root = _run_root(run_root)
@@ -3242,10 +2965,11 @@ def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None
 
 _PRIOR_KIND = "prior-capabilities-"  # + batch_id — the fifth tc-generator input from batch 2
 _SKELETON_KIND = "imported-cases-"  # + batch_id — the skeleton of the batch, its last tc-generator input
-# a kind -> its check (``_validate_factual_receipt``); the kinds of cases are in ``model_inputs`` (``RECEIPT_CHECKS``, ``RECEIPT_FAMILIES``)
+# a kind -> its check (``_validate_factual_receipt``); the kinds of the modules above the journal are in their ``RECEIPT_CHECKS``
+# (``effective_canonical``, ``run_closure``, ``model_inputs``; the families of cases: ``model_inputs.RECEIPT_FAMILIES``)
 _RECEIPT_CHECKS = {
-    "phase1-artifact": _check_phase1_artifact, "review-canaries": _check_review_canaries, "structured-result": _check_structured_result,
-    "reviewer-session-boundary": _check_reviewer_session_boundary, "effective-canonical": _check_effective_canonical,
+    "phase1-artifact": _check_phase1_artifact, "structured-result": _check_structured_result,
+    "reviewer-session-boundary": _check_reviewer_session_boundary,
 }
 # the kinds of mode B: their checks are in its module (``execution_journal``), which a delivery of cases does not carry
 _MODE_B_KINDS = frozenset({
@@ -3502,265 +3226,6 @@ def _validate_execution_event_branch(
         raise ValueError("execution-unknown event order is invalid")
 
 
-def publish_closure_artifact(
-    run_root: Path,
-    attempt_id: str,
-    kind: str,
-    artifact: Mapping[str, Any],
-) -> Mapping[str, Any]:
-    """Publish/read back one immutable pre-terminal closure artifact."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt["state"] == "TERMINAL" or kind not in _CLOSURE_KINDS:
-        raise ValueError("invalid closure artifact attempt")
-    value = dict(artifact)
-    digest = value.get("digest")
-    if not isinstance(digest, str) or not _DIGEST.fullmatch(digest) or _sealed({key: item for key, item in value.items() if key != "digest"}) != value:
-        raise ValueError("invalid closure artifact digest")
-    if any(value.get(key) != attempt.get(key) for key in ("run_id", "attempt_id", "policy_profile")):
-        raise ValueError("closure artifact identity is invalid")
-    schema_name = {
-        "pre_finalization_trace": "pre-finalization-trace.schema.json",
-        "finalization_receipt": "finalization-receipt.schema.json",
-        "terminal_trace": "derived-terminal-trace.schema.json",
-    }[kind]
-    _validate_schema(schema_name, value)
-    if kind == "pre_finalization_trace":
-        try:
-            terminal_reviewer = terminal_reviewer_evidence(
-                root, attempt_id,
-            )
-            effective = read_effective_canonical_if_present(
-                root, attempt_id,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("pre-finalization canonical lineage is invalid") from error
-        reviewer = value.get("reviewer")
-        expected_reviewer = {
-            key: terminal_reviewer[key]
-            for key in (
-                "digest", "session_complete", "authoritative_verdict",
-                "authoritative_verdict_count", "pre_verdict_abort", "isolation", "self_accepted",
-            )
-            if key in terminal_reviewer
-        }
-        expected_effective = effective.get("document_digest") if effective is not None else None
-        admitted = terminal_reviewer["isolation"] == "verified" or terminal_reviewer.get("self_accepted") is True
-        if terminal_reviewer["authoritative_verdict"] == "ACCEPTED" and admitted and effective is None:
-            raise ValueError("pre-finalization effective canonical is unavailable")
-        if (
-            value.get("effective_canonical_digest") != expected_effective
-            or value.get("canonical_digest") != terminal_reviewer.get("canonical_digest")
-            or not isinstance(reviewer, Mapping)
-            or dict(reviewer) != expected_reviewer
-        ):
-            raise ValueError("pre-finalization canonical lineage is invalid")
-        disposition_digest = value.get("disposition_receipt_digest")
-        disposition_event_digest = None
-        if disposition_digest is not None:
-            try:
-                disposition_record = read_attempt_receipt(
-                    root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK",
-                )["record"]
-                disposition = disposition_record["payload"]
-                disposition_event_digest = disposition_record["digest"]
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError("pre-finalization disposition binding is invalid") from error
-            if (
-                disposition.get("digest") != disposition_digest
-                or value.get("generated_delta_digest") != disposition.get("generated_delta_digest")
-                or value.get("disposition_verification") != disposition.get("verification")
-                or value.get("dispositions") != disposition.get("files")
-            ):
-                raise ValueError("pre-finalization disposition binding is invalid")
-        execution = value.get("execution")
-        execution_digest = execution.get("execution_receipt_digest") if isinstance(execution, Mapping) else None
-        _validate_execution_event_branch(
-            state["events"], attempt_id,
-            str(execution.get("verification")) if isinstance(execution, Mapping) else "",
-            execution_digest if isinstance(execution_digest, str) else None,
-        )
-        if execution_digest is not None:
-            try:
-                execution_record = read_attempt_receipt(
-                    root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-                )["record"]
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError("pre-finalization execution binding is invalid") from error
-            if execution_record.get("digest") != execution_digest or execution_record.get("payload", {}).get("verdict") != execution.get("verification"):
-                raise ValueError("pre-finalization execution binding is invalid")
-        try:
-            resume_validation = read_resume_validation_if_present(
-                root, attempt_id,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("pre-finalization resume validation binding is invalid") from error
-        resume_digest = value.get("resume_validation_digest")
-        if isinstance(resume_validation, Mapping) and (
-            resume_validation.get("execution_receipt_digest") != execution_digest
-        ):
-            raise ValueError("pre-finalization resume validation binding is invalid")
-        if resume_digest is not None:
-            if (
-                not isinstance(resume_validation, Mapping)
-                or resume_validation.get("digest") != resume_digest
-                or resume_validation.get("pre_finalization_trace_digest") is not None
-            ):
-                raise ValueError("pre-finalization resume validation binding is invalid")
-        elif isinstance(resume_validation, Mapping):
-            if resume_validation.get("pre_finalization_trace_digest") != value.get("digest"):
-                raise ValueError("pre-finalization late validation binding is invalid")
-            ordered = [
-                (index, event.get("event_type"), event.get("artifact_digest"))
-                for index, event in enumerate(state["events"])
-                if event.get("attempt_id") == attempt_id
-                and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-                and event.get("artifact_digest") in {value.get("digest"), resume_validation.get("digest")}
-            ]
-            pretrace_readbacks = [
-                index for index, event_type, digest in ordered
-                if event_type == "ARTIFACT_READ_BACK" and digest == value.get("digest")
-            ]
-            late_events = [
-                (index, event_type) for index, event_type, digest in ordered
-                if digest == resume_validation.get("digest")
-            ]
-            if (
-                len(pretrace_readbacks) != 1
-                or [event_type for _index, event_type in late_events]
-                != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-                or pretrace_readbacks[0] >= late_events[0][0]
-            ):
-                raise ValueError("pre-finalization late validation order is invalid")
-        trace_binding = value.get("execution_trace")
-        if not isinstance(trace_binding, Mapping):
-            raise ValueError("pre-finalization execution trace binding is invalid")
-        if trace_binding.get("applicability") == "PRESENT":
-            trace_digest = trace_binding.get("trace_receipt_digest")
-            audit_digest = trace_binding.get("audit_receipt_digest")
-            try:
-                trace_record = read_attempt_receipt(
-                    root, attempt_id, "execution-trace", "ARTIFACT_READ_BACK",
-                )["record"]
-                audit_record = read_attempt_receipt(
-                    root, attempt_id, "trace-audit", "ARTIFACT_READ_BACK",
-                )["record"]
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError("pre-finalization execution trace binding is invalid") from error
-            audit_payload = audit_record.get("payload")
-            audit_lifecycle = audit_payload.get("trace_audit", {}).get("lifecycle") if isinstance(audit_payload, Mapping) else None
-            if (
-                trace_record.get("digest") != trace_digest
-                or trace_record.get("trace_sha256") != trace_binding.get("trace_sha256")
-                or audit_record.get("digest") != audit_digest
-                or audit_record.get("execution_trace_receipt_digest") != trace_digest
-                or audit_record.get("trace_sha256") != trace_binding.get("trace_sha256")
-                or not isinstance(audit_payload, Mapping)
-                or trace_binding.get("audit_valid") is not audit_payload.get("valid")
-                or not isinstance(audit_lifecycle, Mapping)
-                or audit_lifecycle.get("verification") != execution.get("verification")
-            ):
-                raise ValueError("pre-finalization execution trace binding is invalid")
-            readback_positions = {
-                event_digest: index
-                for index, event in enumerate(state["events"])
-                if event.get("attempt_id") == attempt_id
-                and event.get("event_type") == "ARTIFACT_READ_BACK"
-                and (event_digest := event.get("artifact_digest")) in {trace_digest, audit_digest, disposition_event_digest}
-            }
-            if (
-                set(readback_positions) != {trace_digest, audit_digest, disposition_event_digest}
-                or not (readback_positions[trace_digest] < readback_positions[audit_digest] < readback_positions[disposition_event_digest])
-            ):
-                raise ValueError("pre-finalization lifecycle order is invalid")
-        elif trace_binding != {
-            "applicability": "NOT_APPLICABLE", "trace_receipt_digest": None,
-            "trace_sha256": None, "audit_receipt_digest": None, "audit_valid": None,
-        }:
-            raise ValueError("pre-finalization execution trace binding is invalid")
-    elif kind == "finalization_receipt":
-        pre_digest = value.get("pre_finalization_trace_digest")
-        if not isinstance(pre_digest, str):
-            raise ValueError("finalization receipt pre-trace binding is invalid")
-        pre_trace = read_closure_artifact(
-            root, attempt_id, "pre_finalization_trace", pre_digest,
-        )
-        try:
-            from tools.finalize_attempt import verify_finalization
-
-            resume_validation = read_resume_validation_if_present(
-                root, attempt_id,
-            )
-            post_pretrace_digest = (
-                resume_validation.get("digest")
-                if isinstance(resume_validation, Mapping)
-                and resume_validation.get("pre_finalization_trace_digest") == pre_digest
-                else None
-            )
-            verifier_inputs = {
-                "run_id": pre_trace["run_id"],
-                "attempt_id": pre_trace["attempt_id"],
-                "policy_profile": pre_trace["policy_profile"],
-                "pre_finalization_trace_digest": pre_digest,
-                "required_artifacts": value.get("checked_artifacts"),
-            }
-            if post_pretrace_digest is not None:
-                verifier_inputs["post_pretrace_validation_digest"] = post_pretrace_digest
-            expected = verify_finalization(verifier_inputs, pre_trace)
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("finalization receipt verification is invalid") from error
-        if expected != value:
-            raise ValueError("finalization receipt verification is invalid")
-    elif kind == "terminal_trace":
-        pre_digest = value.get("pre_finalization_trace_digest")
-        finalization_digest = value.get("finalization_receipt_digest")
-        if (
-            not isinstance(pre_digest, str)
-            or not isinstance(finalization_digest, str)
-            or read_closure_artifact(
-                root, attempt_id, "pre_finalization_trace", pre_digest,
-            ).get("digest") != pre_digest
-            or read_closure_artifact(
-                root, attempt_id, "finalization_receipt", finalization_digest,
-            ).get("digest") != finalization_digest
-        ):
-            raise ValueError("terminal trace closure binding is invalid")
-        result_digest = value.get("terminal_result_digest")
-        try:
-            result = _read_artifact(project, root, root / "terminal-results" / f"{attempt_id}.json", "terminal result")
-        except (OSError, ValueError) as error:
-            raise ValueError("terminal trace result binding is invalid") from error
-        result_events = [
-            item["event_type"] for item in state["events"]
-            if item.get("attempt_id") == attempt_id and item.get("artifact_digest") == result_digest
-            and item.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-        ]
-        if result.get("digest") != result_digest or result_events != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]:
-            raise ValueError("terminal trace result binding is invalid")
-    target = _closure_target(root, attempt_id, kind, digest)
-    record, created, identity = _publish(project, root, target, {key: item for key, item in value.items() if key != "digest"}, kind.replace("_", " "), return_created=True)
-    if record != value:
-        raise ValueError("closure artifact read-back mismatch")
-    relevant = [
-        event["event_type"] for event in derive_state(root)["events"]
-        if event.get("attempt_id") == attempt_id
-        and event.get("artifact_digest") == digest
-        and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-    ]
-    if relevant == []:
-        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=digest)
-    elif relevant not in (["ARTIFACT_PUBLISHED"], ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]):
-        raise ValueError("invalid closure artifact event order")
-    if read_confined_bytes(project, root, target) != _canonical_bytes(record):
-        raise ValueError("closure artifact lost after publication binding")
-    if relevant != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]:
-        append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=digest)
-    if read_confined_bytes(project, root, target) != _canonical_bytes(record):
-        raise ValueError("closure artifact lost after read-back binding")
-    return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": _canonical_bytes(record), "record": record, "created": created, "installed_identity": identity}
-
-
 def read_closure_artifact(
     run_root: Path,
     attempt_id: str,
@@ -3775,39 +3240,6 @@ def read_closure_artifact(
     if value.get("digest") != digest or not any(item["event_type"] == "ARTIFACT_PUBLISHED" for item in events) or not any(item["event_type"] == "ARTIFACT_READ_BACK" for item in events):
         raise ValueError("closure artifact binding is invalid")
     return value
-
-
-def read_closure_artifact_if_present(
-    run_root: Path,
-    attempt_id: str,
-    kind: str,
-) -> Mapping[str, Any] | None:
-    """Read or finish binding the one immutable closure slot already installed."""
-    project, root = _run_root(run_root)
-    if kind not in _CLOSURE_KINDS or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
-        raise ValueError("invalid closure artifact identity")
-    target = root / "closure" / attempt_id / f"{kind}.json"
-    try:
-        raw = read_confined_bytes(project, root, target)
-    except OutputConfinementError as error:
-        raise ValueError("unsafe closure artifact path") from error
-    if raw is None:
-        return None
-    value = _read_artifact(project, root, target, kind.replace("_", " "))
-    digest = value.get("digest")
-    if not isinstance(digest, str):
-        raise ValueError("closure artifact digest is unavailable")
-    try:
-        return read_closure_artifact(
-            root, attempt_id, kind, digest,
-        )
-    except ValueError:
-        # Installation precedes journal binding.  A controller interruption may
-        # therefore leave the exact fixed-slot bytes with no READ_BACK event.
-        # Republishing the same sealed value is non-mutating and lets the normal
-        # publisher recover only the missing ordered binding events; conflicting
-        # bytes or event orders still fail closed there.
-        return publish_closure_artifact(root, attempt_id, kind, value)["record"]
 
 
 def _validate_terminal_transition(
@@ -3865,209 +3297,6 @@ def _validate_terminal_transition(
     )
 
 
-def _validate_accepted_terminal_closure(
-    root: Path,
-    result: Mapping[str, Any],
-    finalization_receipt: Mapping[str, Any],
-    state: Mapping[str, Any],
-) -> None:
-    """Prevent a low-level caller from projecting acceptance beyond durable trace facts."""
-    if result.get("accepted") is not True:
-        return
-    attempt_id = str(result["attempt_id"])
-    pre_digest = finalization_receipt.get("pre_finalization_trace_digest")
-    if finalization_receipt.get("valid") is not True or not isinstance(pre_digest, str):
-        raise ValueError("accepted terminal result lacks valid pre-finalization evidence")
-    pre_trace = read_closure_artifact(
-        root, attempt_id, "pre_finalization_trace", pre_digest,
-    )
-    reviewer = pre_trace.get("reviewer")
-    evidence = result.get("evidence")
-    applicability = pre_trace.get("evidence")
-    execution = pre_trace.get("execution")
-    rows = pre_trace.get("dispositions")
-    trace_binding = pre_trace.get("execution_trace")
-    if not all(isinstance(value, Mapping) for value in (reviewer, evidence, applicability, execution, trace_binding)) or not isinstance(rows, list):
-        raise ValueError("accepted terminal result lacks valid pre-finalization evidence")
-    reviewer_bindings = {
-        "reviewer_session_complete": reviewer.get("session_complete"),
-        "authoritative_verdict": reviewer.get("authoritative_verdict"),
-        "authoritative_verdict_count": reviewer.get("authoritative_verdict_count"),
-        "reviewer_pre_verdict_abort": reviewer.get("pre_verdict_abort"),
-        "reviewer_isolation_state": reviewer.get("isolation"),
-    }
-    if any(evidence.get(key) != value for key, value in reviewer_bindings.items()) or result.get("review_independence") != (
-        "SELF" if reviewer.get("self_accepted") is True else None
-    ):
-        raise ValueError("accepted terminal result contradicts pre-finalization reviewer evidence")
-    try:
-        effective = read_effective_canonical(root, attempt_id)
-        document = effective["document"]
-        steps = [
-            (case["case_id"], step)
-            for case in document["test_cases"]
-            for step in case["steps"]
-        ]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("accepted terminal result lacks an effective canonical") from error
-    from tools.canonical_document import blocker_count as canonical_blocker_count
-
-    blocker_count = canonical_blocker_count(document)
-    manual_steps = sum(step["manual_only"] is True for _case_id, step in steps)
-    coverage = "MANUAL_ONLY" if manual_steps == len(steps) else "MIXED" if manual_steps else "FULL"
-    if (
-        blocker_count != 0
-        or evidence.get("blocker_count") != blocker_count
-        or result.get("coverage") != coverage
-        or pre_trace.get("canonical_digest") is None
-        or pre_trace.get("effective_canonical_digest") != effective.get("document_digest")
-    ):
-        raise ValueError("accepted terminal result contradicts canonical coverage")
-    profile = result.get("policy_profile")
-    if profile == "cases-only-v1":
-        if (
-            any(applicability.get(key) != "NOT_APPLICABLE" for key in ("materialization", "execution", "dispositions"))
-            or execution.get("verification") != "NOT_APPLICABLE"
-            or rows
-            or pre_trace.get("generated_delta_digest") is not None
-            or pre_trace.get("disposition_receipt_digest") is not None
-            or trace_binding != {
-                "applicability": "NOT_APPLICABLE", "trace_receipt_digest": None,
-                "trace_sha256": None, "audit_receipt_digest": None, "audit_valid": None,
-            }
-            or evidence.get("materialization_applicability") != "NOT_APPLICABLE"
-            or evidence.get("execution_applicability") != "NOT_APPLICABLE"
-            or any(evidence.get(key) != 0 for key in (
-                "generated_required_count", "generated_materialized_count", "generated_retained_count",
-            ))
-        ):
-            raise ValueError("accepted cases-only result contradicts pre-finalization evidence")
-        return
-    if profile != "local-pilot-v1":
-        raise ValueError("accepted terminal result has unknown policy profile")
-    try:
-        trace_record = read_attempt_receipt(
-            root, attempt_id, "execution-trace", "ARTIFACT_READ_BACK",
-        )["record"]
-        audit_record = read_attempt_receipt(
-            root, attempt_id, "trace-audit", "ARTIFACT_READ_BACK",
-        )["record"]
-        trace_document = trace_record["payload"]
-        audit_document = audit_record["payload"]
-        relations = trace_document["implementation_relations"]
-        trace_files = trace_document["files"]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("accepted local result lacks durable trace evidence") from error
-    if (
-        any(applicability.get(key) != "PRESENT" for key in ("materialization", "execution", "dispositions"))
-        or execution.get("verification") != "PASS"
-        or not isinstance(execution.get("execution_receipt_digest"), str)
-        or not isinstance(pre_trace.get("generated_delta_digest"), str)
-        or not isinstance(pre_trace.get("disposition_receipt_digest"), str)
-        or trace_binding.get("applicability") != "PRESENT"
-        or trace_binding.get("trace_receipt_digest") != trace_record.get("digest")
-        or trace_binding.get("trace_sha256") != trace_record.get("trace_sha256")
-        or trace_binding.get("audit_receipt_digest") != audit_record.get("digest")
-        or trace_binding.get("audit_valid") is not True
-        or audit_document.get("valid") is not True
-        or audit_record.get("execution_trace_receipt_digest") != trace_record.get("digest")
-        or not isinstance(relations, list)
-        or not isinstance(trace_files, list)
-        or not rows
-        or any(row.get("materialization") != "MATERIALIZED" or row.get("disposition") != "RETAINED" for row in rows if isinstance(row, Mapping))
-        or any(not isinstance(row, Mapping) for row in rows)
-    ):
-        raise ValueError("accepted local result lacks execution and retained dispositions")
-    required_count = len(rows)
-    if (
-        evidence.get("materialization_applicability") != "REQUIRED"
-        or evidence.get("execution_applicability") != "REQUIRED"
-        or evidence.get("generated_required_count") != required_count
-        or evidence.get("generated_materialized_count") != required_count
-        or evidence.get("generated_retained_count") != required_count
-        or evidence.get("automation_accepted") is not True
-        or evidence.get("exact_target_pass") is not True
-        or evidence.get("trace_valid") is not True
-        or evidence.get("operational_reliable") is not True
-        or evidence.get("mixed_manual_traceable") is not (coverage == "MIXED")
-    ):
-        raise ValueError("accepted local result contradicts generated-file evidence")
-    actual_operations = {
-        (row.get("case_id"), row.get("step_id"))
-        for row in relations
-        if isinstance(row, Mapping) and row.get("kind") == "operation"
-    }
-    actual_assertions = {
-        (row.get("case_id"), row.get("step_id"), row.get("expectation_id"), row.get("assertion_id"))
-        for row in relations
-        if isinstance(row, Mapping) and row.get("kind") == "assertion"
-    }
-    expected_operations = {
-        (case_id, step["step_id"])
-        for case_id, step in steps
-        if not step["manual_only"]
-    }
-    expected_assertions = {
-        (case_id, step["step_id"], expectation["expectation_id"], assertion["assertion_id"])
-        for case_id, step in steps
-        if not step["manual_only"]
-        for expectation in step["expectations"]
-        for assertion in expectation["assertions"]
-    }
-    related_files = {row.get("file_id") for row in trace_files if isinstance(row, Mapping)}
-    disposition_files = {row["file_id"] for row in rows}
-    if not expected_operations <= actual_operations or not expected_assertions <= actual_assertions or related_files != disposition_files:
-        raise ValueError("accepted local result has incomplete trace relations")
-
-
-def publish_terminal_result(run_root: Path, facts: Mapping[str, Any], policy_profile: str, *, finalization_receipt: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
-    result = terminal_result(facts, policy_profile)
-    if result["attempt_state"] != "TERMINAL" or not _validate_result_record(result):
-        raise ValueError("terminal result is invalid")
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == result["attempt_id"]), None)
-    if attempt is None or attempt["run_id"] != result["run_id"] or attempt["policy_profile"] != policy_profile:
-        raise ValueError("terminal result binding is invalid")
-    if finalization_receipt is None:
-        if attempt["state"] != "TERMINAL":
-            raise ValueError("terminal result binding is invalid")
-    else:
-        if attempt["state"] == "TERMINAL":
-            raise ValueError("terminal attempt is immutable")
-        digest = finalization_receipt.get("digest")
-        if not isinstance(digest, str) or read_closure_artifact(
-            root, result["attempt_id"], "finalization_receipt", digest,
-        ) != finalization_receipt:
-            raise ValueError("terminal finalization receipt binding is invalid")
-        if (
-            finalization_receipt.get("stage") != "finalization"
-            or result["finalization_valid"] is not bool(finalization_receipt.get("valid"))
-            or any(finalization_receipt.get(key) != result.get(key) for key in ("run_id", "attempt_id", "policy_profile"))
-        ):
-            raise ValueError("terminal finalization receipt binding is invalid")
-        _validate_accepted_terminal_closure(root, result, finalization_receipt, state)
-    target = root / "terminal-results" / f"{result['attempt_id']}.json"
-    record, created, identity = _publish(project, root, target, {key: value for key, value in result.items() if key != "digest"}, "terminal result", return_created=True)
-    if finalization_receipt is not None:
-        _bind_events(root, result["attempt_id"], record["digest"])
-    return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": _canonical_bytes(record), "record": record, "created": created, "installed_identity": identity}
-
-
-def read_terminal_result(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """Return only a result already bound by the immutable terminal event."""
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt["state"] != "TERMINAL":
-        raise KeyError(attempt_id)
-    result = _read_artifact(project, root, root / "terminal-results" / f"{attempt_id}.json", "terminal result")
-    terminal = next((item for item in state["events"] if item.get("attempt_id") == attempt_id and item["event_type"] == "ATTEMPT_TERMINAL"), None)
-    if terminal is None or terminal.get("artifact_digest") != result.get("digest"):
-        raise ValueError("terminal result binding is invalid")
-    return result
-
-
 def _project_state_for(policy_profile: str, project: Path) -> dict[str, Any] | None:
     """What a run says about git in the project at its start — by looking at the file system, never by starting ``git``.
 
@@ -4120,7 +3349,6 @@ model_lifecycle_projection_with_state = _model_lifecycle_projection_with_state
 phase5_generated_delta = _phase5_generated_delta
 read_artifact = _read_artifact
 read_attempt_receipt_with_state = _read_attempt_receipt_with_state
-read_effective_canonical_with_state = _read_effective_canonical_with_state
 read_model_request_with_state = _read_model_request_with_state
 read_model_stage_artifact_with_state = _read_model_stage_artifact_with_state
 receipt_target = _receipt_target
@@ -4132,13 +3360,16 @@ validate_schema = _validate_schema
 
 # what the modules of the model step and of the observations take from here — public names of the same objects (П1 of the
 # cut of v0.8)
+CLOSURE_KINDS = _CLOSURE_KINDS
 MODEL_STAGE_INSTANCE = _MODEL_STAGE_INSTANCE
 MODEL_STAGE_REGISTRY = _MODEL_STAGE_REGISTRY
 PRIOR_KIND = _PRIOR_KIND
 REWORK_REVIEW_STAGE = _REWORK_REVIEW_STAGE
 REWORK_STAGE = _REWORK_STAGE
 SKELETON_KIND = _SKELETON_KIND
+bind_events = _bind_events
 canonical_bytes = _canonical_bytes
+closure_target = _closure_target
 context_marker_parts = _context_marker_parts
 context_marker_receipt_digests = _context_marker_receipt_digests
 context_marker_snapshots = _context_marker_snapshots
@@ -4150,11 +3381,14 @@ model_stage_artifact_target = _model_stage_artifact_target
 named_docs = _named_docs
 parse_json_bytes = _parse_json_bytes
 published_context_receipts = _published_context_receipts
+read_reviewer_session_ledger_with_state = _read_reviewer_session_ledger_with_state
 safe_model_label = _safe_model_label
+terminal_reviewer_evidence_with_state = _terminal_reviewer_evidence_with_state
 validate_context_marker_sources = _validate_context_marker_sources
 validate_generator_artifact_binding = _validate_generator_artifact_binding
 validate_model_request_predecessors = _validate_model_request_predecessors
 validate_model_stage_artifact = _validate_model_stage_artifact
+validate_result_record = _validate_result_record
 
 
 # The facade of the journal for the cut of v0.8 (handoff: design-core-split.md §2.2 П2; tests: orch-tools/tests/test_facade.py):
@@ -4199,9 +3433,9 @@ def _facade(name: str, owners: Callable[[], Sequence[types.ModuleType]],
 
 def _journal_modules() -> tuple[types.ModuleType, ...]:
     """The modules that took the code of the journal, the lowest first (imported here: they import this module at their top)."""
-    from tools import model_inputs, model_steps, scenario_observations
+    from tools import effective_canonical, model_inputs, model_steps, run_closure, scenario_observations
 
-    return (model_inputs, model_steps, scenario_observations)
+    return (effective_canonical, run_closure, model_inputs, model_steps, scenario_observations)
 
 
 def _journal_mode_b() -> tuple[types.ModuleType, ...]:

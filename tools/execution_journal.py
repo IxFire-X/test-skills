@@ -25,7 +25,6 @@ from tools.pilot_state import (  # noqa: F401  (a name per line of the journal t
     phase5_generated_delta as _phase5_generated_delta,
     read_artifact as _read_artifact,
     read_attempt_receipt_with_state as _read_attempt_receipt_with_state,
-    read_effective_canonical_with_state as _read_effective_canonical_with_state,
     read_model_request_with_state as _read_model_request_with_state,
     read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
     safe_label as _safe_label,
@@ -41,13 +40,18 @@ from tools.pilot_state import (  # noqa: F401  (a name per line of the journal t
     derive_state,
     publish_bound,
     read_attempt_receipt,
-    read_closure_artifact_if_present,
     read_resume_validation_if_present,
     read_run,
     recover_execution_inputs_events,
     require_fresh_context_statement,
     canonical_digest as _digest,
     run_root_of as _run_root,
+)
+from tools.effective_canonical import (  # noqa: F401  (a name per line of the journal this module reads)
+    read_effective_canonical_with_state as _read_effective_canonical_with_state,
+)
+from tools.run_closure import (  # noqa: F401  (a name per line of the journal this module reads)
+    read_closure_artifact_if_present,
 )
 
 

@@ -41,14 +41,16 @@ from tools.pilot_state import (  # the names of the journal these bodies read (Ð
     read_attempt_receipt,
     read_attempt_receipt_with_state as _read_attempt_receipt_with_state,
     read_context_selection,
-    read_effective_canonical_if_present,
-    read_effective_canonical_with_state as _read_effective_canonical_with_state,
     read_model_request_with_state as _read_model_request_with_state,
     read_model_stage_artifact_with_state as _read_model_stage_artifact_with_state,
     read_reviewer_session_ledger,
     read_run,
     receipt_target as _receipt_target,
     run_root_of as _run_root,
+)
+from tools.effective_canonical import (  # the names of the effective canonical set these bodies read (ÐŸ1 of the cut of v0.8)
+    read_effective_canonical_if_present,
+    read_effective_canonical_with_state as _read_effective_canonical_with_state,
 )
 
 
