@@ -152,8 +152,6 @@ _MISSING = object()
 def _facade(name: str, owners: Callable[[], Sequence[types.ModuleType]],
             optional: Callable[[], Sequence[types.ModuleType]] = tuple) -> None:
     """Make the loaded module ``name`` the facade of ``owners()`` and ``optional()``."""
-    import sys
-
     def modules() -> tuple[types.ModuleType, ...]:
         return (*owners(), *optional())
 

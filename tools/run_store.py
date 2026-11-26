@@ -21,6 +21,8 @@ from tools.schema_engine import Draft202012Validator, FormatChecker
 
 from tools import run_lock
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.project_inventory import token_signature_rule
+from tools.schema_validation import _json_validation_key
 
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
@@ -95,8 +97,6 @@ def _artifact_schema_valid(schema_text: str, serialized: str) -> bool:
 
 
 def _validate_schema(name: str, value: Mapping[str, Any]) -> None:
-    from tools.schema_validation import _json_validation_key
-
     schema_text = (_SCHEMA_ROOT / name).read_text(encoding="utf-8")
     serialized = _json_validation_key(value)
     # inside one closure a successful check of the same bytes is remembered by digest; the global lru cache
@@ -238,8 +238,6 @@ def _safe_label(value: Any) -> bool:
 
 
 def _credential_like(value: str) -> bool:
-    from tools.project_inventory import token_signature_rule
-
     lowered = value.lower()
     markers = (
         "token", "secret", "credential", "password", "bearer", "prompt",

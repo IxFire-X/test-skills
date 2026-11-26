@@ -16,6 +16,8 @@ from typing import Any, Mapping
 
 from tools import execution_gate
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes
+from tools.project_inventory import URL_CREDENTIALS_TEXT, token_signature_rule
+from tools.schema_validation import schema_diagnostics
 from tools.pilot_state import (  # noqa: F401  (a name per line of the journal this module reads)
     DIGEST as _DIGEST,
     PACK_ROOT as _PACK_ROOT,
@@ -478,7 +480,6 @@ def _check_execution_inputs(project: Path, root: Path, attempt: Mapping[str, Any
     automation_sha256, validate_accepted_autotest_review = execution_gate.from_mode_b(
         "automation_validation", "automation_sha256", "validate_accepted_autotest_review",
     )
-    from tools.schema_validation import schema_diagnostics
 
     automation = receipt.get("automation_artifact")
     review = receipt.get("autotest_review")
@@ -519,7 +520,6 @@ def _check_execution_inputs(project: Path, root: Path, attempt: Mapping[str, Any
 
 def _check_generated_delta(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
     delta = receipt.get("delta")
-    from tools.schema_validation import schema_diagnostics
 
     if (
         set(receipt) != common | {"delta"}
@@ -556,7 +556,6 @@ def _check_generated_delta(project: Path, root: Path, attempt: Mapping[str, Any]
 
 def _check_execution_receipt(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
     (request_digest,) = execution_gate.from_mode_b("execution_adapters", "request_digest")
-    from tools.schema_validation import schema_diagnostics
 
     payload = receipt.get("payload")
     expected_keys = common | {
@@ -703,7 +702,6 @@ def _check_execution_trace(project: Path, root: Path, attempt: Mapping[str, Any]
     TraceBuildError, build_trace, trace_sha256 = execution_gate.from_mode_b(
         "build_trace_document", "TraceBuildError", "build_trace", "trace_sha256",
     )
-    from tools.schema_validation import schema_diagnostics
 
     payload = receipt.get("payload")
     automation = receipt.get("automation_artifact")
@@ -754,7 +752,6 @@ def _check_execution_trace(project: Path, root: Path, attempt: Mapping[str, Any]
 
 
 def _check_trace_audit(project: Path, root: Path, attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], state: Mapping[str, Any], common: set[str], identity_matches: bool) -> None:
-    from tools.schema_validation import schema_diagnostics
     (check,) = execution_gate.from_mode_b("trace_check", "check")
 
     payload = receipt.get("payload")
@@ -790,7 +787,6 @@ def _check_phase5_receipt(project: Path, root: Path, attempt: Mapping[str, Any],
     payload = receipt.get("payload")
     if set(receipt) != common | {"payload"} or not identity_matches or not isinstance(payload, Mapping):
         raise ValueError(f"invalid {kind} receipt")
-    from tools.schema_validation import schema_diagnostics
     if kind == "materialization-ownership":
         _check_ownership(project, root, attempt, kind, receipt, state, payload, schema_diagnostics)
     else:
@@ -957,8 +953,6 @@ RECEIPT_CHECKS = {
 # The publications of mode B: the files of mode B import them, the core takes them through ``execution_gate.from_mode_b``
 def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
     """Return the only publishable UTF-8 runner-output representation."""
-    from tools.project_inventory import URL_CREDENTIALS_TEXT, token_signature_rule
-
     if not isinstance(text, str) or not text:
         return b""
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")

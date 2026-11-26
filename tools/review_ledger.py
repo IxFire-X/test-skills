@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
+from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 from tools.run_store import (  # the run store, below (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
     PACK_ROOT as _PACK_ROOT,
@@ -90,8 +91,6 @@ class ReviewLedgerUnbound(ValueError):
 
 def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> Mapping[str, Any]:
     """Publish/read back one append-only reviewer-ledger revision under its attempt."""
-    from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
-
     project, root = _run_root(run_root)
     state = derive_state(root)
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
@@ -196,8 +195,6 @@ def _read_reviewer_session_ledger_with_state(
     *,
     unconfirmed_ok: bool = False,
 ) -> Mapping[str, Any]:
-    from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
-
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
     published = [
         event for event in state["events"]

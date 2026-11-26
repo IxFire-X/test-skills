@@ -15,8 +15,12 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from tools.canonical_document import document_sha256
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes
-from tools.fixes import RETRY_SPENT, delete_field_fix, human_for, spent_abandon
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.fixes import RETRY_SPENT, REVIEW_CHAIN, delete_field_fix, human_for, spent_abandon
+from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
+from tools.schema_validation import StrictJsonError, loads_json_strict
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
     LEFT_MARK,
@@ -151,7 +155,6 @@ def openspec_marker_by_code(run_root: Path) -> bool:
 def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Answer ``context-marker:requirements`` of such a run by code: the rows ``build_context`` composes from the receipts, no model call; again on an answered step changes nothing."""
     from tools.build_context import build_context
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 
     project, root = _run_root(run_root)
     state, stage = derive_state(root), "context-marker:requirements"
@@ -258,7 +261,7 @@ def publish_model_request(
     journal_inputs = (not inputs and attempt is not None and attempt["state"] != "TERMINAL" and declaration is not None
                       and _MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is not None)
     if journal_inputs:
-        # audit U2: without --input-digest the inputs the journal fixes; its refusals about an unpublished
+        # without --input-digest the inputs the journal fixes; its refusals about an unpublished
         # predecessor stay as they are
         known = _expected_model_inputs(project, root, state, attempt, stage_instance_id)
         if known is None and stage in {"tc-to-autotest", "autotest-reviewer"}:
@@ -450,7 +453,6 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
     """The reviewer's decision against the requested candidate before the answer is written — select would refuse
     it after the ledger is closed, with no way out; here the stage keeps its one retry.  A run whose candidate the journal
     cannot assemble (in a run of an earlier version) is left to select as before."""
-    from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import OrchestrationError, _run_imported, journal_assembly, review_decision
 
     requested = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id
@@ -480,8 +482,6 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
 
 def _spent_fix(run_root: Path, stage_instance_id: str) -> str:
     """The fix of a stage whose one retry is spent: one command that leaves the run (it prints the next one), or the general words where no command is promised."""
-    import sys
-
     from tools.run_pipeline import printed
 
     cause = spent_abandon(stage_instance_id)
@@ -546,8 +546,6 @@ def _publish_model_stage_artifact(
     ``raw_bytes`` — the size of the answer as the model gave it (the ``--artifact`` file); the stored artifact is
     compact JSON, so without it the measurement falls back to the stored bytes.
     """
-    from tools.schema_validation import StrictJsonError, loads_json_strict
-
     project, root = _run_root(run_root)
     _refuse_left(root, attempt_id)
     state = derive_state(root)
@@ -584,7 +582,7 @@ def _publish_model_stage_artifact(
         from tools.review_canaries import hash_codeword
 
         value = hash_codeword(value)
-    if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
+    if len(requests) == 1:  # the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         reused = prior.get("reuse")
         if isinstance(reused, Mapping) and stage_instance_id == _REUSED_AUTOMATION:  # but for the one field that holds the path of the run, which is put again like any binding
@@ -623,8 +621,6 @@ def _publish_model_stage_artifact(
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
         if not requests:
             if stage_instance_id == "tc-reviewer:canonical":  # the request of the reviewer is the work of prepare
-                from tools.fixes import REVIEW_CHAIN
-
                 raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
                                  "the stage has none; fix: запрос ревьюера пишет `prepare --stage tc-reviewer:canonical` (повтори его с тем же --invocation-id, если он уже был), "
                                  "руками запрос не нужен — " + REVIEW_CHAIN)
@@ -757,9 +753,6 @@ def _publish_model_stage_artifact(
 @closure_cached
 def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back one inventory-owned exact C-lite byte-set receipt."""
-    from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
-    from tools.schema_validation import StrictJsonError, loads_json_strict
-
     project, root = _run_root(run_root)
     state = derive_state(root)
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)

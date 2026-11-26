@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.confined_output import OutputConfinementError, read_confined_bytes
+from tools.context_marker_merge import merge_marker_artifacts, requirements_of
+from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
+from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     CLOSURE_CACHE as _CLOSURE_CACHE,
     DIGEST as _DIGEST,
@@ -27,6 +30,7 @@ from tools.pilot_state import (  # the names of the journal these bodies read (�
     SCHEMA_ROOT as _SCHEMA_ROOT,
     check_sealed_value as _check_sealed,
     derive_state,
+    frozen_baseline,
     frozen_inventory as _frozen_inventory,
     parse_json_bytes as _parse_json_bytes,
     read_attempt_receipt_with_state as _read_attempt_receipt_with_state,
@@ -184,8 +188,6 @@ def _context_marker_snapshots(
 def openspec_snapshots(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The OpenSpec sources of the context receipts of ``attempt``, checked against their bytes, as the requirements step of the marker
     composes them (the view «было → стало» of the generator reads the same)."""
-    from tools.pilot_state import frozen_baseline
-
     baseline, stage = frozen_baseline(root, attempt), "context-marker:requirements"
     return _context_marker_snapshots(project, root, state, attempt, stage, [baseline["requirements"]["digest"], baseline["inventory_digest"]],
                                      _published_context_receipts(state, str(attempt["attempt_id"]), stage))
@@ -203,7 +205,6 @@ def _validate_context_marker_sources(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
 ) -> None:
     from tools.build_context import openspec_diagnostics
-    from tools.context_marker_merge import merge_marker_artifacts, requirements_of
 
     stage_instance_id = str(request["stage_instance_id"])
     attempt_id = str(attempt["attempt_id"])
@@ -376,8 +377,6 @@ def _undeclared_capabilities(fragment: Mapping[str, Any]) -> list[str]:
 
 
 def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
-    from tools.schema_validation import schema_diagnostics
-
     if stage_instance_id.startswith("context-marker:"):
         schema_name = "context-marker-output.schema.json"
         if value.get("stage") != "context-marker":
@@ -472,8 +471,6 @@ def _read_model_stage_artifact_checked(
     stage_instance_id: str,
     content_digest: str,
 ) -> Mapping[str, Any]:
-    from tools.schema_validation import StrictJsonError, loads_json_strict
-
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
         raw = read_confined_bytes(project, root, target)
@@ -548,9 +545,6 @@ def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str,
 
 
 def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_digest: str, live: bool = True) -> Mapping[str, Any]:
-    from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
-    from tools.schema_validation import StrictJsonError, loads_json_strict
-
     project, root = _run_root(run_root)
     target = _context_selection_target(root, attempt_id, receipt_digest)
     try:

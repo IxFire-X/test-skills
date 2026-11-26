@@ -1,6 +1,6 @@
 """The facade of pilot_state: a miss takes a loaded journal of mode B from sys.modules and asks no finder (Р2 fix); a patch through
 it reaches every module that took the code of the journal (В1), the files of a run (Р4), the journal of events (Р5), the receipts and the
-ledger of the reviewer (Р6) below it too;
+ledger of the reviewer (Р6) below it too, and a name hoisted to the top of a module of the journal (Р10);
 every such module imports first in a fresh interpreter: none takes a moved name through the facade at its top (В2)."""
 from __future__ import annotations
 
@@ -56,6 +56,14 @@ def test_a_patch_through_pilot_state_reaches_the_receipts_and_the_ledger_of_the_
     spy = object()
     monkeypatch.setattr(pilot_state, "bind_bytes", spy)
     assert run_receipts.bind_bytes is review_ledger.bind_bytes is spy
+
+
+def test_a_patch_of_frozen_baseline_through_pilot_state_reaches_the_records_of_a_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import model_records
+
+    spy = object()
+    monkeypatch.setattr(pilot_state, "frozen_baseline", spy)
+    assert model_records.frozen_baseline is spy
 
 
 @pytest.mark.parametrize("module", ["run_store", "run_journal", "run_receipts", "review_ledger", "model_records", "effective_canonical", "run_closure", "model_inputs", "model_steps",

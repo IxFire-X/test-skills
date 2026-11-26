@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.canonical_document import document_sha256
 from tools.confined_output import OutputConfinementError, read_confined_bytes
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
@@ -196,8 +197,6 @@ def publish_effective_canonical(
     bundle_fields = ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")
     bundle = {key: effective_bundle_receipt.get(key) for key in bundle_fields}
     try:
-        from tools.canonical_document import document_sha256
-
         value = {
             "document": dict(document), "document_digest": document_sha256(dict(document)),
             "effective_bundle_receipt": bundle,

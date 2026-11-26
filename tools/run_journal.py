@@ -20,6 +20,7 @@ from typing import Any, Mapping, Sequence
 
 from tools import run_lock
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.project_inventory import read_inventory_receipt
 from tools.run_store import (  # the files of a run, right below (П1 of the cut of v0.8)
     CLOSURE_CACHE as _CLOSURE_CACHE,
     DIGEST as _DIGEST,
@@ -106,7 +107,7 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
     assembled: set[str] = set()
     review_requests: set[tuple[str, str]] = set()
     context_selected: set[str] = set()
-    rework_marked: set[str] = set()  # the attempts whose first review sent cases back (V7: the receipt ``rework-round``)
+    rework_marked: set[str] = set()  # the attempts whose first review sent cases back (the receipt ``rework-round``)
     for event in events:
         event_type = event["event_type"]
         attempt_id = event.get("attempt_id")
@@ -513,7 +514,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         create_confined_directory_exclusive(root_project, runs, root)
         if _is_reparse(root):
             raise ValueError(_UNSAFE_RUN_ROOT)
-        create_confined_directory_exclusive(root_project, root, root / "tmp")  # PT2: where --out writes; the code makes it, not the agent
+        create_confined_directory_exclusive(root_project, root, root / "tmp")  # where --out writes; the code makes it, not the agent
         receipt_data = {"schema_version": "1.0.0", "run_id": run_id, "request_id": safe_auth["request_id"], "policy_profile": policy_profile, "execution_requested": safe_auth["execution_requested"]}
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
@@ -1187,8 +1188,6 @@ def freeze_phase_two_inputs(run_root: Path, project_root: Path, module_root: Pat
 
 
 def _frozen_inventory(project: Path, root: Path, inventory_digest: str) -> dict[str, Any]:
-    from tools.project_inventory import read_inventory_receipt
-
     if not _DIGEST.fullmatch(inventory_digest):
         raise ValueError("invalid frozen inventory digest")
     receipt = read_inventory_receipt(project, root, root / "inventories" / (inventory_digest.removeprefix("sha256:") + ".json"))

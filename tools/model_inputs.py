@@ -17,8 +17,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 from tools import execution_gate
+from tools.canonical_document import document_sha256
 from tools.confined_output import OutputConfinementError, read_confined_bytes
-from tools.fixes import CLOSE_RUN_FIX
+from tools.fixes import CLOSE_RUN_FIX, REVIEW_CHAIN
+from tools.schema_validation import StrictJsonError, loads_json_strict
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
     DIGEST as _DIGEST,
     PRIOR_KIND as _PRIOR_KIND,
@@ -151,7 +153,6 @@ def context_progress(run_root: Path, attempt_id: str, state: Mapping[str, Any] |
     bound by the journal through the receipt digest): ``{"have", "total"}``.  ``total`` is None before the first batch and for a
     run of an earlier version (no count) — the set is then taken as whole.  Only reads the receipt files and the journal."""
     from tools.project_inventory import _digest
-    from tools.schema_validation import StrictJsonError, loads_json_strict
 
     project, root = _run_root(run_root)
     state = state if state is not None else derive_state(root)
@@ -430,7 +431,7 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
                              "a new run (scan --new-run)")
     publish_bound(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
     ids = [str(row.get("capability_id")) for row in value["operation_capabilities"]]
-    # PT2: the composition in a line — the ids (their names), the body in the file: record.prior_capabilities.operation_capabilities
+    # the composition in a line — the ids (their names), the body in the file: record.prior_capabilities.operation_capabilities
     return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(ids), "capability_ids": ids[:60],
             **({"capability_ids_more": len(ids) - 60} if len(ids) > 60 else {}),
             "path": target.relative_to(root).as_posix(), "body_at": "record.prior_capabilities.operation_capabilities"}
@@ -721,7 +722,6 @@ def _cases_refusal(project: Path, root: Path, state: Mapping[str, Any], attempt_
                 same = False
             if not same:
                 return f"{kind} нового прогона иной, чем у источника"
-        from tools.canonical_document import document_sha256
         from tools.orchestrate_test_case_revision import journal_assembly
 
         try:
@@ -1250,7 +1250,6 @@ def _expected_model_inputs(
             basis = rework_basis(root, attempt_id)
         except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id} is asked for only after the first review sent cases back for a rework ({error}); fix: `status` names the next step") from error
-        from tools.canonical_document import document_sha256
 
         plan = _generator_input(project, root, state, attempt_id, "plan")
         contexts = list(dict.fromkeys([*basis["contexts"], *(_plan_contexts(plan) if plan.get("context_files") else [])]))  # the files the plan names lie in all its receipts
@@ -1332,8 +1331,6 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
     if len(inputs) > len(expected):
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
     if stage_instance_id.startswith("tc-reviewer:"):  # the reviewer's request is the work of prepare, one fix for the whole chain
-        from tools.fixes import REVIEW_CHAIN
-
         return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет `prepare --stage tc-reviewer:canonical` "
                                    "(он знает оба digest сам), руками он не нужен — " + REVIEW_CHAIN)
     return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: повтори prepare этой стадии (входы он берёт из журнала сам)")
