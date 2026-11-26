@@ -39,12 +39,12 @@ def select(cases: Sequence[Mapping[str, Any]], path: str) -> tuple[list[dict[str
     samples: list[dict[str, Any]] = []
     warnings: list[str] = []
     for case in cases:
+        if len(samples) == SAMPLES:  # first: a case after the three is not taken whatever its length
+            warnings.append(f"В {path} кейсов больше трёх — взяты первые три.")
+            break
         sample = human(case)
         if sum(len(text.encode("utf-8")) for text in _texts(sample)) > SAMPLE_BYTES:
             warnings.append(f"Образец «{case['title']}» длиннее 2 КБ — не взят.")
-        elif len(samples) == SAMPLES:
-            warnings.append(f"В {path} кейсов больше трёх — взяты первые три.")
-            break
         else:
             samples.append(sample)
     if samples:
@@ -85,11 +85,13 @@ def transferred(document: Mapping[str, Any], samples: Sequence[Mapping[str, Any]
 def known_text(project: Path, document: Mapping[str, Any], files: Sequence[Mapping[str, Any]]) -> str:
     """The requirements of *document* and the context files of the run (``project_path``, ``content_digest`` of the context
     receipts) whose bytes still match — what the run itself gives."""
+    from tools.output_guard import project_file
+
     parts = [str(item["text"]) for key in ("source_requirements", "requirements") for item in document.get(key) or []]
     for row in files:
         try:
-            raw = (Path(project) / str(row["project_path"])).read_bytes()
-        except OSError:
+            raw = project_file(Path(project), str(row["project_path"])).read_bytes()  # by its text, inside the project, no link on the way
+        except (OSError, ValueError):
             continue
         if "sha256:" + hashlib.sha256(raw).hexdigest() == row.get("content_digest"):  # a file changed after the scan is not the scanned project
             parts.append(raw.decode("utf-8", errors="replace"))

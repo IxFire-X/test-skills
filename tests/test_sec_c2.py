@@ -91,7 +91,7 @@ def test_the_file_flags_of_the_api_commands_are_the_registered_ones() -> None:
 # module -> the fields of a file on disk (a receipt, an answer of the model, ``zephyr-import.json``) that name a file.  A reader of
 # such a field outside this table fails the test below.  ``project_path`` of an inventory row or of a context receipt names a file of
 # the scanned project: the row is bound by its digest to the journal, and a reader that opens it goes through ``output_guard.project_file``
-# (``batch_assembly._context_documents``, ``step_size``) or through the inventory (``confined_files``); ``template_path`` is the field of
+# (``batch_assembly._context_documents``, ``step_size``, ``style_samples.known_text``) or through the inventory (``confined_files``); ``template_path`` is the field of
 # ``zephyr-import.json`` that no journal event binds: ``output_guard.project_file`` before the digest is taken.
 PATH_FIELDS = {
     "batch_assembly.py": {"project_path"}, "cases_import.py": {"project_path"}, "existing_tests.py": {"project_path"},
@@ -99,7 +99,7 @@ PATH_FIELDS = {
     "orchestrate_test_case_revision.py": {"project_path"},
     "project_inventory.py": {"project_path"}, "ready.py": {"project_path"}, "run_pipeline.py": {"project_path"},
     "run_report.py": {"template_path"}, "run_scan.py": {"project_path"}, "run_store.py": {"project_path"}, "scan_rules.py": {"project_path"}, "scenario_observations.py": {"project_path"},
-    "step_size.py": {"project_path"},
+    "step_size.py": {"project_path"}, "style_samples.py": {"project_path"},
 }
 _FIELD_NAMES = {"template_path", "project_path"}
 

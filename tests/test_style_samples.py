@@ -41,7 +41,7 @@ def test_the_skillsrc_takes_style_samples_and_nothing_else_there() -> None:
 def test_three_short_cases_are_taken_and_the_scan_says_so() -> None:
     from tools.style_samples import select
 
-    samples, warnings = select([_case("Длинный", "x" * 2100), *(_case(f"Кейс {number}") for number in range(4))], "style.csv")
+    samples, warnings = select([_case("Длинный", "x" * 2100), *(_case(f"Кейс {number}") for number in range(3)), _case("После трёх", "x" * 2100)], "style.csv")
     assert [sample["title"] for sample in samples] == ["Кейс 0", "Кейс 1", "Кейс 2"]
     assert warnings == ["Образцы стиля: взято 3 кейса из style.csv — модель возьмёт форму, не факты.",
                         "Образец «Длинный» длиннее 2 КБ — не взят.", "В style.csv кейсов больше трёх — взяты первые три."]
@@ -119,3 +119,11 @@ def test_the_view_has_the_hint_only_with_a_carried_fact() -> None:
     assert render(document, style={}) == render(document)
     view = render(copy.deepcopy(document), style={"TC-1": ["тверь"]}).decode("utf-8")
     assert "- CV_STYLE_SAMPLE: в кейсах есть значения из образцов стиля" in view and "TC-1: «тверь»" in view
+
+
+def test_how_to_use_says_the_approved_words() -> None:
+    text = " ".join((Path(__file__).resolve().parents[1] / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
+    assert ("**Кейсы в стиле вашей команды.** Положите до трёх своих кейсов — экспорт Zephyr в CSV — и укажите путь в `.skillsrc`: "
+            "`\"style\": {\"samples\": \"cases/style.csv\"}`. Модель возьмёт из них форму: как вы называете кейсы, пишете шаги, данные и "
+            "ожидания. Факты из образцов она не берёт; если значение из образца всё же попало в кейс, ревьюер увидит это подсказкой. "
+            "Берите кейсы на другие требования, чем у прогона.") in text
