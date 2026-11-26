@@ -8,15 +8,17 @@ import shutil
 import sys
 import venv
 import pytest
+import subprocess
 
 from tests.test_automation_revision_budget import automated_document, automation, durable_boundary, host_evidence, review
 from tests.test_generated_delta import _effective_bundle_digest
 from tests.helpers import MODULE_PYTHON
+from tools.run_tests import validate_artifact_runner_compatibility
+from tools.pilot_state import read_attempt_receipt, read_terminal_result, read_effective_canonical, derive_state
+from tools.execution_adapters import ExecutionRequest, PYTEST
 
 
 def test_inline_runner_review_precedes_materialization(tmp_path: Path) -> None:
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     document = automated_document()
     artifact = automation(document)
     check = lambda **options: validate_artifact_runner_compatibility(tmp_path, "python", document, artifact, **options)
@@ -38,8 +40,6 @@ def test_inline_runner_review_precedes_materialization(tmp_path: Path) -> None:
 
 
 def test_inline_java_review_resolves_only_direct_class_methods(tmp_path: Path) -> None:
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     document = automated_document()
     artifact = automation(document)
     content = "package sample;\nclass ProductsTest { void products() {} class Nested { void hidden() {} } }\n"
@@ -64,8 +64,6 @@ def test_inline_java_review_resolves_only_direct_class_methods(tmp_path: Path) -
 ])
 def test_inline_java_review_rejects_class_display_name(tmp_path: Path, annotation: str) -> None:
     """FaT-DN: a class display name becomes the Surefire classname — the report cannot match the class FQN."""
-    from tools.run_tests import validate_artifact_runner_compatibility
-
     document = automated_document()
     artifact = automation(document)
     content = (
@@ -263,8 +261,6 @@ def _request(project: Path, document: dict, artifact: dict):
 def _the_run_of_a_person(request) -> dict[Path, bytes]:
     """What a person does with the printed command: run the closed request as it stands and bring the reports it wrote (the test may start a
     process; the package may not)."""
-    import subprocess
-
     cwd = Path(request.cwd)
     subprocess.run(list(request.argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     return {cwd / name: (cwd / name).read_bytes() for name in request.report_paths if (cwd / name).is_file()}
@@ -321,7 +317,6 @@ def test_sensitive_junit_identity_finalizes_unknown_without_publishing_value(tmp
     """A report whose test identity carries a token is not published: the result is UNKNOWN (JUNIT_INVALID), the generated file is kept and
     nothing of the value reaches the run or the answer."""
     from tests.p4_flow import human_run, ingest, materialize
-    from tools.pilot_state import read_attempt_receipt, read_terminal_result
 
     monkeypatch.setenv("AUDIT_CASE_VALUE", marker)
     project = tmp_path / "project"
@@ -357,7 +352,6 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     tmp_path: Path, capsys,
 ) -> None:
     from tests.p4_flow import human_run, ingest, materialize
-    from tools.pilot_state import read_attempt_receipt, read_effective_canonical
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -394,7 +388,6 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     assert code == 1, json.dumps(output, indent=2)
     assert output["verdict"] == "FAIL"
     assert output["finalization"] == "complete"
-    from tools.pilot_state import read_terminal_result
 
     assert read_terminal_result(run_root, attempt_id)["reason_code"] == "NO_TESTS_COLLECTED"
     assert not generated.exists()
@@ -404,7 +397,6 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
 def test_the_printed_command_keeps_nested_module_runtime_cwd_and_selector_without_root_fallback(tmp_path: Path, capsys) -> None:
     """A parent-owned run is built only in its selected nested module, never project root: the command names that module, and the run of it is the result."""
     from tests.p4_flow import human_run, ingest, materialize
-    from tools.pilot_state import derive_state, read_attempt_receipt, read_terminal_result
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project, module_root = tmp_path / "project", tmp_path / "project" / "modules" / "child"
@@ -452,8 +444,6 @@ def test_the_printed_command_keeps_nested_module_runtime_cwd_and_selector_withou
 
 
 def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_path: Path, monkeypatch) -> None:
-    import subprocess
-
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
     shutil.copytree(fixture, project)
@@ -481,10 +471,6 @@ def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_p
 
 def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp_path: Path, monkeypatch) -> None:
     """Changing only request.executable must block before the claim of the start: the request the reports are held against is the module's own."""
-    import subprocess
-
-    from tools.execution_adapters import ExecutionRequest, PYTEST
-    from tools.pilot_state import derive_state
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"

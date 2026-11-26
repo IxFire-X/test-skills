@@ -8,11 +8,17 @@ import shutil
 from pathlib import Path
 
 import pytest
+import tests.test_batch_assembly as batch
+import tests.test_reviewer_protocol as protocol
 
 from tests.helpers import MODULE_PYTHON, answer_stage
 from tests.p4_flow import run_the_build
 from tests.test_review_canaries import _answer, _boundary_and_removed, _finding, _ids, _open, _select
 from tests.test_review_requested import _api, _generated_run, _put
+from tests.test_exec_prepares import _module_python
+from tests.test_profile_flows import _automated
+from tests.test_project_native_pytest import _local_attempt
+from tools.pilot_state import read_terminal_result
 
 FIXTURE = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
 FAILING = "def test_selected() -> None:\n    assert 1 == 2\n"
@@ -20,12 +26,6 @@ FAILING = "def test_selected() -> None:\n    assert 1 == 2\n"
 
 def _fixture_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """``_generated_run`` over the fixture project of a build, with automated cases: its run is a run of local-pilot-v1."""
-    import tests.test_batch_assembly as batch
-    import tests.test_reviewer_protocol as protocol
-    from tests.test_exec_prepares import _module_python
-    from tests.test_profile_flows import _automated
-    from tests.test_project_native_pytest import _local_attempt
-
     def new_run(project: Path):
         shutil.copytree(FIXTURE, project, dirs_exist_ok=True)
         (project / ".skillsrc").write_text(json.dumps({
@@ -101,8 +101,6 @@ def _accepted_in_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: 
 
 def test_a_set_accepted_in_part_closes_partial_when_the_autotests_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                          capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.pilot_state import read_terminal_result
-
     run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=False)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
@@ -113,8 +111,6 @@ def test_a_set_accepted_in_part_closes_partial_when_the_autotests_pass(tmp_path:
 def test_a_set_whose_rejected_case_passed_the_rework_runs_through_the_automation_and_closes_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                                capsys: pytest.CaptureFixture[str]) -> None:
     """V7b, the path of the default: accepted in part → the rework → the second round → the automation over r3 (every case back) → the build → the close."""
-    from tools.pilot_state import read_terminal_result
-
     run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=True)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
@@ -124,8 +120,6 @@ def test_a_set_whose_rejected_case_passed_the_rework_runs_through_the_automation
 
 def test_a_set_accepted_in_part_closes_as_any_failed_run_when_the_autotests_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                                 capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.pilot_state import read_terminal_result
-
     run = _accepted_in_part(tmp_path, monkeypatch, FAILING, capsys, rework=False)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "FAIL" and output["finalization"] == "complete", output
@@ -136,8 +130,6 @@ def test_a_set_accepted_in_part_closes_as_any_failed_run_when_the_autotests_fail
 def test_a_set_whose_second_round_was_aborted_runs_through_the_automation_and_the_build_and_the_journal_is_accepted(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """V7b-fix: the request of the second round has no answer, the result is published: the start of the execution is not refused by the journal."""
-    from tools.pilot_state import read_terminal_result
-
     run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=True, abort=True)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
@@ -147,8 +139,6 @@ def test_a_set_whose_second_round_was_aborted_runs_through_the_automation_and_th
 def test_a_set_whose_rework_was_given_up_runs_through_the_automation_and_the_build_and_the_journal_is_accepted(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """V7d: the rework asked and given up (``submit --abort``): the attempt stays open, the automation runs over r2, the journal takes the start of the execution."""
-    from tools.pilot_state import read_terminal_result
-
     run = _accepted_in_part(tmp_path, monkeypatch, None, capsys, rework=True, give_up=True)
     code, output = run_the_build(tmp_path / "project", run["run_root"], capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output

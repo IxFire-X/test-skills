@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 from tests.test_profile_flows import _api, _cli, _front, cases_only_pack  # noqa: F401  (the fixture: a copy of the delivery of cases)
-from tools import pilot_state, step_size
+from tests.p4_flow import flow_args
+from tests.test_run_scoped_authorization import _the_flow_up_to_the_report
+from tests.test_cut_model import _generator_stage, _prepare_argv
+from tests.test_review_open_recovery import _main
+from tests.test_f3_scan_finish import _finish_argv, _pipeline, _rework_closed
+from tools import pilot_state, step_size, exec_commands
+from tools.run_pipeline import main
+from tools.orchestrate_test_case_revision import abort_rework_review
 
 PROFILE = "cases-only-v1"
 BIG = 50_000_000
@@ -80,11 +87,6 @@ def test_status_names_the_batch_when_a_view_of_its_inputs_is_gone(tmp_path: Path
 # ---- 4: finish decides the way of the refusal by the journal, not by a file ----------------------------------------------------------------
 
 def test_finish_after_an_ingest_cut_at_its_receipt_tells_to_repeat_the_ingest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import flow_args
-    from tests.test_run_scoped_authorization import _the_flow_up_to_the_report
-    from tools import exec_commands
-    from tools.run_pipeline import main
-
     project, run_root, attempt_id, _printed = _the_flow_up_to_the_report(tmp_path, capsys)
     original = pilot_state.append_event
 
@@ -106,9 +108,6 @@ def test_finish_after_an_ingest_cut_at_its_receipt_tells_to_repeat_the_ingest(tm
 # ---- 6: the mark of a lost word never stops prepare ------------------------------------------------------------------------------------
 
 def test_a_mark_of_a_lost_word_with_other_bytes_does_not_stop_prepare(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_cut_model import _generator_stage, _prepare_argv
-    from tests.test_review_open_recovery import _main
-
     run, stage = _generator_stage(tmp_path)
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0  # the repeat makes the mark
@@ -121,9 +120,6 @@ def test_a_mark_of_a_lost_word_with_other_bytes_does_not_stop_prepare(tmp_path: 
 
 def test_the_abort_of_the_review_of_a_rework_is_refused_on_a_closed_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Direct call: ``stage_steps`` does not list this step for most closed attempts, so no command reaches the function there."""
-    from tests.test_f3_scan_finish import _finish_argv, _pipeline, _rework_closed
-    from tools.orchestrate_test_case_revision import abort_rework_review
-
     run = _rework_closed(tmp_path, capsys)
     assert _pipeline(capsys, _finish_argv(run))[1].get("status") == "ok"
     with pytest.raises(ValueError, match="ATTEMPT_TERMINAL"):

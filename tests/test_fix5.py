@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from tools import pilot_state, stage_steps
+from tools import pilot_state, stage_steps, run_pipeline
 from tools.json_cli import error_envelope
+from tests.test_request_order import _selected
+from tests.test_review_requested import _generated_run
+from tests.test_fix2 import _cut_rework
 
 
 def _refused(root: Path, stage: str, **flags) -> dict:
@@ -24,8 +27,6 @@ def _says_drift(envelope: dict) -> None:
 
 
 def test_the_request_of_the_automation_is_not_published_when_a_file_of_the_context_changed(tmp_path: Path) -> None:
-    from tests.test_request_order import _selected
-
     root, _attempt, _inputs = _selected(tmp_path)
     skillsrc = root.parent.parent / ".skillsrc"
     skillsrc.write_text(skillsrc.read_text(encoding="utf-8") + "\n# changed after the scan\n", encoding="utf-8")
@@ -33,16 +34,12 @@ def test_the_request_of_the_automation_is_not_published_when_a_file_of_the_conte
 
 
 def _generated(tmp_path: Path, **kwargs) -> dict:
-    from tests.test_review_requested import _generated_run
-
     run = _generated_run(tmp_path, **kwargs)
     (run["project"] / "src" / "evidence.py").write_text("value = 2\n", encoding="utf-8")
     return run
 
 
 def test_the_request_of_a_batch_names_the_drift_of_the_context(tmp_path: Path) -> None:
-    from tests.test_review_requested import _generated_run
-
     run = _generated_run(tmp_path, generated=False)
     root = Path(run["run_root"])
     for kind in ("header", "plan"):
@@ -58,9 +55,6 @@ def test_the_request_of_the_review_is_not_published_when_a_file_of_the_context_c
 
 
 def test_status_after_a_submit_cut_after_the_rework_file_points_to_the_repeat_of_the_submit(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tests.test_fix2 import _cut_rework
-    from tools import run_pipeline
-
     run, _answer = _cut_rework(tmp_path, monkeypatch)
     capsys.readouterr()
     run_pipeline.main(["status", "--project", str(run["project"]), "--run", Path(run["run_root"]).name])

@@ -6,10 +6,17 @@ import json
 from pathlib import Path
 
 import pytest
+import copy
 
 from tests.test_review_requested import _api, _generated_run, _journal, _put
 from tests.helpers import prepare_stage, submit_stage
 from tests.journal_helpers import assert_refused_once
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment, with_digest
+from tools.canonical_document import uncovered_requirements
+from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
+from tests.test_automation_revision_budget import review
+from tools.automation_validation import automation_sha256
+from tools import pilot_state
 
 
 def _publish_inputs(run: dict) -> tuple[str, str]:
@@ -64,10 +71,6 @@ def test_microservices_4d8491a2_uncovered_requirement_before_the_write(tmp_path:
 
 
 def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> None:
-    import copy
-
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-    from tools.canonical_document import uncovered_requirements
 
     run = _generated_run(tmp_path, generated=False)
     fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
@@ -87,11 +90,6 @@ def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> Non
 
 
 def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_path: Path) -> None:
-    from tests.helpers import prepare_stage, submit_stage
-    from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, autotest_run, boundary_of, run_generator
-    from tests.test_automation_revision_budget import review
-    from tools.automation_validation import automation_sha256
-
     run = autotest_run(tmp_path)
     assert run_generator(run)[0] == 0
     assert prepare_stage(run["root"], REVIEWER, *INDEPENDENT)[0] == 0
@@ -112,8 +110,6 @@ def test_petclinic_rest_523ec561_reviewed_relations_digest_before_the_write(tmp_
 
 def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monkeypatch) -> None:
     """A run whose generator request was published without the published plan and header (the old flow) is read as before."""
-    from tools import pilot_state
-
     run = _generated_run(tmp_path, generated=False)
     plan = json.loads(Path(run["plan"]).read_bytes())
     fragment = json.loads(Path(run["fragments"][0]).read_bytes())
@@ -131,8 +127,6 @@ def test_a_journal_written_before_the_package_still_replays(tmp_path: Path, monk
 
 def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tmp_path: Path) -> None:
     """The whole fragment check runs at submit against the published plan/header, not only in assemble."""
-    from tools.batch_assembly import with_digest
-
     run = _generated_run(tmp_path, generated=False)
     _publish_inputs(run)
     fragment, other = (json.loads(Path(path).read_bytes()) for path in run["fragments"])
@@ -150,9 +144,6 @@ def test_a_case_on_a_requirement_of_another_batch_is_refused_before_the_write(tm
 
 
 def test_a_plan_with_a_context_that_is_not_of_the_attempt_is_refused(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.batch_assembly import with_digest
-
     run = _generated_run(tmp_path, generated=False)
     header = {key: item for key, item in json.loads(Path(run["header"]).read_bytes()).items() if key != "digest"}
     pilot_state.publish_generator_input(run["run_root"], run["attempt_id"], "header", header)

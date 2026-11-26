@@ -3,7 +3,17 @@ import json
 from pathlib import Path
 
 import pytest
+import tools.generated_delta as generated_delta
 from jsonschema import Draft202012Validator, ValidationError
+from tools.pilot_state import publish_model_request, publish_effective_canonical, append_event, publish_attempt_receipt
+from tools.pilot_state import read_effective_canonical, publish_generated_delta, derive_state, read_attempt_receipt
+from tools.pilot_state import read_execution_inputs, publish_execution_inputs, publish_phase5_receipt, _sealed
+from tools.generated_delta import GeneratedDeltaError, _seal, materialize_delta, apply_dispositions, inspect_delta
+from tools.generated_delta import _file_row
+from tools.canonical_document import document_sha256
+from tools.orchestrate_test_case_revision import orchestrate_revision
+from tools.schema_validation import schema_diagnostics
+from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_automation_artifact
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -310,8 +320,6 @@ def _materialize(tmp_path: Path, inputs, **extra):
 
 
 def test_automation_request_rejects_wrong_inputs_before_publication(tmp_path: Path):
-    from tools.pilot_state import publish_model_request
-
     *_, run_root, attempt_id = _inputs(tmp_path, automation_lifecycle=False)
     before = (run_root / "events.jsonl").read_bytes()
     requests = sorted((run_root / "model-requests").rglob("*.json"))
@@ -338,8 +346,6 @@ def _published_execution_delta(tmp_path: Path, *, failed: bool) -> tuple[dict, P
 
 def test_materialization_requires_attempt_owned_effective_selection_before_writes(tmp_path: Path):
     """Phase 5 cannot materialize a caller-supplied canonical document alone."""
-    from tools.generated_delta import GeneratedDeltaError
-
     inputs = _inputs(tmp_path, effective=False)
     with pytest.raises(GeneratedDeltaError, match="effective canonical selection"):
         _materialize(tmp_path, inputs)
@@ -347,8 +353,6 @@ def test_materialization_requires_attempt_owned_effective_selection_before_write
 
 
 def test_effective_selection_rejects_unpublished_or_nonterminal_reviewer_digest(tmp_path: Path):
-    from tools.pilot_state import publish_effective_canonical
-
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path, effective=False)
     with pytest.raises(ValueError, match="invalid effective canonical selection"):
         publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), "sha256:" + "9" * 64)
@@ -362,8 +366,6 @@ def test_reviewer_request_rejects_missing_attempt_boundary(tmp_path: Path):
 
 
 def test_effective_selection_rejects_noncanonical_reviewer_ledger_bytes(tmp_path: Path):
-    from tools.pilot_state import publish_effective_canonical
-
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path, effective=False)
     ledger_digest = _published_reviewer_ledger(run_root, attempt_id, document)
     ledger_path = run_root / "reviewer-session-ledgers" / attempt_id / f"{ledger_digest.removeprefix('sha256:')}.json"
@@ -375,9 +377,6 @@ def test_effective_selection_rejects_noncanonical_reviewer_ledger_bytes(tmp_path
 
 
 def test_effective_selection_read_requires_publish_then_readback_events(tmp_path: Path):
-    from tools.canonical_document import document_sha256
-    from tools.pilot_state import append_event, publish_attempt_receipt, read_effective_canonical
-
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path, effective=False)
     ledger_digest = _published_reviewer_ledger(run_root, attempt_id, document)
     bundle = _effective_bundle(document)
@@ -393,8 +392,6 @@ def test_effective_selection_read_requires_publish_then_readback_events(tmp_path
 
 
 def test_effective_selection_is_fixed_and_rejects_conflicting_bundle(tmp_path: Path):
-    from tools.pilot_state import publish_effective_canonical, read_effective_canonical
-
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path)
     bundle = _effective_bundle(document)
     bundle["csv_sha256"] = "sha256:" + "7" * 64
@@ -403,8 +400,6 @@ def test_effective_selection_is_fixed_and_rejects_conflicting_bundle(tmp_path: P
 
 
 def test_materialization_rejects_same_document_with_foreign_effective_bundle_digest(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError
-
     inputs = _inputs(tmp_path)
     _baseline, automation, review, _document, _run_root, _attempt_id = inputs
     foreign = "sha256:" + "f" * 64
@@ -418,9 +413,6 @@ def test_materialization_rejects_same_document_with_foreign_effective_bundle_dig
 
 @pytest.mark.parametrize("field", ["effective_canonical_digest", "effective_bundle_receipt_digest"])
 def test_generated_delta_rejects_tampered_effective_selection_digest(tmp_path: Path, field: str):
-    from tools.generated_delta import _seal
-    from tools.pilot_state import publish_generated_delta
-
     inputs = _inputs(tmp_path)
     delta = _materialize(tmp_path, inputs)
     forged = dict(delta)
@@ -433,9 +425,6 @@ def test_generated_delta_rejects_tampered_effective_selection_digest(tmp_path: P
 def test_actual_phase4_selection_is_consumed_by_phase5_materialization(tmp_path: Path):
     from tests.helpers import build_phase_two_baseline
     from tests.test_automation_revision_budget import automation as automation_artifact, automated_document, durable_boundary, host_evidence, review as review_artifact
-    from tools.generated_delta import materialize_delta
-    from tools.orchestrate_test_case_revision import orchestrate_revision
-    from tools.pilot_state import read_effective_canonical
     from tests.spine_helpers import run_phase_one_spine
 
     (tmp_path / "tests").mkdir()
@@ -500,8 +489,6 @@ def _add_component_prefix_collision(automation: dict, *, reverse: bool) -> None:
 
 
 def test_materialize_complete_owned_delta_reads_back_every_file_and_retains_after_pass(tmp_path: Path):
-    from tools.generated_delta import apply_dispositions, inspect_delta
-
     inputs = _inputs(tmp_path)
     baseline, automation, review, document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -517,9 +504,6 @@ def test_materialize_complete_owned_delta_reads_back_every_file_and_retains_afte
 
 
 def test_execution_inputs_are_fixed_and_read_back_before_materialization(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.pilot_state import derive_state, read_attempt_receipt, read_execution_inputs
-
     inputs = _inputs(tmp_path)
     _baseline, automation, review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -559,9 +543,6 @@ def test_execution_inputs_are_fixed_and_read_back_before_materialization(tmp_pat
 
 
 def test_materialization_rejects_missing_automation_model_lifecycle_before_side_effects(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.pilot_state import derive_state
-
     inputs = _inputs(tmp_path, automation_lifecycle=False)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
 
@@ -646,8 +627,6 @@ def test_execution_inputs_recovery_is_forbidden_after_execution_start(tmp_path: 
 
 
 def test_existing_even_byte_identical_unowned_path_is_never_overwritten(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, materialize_delta
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     path = tmp_path / "tests" / "test_products.py"
     path.parent.mkdir(exist_ok=True)
@@ -661,10 +640,6 @@ def test_existing_even_byte_identical_unowned_path_is_never_overwritten(tmp_path
 
 
 def test_ownership_receipt_precedes_writes_and_exact_retry_recovers_orphans(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.pilot_state import read_attempt_receipt
-    from tools.schema_validation import schema_diagnostics
-
     inputs = _inputs(tmp_path, mutate=_add_second_file)
     baseline, automation, review, _document, run_root, attempt_id = inputs
     with pytest.raises(GeneratedDeltaError) as interrupted:
@@ -693,8 +668,6 @@ def test_ownership_receipt_precedes_writes_and_exact_retry_recovers_orphans(tmp_
 
 
 def test_owned_orphan_drift_is_preserved_and_retry_conflicts(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError
-
     inputs = _inputs(tmp_path, mutate=_add_second_file)
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
         _materialize(tmp_path, inputs, interrupt_after=1)
@@ -709,10 +682,6 @@ def test_owned_orphan_drift_is_preserved_and_retry_conflicts(tmp_path: Path):
 
 
 def test_new_ownership_never_adopts_a_post_preflight_exact_race(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.pilot_state import read_attempt_receipt
-
     inputs = _inputs(tmp_path)
     original = generated_delta.create_confined_bytes_exclusive
 
@@ -731,7 +700,6 @@ def test_new_ownership_never_adopts_a_post_preflight_exact_race(tmp_path: Path, 
 
 def test_ownership_publication_failure_performs_zero_project_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.pilot_state as pilot_state
-    from tools.generated_delta import GeneratedDeltaError
 
     inputs = _inputs(tmp_path)
 
@@ -746,12 +714,7 @@ def test_ownership_publication_failure_performs_zero_project_writes(tmp_path: Pa
 
 
 def test_existing_ownership_must_canonically_match_requested_plan(tmp_path: Path):
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
-    from tools.generated_delta import GeneratedDeltaError, _file_row
-    from tools.pilot_state import publish_execution_inputs, publish_phase5_receipt
-
     baseline, automation, _review, _document, run_root, attempt_id = _inputs(tmp_path)
-    from tools.pilot_state import read_effective_canonical
     effective = read_effective_canonical(run_root, attempt_id)
     generated = automation["artifacts"]["generated_files"][0]
     content = generated["content"].encode("utf-8")
@@ -775,10 +738,6 @@ def test_existing_ownership_must_canonically_match_requested_plan(tmp_path: Path
 
 
 def test_delta_is_closed_schema_valid_and_unknown_never_cleans(tmp_path: Path):
-    from tools.generated_delta import apply_dispositions, inspect_delta
-    from tools.pilot_state import read_attempt_receipt
-    from tools.schema_validation import schema_diagnostics
-
     inputs = _inputs(tmp_path)
     baseline, automation, review, document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -796,8 +755,6 @@ def test_delta_is_closed_schema_valid_and_unknown_never_cleans(tmp_path: Path):
 
 
 def test_complete_not_applicable_cleanup_is_rejected_before_plan_or_effect(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -816,8 +773,6 @@ def test_complete_not_applicable_cleanup_is_rejected_before_plan_or_effect(tmp_p
 
 
 def test_execution_derived_cleanup_rejects_missing_or_mismatched_execution_receipt(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -855,8 +810,6 @@ def test_execution_derived_cleanup_rejects_missing_or_mismatched_execution_recei
 
 
 def test_disposition_requires_a_decision_for_every_generated_file(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-
     inputs = _inputs(tmp_path)
     baseline, automation, review, document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -879,10 +832,6 @@ def cleanup_policy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("cleanup_policy")
 def test_disposition_recovery_publishes_plan_before_cleanup_and_recovers_deleted_file(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-    from tools.pilot_state import read_attempt_receipt
-    from tools.schema_validation import schema_diagnostics
-
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
     path = tmp_path / relative_path
@@ -906,8 +855,6 @@ def test_disposition_recovery_publishes_plan_before_cleanup_and_recovers_deleted
 @pytest.mark.usefixtures("cleanup_policy")
 def test_disposition_plan_recovers_when_persisted_before_its_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.pilot_state as pilot_state
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-    from tools.pilot_state import derive_state, read_attempt_receipt
 
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
@@ -940,7 +887,6 @@ def test_disposition_plan_recovers_when_persisted_before_its_events(tmp_path: Pa
 @pytest.mark.usefixtures("cleanup_policy")
 def test_conflicting_raw_disposition_plan_remains_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.pilot_state as pilot_state
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
 
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
@@ -962,9 +908,6 @@ def test_conflicting_raw_disposition_plan_remains_blocked(tmp_path: Path, monkey
 
 @pytest.mark.usefixtures("cleanup_policy")
 def test_cleanup_missing_before_plan_is_not_recovered_as_cleaned(tmp_path: Path):
-    from tools.generated_delta import apply_dispositions
-    from tools.pilot_state import read_attempt_receipt
-
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
     (tmp_path / relative_path).unlink()
@@ -976,9 +919,6 @@ def test_cleanup_missing_before_plan_is_not_recovered_as_cleaned(tmp_path: Path)
 
 @pytest.mark.usefixtures("cleanup_policy")
 def test_cleanup_exact_plan_crash_then_missing_is_recovered_cleaned(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-    from tools.pilot_state import read_attempt_receipt
-
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
     with pytest.raises(GeneratedDeltaError, match="MATERIALIZATION_INTERRUPTED"):
@@ -991,8 +931,6 @@ def test_cleanup_exact_plan_crash_then_missing_is_recovered_cleaned(tmp_path: Pa
 
 @pytest.mark.usefixtures("cleanup_policy")
 def test_preplan_drift_is_never_cleaned_after_byte_identical_restore(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     relative_path = delta["files"][0]["path"]
     path = tmp_path / relative_path
@@ -1017,9 +955,6 @@ def test_preplan_drift_is_never_cleaned_after_byte_identical_restore(tmp_path: P
 def test_preplan_conflict_never_becomes_accepted_pass_or_unknown_disposition(
     tmp_path: Path, verification: str, requested_disposition: str, evidence: str | None, pre_plan_state: str,
 ):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-    from tools.pilot_state import read_attempt_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1049,10 +984,6 @@ def test_preplan_conflict_never_becomes_accepted_pass_or_unknown_disposition(
 
 
 def test_unknown_disposition_binds_evidence_and_never_removes_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import apply_dispositions
-    from tools.pilot_state import read_attempt_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1077,9 +1008,6 @@ def test_unknown_disposition_binds_evidence_and_never_removes_files(tmp_path: Pa
 
 @pytest.mark.usefixtures("cleanup_policy")
 def test_exact_final_disposition_replay_does_not_mutate_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import apply_dispositions
-
     delta, run_root, attempt_id = _published_execution_delta(tmp_path, failed=True)
     requested = {delta["files"][0]["path"]: "CLEANED"}
     first = apply_dispositions(tmp_path, delta, requested, run_root=run_root, attempt_id=attempt_id, verification="FAIL")
@@ -1095,9 +1023,6 @@ def test_exact_final_disposition_replay_does_not_mutate_project(tmp_path: Path, 
 
 @pytest.mark.parametrize("state", ["drift", "missing"])
 def test_unknown_disposition_inspects_bytes_without_cleanup(tmp_path: Path, state: str, monkeypatch: pytest.MonkeyPatch):
-    import tools.generated_delta as generated_delta
-    from tools.generated_delta import apply_dispositions
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1120,8 +1045,6 @@ def test_unknown_disposition_inspects_bytes_without_cleanup(tmp_path: Path, stat
 
 
 def test_disposition_final_replay_rejects_different_facts(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, apply_dispositions
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1142,8 +1065,6 @@ def test_disposition_final_replay_rejects_different_facts(tmp_path: Path):
 
 
 def test_pilot_rejects_forged_or_wrong_attempt_disposition_payload(tmp_path: Path):
-    from tools.pilot_state import publish_phase5_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     forged = {"schema_version": "1.0.0", "stage": "disposition-plan"}
@@ -1154,8 +1075,6 @@ def test_pilot_rejects_forged_or_wrong_attempt_disposition_payload(tmp_path: Pat
 
 
 def test_disposition_publisher_rejects_duplicate_or_subset_plan(tmp_path: Path):
-    from tools.pilot_state import _sealed, publish_phase5_receipt
-
     inputs = _inputs(tmp_path, mutate=_add_second_file)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1179,8 +1098,6 @@ def test_disposition_publisher_rejects_duplicate_or_subset_plan(tmp_path: Path):
 
 
 def test_disposition_publisher_rejects_wrong_plan_relation(tmp_path: Path):
-    from tools.pilot_state import _sealed, publish_phase5_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1196,8 +1113,6 @@ def test_disposition_publisher_rejects_wrong_plan_relation(tmp_path: Path):
 
 
 def test_disposition_publisher_rejects_wrong_delta_stage_and_final_relation(tmp_path: Path):
-    from tools.pilot_state import _sealed, publish_phase5_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1243,8 +1158,6 @@ def test_disposition_publisher_rejects_accepted_final_for_nonexact_plan_state(
     tmp_path: Path, verification: str, operation: str, requested_disposition: str, pre_effect_state: str,
     disposition: str, reason_code: str | None, evidence: str | None,
 ):
-    from tools.pilot_state import _sealed, publish_phase5_receipt
-
     inputs = _inputs(tmp_path)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     delta = _materialize(tmp_path, inputs)
@@ -1277,9 +1190,6 @@ def test_disposition_publisher_rejects_accepted_final_for_nonexact_plan_state(
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_component_prefix_generated_paths_fail_before_ownership_or_project_write(tmp_path: Path, reverse: bool):
-    from tools.generated_delta import GeneratedDeltaError
-    from tools.pilot_state import read_attempt_receipt
-
     inputs = _inputs(tmp_path, mutate=lambda automation: _add_component_prefix_collision(automation, reverse=reverse))
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
     with pytest.raises(GeneratedDeltaError, match="component-colliding"):
@@ -1290,8 +1200,6 @@ def test_component_prefix_generated_paths_fail_before_ownership_or_project_write
 
 
 def test_materialization_requires_preexisting_authoritative_test_root(tmp_path: Path):
-    from tools.generated_delta import GeneratedDeltaError, materialize_delta
-
     baseline, automation, review, document, run_root, attempt_id = _inputs(tmp_path)
     (tmp_path / "tests").rmdir()
     with pytest.raises(GeneratedDeltaError, match="test root"):
@@ -1299,9 +1207,6 @@ def test_materialization_requires_preexisting_authoritative_test_root(tmp_path: 
 
 
 def test_case_collision_and_escape_are_rejected_before_any_write(tmp_path: Path):
-    from tools.automation_validation import validate_automation_artifact
-    from tools.generated_delta import GeneratedDeltaError
-
     def add_casefolding_collision(automation: dict) -> None:
         artifacts = automation["artifacts"]
         artifacts["generated_files"].append({

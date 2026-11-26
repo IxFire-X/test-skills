@@ -8,6 +8,8 @@ import pytest
 
 from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
 from tools import pilot_state
+from tools.context_marker_parts import merge_parts
+from tools.json_cli import error_fields
 
 
 def _baseline_requests(root: Path) -> list[dict]:
@@ -16,9 +18,6 @@ def _baseline_requests(root: Path) -> list[dict]:
 
 
 def test_a_refused_merge_writes_no_request_and_the_merge_goes_on_after(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.context_marker_parts import merge_parts
-    from tools.json_cli import error_fields
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     for index, receipt in enumerate(receipts, start=1):

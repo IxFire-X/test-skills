@@ -17,6 +17,9 @@ import pytest
 from tests.journal_helpers import assert_refused_once
 from tests.test_review_requested import _digest_of, _generated_run, _journal, _put
 from tests.test_review_two_commands import _candidate_file, _cycle, _open, _select_verdict
+from tools import pilot_state
+from tools.pilot_state import derive_state, read_reviewer_session_ledger
+from tools.orchestrate_test_case_revision import OrchestrationError, review_decision, journal_assembly
 
 
 def _answer(run: dict, mutate=None, name: str = "review.json") -> str:
@@ -67,9 +70,6 @@ def test_a_wrong_decision_is_refused_before_the_write_and_the_retry_closes_the_r
 def test_the_selection_checks_the_decision_before_it_closes_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A journal written before FaT-R1 (the wrong answer is recorded): submit refuses with the session still open, so
     ``submit --abort REVIEW_UNUSABLE`` and finish close the attempt — no dead end."""
-    from tools import pilot_state
-    from tools.pilot_state import derive_state, read_reviewer_session_ledger
-
     run = _requested(tmp_path)
     review = _answer(run, _destructive_autofix)
     with monkeypatch.context() as old:  # the package before FaT-R1 wrote it
@@ -88,10 +88,7 @@ def test_the_selection_checks_the_decision_before_it_closes_the_ledger(tmp_path:
 
 
 def test_an_autofix_of_an_import_may_not_touch_the_human_fields(tmp_path: Path) -> None:
-    from tools.orchestrate_test_case_revision import OrchestrationError, review_decision
-
     run = _generated_run(tmp_path)
-    from tools.orchestrate_test_case_revision import journal_assembly
 
     candidate = journal_assembly(run["run_root"], run["attempt_id"])[0]
     _put(run["tmp"] / "candidate.json", candidate)

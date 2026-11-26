@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tools.run_pipeline import _report_mismatch
 
 ATTEMPT = "a" * 32
 # The shape of the Petclinic campaign report (Surefire 3.0.2): the suite name and the file keep the FQN, classname is the
@@ -64,6 +65,4 @@ def test_no_hint_outside_a_renamed_class(tmp_path: Path, monkeypatch, classname:
 
 
 def test_unreadable_receipt_never_fails_the_step(tmp_path: Path) -> None:
-    from tools.run_pipeline import _report_mismatch
-
     assert _report_mismatch(tmp_path, ATTEMPT) == {}

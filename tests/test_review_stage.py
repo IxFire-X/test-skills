@@ -15,7 +15,7 @@ import pytest
 from tests.test_review_canaries import _answer, _boundary_and_removed, _fake_seed, _finding, _generated_run, _ids
 from tests.test_stage_steps import _call, _events, _put, _status
 from tests.test_rework_stage import _published
-from tools import pilot_state, review_canaries, stage_steps
+from tools import pilot_state, review_canaries, stage_steps, orchestrate_test_case_revision as orchestrate
 
 STAGE = "tc-reviewer:canonical"
 INDEPENDENT = ("--invocation-id", "reviewer-subagent-1", "--fresh-context", "yes")
@@ -116,8 +116,6 @@ def test_an_accepted_set_is_selected_and_published_and_status_names_finish(tmp_p
 
 
 def test_a_partial_acceptance_goes_back_once_and_names_the_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     run = _opened(tmp_path, monkeypatch, capsys)
     answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[*_boundary_and_removed(run), _finding("BLOCKING", [_ids(run)[0]["case_id"]], "Нет проверки состояния.")])

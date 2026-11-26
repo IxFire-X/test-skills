@@ -9,6 +9,13 @@ from pathlib import Path
 import pytest
 
 from tests.test_marker_reuse import _fresh, _marker, _request, _source
+from tests.test_self_review import _run
+from tools import pilot_state
+from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
+from tests.test_quarantine import THREE_FUNCTIONS, _fail
+from tests.test_phase2_scan import _skillsrc
+from tools.init_skillsrc import _payload
+from tools.skillsrc_manifest import parse_skillsrc_bytes
 
 TEST_PATH = "tests/test_written.py"
 
@@ -114,10 +121,6 @@ def test_a_file_left_out_as_secret_since_the_source_refuses_the_reuse(tmp_path: 
 
 def test_a_source_whose_context_lacks_a_file_the_new_one_holds_is_not_taken(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The own test of the human's ``paths.include`` is in the context of the new run: the marker of the source was made without it (and the other way round: a source made before the tests were kept out)."""
-    from tests.test_self_review import _run
-    from tools import pilot_state
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-
     source_root, _attempt = _source(tmp_path)
     _own(tmp_path, source_root, monkeypatch)
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
@@ -130,8 +133,6 @@ def test_a_source_whose_context_lacks_a_file_the_new_one_holds_is_not_taken(tmp_
 
 
 def test_the_differences_name_the_input_and_only_the_changed_ones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     source_root, _attempt = _source(tmp_path)
     (tmp_path / "tests" / "added.py").write_text("x = 1\n", encoding="utf-8")
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -140,8 +141,6 @@ def test_the_differences_name_the_input_and_only_the_changed_ones(tmp_path: Path
 
 
 def test_the_files_a_refusal_names_leave_out_the_own_tests_and_the_build_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     source_root, _attempt = _source(tmp_path)
     _own(tmp_path, source_root, monkeypatch)
     (tmp_path / "target").mkdir()
@@ -152,9 +151,6 @@ def test_the_files_a_refusal_names_leave_out_the_own_tests_and_the_build_directo
 
 
 def test_a_context_in_more_receipts_than_the_source_refuses_the_reuse(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt, select_context_batches
-
     source_root, _attempt = _source(tmp_path)
     (tmp_path / "tests").mkdir(exist_ok=True)
     for name in ("one.py", "two.py"):
@@ -190,8 +186,6 @@ def test_an_unknown_digest_is_compared_as_it_is(tmp_path: Path) -> None:
 
 
 def test_a_receipt_of_the_source_that_does_not_read_is_a_refusal_not_a_skip(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     source_root, source_attempt = _source(tmp_path)
     for path in (source_root / "context-selections").rglob("*.json"):
         path.write_bytes(b"{")
@@ -203,8 +197,6 @@ def test_a_receipt_of_the_source_that_does_not_read_is_a_refusal_not_a_skip(tmp_
 
 
 def test_the_receipt_of_the_new_run_is_read_against_the_live_files_as_before(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path)
     receipt = pilot_state.read_context_selection(run_root, attempt_id, inputs[2])
@@ -215,8 +207,6 @@ def test_the_receipt_of_the_new_run_is_read_against_the_live_files_as_before(tmp
 
 
 def test_a_receipt_read_without_the_live_files_still_checks_its_own_digest(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path)
     receipt = dict(pilot_state.read_context_selection(run_root, attempt_id, inputs[2]))
@@ -228,8 +218,6 @@ def test_a_receipt_read_without_the_live_files_still_checks_its_own_digest(tmp_p
 
 
 def test_a_receipt_read_without_the_live_files_does_not_see_a_changed_file(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path)
     receipt = pilot_state.read_context_selection(run_root, attempt_id, inputs[2])
@@ -241,9 +229,6 @@ def test_a_receipt_read_without_the_live_files_does_not_see_a_changed_file(tmp_p
 # --- the whole way with the receipts a real run wrote (no stand-in for the owner of the file) ---
 
 def test_the_test_a_real_run_wrote_and_a_build_directory_keep_the_reuse(tmp_path: Path) -> None:
-    from tests.test_quarantine import THREE_FUNCTIONS, _fail
-    from tools import pilot_state
-
     run_root, _attempt, delta = _fail(tmp_path, content=THREE_FUNCTIONS)  # the run: its marker and accepted review, and the test it wrote into the project
     (tmp_path / "target").mkdir()
     (tmp_path / "target" / "classes.txt").write_text("x", encoding="utf-8")
@@ -256,10 +241,6 @@ def test_the_test_a_real_run_wrote_and_a_build_directory_keep_the_reuse(tmp_path
 
 
 def test_a_changed_skillsrc_refuses_the_reuse(tmp_path: Path) -> None:
-    from tests.test_phase2_scan import _skillsrc
-    from tools.init_skillsrc import _payload
-    from tools.skillsrc_manifest import parse_skillsrc_bytes
-
     (tmp_path / ".skillsrc").write_bytes(_skillsrc())
     source_root, _attempt = _source(tmp_path)
     document = json.loads(json.dumps(parse_skillsrc_bytes(_skillsrc())))
@@ -269,8 +250,6 @@ def test_a_changed_skillsrc_refuses_the_reuse(tmp_path: Path) -> None:
 
 
 def test_a_receipt_of_the_source_that_is_no_object_is_a_refusal_and_the_scan_goes_on(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     source_root, _attempt = _source(tmp_path)
     for path in (source_root / "context-selections").rglob("*.json"):
         path.write_bytes(b"[]")

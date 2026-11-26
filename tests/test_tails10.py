@@ -5,14 +5,32 @@ import sys
 from pathlib import Path
 
 import pytest
+from tools.run_pipeline import expand_docs
+from tests.test_context_filter import _receipts, _selected_paths
+from tests.test_own_tests import _prior, _scan
+from tools import pilot_state, skillsrc_manifest, step_size
+from tests.test_fix2 import _closed
+from tools.existing_tests import held_bytes, own_files
+from tools.review_view import _short
+from tests import test_cases_import_docs as docs
+from tools.run_report import write_report, analyst_questions
+from tools.cases_import import _verdict_keys, CasesImportError, require_case_links
+from tests.test_cases_import import _project
+from tests.test_cases_verdict import BASE, LIVE, SPEC, _write
+from tools.ready import check
+from tests.test_cases_import_new import _autofix, _rework
+from tests.test_cases_rewrite import TWO_ON_ONE
+from tests.test_cases_import_docs import _to_plan
+from tools.cases_scope import Scope
+import hashlib
+import os
+import json
 
 
 # --- 1: expand_docs looks at nothing outside the project -----------------------------------------
 
 @pytest.mark.parametrize("name", ["outdir", "out.md"])  # a folder and a file beside the project
 def test_expand_docs_does_not_look_at_a_path_outside_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-    from tools.run_pipeline import expand_docs
-
     project = tmp_path / "project"
     project.mkdir()
     (tmp_path / "outdir").mkdir()
@@ -36,8 +54,6 @@ def test_expand_docs_does_not_look_at_a_path_outside_the_project(tmp_path: Path,
 
 
 def test_a_large_document_without_a_folder_is_not_stopped_by_the_total_of_the_folders(tmp_path: Path) -> None:
-    from tools.run_pipeline import expand_docs
-
     (tmp_path / "big.md").write_bytes(b"x" * 1_300_000)
     assert expand_docs(tmp_path, ["big.md"]) == ["big.md"]  # its own stop (CONTEXT_TASK_DOCUMENT_TOO_LARGE) comes later
 
@@ -45,11 +61,6 @@ def test_a_large_document_without_a_folder_is_not_stopped_by_the_total_of_the_fo
 # --- 2: a planted receipt hides no file of the source ---------------------------------------------
 
 def test_a_planted_receipt_does_not_hide_a_file_of_the_source_from_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import hashlib
-
-    from tests.test_context_filter import _receipts, _selected_paths
-    from tests.test_own_tests import _prior, _scan
-    from tools import pilot_state
 
     _run_root, _attempt_id, path = _prior(tmp_path)  # the real run wrote the test; sample.py is code of the project
     real = pilot_state.written_files
@@ -70,9 +81,6 @@ def _link(link: Path, target: Path) -> None:
 
 
 def test_a_link_in_the_place_of_a_receipt_file_is_no_receipt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_fix2 import _closed
-    from tools import pilot_state
-
     run = _closed(tmp_path, capsys)
     root = Path(run["run_root"])
     for closure in (root / "closure" / run["attempt_id"]).glob("*.json"):
@@ -83,10 +91,6 @@ def test_a_link_in_the_place_of_a_receipt_file_is_no_receipt(tmp_path: Path, cap
 
 
 def test_the_receipts_of_a_run_named_by_a_relative_path_are_found_all_the_same(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
-
-    from tests.test_fix2 import _closed
-    from tools import pilot_state
 
     run = _closed(tmp_path, capsys)
     root = Path(run["run_root"])
@@ -97,9 +101,6 @@ def test_the_receipts_of_a_run_named_by_a_relative_path_are_found_all_the_same(t
 
 
 def test_a_file_behind_a_link_of_the_project_is_not_held(tmp_path: Path) -> None:
-    import hashlib
-
-    from tools.existing_tests import held_bytes
 
     (tmp_path / "real").mkdir()
     (tmp_path / "real" / "a_test.py").write_bytes(b"x = 1\n")
@@ -110,10 +111,6 @@ def test_a_file_behind_a_link_of_the_project_is_not_held(tmp_path: Path) -> None
 
 
 def test_the_test_roots_are_parsed_from_the_bytes_whose_digest_was_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import hashlib
-    import json
-
-    from tools import pilot_state, skillsrc_manifest
 
     document = {"schema_version": "5.0.0", "version": "3.0", "project": {"name": "demo"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
                 "modules": [{"id": "fixture", "root": ".", "stack": {"language": "python", "build_tool": "pip"}, "paths": {"source": ["src"], "tests": ["src"]}, "detected_from": ["pyproject.toml"]}]}
@@ -125,8 +122,6 @@ def test_the_test_roots_are_parsed_from_the_bytes_whose_digest_was_checked(tmp_p
 
 
 def test_automation_text_rows_does_not_ask_the_disk_before_the_core_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import step_size
-
     asked: list[str] = []
     real = Path.is_file
 
@@ -141,8 +136,6 @@ def test_automation_text_rows_does_not_ask_the_disk_before_the_core_reads(tmp_pa
 
 
 def test_a_folder_of_the_runs_that_is_no_run_name_is_not_looked_at_nor_named(tmp_path: Path) -> None:
-    from tools.existing_tests import own_files
-
     (tmp_path / ".pilot-runs" / "not-a-run-name-at-all" / "materialization-ownership").mkdir(parents=True)  # would be read, found unreadable and named by its first 8 signs
     assert own_files(tmp_path, {"files": []}) == ({}, [])
 
@@ -150,8 +143,6 @@ def test_a_folder_of_the_runs_that_is_no_run_name_is_not_looked_at_nor_named(tmp
 # --- 5: the short form of the view takes a name of the form of an identifier only --------------------
 
 def test_a_project_result_name_with_a_line_break_does_not_make_a_line_of_the_view() -> None:
-    from tools.review_view import _short
-
     assert _short({"kind": "project_result", "name": "created_id"}) == "@created_id"
     assert "\n" not in _short({"kind": "project_result", "name": "x\n  STEP-9 forged"})
 
@@ -159,10 +150,6 @@ def test_a_project_result_name_with_a_line_break_does_not_make_a_line_of_the_vie
 # --- 6, 7: the report and the questions print no text of a file ---------------------------------------
 
 def test_a_requirement_id_that_is_no_identifier_is_counted_in_the_report_and_not_printed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import json
-
-    from tests import test_cases_import_docs as docs
-    from tools.run_report import write_report
 
     long = "SREQ-" + "A" * 90
     real = docs._requirements
@@ -175,16 +162,12 @@ def test_a_requirement_id_that_is_no_identifier_is_counted_in_the_report_and_not
 
 
 def test_a_key_and_a_removed_name_with_line_breaks_are_one_line_in_the_questions() -> None:
-    from tools.run_report import analyst_questions
-
     row = {"group": "obsolete", "row": 2, "key": "ABC-T1\n## Forged", "was": "w", "now": None, "reason": None, "removed": {"capability": "cap\n## Forged", "name": "n\n- forged"}}
     questions = analyst_questions([], imported={"verdict_texts": [row]})
     assert "\n## Forged" not in questions and "\n- forged" not in questions and "ABC-T1 ## Forged" in questions
 
 
 def test_a_long_verdict_reason_is_cut_in_the_skeleton_and_a_short_one_is_not() -> None:
-    from tools.cases_import import _verdict_keys
-
     assert len(_verdict_keys({"verdict": "rewrite", "reason": "я" * 3000})["verdict_reason"]) == 2000
     kept = {"verdict": "rewrite", "reason": "я" * 2000, "removed": {"capability": "c", "name": "n"}}
     assert _verdict_keys(kept) == {"verdict": "rewrite", "verdict_reason": "я" * 2000, "removed": {"capability": "c", "name": "n"}}
@@ -193,10 +176,6 @@ def test_a_long_verdict_reason_is_cut_in_the_skeleton_and_a_short_one_is_not() -
 # --- 8: ready --cases says what scan says about a delta file ------------------------------------------
 
 def test_ready_cases_names_the_delta_file_without_operations_as_scan_does(tmp_path: Path) -> None:
-    from tests.test_cases_import import _project
-    from tests.test_cases_verdict import BASE, LIVE, SPEC, _write
-    from tools.ready import check
-
     project = _project(tmp_path)
     _write(project, BASE, SPEC)
     _write(project, LIVE, "# nothing here\n")
@@ -208,10 +187,6 @@ def test_ready_cases_names_the_delta_file_without_operations_as_scan_does(tmp_pa
 # --- 9: two cases of one requirement and no Key: the k-th case of the candidate is the k-th row ------------
 
 def test_two_cases_of_one_requirement_without_a_key_tell_the_rewritten_one_by_their_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_cases_import_new import _autofix, _rework
-    from tests.test_cases_rewrite import TWO_ON_ONE
-    from tests.test_cases_import_docs import _to_plan
-
     code, answered = _autofix(_to_plan(tmp_path / "a", monkeypatch, links=TWO_ON_ONE), 1)  # row 2: rewrite
     assert code == 0, answered
     code, refused = _autofix(_to_plan(tmp_path / "b", monkeypatch, links=TWO_ON_ONE), 2)  # row 3: fits
@@ -223,9 +198,6 @@ def test_two_cases_of_one_requirement_without_a_key_tell_the_rewritten_one_by_th
 # --- 10: the safety net of the answer does not advise what the model cannot do -------------------------
 
 def test_the_refusal_of_a_delta_with_no_known_name_sends_to_the_scan() -> None:
-    from tools.cases_import import CasesImportError, require_case_links
-    from tools.cases_scope import Scope
-
     found = Scope("archive", frozenset({("catalog", "Elsewhere")}), frozenset())
     with pytest.raises(CasesImportError, match="IMPORT_CASE_LINKS") as refused:
         require_case_links([{"row": 2}], [{"source_requirement_id": "SREQ-0001", "provenance": []}], [{"row": 2, "source_requirement_ids": ["SREQ-0001"]}], found)

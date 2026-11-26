@@ -12,6 +12,15 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_finish import _automation_chain
+from tools import pilot_state, exec_commands
+from tools.pilot_state import ModelResponseDigestMismatch, derive_state
+from tools.finalize_attempt import automation_next
+from tools.run_pipeline import HostStop, cmd_finish
+from tests.test_reviewer_protocol import _new_run
+from tests.test_automation_revision_budget import automated_document
+from tests.test_generated_delta import _published_reviewer_ledger
+from tests.test_self_review import _run as _self_run
+from tests.p4_flow import human_run, materialize
 
 
 def _run(capsys: pytest.CaptureFixture[str], command: str, project: Path, run_root: Path) -> tuple[int, dict]:
@@ -37,8 +46,6 @@ def _status(project: Path, run_root: Path, capsys: pytest.CaptureFixture[str]) -
 
 def _journal_before_dg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     """The 523ec561 journal as the package before FaT-DG wrote it: the answer was not checked for the digest fields yet."""
-    from tools import pilot_state
-
     with monkeypatch.context() as old:
         old.setattr(pilot_state, "_response_digest_rows", lambda *_args: [])
         return _automation_chain(tmp_path, ["ПРИНЯТО"], edit_review=_wrong_relations)
@@ -46,8 +53,6 @@ def _journal_before_dg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple
 
 def test_today_model_response_refuses_the_unbound_answer_and_writes_nothing(tmp_path: Path) -> None:
     """FaT-DG keeps new runs out of this state; the closure below is for journals written before it."""
-    from tools.pilot_state import ModelResponseDigestMismatch, derive_state
-
     with pytest.raises(ModelResponseDigestMismatch) as refused:
         _automation_chain(tmp_path, ["ПРИНЯТО"], edit_review=_wrong_relations)
     assert refused.value.code == "MODEL_RESPONSE_DIGEST_MISMATCH" and "reviewed_relations_sha256" in str(refused.value)
@@ -85,9 +90,6 @@ def test_an_accepted_review_materialize_cannot_write_is_closed_by_finish(tmp_pat
 
 
 def test_a_valid_accepted_chain_still_goes_to_materialize(tmp_path: Path) -> None:
-    from tools.finalize_attempt import automation_next
-    from tools.run_pipeline import HostStop, cmd_finish
-
     root, attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
     assert automation_next(root, attempt_id)[0] == "ACCEPTED"
     with pytest.raises(HostStop) as stop:
@@ -123,8 +125,6 @@ def test_a_automation_not_finished_names_the_next_model_stage(tmp_path: Path, ca
 
 
 def test_b_an_open_canonical_review_names_how_to_close_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_reviewer_protocol import _new_run
-
     root, _attempt_id = _new_run(tmp_path, "local-pilot-v1")
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED", finish
@@ -134,10 +134,6 @@ def test_b_an_open_canonical_review_names_how_to_close_it(tmp_path: Path, capsys
 
 
 def test_c_an_accepted_review_without_selection_names_the_selection(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _published_reviewer_ledger
-    from tests.test_self_review import _run as _self_run
-
     root, attempt_id = _self_run(tmp_path, "local-pilot-v1", flag=False)
     _published_reviewer_ledger(root, attempt_id, automated_document())
     code, finish = _run(capsys, "finish", tmp_path, root)
@@ -147,10 +143,7 @@ def test_c_an_accepted_review_without_selection_names_the_selection(tmp_path: Pa
 
 
 def test_d_an_interrupted_ingest_is_finished_by_ingest(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.p4_flow import human_run, materialize
     from tests.test_exec_prepares import _project
-    from tools import exec_commands
-    from tools.pilot_state import derive_state
 
     project, run_root, attempt_id = _project(tmp_path)
     printed = materialize(project, run_root, capsys)

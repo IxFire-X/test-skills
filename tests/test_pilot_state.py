@@ -9,8 +9,12 @@ from jsonschema import Draft202012Validator, FormatChecker
 from tools import pilot_state
 from tools import confined_output
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive
-from tools.pilot_state import append_event, create_run, derive_state
+from tools.pilot_state import append_event, create_run, derive_state, create_attempt
+from tools.project_inventory import read_inventory_receipt, select_context_batches
 from helpers import phase_two_baseline
+from types import SimpleNamespace
+from tests.test_automation_revision_budget import automated_document
+from tests.helpers import generator_requests_before_dg
 
 
 AUTHORIZATION = {"request_id": "request-1", "execution_requested": False}
@@ -19,8 +23,6 @@ DIGEST_B = "sha256:" + "b" * 64
 
 
 def test_directory_guard_tolerates_reported_attribute_bit_but_rejects_reparse(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
     original_stat = os.stat
     calls = 0
     extra = 0x10000000  # Exact transient bit observed on the Windows CI runner.
@@ -275,9 +277,6 @@ def test_event_append_rejects_fabricated_and_out_of_order_attempt_evidence_witho
 
 
 def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> None:
-    from tools.project_inventory import read_inventory_receipt, select_context_batches
-    from tests.test_automation_revision_budget import automated_document
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     baseline = _baseline(root)
@@ -341,7 +340,6 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
             "source_code_and_diff": {"sources": ["fixture — durable model input"]},
         }, "warnings": [],
     })
-    from tests.helpers import generator_requests_before_dg
 
     plan_digest, header_digest = "sha256:" + "1" * 64, "sha256:" + "2" * 64
     before = _snapshot(root)
@@ -412,8 +410,6 @@ def test_direct_terminal_event_requires_completed_phase_seven_closure(tmp_path: 
 
 
 def test_process_stopped_requires_verified_recovery_without_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     attempt = create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, _baseline(root))
@@ -426,8 +422,6 @@ def test_process_stopped_requires_verified_recovery_without_mutation(tmp_path: P
 
 
 def test_ordered_state_reducer_uses_latest_valid_transition(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     attempt = create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, _baseline(root))
@@ -488,8 +482,6 @@ def test_immutable_publish_is_temp_fsync_then_atomic_no_replace(tmp_path: Path, 
 
 
 def test_run_and_module_reparse_components_never_escape(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
-
     unsafe_runs = tmp_path / ".pilot-runs"
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -538,7 +530,6 @@ def test_duplicate_key_documents_really_fail_strict_replay(tmp_path: Path) -> No
     (root / "events.jsonl").write_bytes(event.read_bytes())
     with pytest.raises(ValueError, match="event journal"):
         derive_state(root)
-    from tools.pilot_state import create_attempt
 
     second_project = tmp_path / "second"
     second_project.mkdir()
@@ -552,8 +543,6 @@ def test_duplicate_key_documents_really_fail_strict_replay(tmp_path: Path) -> No
 
 
 def test_real_artifacts_validate_with_format_checker(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, _baseline(root))
@@ -582,8 +571,6 @@ def test_real_artifacts_validate_with_format_checker(tmp_path: Path) -> None:
 
 
 def test_event_authority_rejects_second_active_attempt_and_invalid_lineage(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     first = create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, _baseline(root))
@@ -597,8 +584,6 @@ def test_event_authority_rejects_second_active_attempt_and_invalid_lineage(tmp_p
 
 
 def test_replay_rejects_resealed_attempt_identity_and_two_nonterminal_attempts(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     first = create_attempt(root, {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"}, _baseline(root))
@@ -615,7 +600,6 @@ def test_replay_rejects_resealed_attempt_identity_and_two_nonterminal_attempts(t
 
 
 def test_uncommitted_attempt_recovery_preserves_every_conflict(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
     cases = (
         "filename", "attempt_id", "module", "baseline", "project", "policy",
         "parent", "retry", "unsafe_retry", "raw_bytes", "digest", "multiple",
@@ -759,7 +743,6 @@ def test_recovery_distinguishes_pending_publication_from_committed_truncation(tm
 
 
 def test_idempotent_event_revalidates_bound_artifact(tmp_path: Path) -> None:
-    from tools.pilot_state import create_attempt
     for case in ("intact", "missing", "mutated", "resealed", "wrong_path"):
         project = tmp_path / case
         project.mkdir()
@@ -878,8 +861,6 @@ def test_round4_postwrite_commit_classification_preserves_attempt_and_run_bounda
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An exception after an exact journal commit is never an outer rollback cue."""
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     _baseline(root)
@@ -911,8 +892,6 @@ def test_round4_unknown_postwrite_outcomes_preserve_all_available_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Missing counterpart and OTHER journal outcomes stay durable-unknown."""
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     baseline = _baseline(root)
@@ -984,8 +963,6 @@ def test_round4_unreadable_final_counterpart_is_publication_unknown_not_attempt_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A read fault after journal replacement cannot authorize deleting an attempt."""
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     original = pilot_state.read_confined_bytes
@@ -1011,8 +988,6 @@ def test_round5_final_counterpart_failure_preserves_pending_marker_before_cleanu
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The marker remains the recovery proof until both final reads are exact."""
-    from tools.pilot_state import create_attempt
-
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
     marker_snapshot: dict[str, tuple[bytes, int]] = {}

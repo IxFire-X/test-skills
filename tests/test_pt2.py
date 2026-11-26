@@ -10,8 +10,22 @@ import sys
 from pathlib import Path
 
 import pytest
+import shutil
+import tempfile
 
 from tests.test_pack_profile import copy_profile
+from tests.test_self_review import _run
+from tests.test_exec_split import _json
+from tests.test_first_run import _python_project
+from tools import api, pilot_state, orchestrate_test_case_revision as orchestrate
+from tools.step_size import compact_inputs
+from tools.ready import check
+from tools.schema_validation import schema_diagnostics
+from tools.pilot_state import effective_canonical_or_reason
+from tests.test_review_requested import _generated_run, build_generated_run
+from tools.run_report import build_report, render_markdown
+from tests.test_finish import _project
+from tests.test_review_two_commands import _open, _select_verdict, _verdict
 
 pytestmark = pytest.mark.contract
 
@@ -24,16 +38,11 @@ REMOVED_COMMANDS = ("model-request", "model-response", "read-model-artifact", "r
 # ---- <run>/tmp is made by the scan -------------------------------------------------------------------------------------
 
 def test_the_run_has_its_tmp_directory_from_the_start(tmp_path: Path) -> None:
-    from tests.test_self_review import _run
-
     run_root, _attempt = _run(tmp_path, "cases-only-v1", flag=False)
     assert (run_root / "tmp").is_dir() and not any((run_root / "tmp").iterdir())
 
 
 def test_a_scan_creates_the_tmp_directory_of_its_run(tmp_path: Path) -> None:
-    from tests.test_exec_split import _json
-    from tests.test_first_run import _python_project
-
     project = _python_project(tmp_path, runtime=False)
     done = subprocess.run([sys.executable, "-m", "tools.run_pipeline", "scan", "--project", str(project), "--docs", "services/api/docs/feature.md", "--module", "nested",
                            "--profile", "cases-only-v1"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
@@ -46,10 +55,6 @@ def test_a_scan_creates_the_tmp_directory_of_its_run(tmp_path: Path) -> None:
 # ---- compact answers ---------------------------------------------------------------------------------------------------
 
 def test_the_files_of_a_step_are_a_summary_and_the_path_of_the_list(tmp_path: Path) -> None:
-    from tests.test_self_review import _run
-    from tools import api
-    from tools.step_size import compact_inputs
-
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     rows = [{"digest": "sha256:" + f"{index:064x}", "path": str(run_root / "inputs" / (f"file-{index:03d}-" + "x" * 60 + ".java")), "bytes": 1000 + index}
             for index in range(200)] + [{"digest": "sha256:" + "f" * 64, "path": str(run_root / "map.md"), "bytes": 5, "basis": "карта"}]
@@ -64,8 +69,6 @@ def test_the_files_of_a_step_are_a_summary_and_the_path_of_the_list(tmp_path: Pa
 
 
 def test_the_composition_of_prior_capabilities_is_listed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from tools import pilot_state
-
     capabilities = [{"capability_id": f"CAP-B1-name{index}", "action": f"name{index}"} for index in range(80)]
     value = {"operation_capabilities": capabilities, "digest": "sha256:" + "d" * 64}
     run = tmp_path / "project" / ".pilot-runs" / ("a" * 32)
@@ -105,9 +108,6 @@ def test_the_help_of_the_cases_only_pack_lists_none_of_the_removed_commands(case
 
 
 def test_ready_says_finish_in_the_cases_only_row_and_ingest_where_it_exists(tmp_path: Path) -> None:
-    from tests.test_first_run import _python_project
-    from tools.ready import check
-
     project = _python_project(tmp_path, runtime=False)
     cases = next(row for row in check(project, [], "cases-only-v1", "nested")["checks"] if row["id"] == "run:freeze")["message"]
     assert "до finish:" in cases and "ingest" not in cases and "materialize" not in cases
@@ -131,9 +131,6 @@ def _jsonl_rows() -> list[dict]:
 
 
 def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each_one_checks(tmp_path: Path) -> None:
-    import shutil
-
-    from tools.schema_validation import schema_diagnostics
 
     rows = _jsonl_rows()
     results = [row for row in rows if "semantic_type" in row and "operator" not in row]
@@ -161,9 +158,6 @@ def test_the_three_samples_of_checks_are_what_the_schema_takes_and_say_what_each
 # ---- before the verdict ----------------------------------------------------------------------------------------------------
 
 def test_no_effective_document_before_the_verdict_is_an_answer_not_a_refusal_of_the_journal(tmp_path: Path) -> None:
-    from tests.test_self_review import _run
-    from tools.pilot_state import effective_canonical_or_reason
-
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     answer = effective_canonical_or_reason(run_root, attempt_id)  # what status and the report read: «not yet» is the journal's word
     assert answer["effective"] is None and "вердикт" in answer["reason"], answer
@@ -174,9 +168,6 @@ def test_no_effective_document_before_the_verdict_is_an_answer_not_a_refusal_of_
 
 @pytest.mark.slow
 def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_and_says_so(tmp_path: Path) -> None:
-    from tests.test_review_requested import _generated_run
-    from tools.run_report import build_report, render_markdown
-
     run = _generated_run(tmp_path)
     report = build_report(run["project"], Path(run["run_root"]).name)[0]
     counts = report["counts"]
@@ -202,9 +193,6 @@ def test_the_three_texts_say_the_same_about_scripts_and_none_contradicts() -> No
 @pytest.mark.slow
 def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: Path) -> None:
     """The probe of orchestrator-3: the run has its accepted effective selection; its file is gone; the journal still says it was accepted."""
-    from tests.test_finish import _project
-    from tools import pilot_state
-
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
     assert pilot_state.effective_canonical_or_reason(run_root, attempt_id).get("effective", "x") is not None
     pilot_state._receipt_target(Path(run_root), attempt_id, "effective-canonical").unlink()
@@ -214,12 +202,6 @@ def test_a_deleted_effective_document_is_a_refusal_not_no_verdict_yet(tmp_path: 
 
 @pytest.mark.slow
 def test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import build_generated_run
-    from tests.test_review_two_commands import _open, _select_verdict, _verdict
-    from tools import orchestrate_test_case_revision as orchestrate
-    from tools.pilot_state import effective_canonical_or_reason
-    import tempfile
-
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 0)  # with the rework on, one case of two sent back (50 %) waits for the rework: no verdict is closed yet
     with tempfile.TemporaryDirectory() as directory:
         run = build_generated_run(Path(directory))

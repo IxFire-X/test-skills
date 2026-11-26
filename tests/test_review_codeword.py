@@ -13,12 +13,14 @@ import pytest
 
 from tests.test_review_canaries import _answer, _flags, _open, _select
 from tests.test_review_requested import _generated_run
+from tools import pilot_state
+from tools.pilot_state import read_model_request, publish_model_request
+from tools.review_canaries import nonce_digest, recorded_answer, codeword_state
+from tools.schema_validation import schema_diagnostics
 
 
 def _with_words(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """The nonces the fixture's generator requests gave, by stage: ``_generated_run`` drops the output of ``publish_model_request``."""
-    from tools import pilot_state
-
     given: dict[str, str] = {}
     real = pilot_state.publish_model_request
 
@@ -38,9 +40,6 @@ def _every_file(run: dict) -> bytes:
 
 
 def test_the_generator_request_gives_a_nonce_and_keeps_its_sha256_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.pilot_state import read_model_request
-    from tools.review_canaries import nonce_digest
-
     words = _with_words(monkeypatch)
     run = _generated_run(tmp_path)
     assert len(words) == 2 and all(len(word) == 12 for word in words.values()) and len(set(words.values())) == 2
@@ -53,12 +52,9 @@ def test_the_generator_request_gives_a_nonce_and_keeps_its_sha256_only(tmp_path:
 
 
 def test_only_the_generator_gets_a_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.pilot_state import publish_model_request
-
     run = _generated_run(tmp_path)
     marker = next(row for row in (json.loads(line) for line in (run["run_root"] / "events.jsonl").read_text(encoding="utf-8").splitlines())
                   if row["event_type"] == "MODEL_REQUESTED" and row["stage_instance_id"] == "context-marker:baseline")
-    from tools.pilot_state import read_model_request
 
     assert "nonce_sha256" not in read_model_request(*_flags(run), "context-marker:baseline", marker["artifact_digest"])
     assert publish_model_request  # imported for the next test's readers
@@ -88,8 +84,6 @@ def test_a_named_word_is_refused_in_a_run_that_does_not_admit_self_even_with_fre
 
 
 def test_in_a_run_that_admits_self_a_named_word_is_recorded_as_a_hash_and_marks_self(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.review_canaries import nonce_digest, recorded_answer
-
     words = _with_words(monkeypatch)
     run = _generated_run(tmp_path, self_review=True)
     _open(run, monkeypatch, fresh=True)
@@ -111,16 +105,12 @@ def test_a_wrong_word_counts_as_not_named_and_is_said_so(tmp_path: Path, monkeyp
 
 
 def test_a_request_without_a_word_leaves_nothing_to_compare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.review_canaries import codeword_state
-
     run = _generated_run(tmp_path)  # the word was lost with the output: the answer has nothing to be compared with only if no request had one
     answer = _answer(run, codeword="что-то")
     assert codeword_state(*_flags(run), answer) in {"wrong", "no_word"}
 
 
 def test_the_reviewer_answer_schema_takes_codeword_seen_and_the_request_schema_the_hash() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     root = Path(__file__).resolve().parents[1]
     answer = {"schema_version": "5.0.0", "stage": "tc-reviewer", "warnings": [], "codeword_seen": None, "artifacts": {"validation_report": {
         "verdict": "ПРИНЯТО", "candidate": {"document_id": "TCDOC-x", "revision": 1, "document_sha256": "sha256:" + "a" * 64},

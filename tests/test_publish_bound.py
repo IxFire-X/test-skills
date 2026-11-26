@@ -14,6 +14,7 @@ import pytest
 
 from tests.test_cut_review import _crash_event
 from tests.test_review_requested import _generated_run, _journal
+from tools import pilot_state
 
 
 def _target(run: dict, name: str = "x.bin") -> Path:
@@ -36,8 +37,6 @@ def _bind(run: dict, data: bytes, **kwargs):
 
 
 def test_the_contract_is_in_the_docstrings() -> None:
-    from tools import pilot_state
-
     bound, raw = " ".join(pilot_state.publish_bound.__doc__.split()), " ".join(pilot_state.bind_bytes.__doc__.split())
     assert "other bytes" in bound and "never read as their source" in bound and "RECEIPT_FILE_UNBOUND" in bound
     assert "never the source" in raw and "ReceiptFileUnbound" in raw
@@ -75,8 +74,6 @@ def test_a_cut_between_the_file_and_its_events_is_finished_by_the_same_call(tmp_
 
 
 def test_other_bytes_on_the_disk_are_refused_with_the_code_and_nothing_is_written(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     _target(run).parent.mkdir(parents=True, exist_ok=True)
     _target(run).write_bytes(b"what an agent left here\n")
@@ -88,8 +85,6 @@ def test_other_bytes_on_the_disk_are_refused_with_the_code_and_nothing_is_writte
 
 
 def test_bytes_and_a_digest_are_required(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     for data, digest in (("text", _digest(b"x")), (b"x", "not-a-digest")):
         with pytest.raises(ValueError, match="required"):
@@ -116,8 +111,6 @@ class _Reached(Exception):
 
 
 def test_the_naive_four_the_effective_canonical_and_the_canaries_publish_through_publish_bound(tmp_path: Path, monkeypatch) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     seen: list[tuple] = []
 

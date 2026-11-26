@@ -12,7 +12,16 @@ from tests.journal_helpers import assert_refused_once
 
 from tests.test_digest_traps import _journal
 from tests.test_marker_parts import _marker, _publish_part, _run
+from tests.helpers import build_phase_two_baseline, prepare_stage
+from tests.spine_helpers import run_phase_one_spine
+from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, GENERATOR, run_generator, run_reviewer
+from tests.test_automation_revision_budget import automated_document
+from tests.test_generated_delta import _effective_bundle, _published_reviewer_ledger
 from tools import pilot_state
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.build_context import build_context
+from tools.context_marker_parts import merge_parts
+from tools.pilot_state import publish_effective_canonical, read_effective_canonical
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -39,8 +48,6 @@ def _responses(root: Path) -> list[str]:
 
 def test_d4_requirements_that_miss_openspec_are_refused_before_the_write(tmp_path: Path) -> None:
     """Before FaT-AU5 the answer was written and only the merge failed — for good, the parts being recorded already."""
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-
     root, attempt_id, baseline, _receipts = _spec_run(tmp_path)
     _request_requirements(root, attempt_id, baseline)
     with pytest.raises(ValueError, match="OpenSpec reconciliation failed: context-marker:requirements: .*OPENSPEC_MISSING.*--transport-attempts 2"):
@@ -49,10 +56,6 @@ def test_d4_requirements_that_miss_openspec_are_refused_before_the_write(tmp_pat
 
 
 def test_d4_requirements_that_follow_openspec_merge(tmp_path: Path) -> None:
-    from tools.build_context import build_context
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-    from tools.context_marker_parts import merge_parts
-
     root, attempt_id, baseline, receipts = _spec_run(tmp_path)
     entry = {"path": SPEC_PATH, "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
     rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
@@ -66,9 +69,6 @@ def test_d4_requirements_that_follow_openspec_merge(tmp_path: Path) -> None:
 
 
 def _automation_run(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
-    from tests.helpers import build_phase_two_baseline
-    from tests.spine_helpers import run_phase_one_spine
-
     (tmp_path / "tests").mkdir()
     identity = {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "local-pilot-v1"}
     baseline = build_phase_two_baseline(tmp_path, identity, skill_pack_root=tmp_path / ".pilot-runs")
@@ -79,12 +79,6 @@ def _automation_run(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
 
 def test_u1_every_refusal_of_the_removed_automation_block_still_holds(tmp_path: Path) -> None:
     """The removed block refused an automation request that came out of order; the cycle refuses it by name and writes nothing."""
-    from tests.helpers import prepare_stage
-    from tests.test_autotest_cycle import INDEPENDENT, REVIEWER, GENERATOR, run_generator, run_reviewer
-    from tests.test_automation_revision_budget import automated_document
-    from tests.test_generated_delta import _effective_bundle, _published_reviewer_ledger
-    from tools.pilot_state import publish_effective_canonical, read_effective_canonical
-
     run_root, attempt_id, _flags = _automation_run(tmp_path)
     before = _journal(run_root)
     code, refused = prepare_stage(run_root, GENERATOR, "--model-id", "model-automation")
@@ -104,11 +98,8 @@ def test_u1_every_refusal_of_the_removed_automation_block_still_holds(tmp_path: 
 
 def test_a_marker_request_over_an_openspec_receipt_is_published(tmp_path: Path) -> None:
     """Before FaT-AU5 the OpenSpec bytes were read with the project itself as the confined root, which always refuses."""
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-
     root, attempt_id, baseline, receipts = _spec_run(tmp_path)
     entry = {"path": SPEC_PATH, "content": SPEC, "sha256": "sha256:" + hashlib.sha256(SPEC.encode("utf-8")).hexdigest()}
-    from tools.build_context import build_context
 
     rows = build_context(PACK_ROOT, docs_snapshot=[entry])["artifacts"]["analytics_documentation"]["requirements"]
     _request_requirements(root, attempt_id, baseline)

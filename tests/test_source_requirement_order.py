@@ -9,6 +9,9 @@ import copy
 from pathlib import Path
 
 import pytest
+from tools.pilot_state import _requirement_order_rows
+from tests.test_marker_parts import _requirements
+from tools import pilot_state
 
 DOC = "docs/portable-owner-lifecycle-requirements.md"
 
@@ -76,7 +79,6 @@ def test_rows_without_a_line_reference_keep_the_model_s_order() -> None:
     rows = [_row(1, 12), _row(2, 4)]
     rows[0]["provenance"] = ["docs — requirement without a line"]
     assert _order(rows) is None
-    from tools.pilot_state import _requirement_order_rows
 
     assert _requirement_order_rows("tc-generator:BATCH-a", _value([_row(1, 12), _row(2, 4)])) is None
 
@@ -98,9 +100,6 @@ def _published(tmp_path: Path, rows: list[dict], monkeypatch: pytest.MonkeyPatch
 
 
 def test_model_response_refuses_an_answer_out_of_order_and_writes_nothing(tmp_path: Path) -> None:
-    from tests.test_marker_parts import _requirements
-    from tools import pilot_state
-
     rows = copy.deepcopy(_requirements())
     if len(rows) < 2:
         rows.append(dict(copy.deepcopy(rows[0]), source_requirement_id="SREQ-9998", display_order=rows[0]["display_order"] + 1))
@@ -115,9 +114,6 @@ def test_model_response_refuses_an_answer_out_of_order_and_writes_nothing(tmp_pa
 
 
 def test_a_journal_written_before_the_check_reads_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_marker_parts import _requirements
-    from tools import pilot_state
-
     rows = copy.deepcopy(_requirements())
     if len(rows) < 2:
         rows.append(dict(copy.deepcopy(rows[0]), source_requirement_id="SREQ-9998", display_order=rows[0]["display_order"] + 1))

@@ -7,6 +7,13 @@ from pathlib import Path
 import pytest
 
 from tests.test_review_requested import _generated_run
+from tools.pilot_state import ModelRequestInvalid, publish_model_request, ModelRequestDuplicate
+from tools.pilot_state import ModelStageArtifactInvalid, publish_model_stage_artifact
+from tests.test_marker_parts import _run
+from tools.batch_assembly import with_digest
+from tools.json_cli import error_fields
+from tools import pilot_state
+from tools.fixes import fix_for
 
 
 def _request(run: dict, **extra):
@@ -23,8 +30,6 @@ def _request(run: dict, **extra):
     ({"invocation_id": "bad id with spaces"}, "--invocation-id is not a safe label"),
 ])
 def test_an_invalid_model_request_names_its_condition(tmp_path: Path, extra: dict, named: str) -> None:
-    from tools.pilot_state import ModelRequestInvalid, publish_model_request
-
     run = _generated_run(tmp_path, generated=False)
     arguments = {"model_id": "model-generator", "invocation_id": "invoke-x", "input_digests": ["sha256:" + "1" * 64], **extra}
     with pytest.raises(ModelRequestInvalid) as refused:
@@ -34,8 +39,6 @@ def test_an_invalid_model_request_names_its_condition(tmp_path: Path, extra: dic
 
 
 def test_a_stage_outside_the_registry_is_named(tmp_path: Path) -> None:
-    from tools.pilot_state import ModelRequestInvalid, publish_model_request
-
     run = _generated_run(tmp_path, generated=False)
     with pytest.raises(ModelRequestInvalid, match="stage 'tc-unknown:x' is not <stage>:<instance>"):
         publish_model_request(run["run_root"], run["attempt_id"], "tc-unknown:x", model_id="m", invocation_id="i",
@@ -43,8 +46,6 @@ def test_a_stage_outside_the_registry_is_named(tmp_path: Path) -> None:
 
 
 def test_a_repeated_request_says_the_answer_goes_to_model_response(tmp_path: Path) -> None:
-    from tools.pilot_state import ModelRequestDuplicate, publish_model_request
-
     run = _generated_run(tmp_path, generated=True)  # the generator requests are published
     stage = next(event["stage_instance_id"] for event in __import__("tools.pilot_state", fromlist=["derive_state"]).derive_state(run["run_root"])["events"]
                  if event["event_type"] == "MODEL_REQUESTED" and str(event.get("stage_instance_id")).startswith("tc-generator:"))
@@ -57,9 +58,6 @@ def test_a_repeated_request_says_the_answer_goes_to_model_response(tmp_path: Pat
 
 
 def test_a_schema_refusal_of_an_answer_carries_diagnostics_and_the_retry_prompt(tmp_path: Path) -> None:
-    from tests.test_marker_parts import _run
-    from tools.pilot_state import ModelStageArtifactInvalid, publish_model_request, publish_model_stage_artifact
-
     root, attempt_id, baseline, receipts = _run(tmp_path, files=1)
     publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="marker",
                           input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"]])
@@ -73,9 +71,6 @@ def test_a_schema_refusal_of_an_answer_carries_diagnostics_and_the_retry_prompt(
 
 
 def test_an_answer_without_its_request_names_the_missing_request(tmp_path: Path) -> None:
-    from tools.batch_assembly import with_digest
-    from tools.pilot_state import publish_model_stage_artifact
-
     run = _generated_run(tmp_path, generated=False)
     fragment = json.loads(Path(run["fragments"][0]).read_bytes())
     with pytest.raises(ValueError) as refused:
@@ -95,9 +90,6 @@ def test_an_answer_without_its_request_names_the_missing_request(tmp_path: Path)
 ])
 def test_every_invalid_model_request_carries_a_fix_field(tmp_path: Path, stage: str, extra: dict, fixed: str) -> None:
     """FaT-H4b (hunt 4, 4.2): each branch of MODEL_REQUEST_INVALID ends in «; fix: …», which error_fields gives apart."""
-    from tools.json_cli import error_fields
-    from tools.pilot_state import ModelRequestInvalid, publish_model_request
-
     run = _generated_run(tmp_path, generated=False)
     arguments = {"model_id": "model-generator", "invocation_id": "invoke-x", "input_digests": ["sha256:" + "1" * 64], **extra}
     with pytest.raises(ModelRequestInvalid) as refused:
@@ -108,8 +100,6 @@ def test_every_invalid_model_request_carries_a_fix_field(tmp_path: Path, stage: 
 
 
 def test_a_closed_attempt_names_the_scan_of_a_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path, generated=False)
     root = Path(run["run_root"])
     real = pilot_state.derive_state
@@ -123,7 +113,5 @@ def test_a_closed_attempt_names_the_scan_of_a_new_run(tmp_path: Path, monkeypatc
 
 
 def test_the_body_missing_fix_names_what_the_code_could_not_lay_out_and_asks_for_one_block() -> None:
-    from tools.fixes import fix_for
-
     fix = fix_for("SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING")
     assert "строит код" in fix and "корневой указатель" in fix and "ОДИН блок" in fix

@@ -10,6 +10,13 @@ import pytest
 
 from tests.helpers import MODULE_PYTHON
 from tests.test_project_native_pytest import _module_python, _reviewed_inputs
+from tools.pilot_state import read_terminal_result, derive_state, read_attempt_receipt
+from tools.exec_commands import cmd_exec
+from tools.run_pipeline import build_parser, cmd_finish, HostStop
+from tests import test_durable_execution_trace as trace
+from tools import pilot_state
+from tools.finalize_attempt import finalize_attempt
+from tools.orchestrate_test_case_revision import validate_reviewer_session
 
 CARRIERS = ("canonical_document", "automation_artifact", "autotest_review", "authorization_receipt", "host_isolation_receipt", "generated_delta_receipt")
 
@@ -42,7 +49,6 @@ def _args(project: Path, run_root: Path, **paths: str) -> SimpleNamespace:
 
 def test_materialize_and_ingest_take_the_carriers_from_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.p4_flow import run_the_build
-    from tools.pilot_state import read_terminal_result
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     code, output = run_the_build(project, run_root, capsys)
@@ -53,10 +59,6 @@ def test_materialize_and_ingest_take_the_carriers_from_the_attempt(tmp_path: Pat
 def test_the_commands_take_no_carrier_path_so_there_is_nothing_to_forge(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Formerly an explicit carrier of ``exec`` was checked against the attempt (and a forged one refused); materialize and ingest have no such
     argument: the six carriers come from the journal only, and the old flags of ``exec`` are read by nothing (it answers EXEC_REPLACED)."""
-    from tools.exec_commands import cmd_exec
-    from tools.pilot_state import derive_state
-    from tools.run_pipeline import build_parser
-
     project, run_root, _attempt_id, values = _project(tmp_path)
     forged = dict(values["automation_artifact"])
     forged["schema_version"] = "9.9.9"
@@ -94,8 +96,6 @@ def _axes(result: dict) -> dict:
 
 @pytest.mark.parametrize("verdict", ["PASS", "NOT_RUNNABLE", "UNKNOWN"])
 def test_finish_closes_an_executed_attempt_like_the_manual_sequence(tmp_path: Path, capsys: pytest.CaptureFixture[str], verdict: str) -> None:
-    from tests import test_durable_execution_trace as trace
-    from tools.pilot_state import read_attempt_receipt
     from tests.spine_helpers import finalize_phase_one_spine
 
     outcomes = []
@@ -147,8 +147,6 @@ def _cases_only_effective(tmp_path: Path, *, lowered: bool = False) -> tuple[Pat
 
 def test_finish_closes_an_accepted_cases_only_attempt_like_the_manual_sequence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_exit_policy import _facts
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_attempt
 
     root, attempt_id = _cases_only_effective(tmp_path / "manual")
     effective = pilot_state.read_effective_canonical(root, attempt_id)
@@ -169,7 +167,6 @@ def test_finish_closes_an_accepted_cases_only_attempt_like_the_manual_sequence(t
 
 def test_finish_closes_a_rework_branch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_reviewer_protocol import _bind_session, _completed, _session, _started, _verdict
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
 
     session, binding, review = _session(_started(), _verdict(), _completed(), review_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     run_root, attempt_id = _bind_session(tmp_path, session, binding, "cases-only-v1")
@@ -187,7 +184,6 @@ def test_finish_on_a_lowered_run_closes_cases_only_and_names_both_profiles(tmp_p
 
 def test_finish_before_the_review_names_what_is_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_reviewer_protocol import _new_run
-    from tools.run_pipeline import cmd_finish
 
     run_root, _attempt_id = _new_run(tmp_path)
     capsys.readouterr()
@@ -199,7 +195,6 @@ def test_finish_before_the_review_names_what_is_missing(tmp_path: Path, capsys: 
 
 def test_finish_closes_a_reviewer_abort_branch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_reviewer_protocol import _bind_session, _package, _session, _started
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
 
     aborted = {"ordinal": 2, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_CONTEXT_LIMIT"}
     session, binding, _review = _session(_started(), aborted, status="ABORTED", package=_package(1000))  # FaT-10d: over the budget open-session refuses
@@ -321,8 +316,6 @@ def test_finish_closes_a_refused_automation_like_the_manual_sequence(
 def test_finish_with_a_correction_still_possible_names_the_next_revision(
     tmp_path: Path, verdicts: list, blocked: bool, revision: str,
 ) -> None:
-    from tools.run_pipeline import HostStop, cmd_finish
-
     root, _attempt_id = _automation_chain(tmp_path, verdicts, blocked=blocked)
     with pytest.raises(HostStop) as stop:
         cmd_finish(SimpleNamespace(project=str(tmp_path), run=root.name))
@@ -333,7 +326,6 @@ def test_finish_with_a_correction_still_possible_names_the_next_revision(
 def test_a_second_finish_in_a_cases_only_delivery_does_not_open_a_schema_the_delivery_lacks(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_pack_profile import copy_profile
-    from tools import pilot_state
 
     pack = copy_profile(tmp_path / "pack", "cases-only")
     monkeypatch.setattr(pilot_state, "_SCHEMA_ROOT", pack / "schemas")

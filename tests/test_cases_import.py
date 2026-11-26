@@ -9,10 +9,29 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import re
+import shutil as copying
 
 from tests.journal_helpers import assert_refused_once
 
-from tests.helpers import MODULE_PYTHON
+from tests.helpers import MODULE_PYTHON, prepare_stage, submit_stage, answer_stage
+from tools import ready, api, context_marker_parts, exec_commands
+from tools.pilot_state import derive_state, read_model_request, read_model_stage_artifact, append_event
+from tools.pilot_state import publish_model_request, publish_model_stage_artifact, read_attempt_receipt
+from tools.pilot_state import read_effective_canonical, read_terminal_result
+from tools.run_report import build_report
+from tests.test_review_requested import _journal, _put
+from tools.batch_assembly import with_digest, IMPORT_ANSWER_PER_HUMAN_BYTE, plan_batches, require_imported_human_fields
+from tools.batch_assembly import fill_fragment_mechanics
+from tools.cases_import import imported_value, source_requirements, read_cases, password_cells
+from tests.test_requirement_traceability import canonical_fixture
+from tools.review_view import IMPORT_NOTE, render
+from tests.test_automation_revision_budget import durable_boundary, host_evidence, review, automated_document
+from tests.p4_flow import flow_args, human_run
+from tests.test_review_two_commands import _candidate_file, _open, _select_verdict, _verdict
+from tools.automation_validation import automation_sha256
+from tools.test_case_projections import render_zephyr_csv
+from tools.schema_validation import schema_diagnostics
 
 pytestmark = pytest.mark.contract
 
@@ -94,16 +113,12 @@ def test_scan_says_how_many_cases_it_read_from_the_csv(tmp_path: Path, monkeypat
 
 
 def test_ready_takes_the_csv_of_cases_and_says_how_many_cases_it_holds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import ready
-
     ready.main(["--project", str(_project(tmp_path)), "--cases", "cases/zephyr.csv", "--profile", "cases-only-v1"])
     row = next(item for item in json.loads(capsys.readouterr().out)["checks"] if item["id"] == "cases")
     assert row["level"] == "OK" and "кейсов 2" in row["message"], row
 
 
 def test_ready_refuses_a_csv_of_cases_as_scan_does(tmp_path: Path) -> None:
-    from tools import ready
-
     project = _project(tmp_path, HEADER + "\r\nКейс,Цель,,High,Шаг,\"Операция: не определена\",Итог\r\n")
     report = ready.check(project, [], "cases-only-v1", cases="cases/zephyr.csv")
     row = next(item for item in report["checks"] if item["id"] == "cases")
@@ -111,10 +126,6 @@ def test_ready_refuses_a_csv_of_cases_as_scan_does(tmp_path: Path) -> None:
 
 
 def test_cases_import_answers_the_requirements_part_by_code_one_source_requirement_per_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import api, context_marker_parts
-    from tools.pilot_state import derive_state, read_model_request, read_model_stage_artifact
-    from tools.run_report import build_report
-
     project = _project(tmp_path)
     _code, scan = _scan(project, monkeypatch)
     run_root = Path(scan["run_root"])
@@ -231,11 +242,6 @@ def _batch_stage(run: dict, index: int = 0) -> str:
 
 @pytest.mark.slow
 def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_checked_before_the_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import prepare_stage, submit_stage
-    from tests.test_review_requested import _journal
-    from tools.batch_assembly import with_digest
-    from tools.pilot_state import read_model_request
-
     run = _to_generator(tmp_path, monkeypatch)
     code, prepared = prepare_stage(run["root"], _batch_stage(run))
     assert code == 0, prepared
@@ -261,9 +267,6 @@ def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_check
 
 
 def test_the_batches_of_an_import_are_estimated_from_the_human_fields_one_case_a_group() -> None:
-    from tools.batch_assembly import IMPORT_ANSWER_PER_HUMAN_BYTE, plan_batches
-    from tools.cases_import import imported_value, source_requirements, read_cases
-
     rows = [HEADER] + [f"Кейс {n},Цель {n},,High,Шаг {n},\"{'д' * 3000}\",Итог {n}" for n in range(1, 5)]
     data = ("\r\n".join(rows) + "\r\n").encode("utf-8")
     imported = imported_value("cases/zephyr.csv", data)
@@ -279,9 +282,6 @@ def test_the_batches_of_an_import_are_estimated_from_the_human_fields_one_case_a
 
 
 def test_the_review_view_of_an_import_says_the_human_text_is_not_judged() -> None:
-    from tests.test_requirement_traceability import canonical_fixture
-    from tools.review_view import IMPORT_NOTE, render
-
     document = canonical_fixture()
     plain = render(document)
     marked = render(document, imported=True)
@@ -365,16 +365,6 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
     """e2e of stage 1, by commands: scan --cases → prepare (the code answers) → marker parts → plan → generator with the skeleton →
     prepare of the review → accepted review → submit (effective) → tc-to-autotest → accepted static
     review → materialize, a run of the printed command and ingest of the pytest mini project."""
-    from tests.test_automation_revision_budget import durable_boundary, host_evidence, review
-    from tests.p4_flow import flow_args, human_run
-    from tests.helpers import answer_stage
-    from tests.test_review_requested import _put
-    from tests.test_review_two_commands import _candidate_file, _open, _select_verdict, _verdict
-    from tools.automation_validation import automation_sha256
-    from tools.pilot_state import (append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt,
-                                   read_effective_canonical, read_model_stage_artifact, read_terminal_result)
-    from tools import exec_commands
-
     run = _to_generator(tmp_path, monkeypatch)
     root, attempt_id, tmp = run["root"], run["attempt_id"], run["root"] / "tmp"
     fragment = _automated_fragment(run)
@@ -428,10 +418,6 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
 @pytest.mark.slow
 def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The human fields of case A with the trace of case B would put A's autotest under B's requirement."""
-    from tests.helpers import prepare_stage, submit_stage
-    from tests.test_review_requested import _journal
-    from tools.batch_assembly import with_digest
-
     run = _to_generator(tmp_path, monkeypatch)
     assert prepare_stage(run["root"], _batch_stage(run))[0] == 0
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
@@ -472,9 +458,6 @@ def test_cells_no_answer_can_keep_are_refused_on_scan_by_row(tmp_path: Path, mon
 
 @pytest.mark.slow
 def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the_fragment_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_review_requested import _put
-    from tools.run_report import build_report
-
     run = _to_generator(tmp_path, monkeypatch, _row(objective="", data=""))
     [case] = run["imported"]["cases"]
     assert case["objective"] == case["title"] == "Склейка двух значений" and case["steps"][0]["test_data"] == "—"
@@ -489,19 +472,12 @@ def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the
 
 
 def test_the_review_view_says_how_many_cells_code_normalized() -> None:
-    from tests.test_requirement_traceability import canonical_fixture
-    from tools.review_view import render
-
     document = canonical_fixture()
     assert "нормализовано: 2 ячейки" in render(document, imported=True, normalized=2).decode("utf-8")
     assert "нормализовано" not in render(document, imported=True).decode("utf-8")
 
 
 def test_an_http_expectation_survives_v5_and_the_import_whole() -> None:
-    from tests.test_automation_revision_budget import automated_document
-    from tools.cases_import import imported_value
-    from tools.test_case_projections import render_zephyr_csv
-
     document = automated_document()
     data = render_zephyr_csv(document).payload
     [case] = imported_value("cases/zephyr.csv", data)["cases"]
@@ -554,32 +530,22 @@ def test_a_mention_or_a_placeholder_is_no_password(tmp_path: Path, monkeypatch: 
 
 
 def test_the_csv_of_the_import_fixtures_have_no_false_password() -> None:
-    from tools.cases_import import password_cells, read_cases
-
     assert password_cells(read_cases(CSV.encode("utf-8"))) == []
 
 
 def _imported_sample() -> tuple[dict, dict]:
-    import re
-
     text = (Path(__file__).parents[1] / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```json\n(.*?)\n```", text.split("## An imported case", 1)[1], re.S)
     return json.loads(blocks[0]), json.loads(blocks[1])
 
 
 def test_the_sample_of_an_imported_case_keeps_the_human_fields_of_its_skeleton_row() -> None:
-    from tools.batch_assembly import require_imported_human_fields
-
     row, case = _imported_sample()
     fragment = {"source_to_canonical_mappings": [{"source_requirement_id": "SREQ-0003", "canonical_requirement_ids": ["CREQ-B1-003"]}], "test_cases": [case]}
     require_imported_human_fields(fragment, {"owned_source_requirement_ids": ["SREQ-0003"]}, {"cases": [row]})  # no refusal
 
 
 def test_the_sample_of_an_imported_case_is_a_case_of_the_schema(tmp_path: Path) -> None:
-    import shutil as copying
-
-    from tools.batch_assembly import fill_fragment_mechanics
-    from tools.schema_validation import schema_diagnostics
 
     _row, case = _imported_sample()
     capability = {"capability_id": "CAP-B1-search", "action": "search", "adapter": "project_native_junit", "arguments": [],

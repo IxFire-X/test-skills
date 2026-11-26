@@ -4,7 +4,10 @@ import os
 import shutil
 import subprocess
 import sys
+import pytest
+import io
 from pathlib import Path
+from tools import pilot_state, api
 
 MODULE_PYTHON = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
 
@@ -119,9 +122,6 @@ def projection_fixture(root: Path, target: Path) -> Path:
 def generator_requests_before_dg():
     """FaT-DG: fixtures whose generator fragments carry no real plan publish their requests as runs did before
     FaT-DG — no published plan/header, so the request checks no inputs and the answer is checked only for coverage."""
-    import pytest
-
-    from tools import pilot_state
 
     with pytest.MonkeyPatch.context() as old:
         old.setattr(pilot_state, "_expected_model_inputs", lambda *_args: None)
@@ -155,9 +155,6 @@ def run_tmp(tmp_path: Path) -> Path:
 
 def api_call(*argv: str) -> tuple[int, dict]:
     """One command of ``tools.api`` in this process: the exit code and the last JSON line it printed (the result or the refusal)."""
-    import io
-
-    from tools import api
 
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):

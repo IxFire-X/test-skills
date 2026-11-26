@@ -6,6 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.helpers import prepare_stage
+from tests.test_cases_import import _to_generator
+from tools import pilot_state
+from tests.test_step_inputs import _generator_run
+from tests.test_marker_parts import _run
+from tools.batch_assembly import BatchAssemblyError, validate_fragment
+from tools.json_cli import error_fields
 
 BINDINGS = ("plan_digest", "header_digest", "context_receipt_digest", "digest")
 
@@ -15,10 +22,6 @@ def _stage(run: dict) -> str:
 
 
 def test_the_request_takes_the_inputs_the_journal_fixes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import prepare_stage
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-
     run = _to_generator(tmp_path, monkeypatch)
     code, requested = prepare_stage(run["root"], _stage(run))
     assert code == 0, requested
@@ -30,18 +33,12 @@ def test_the_request_takes_the_inputs_the_journal_fixes(tmp_path: Path, monkeypa
 
 
 def test_without_input_digest_an_unpublished_plan_is_the_refusal_of_before(tmp_path: Path) -> None:
-    from tests.test_step_inputs import _generator_run
-    from tools import pilot_state
-
     root, attempt_id, *_rest = _generator_run(tmp_path)  # plan and header as plain run files, not generator inputs
     with pytest.raises(pilot_state.ModelInputsMismatch, match="MODEL_INPUTS_MISMATCH.*fix"):
         pilot_state.publish_model_request(root, attempt_id, "tc-generator:BATCH-fixture", model_id="g", invocation_id="gen", input_digests=[])
 
 
 def test_a_stage_whose_inputs_the_journal_does_not_fix_still_needs_input_digest(tmp_path: Path) -> None:
-    from tests.test_marker_parts import _run
-    from tools import pilot_state
-
     root, attempt_id, _baseline, _receipts = _run(tmp_path, files=1)
     with pytest.raises(pilot_state.ModelRequestInvalid, match="no --input-digest given; fix: --input-digest") as refused:
         pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="marker", input_digests=[])
@@ -55,10 +52,6 @@ def _fragment(run: dict) -> dict:
 
 
 def test_a_fragment_without_its_binding_fields_gets_them_from_the_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import prepare_stage
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-
     run = _to_generator(tmp_path, monkeypatch)
     assert prepare_stage(run["root"], _stage(run))[0] == 0
     good = _fragment(run)
@@ -71,10 +64,6 @@ def test_a_fragment_without_its_binding_fields_gets_them_from_the_code(tmp_path:
 
 
 def test_a_binding_field_given_wrong_is_refused_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import prepare_stage
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-
     run = _to_generator(tmp_path, monkeypatch)
     assert prepare_stage(run["root"], _stage(run))[0] == 0
     wrong = {key: value for key, value in _fragment(run).items() if key != "digest"}
@@ -84,10 +73,6 @@ def test_a_binding_field_given_wrong_is_refused_as_before(tmp_path: Path, monkey
 
 
 def test_a_full_answer_is_stored_as_before_and_names_nothing_filled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.helpers import prepare_stage
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-
     run = _to_generator(tmp_path, monkeypatch)
     assert prepare_stage(run["root"], _stage(run))[0] == 0
     good = _fragment(run)
@@ -96,9 +81,6 @@ def test_a_full_answer_is_stored_as_before_and_names_nothing_filled(tmp_path: Pa
 
 
 def test_validate_fragment_accepts_what_model_response_will_fill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_cases_import import _to_generator
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
-
     run = _to_generator(tmp_path, monkeypatch)
     bare = {key: value for key, value in _fragment(run).items() if key not in BINDINGS}
     validate_fragment(bare, run["plan"], run["header"], run["context"], None, run["imported"])
@@ -110,11 +92,6 @@ def test_validate_fragment_accepts_what_model_response_will_fill(tmp_path: Path,
 
 def test_a_refused_retry_does_not_advise_the_retry_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit 2 (FaT-AB): the answer given as the one retry and refused names the way out of the stage, not a third call."""
-    from tests.helpers import prepare_stage
-    from tests.test_cases_import import _to_generator
-    from tools import pilot_state
-    from tools.json_cli import error_fields
-
     run = _to_generator(tmp_path, monkeypatch)
     assert prepare_stage(run["root"], _stage(run))[0] == 0
     wrong = dict(_fragment(run), header_digest=run["plan_digest"])

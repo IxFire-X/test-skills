@@ -9,6 +9,12 @@ import json
 from pathlib import Path
 
 import pytest
+from tools.pilot_state import publish_model_stage_artifact, skill_pack_digest, ModelReuseMismatch, derive_state
+from tools.pilot_state import reuse_family, marker_reuse_suggestion
+from tools import pilot_state, orchestrate_test_case_revision as revision, review_canaries
+from tools.run_report import write_report
+from tests.test_first_run import _python_project
+from tests.test_scan_guard import _scan
 
 
 def _source(project: Path) -> tuple[Path, str]:
@@ -57,8 +63,6 @@ def _request(run_root: Path, attempt_id: str, inputs: list[str], reuse_from: str
 
 
 def test_the_marker_of_an_accepted_run_with_the_same_inputs_is_reused_unchanged(tmp_path: Path) -> None:
-    from tools.pilot_state import publish_model_stage_artifact, skill_pack_digest
-
     source_root, source_attempt = _source(tmp_path)
     marker, digest = _marker(source_root, source_attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -73,8 +77,6 @@ def test_the_marker_of_an_accepted_run_with_the_same_inputs_is_reused_unchanged(
 def test_the_marker_of_a_source_is_taken_whatever_the_profile_of_the_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The marker is reused as it was: the profile is no input of it (a scan of the same project gives the same inventory and requirements in both profiles);
     only the cases, the plan and the review ask the baseline of the run."""
-    from tools import pilot_state
-
     source_root, source_attempt = _source(tmp_path)
     _marker_value, digest = _marker(source_root, source_attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -84,8 +86,6 @@ def test_the_marker_of_a_source_is_taken_whatever_the_profile_of_the_new_run(tmp
 
 
 def test_a_changed_answer_to_a_reuse_request_is_refused_and_nothing_is_written(tmp_path: Path) -> None:
-    from tools.pilot_state import ModelReuseMismatch, derive_state, publish_model_stage_artifact
-
     source_root, source_attempt = _source(tmp_path)
     marker, digest = _marker(source_root, source_attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -99,8 +99,6 @@ def test_a_changed_answer_to_a_reuse_request_is_refused_and_nothing_is_written(t
 
 @pytest.mark.parametrize("case", ["unknown run", "the same run", "review not accepted", "other inputs", "other package", "drift"])
 def test_a_source_is_refused_unless_every_condition_holds(tmp_path: Path, case: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     if case == "review not accepted":  # the marker reached the generator, the review of the cases did not accept them
         monkeypatch.setattr(pilot_state, "_review_verdict", lambda *args: None)  # no review at all: the marker is not taken (a rejected set is: tails13)
     source_root, _attempt = _source(tmp_path)
@@ -119,14 +117,10 @@ def test_a_source_is_refused_unless_every_condition_holds(tmp_path: Path, case: 
 
 
 def test_reuse_takes_the_stages_of_the_list_only() -> None:
-    from tools.pilot_state import reuse_family
-
     assert reuse_family("tc-generator:rework-2") is None and reuse_family("tc-generator:rework-1") == "rework"  # the exact names, not the prefix tc-generator:
 
 
 def test_a_fresh_marker_request_records_its_role_and_no_reuse(tmp_path: Path) -> None:
-    from tools.pilot_state import skill_pack_digest
-
     run_root, attempt_id, inputs = _fresh(tmp_path)
     record = _request(run_root, attempt_id, inputs, None)
     assert record["skill_pack_digest"] == skill_pack_digest() and "reuse" not in record and record["schema_version"] == "1.1.0"
@@ -134,8 +128,6 @@ def test_a_fresh_marker_request_records_its_role_and_no_reuse(tmp_path: Path) ->
 
 def test_a_source_recorded_without_the_package_digest_is_not_offered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A run from before FaT-CR (no skill_pack_digest in its marker request) falls out, honestly."""
-    from tools import pilot_state
-
     monkeypatch.setattr(pilot_state, "skill_pack_digest", lambda: None)
     source_root, _attempt = _source(tmp_path)
     monkeypatch.undo()
@@ -145,8 +137,6 @@ def test_a_source_recorded_without_the_package_digest_is_not_offered(tmp_path: P
 
 
 def test_the_scan_suggestion_names_the_source_and_the_commands(tmp_path: Path) -> None:
-    from tools.pilot_state import marker_reuse_suggestion
-
     source_root, _attempt = _source(tmp_path)
     marker, digest = _marker(source_root, _attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -159,8 +149,6 @@ def test_the_scan_suggestion_names_the_source_and_the_commands(tmp_path: Path) -
 
 @pytest.mark.parametrize("outcome, state", [("REWORK", None), ("PARTIAL", "unfinished")])
 def test_a_marker_is_taken_from_a_run_whose_set_was_not_accepted_and_the_cases_are_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, state: str | None) -> None:
-    from tools import orchestrate_test_case_revision as revision, pilot_state, review_canaries
-
     source_root, _attempt = _source(tmp_path)
     monkeypatch.setattr(pilot_state, "_review_verdict", lambda *args: "ТРЕБУЕТ ДОРАБОТКИ")
     monkeypatch.setattr(review_canaries, "recorded_answer", lambda *args: None)
@@ -174,8 +162,6 @@ def test_a_marker_is_taken_from_a_run_whose_set_was_not_accepted_and_the_cases_a
 
 
 def test_the_scan_suggestion_says_which_input_differs(tmp_path: Path) -> None:
-    from tools.pilot_state import marker_reuse_suggestion
-
     source_root, _attempt = _source(tmp_path)
     run_root, attempt_id, inputs = _fresh(tmp_path, changed=True)
     reuse = marker_reuse_suggestion(run_root, attempt_id)
@@ -186,16 +172,11 @@ def test_the_scan_suggestion_says_which_input_differs(tmp_path: Path) -> None:
 
 
 def test_the_scan_suggestion_without_an_earlier_run_is_null_with_a_reason(tmp_path: Path) -> None:
-    from tools.pilot_state import marker_reuse_suggestion
-
     run_root, attempt_id, _inputs = _fresh(tmp_path)
     assert marker_reuse_suggestion(run_root, attempt_id) == {"run_id": None, "reason": "нет прошлого прогона с разметкой"}
 
 
 def test_a_reuse_is_not_a_model_call_in_the_report(tmp_path: Path) -> None:
-    from tools.pilot_state import publish_model_stage_artifact
-    from tools.run_report import write_report
-
     source_root, source_attempt = _source(tmp_path)
     marker, _digest = _marker(source_root, source_attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -211,8 +192,6 @@ def test_a_reuse_is_not_a_model_call_in_the_report(tmp_path: Path) -> None:
 
 def test_a_reused_marker_goes_through_the_same_openspec_reconciliation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit D4: the source checks of a fresh answer (OpenSpec on the merged marker) run on a reused one too, not around it."""
-    from tools import pilot_state
-
     source_root, source_attempt = _source(tmp_path)
     marker, _digest = _marker(source_root, source_attempt)
     run_root, attempt_id, inputs = _fresh(tmp_path)
@@ -226,9 +205,6 @@ def test_a_reused_marker_goes_through_the_same_openspec_reconciliation(tmp_path:
 
 
 def test_the_scan_prints_the_reuse_suggestion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _scan
-
     code, payload = _scan(_python_project(tmp_path, runtime=False), monkeypatch)
     assert code == 0 and payload["reuse"] == {"run_id": None, "reason": "нет прошлого прогона с разметкой"}
 
@@ -260,8 +236,6 @@ def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, inputs: list[s
 
 @pytest.mark.parametrize("parts", [2, 11])
 def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parts: int) -> None:
-    from tools import pilot_state
-
     run_root, attempt_id, inputs = _fresh(tmp_path)
     module = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)["module"]
     source_id = _parts_source(tmp_path, monkeypatch, inputs, module, "m", parts)
@@ -274,8 +248,6 @@ def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts
 
 @pytest.mark.parametrize("by", ["controller:cases-import", "controller:openspec-marker"])
 def test_a_source_whose_requirements_were_made_by_code_starts_with_that_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by: str) -> None:
-    from tools import pilot_state
-
     run_root, attempt_id, inputs = _fresh(tmp_path)
     module = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)["module"]
     _parts_source(tmp_path, monkeypatch, inputs, module, by)

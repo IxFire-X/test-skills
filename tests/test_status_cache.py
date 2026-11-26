@@ -13,20 +13,18 @@ from types import SimpleNamespace
 
 import pytest
 from tests.test_p6a_portability import _open_run
+from tests.test_run_report import _finished_run
+from tools import pilot_state
+from tools.run_pipeline import cmd_status, main
 
 
 def _terminal_run(tmp_path: Path) -> Path:
-    from tests.test_run_report import _finished_run
-
     return _finished_run(tmp_path)
 
 
 @pytest.mark.parametrize("make_run", [_terminal_run, _open_run], ids=["terminal", "open"])
 def test_status_derives_once_validates_the_manifest_once_and_starts_no_process(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], make_run) -> None:
-    from tools import pilot_state
-    from tools.run_pipeline import cmd_status
-
     run_root = make_run(tmp_path)
     project = run_root.parents[1]
     capsys.readouterr()
@@ -68,9 +66,6 @@ def test_status_derives_once_validates_the_manifest_once_and_starts_no_process(
 def test_status_still_checks_the_whole_journal_before_it_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                  capsys: pytest.CaptureFixture[str]) -> None:
     """The block's final full check runs before the answer is printed: a forged event copy is an error, not a status."""
-    from tools import pilot_state
-    from tools.run_pipeline import main
-
     run_root = _terminal_run(tmp_path)
     project = run_root.parents[1]
     capsys.readouterr()

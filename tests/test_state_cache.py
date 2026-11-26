@@ -7,13 +7,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import json
 
 from tests.test_review_requested import _generated_run, _journal
+from tools import pilot_state
+from tests.test_review_two_commands import _open
+from tools.run_pipeline import main
 
 
 def test_the_state_in_a_closure_is_the_state_without_it(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     plain = pilot_state.derive_state(run["run_root"])
     with pilot_state.closure_cache():
@@ -23,10 +25,7 @@ def test_the_state_in_a_closure_is_the_state_without_it(tmp_path: Path) -> None:
 
 
 def test_a_new_event_inside_a_closure_is_seen(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
-    from tests.test_review_two_commands import _open
 
     with pilot_state.closure_cache():
         before = pilot_state.derive_state(run["run_root"])
@@ -38,8 +37,6 @@ def test_a_new_event_inside_a_closure_is_seen(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("target", ["copy", "journal"])
 def test_an_edit_of_the_journal_files_is_not_hidden_by_the_closure(tmp_path: Path, target: str) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     path = run["run_root"] / ("events/0000000003.json" if target == "copy" else "events.jsonl")
     with pytest.raises(ValueError), pilot_state.closure_cache():
@@ -52,8 +49,6 @@ def test_an_edit_of_the_journal_files_is_not_hidden_by_the_closure(tmp_path: Pat
 
 
 def test_no_command_leaves_a_state_file_in_tmp(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import main
-
     run = _generated_run(tmp_path)
     journal = _journal(run["run_root"])
     assert main(["status", "--project", str(run["project"]), "--run", run["run_root"].name]) == 0
@@ -63,9 +58,6 @@ def test_no_command_leaves_a_state_file_in_tmp(tmp_path: Path, capsys: pytest.Ca
 
 def test_a_forged_state_file_changes_nothing(tmp_path: Path) -> None:
     """The probe of the orchestrator: a state-cache.json with a recomputed digest — the state is the journal's."""
-    import json
-
-    from tools import pilot_state
 
     run = _generated_run(tmp_path)
     state = pilot_state.derive_state(run["run_root"])

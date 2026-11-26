@@ -7,6 +7,9 @@ import pytest
 
 from tests.test_exit_policy import _local
 from tests.test_generated_delta import _inputs
+from tools.finalize_attempt import decide_dispositions, build_pre_finalization_trace, disposition_receipt
+from tools.finalize_attempt import publish_terminal_result, verify_finalization, _finalization_verifier_inputs
+from tools import pilot_state
 
 
 def _delta(tmp_path: Path, *, two: bool = False, fail_after: int | None = None):
@@ -102,9 +105,6 @@ def test_durable_fail_branches_clean_every_owned_file_and_terminalize_unaccepted
 
 
 def test_unknown_branch_preserves_unchanged_and_drifted_files_with_exact_execution_unknown_evidence(tmp_path: Path) -> None:
-    from tools.finalize_attempt import decide_dispositions
-    from tools import pilot_state
-
     evidence = "sha256:" + "a" * 64
     delta, run_root, attempt_id = _delta(tmp_path)
     generated_path = tmp_path / "tests" / "test_products.py"
@@ -138,9 +138,6 @@ def test_unknown_branch_preserves_unchanged_and_drifted_files_with_exact_executi
 
 
 def test_partial_materialization_cleans_only_materialized_files_never_starts_execution_and_terminalizes_not_applicable(tmp_path: Path) -> None:
-    from tools.finalize_attempt import decide_dispositions
-    from tools import pilot_state
-
     delta, run_root, attempt_id = _delta(tmp_path, two=True, fail_after=1)
     assert delta["facts"] == {
         "completion": "PARTIAL", "verification": "NOT_APPLICABLE",
@@ -174,8 +171,6 @@ def test_partial_materialization_cleans_only_materialized_files_never_starts_exe
 
 
 def test_direct_terminal_event_without_completed_closure_is_rejected(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     _delta_value, run_root, attempt_id = _delta(tmp_path)
     before = pilot_state.derive_state(run_root)
     with pytest.raises(ValueError, match="terminal result"):
@@ -189,8 +184,6 @@ def test_direct_terminal_event_without_completed_closure_is_rejected(tmp_path: P
 
 
 def test_invalid_finalization_keeps_execution_facts_and_prior_cause_immutable() -> None:
-    from tools.finalize_attempt import build_pre_finalization_trace, disposition_receipt, publish_terminal_result, verify_finalization
-
     run_id, attempt_id = "a" * 32, "b" * 32
     facts = _terminal_facts(
         run_id, attempt_id, verification="FAIL", coverage="MIXED", reason_code=None,
@@ -235,8 +228,6 @@ def test_invalid_finalization_keeps_execution_facts_and_prior_cause_immutable() 
 
 
 def test_post_pretrace_validation_is_bound_as_a_required_verifier_artifact() -> None:
-    from tools.finalize_attempt import _finalization_verifier_inputs
-
     late = "sha256:" + "9" * 64
     pretrace = {
         "run_id": "a" * 32,
@@ -254,8 +245,6 @@ def test_post_pretrace_validation_is_bound_as_a_required_verifier_artifact() -> 
 
 
 def test_pre_execution_local_partial_tuple_requires_not_applicable_execution_contract() -> None:
-    from tools import pilot_state
-
     facts = _terminal_facts(
         "a" * 32, "b" * 32, completion="PARTIAL", verification="NOT_APPLICABLE", coverage="MIXED",
         required=2, materialized=1, retained=0, execution_applicability="NOT_APPLICABLE",

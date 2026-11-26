@@ -15,9 +15,11 @@ import json
 from pathlib import Path
 
 import pytest
+import copy
 
 from tests.test_review_requested import build_generated_run, _generated_run, _journal, _put, _review_answer
 from tests.journal_helpers import assert_refused_once
+from tests import test_batch_assembly
 
 STAGE = "tc-reviewer:canonical"
 
@@ -257,9 +259,6 @@ def test_prepare_publishes_the_candidate_of_an_answer_with_a_mixed_order(tmp_pat
     """The answer of a batch that lists requirement ids and categories out of order is stored in order (submit) and assembled
     in order (assemble_candidate); prepare, which assembles from the journal, publishes it and opens the review — the one
     assembly per process does not go round the normalization."""
-    import copy
-
-    from tests import test_batch_assembly
 
     real = test_batch_assembly._fragment
 

@@ -8,6 +8,13 @@ from pathlib import Path
 import pytest
 
 from tests.test_cases_import import _project, _scan
+from tools import api, context_marker_parts, pilot_state
+from tools.cases_import import CasesImportError, import_requirements
+from tools.json_cli import error_fields
+from tests.test_au5_single_checks import _request_requirements, _spec_run
+from tests.test_marker_parts import _marker
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.project_inventory import read_execution_baseline
 
 SPEC = ("# sample Specification\n\n## Purpose\nCombine values.\n\n## Requirements\n### Requirement: Combine\n"
         "The system SHALL combine two values with a colon.\n\n#### Scenario: two values\n- **WHEN** combine(\"a\", \"b\")\n- **THEN** \"a:b\"\n")
@@ -29,8 +36,6 @@ def _openspec_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 
 
 def test_an_import_on_a_project_with_openspec_marks_and_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import api, context_marker_parts, pilot_state
-
     root, attempt_id = _openspec_run(tmp_path, monkeypatch)
     assert api.main(["prepare", "--run-root", str(root), "--stage", "context-marker:requirements"]) == 0
     answer = next(event["artifact_digest"] for event in pilot_state.derive_state(root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED")
@@ -46,10 +51,6 @@ def test_an_import_on_a_project_with_openspec_marks_and_merges(tmp_path: Path, m
 
 
 def test_a_refused_code_answer_leaves_no_request_and_names_its_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-    from tools.cases_import import CasesImportError, import_requirements
-    from tools.json_cli import error_fields
-
     root, attempt_id = _openspec_run(tmp_path, monkeypatch)
 
     def refuse(_stage, _value):
@@ -66,12 +67,6 @@ def test_a_refused_code_answer_leaves_no_request_and_names_its_code(tmp_path: Pa
 
 
 def test_the_openspec_refusal_of_a_model_answer_has_a_code(tmp_path: Path) -> None:
-    from tests.test_au5_single_checks import _request_requirements, _spec_run
-    from tests.test_marker_parts import _marker
-    from tools import pilot_state
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-    from tools.json_cli import error_fields
-
     root, attempt_id, baseline, _receipts = _spec_run(tmp_path)
     _request_requirements(root, attempt_id, baseline)
     with pytest.raises(ValueError) as refused:
@@ -82,12 +77,6 @@ def test_the_openspec_refusal_of_a_model_answer_has_a_code(tmp_path: Path) -> No
 
 def test_a_model_answer_under_the_label_of_the_import_is_still_reconciled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The key of the skip is the CSV bytes, not the label: an answer that is not the code's one meets OpenSpec as any."""
-    from tests.test_marker_parts import _marker
-    from tools import pilot_state
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-    from tools.json_cli import error_fields
-    from tools.project_inventory import read_execution_baseline
-
     root, attempt_id = _openspec_run(tmp_path, monkeypatch)
     attempt = pilot_state.derive_state(root)["attempts"][-1]
     baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))

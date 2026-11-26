@@ -5,11 +5,16 @@ import sys
 from pathlib import Path
 
 import pytest
+import tools.pilot_state as state
 from helpers import phase_two_baseline
 
 from tools import pilot_state
 from tools.pilot_state import append_event, create_attempt, create_run, derive_state, module_selection_digest
+from tools.pilot_state import read_attempt_receipt, record_execution_unknown
+from tools.run_pipeline import main
 from tests.test_pilot_state import _append_synthetic_terminal, _append_synthetic_unknown
+from tests.test_durable_execution_trace import _publish_execution, _unknown_report
+from tests.test_execution_receipt import _execution_facts
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -90,11 +95,6 @@ def test_a_run_that_holds_the_old_process_stop_is_read_and_its_explicit_child_is
     """P4b (Q3): nothing in the package writes PROCESS_STOPPED now (no process is started), but a run of an earlier version holds it.  Such a journal
     is read as before: the stop is checked against its receipt, the explicit child after the UNKNOWN is allowed, ``derive_state`` and the
     status of the run do not fail."""
-    from tests.test_durable_execution_trace import _publish_execution, _unknown_report
-    from tests.test_execution_receipt import _execution_facts
-    from tools.pilot_state import read_attempt_receipt, record_execution_unknown
-    from tools.run_pipeline import main
-
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     timeout = _unknown_report(root, attempt_id, durable, request)
     timeout["process_evidence"][0].update({"process_scope_stopped": True,
@@ -143,7 +143,6 @@ def test_attempt_rejects_unsafe_module_and_cross_project_policy_child(tmp_path: 
 
 def test_attempt_event_failure_leaves_no_orphan_attempt_and_retry_is_possible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _selected_run(tmp_path)
-    import tools.pilot_state as state
 
     baseline = phase_two_baseline(root, tmp_path, _identity(tmp_path))
     original = state._append_event
@@ -195,8 +194,6 @@ def test_attempt_identity_and_lineage_shape_is_closed(tmp_path: Path, monkeypatc
 
 
 def test_late_process_stopped_cannot_retroactively_validate_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import tools.pilot_state as state
-
     root = _selected_run(tmp_path)
     parent_baseline = phase_two_baseline(root, tmp_path, _identity(tmp_path))
     parent = create_attempt(root, _identity(tmp_path), parent_baseline)

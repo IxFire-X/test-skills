@@ -12,6 +12,9 @@ from tests.test_review_open_recovery import _main
 from tests.test_review_requested import _generated_run, _journal
 from tests.journal_helpers import assert_refused_once
 from tests.test_cut_review import _crash_event, _crash_nth, _events
+from tools import pilot_state, review_canaries
+from tools.pilot_state import read_model_request
+from tools.run_report import build_report, render_markdown
 
 
 
@@ -26,8 +29,6 @@ def _generator_inputs(run: dict, plan_digest: str, header_digest: str) -> list[s
 
 @pytest.mark.parametrize("point", ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"])
 def test_prior_capabilities_cut_between_the_receipt_and_its_events(tmp_path: Path, monkeypatch, capsys, point: str) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path, generated=False)
     plan_digest, header_digest = _publish_inputs(run)
     fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
@@ -49,8 +50,6 @@ def test_prior_capabilities_cut_between_the_receipt_and_its_events(tmp_path: Pat
 
 
 def test_a_prior_capabilities_file_with_other_bytes_and_no_events_is_refused_with_its_code(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path, generated=False)
     plan_digest, header_digest = _publish_inputs(run)
     fragments = [json.loads(Path(path).read_bytes()) for path in run["fragments"]]
@@ -97,10 +96,6 @@ def _generator_stage(tmp_path: Path):
 def test_a_request_cut_before_its_event_leaves_a_receipt_only_the_disk_knows(tmp_path: Path, monkeypatch, capsys) -> None:
     """The first call wrote the receipt (word N1) and died before MODEL_REQUESTED; the repeat writes its own (N2) and binds it.  The first
     receipt is an orphan on the disk: every reader goes by the events, so the run sees the word the agent was shown and no other."""
-    from tools import review_canaries
-    from tools.pilot_state import read_model_request
-    from tools.run_report import build_report
-
     run, stage = _generator_stage(tmp_path)
     with monkeypatch.context() as broken:
         _crash_raw_event(broken, "MODEL_REQUESTED")
@@ -131,9 +126,6 @@ def test_a_repeated_prepare_after_its_event_says_the_word_is_lost_and_writes_no_
 
 
 def test_the_report_says_the_word_of_the_generator_is_lost_and_counts_no_refusal(tmp_path: Path, capsys) -> None:
-    from tools import pilot_state
-    from tools.run_report import build_report, render_markdown
-
     run, stage = _generator_stage(tmp_path)
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0
     refusals = build_report(run["project"], run["run_root"].name)[0]["refusals"]
@@ -158,8 +150,6 @@ def test_the_mark_of_a_lost_word_is_a_file_of_the_stage_made_once_and_never_chan
 
 
 def test_only_the_generator_request_has_a_word_to_lose(tmp_path: Path, capsys) -> None:
-    from tools import pilot_state
-
     run, stage = _generator_stage(tmp_path)
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0
     state = pilot_state.derive_state(run["run_root"])

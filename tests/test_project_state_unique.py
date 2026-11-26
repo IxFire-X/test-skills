@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tools import pilot_state
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,8 +35,6 @@ def _with_project_state(tmp_path: Path, state) -> Path:
 
 
 def test_a_run_with_the_directory_marker_or_no_state_is_read(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     marker = pilot_state._sealed({"kind": "GIT_DIRECTORY", "path": ".git", "entries": []})
     for number, state in enumerate((None, marker)):
         run_root = _with_project_state(tmp_path / str(number), state)
@@ -43,8 +42,6 @@ def test_a_run_with_the_directory_marker_or_no_state_is_read(tmp_path: Path) -> 
 
 
 def test_a_run_with_the_old_git_tree_state_is_refused(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     state = pilot_state._sealed({"kind": "GIT_TREE", "status": ["?? a.txt"], "files": [{"path": "a.txt", "digest": "sha256:" + "1" * 64}]})
     run_root = _with_project_state(tmp_path, state)
     with pytest.raises(ValueError):

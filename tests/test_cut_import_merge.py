@@ -10,6 +10,12 @@ import pytest
 from tests.test_cases_import import _project, _scan
 from tests.test_review_open_recovery import _crash_once, _main
 from tests.test_cut_review import _crash_event, _events
+from tools import pilot_state, context_marker_parts
+from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
+from tools.context_marker_parts import merge_parts
+from tests.test_batch_assembly import _header
+from tools.batch_assembly import plan_batches
+from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 
 
 def _import_argv(root: Path, attempt_id: str) -> list[str]:
@@ -26,8 +32,6 @@ def _stage_events(root: Path, stage: str) -> list[str]:
 
 @pytest.mark.parametrize("point", ["skeleton-file-written", "skeleton-published", "request-written", "answer-file-written"])
 def test_cases_import_cut_between_its_writes(tmp_path: Path, monkeypatch, capsys, point: str) -> None:
-    from tools import pilot_state
-
     project = _project(tmp_path)
     _code, scan = _scan(project, monkeypatch)
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
@@ -53,8 +57,6 @@ def test_cases_import_cut_between_its_writes(tmp_path: Path, monkeypatch, capsys
 # --------------------------------------------------------------------------------------
 
 def _parts_answered(tmp_path: Path):
-    from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
-
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
     for index, receipt in enumerate(receipts, start=1):
@@ -65,9 +67,6 @@ def _parts_answered(tmp_path: Path):
 
 @pytest.mark.parametrize("point", ["request-written", "answer-file-written"])
 def test_merge_cut_between_the_request_and_the_answer(tmp_path: Path, monkeypatch, point: str) -> None:
-    from tools import pilot_state
-    from tools.context_marker_parts import merge_parts
-
     root, attempt_id = _parts_answered(tmp_path)
     with monkeypatch.context() as broken:
         if point == "request-written":
@@ -88,11 +87,6 @@ def test_merge_cut_between_the_request_and_the_answer(tmp_path: Path, monkeypatc
 
 @pytest.mark.parametrize("point", ["skeleton-file-written", "skeleton-published"])
 def test_plan_of_an_import_cut_between_a_skeleton_file_and_its_events(tmp_path: Path, monkeypatch, capsys, point: str) -> None:
-    from tests.test_batch_assembly import _header
-    from tools import context_marker_parts, pilot_state
-    from tools.batch_assembly import plan_batches
-    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-
     project = _project(tmp_path)
     _code, scan = _scan(project, monkeypatch)
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
@@ -126,9 +120,6 @@ def test_plan_of_an_import_cut_between_a_skeleton_file_and_its_events(tmp_path: 
 def test_the_resume_is_for_the_request_the_code_wrote_itself(tmp_path: Path) -> None:
     """A request of the stage made by someone else (another invocation) is not resumed: MODEL_REQUEST_DUPLICATE, as before; the same
     request again is returned as it is, written once."""
-    from tests.test_marker_parts import _run
-    from tools import pilot_state
-
     root, attempt_id, baseline, receipts = _run(tmp_path, files=1)
     inputs = [baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"]]
     first = pilot_state.publish_code_step_request(root, attempt_id, "context-marker:baseline", model_id="code", invocation_id="merge-x", input_digests=inputs)

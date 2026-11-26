@@ -9,6 +9,14 @@ from pathlib import Path
 import pytest
 
 from tools import pilot_state, step_size
+from tests.test_cut_model import _generator_stage, _prepare_argv
+from tests.test_review_open_recovery import _main
+from tests.test_cut_review import _evidence_verdict
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _open, _select_verdict, _bundles, _cycle
+from tests.test_closure_deadlocks import _run
+from tools.orchestrate_test_case_revision import journal_assembly
+from tools.test_case_projections import render_markdown
 
 
 # ---- 1: a file that only names a digest binds nothing ---------------------------------------------------------------------------------------
@@ -20,9 +28,6 @@ def _header_row(run: dict, stage: str) -> tuple[dict, dict | None]:
 
 @pytest.mark.parametrize("planted", [lambda digest: {"digest": digest}, lambda digest: {"x": {"digest": digest}}], ids=["own-digest-field", "nested-digest-field"])
 def test_a_planted_file_that_names_the_digest_of_an_input_does_not_take_its_place(tmp_path: Path, capsys: pytest.CaptureFixture[str], planted) -> None:
-    from tests.test_cut_model import _generator_stage, _prepare_argv
-    from tests.test_review_open_recovery import _main
-
     run, stage = _generator_stage(tmp_path)
     assert _main(capsys, _prepare_argv(run, stage))[0] == 0
     found, header = _header_row(run, stage)
@@ -36,10 +41,6 @@ def test_a_planted_file_that_names_the_digest_of_an_input_does_not_take_its_plac
 # ---- 3: the ledger of the reviewer is the last revision, read by the strict reader --------------------------------------------------------------
 
 def test_a_first_revision_of_the_ledger_that_is_gone_bad_does_not_stop_the_measure_of_the_review(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_cut_review import _evidence_verdict
-    from tests.test_review_requested import _generated_run
-    from tests.test_review_two_commands import _open, _select_verdict
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     assert _select_verdict(run, _evidence_verdict(run, "src/extra.py"))[0] == 0  # an evidence round: the ledger is published again, each revision under its digest
@@ -55,11 +56,6 @@ def test_a_first_revision_of_the_ledger_that_is_gone_bad_does_not_stop_the_measu
 # ---- 4: «not reviewed» is decided by the journal, not by a file under published/ ----------------------------------------------------------------
 
 def test_a_rejected_file_laid_beside_the_package_does_not_stop_the_unreviewed_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_closure_deadlocks import _run
-    from tests.test_review_requested import _generated_run
-    from tests.test_review_two_commands import _bundles, _cycle, _open
-    from tools.orchestrate_test_case_revision import journal_assembly
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     assert _cycle("submit", run, "--abort", "REVIEW_UNUSABLE")[0] == 0
@@ -87,22 +83,16 @@ def _grouped_with_parameter(name: str) -> dict:
 
 @pytest.mark.parametrize("name", ["<img src=x onerror=alert(1)>", "[нажми](javascript:alert(1))"])
 def test_the_name_of_the_parameter_of_a_group_is_no_markup_in_the_markdown(name: str) -> None:
-    from tools.test_case_projections import render_markdown
-
     text = render_markdown(_grouped_with_parameter(name)).payload.decode("utf-8")
     assert not re.search(r"(?<!\\)<img", text) and not re.search(r"(?<!\\)\]\(javascript", text) and "PG-first-name" in text  # a sign is there only with its backslash
 
 
 def test_a_harmless_name_of_the_parameter_keeps_its_bytes() -> None:
     """The ``.md`` is compared with its rendering when a set is verified: a name without markup signs must come out as before."""
-    from tools.test_case_projections import render_markdown
-
     assert "<first_name>" in render_markdown(_grouped_with_parameter("first_name")).payload.decode("utf-8")
 
 
 def test_a_json_tail_with_three_backticks_does_not_close_its_fence() -> None:
-    from tools.test_case_projections import render_markdown
-
     document = json.loads((Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json").read_text(encoding="utf-8"))
     document["test_cases"][0]["steps"][0]["test_data"] = '\u0422\u0435\u043b\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430.\n\n{"note":"```x```"}'
     lines = render_markdown(document).payload.decode("utf-8").splitlines()

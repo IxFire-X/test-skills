@@ -23,8 +23,13 @@ import pytest
 
 from tests.test_first_run import _python_project, _write
 from tests.test_phase2_scan import _args
-from tools import run_pipeline
+from tests.test_reviewer_protocol import _new_run
+from tests.test_secret_inputs import SECRET, SECRET_PATH, _secret_project
+from tests.p4_flow import flow_args
+from tests.test_finish import _project
+from tools import run_pipeline, pilot_state, project_inventory
 from tools import exec_commands
+from tools.ready import _table, check
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = "services/api/docs/feature.md"
@@ -84,8 +89,6 @@ def test_a_repeated_scan_is_refused_with_the_open_run(tmp_path: Path, monkeypatc
 
 
 def test_another_request_a_failed_scan_and_an_old_run_do_not_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_reviewer_protocol import _new_run
-
     project = _python_project(tmp_path, runtime=False)
     _new_run(project)  # a run without scan_request (before FaT-G) is never compared
     code, failed = _scan(project, monkeypatch, target="missing.py")
@@ -132,8 +135,6 @@ def test_status_names_the_changed_files_and_the_new_scan(tmp_path: Path, monkeyp
 
 
 def test_a_changed_secret_file_is_named_by_path_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_secret_inputs import SECRET, SECRET_PATH, _secret_project
-
     project, _digest = _secret_project(tmp_path)
     code, scan = _scan(project, monkeypatch)
     assert code == 0, scan
@@ -145,9 +146,6 @@ def test_a_changed_secret_file_is_named_by_path_only(tmp_path: Path, monkeypatch
 
 
 def test_materialize_names_the_changed_files_instead_of_a_child_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.p4_flow import flow_args
-    from tests.test_finish import _project
-
     project, run_root, _attempt_id, _values = _project(tmp_path)
     (project / "src" / "sample.py").write_text((project / "src" / "sample.py").read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
     code = exec_commands.cmd_materialize(flow_args(project, run_root))
@@ -158,8 +156,6 @@ def test_materialize_names_the_changed_files_instead_of_a_child_attempt(tmp_path
 
 
 def test_ready_says_not_to_change_the_project_after_the_scan(tmp_path: Path) -> None:
-    from tools.ready import _table, check
-
     report = check(_python_project(tmp_path, runtime=False), [DOCS], "cases-only-v1", "nested")
     row = next(item for item in report["checks"] if item["id"] == "run:freeze")
     assert row["level"] == "OK" and ".skillsrc" in row["message"] and row["message"] in _table(report)
@@ -227,8 +223,6 @@ def test_the_second_pass_starts_from_the_printed_command(tmp_path: Path, monkeyp
 
 def test_exec_never_trusts_the_profile_written_in_the_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Exec checks against local-pilot-v1 with the runtime identity, always; the baseline's own profile is status-only."""
-    from tools import pilot_state, project_inventory
-
     project = _python_project(tmp_path, runtime=True)
     _write(project, "services/api/.venv/Scripts/python.exe", "fixture-runtime-v1")
     code, scan = _scan(project, monkeypatch, profile="cases-only-v1")

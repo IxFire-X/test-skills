@@ -12,6 +12,9 @@ from tests.helpers import answer_stage, prepare_stage, submit_stage
 from tests.test_digest_traps import _publish_inputs
 from tests.test_review_requested import _generated_run, _journal
 from tests.journal_helpers import assert_refused_once
+from tools.pilot_state import read_model_request
+from tools.batch_assembly import with_digest
+from tools.orchestrate_test_case_revision import journal_assembly
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,8 +47,6 @@ def _to_the_second_batch(run: dict, fragments: list[dict]) -> str:
 
 
 def test_batch_one_has_four_inputs_and_batch_two_a_fifth_built_from_the_journal(tmp_path: Path) -> None:
-    from tools.pilot_state import read_model_request
-
     run, plan_digest, header_digest, fragments = _run(tmp_path)
     first, second = fragments[0]["batch_id"], fragments[1]["batch_id"]
     code, prepared = prepare_stage(run["run_root"], f"tc-generator:{first}")
@@ -70,8 +71,6 @@ def test_batch_one_has_four_inputs_and_batch_two_a_fifth_built_from_the_journal(
 
 
 def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps_the_retry(tmp_path: Path) -> None:
-    from tools.batch_assembly import with_digest
-
     run, _plan_digest, _header_digest, fragments = _run(tmp_path)
     second = _to_the_second_batch(run, fragments)
 
@@ -84,7 +83,6 @@ def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps
     assert_refused_once(run["run_root"], before, refused["code"], refused.get("command"))  # J1: the one event the refusal itself added
     code, answered = submit_stage(run["run_root"], second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
-    from tools.orchestrate_test_case_revision import journal_assembly
 
     assert journal_assembly(run["run_root"], run["attempt_id"])[0]["test_cases"]  # both answers are the journal's: the review assembles them
 

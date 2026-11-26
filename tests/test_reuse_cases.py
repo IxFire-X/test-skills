@@ -11,7 +11,8 @@ import pytest
 from tests.test_review_canaries import _answer, _fake_seed, _select
 from tests.test_review_codeword import _with_words
 from tests.test_review_requested import _generated_run
-from tools import pilot_state, stage_steps
+from tools import pilot_state, stage_steps, run_report, review_canaries
+from tools.fixes import FIXES
 
 REVIEW = "tc-reviewer:canonical"
 
@@ -370,8 +371,6 @@ def test_a_reviewer_who_named_the_word_in_a_source_that_said_fresh_is_not_taken(
 
 
 def test_a_self_source_whose_reviewer_named_the_word_is_taken_and_the_report_does_not_say_otherwise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import run_report
-
     words = _with_words(monkeypatch)
     src = _generated_run(tmp_path, self_review=True)
     stage_steps.prepare(src["run_root"], REVIEW, fresh_context=False)
@@ -386,8 +385,6 @@ def test_a_self_source_whose_reviewer_named_the_word_is_taken_and_the_report_doe
 # ---- the canaries ---------------------------------------------------------------------------------------------------------------------
 
 def test_the_canaries_of_the_new_run_count_the_reused_answer_as_the_source_did(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import review_canaries
-
     monkeypatch.setattr(review_canaries, "seed", _fake_seed)
     src = _generated_run(tmp_path)
     stage_steps.prepare(src["run_root"], REVIEW, invocation_id="reviewer-subagent-1", fresh_context=True)
@@ -434,7 +431,5 @@ def test_the_scan_offers_the_marker_alone_and_says_why_when_the_cases_are_not_ta
 # ---- the texts ------------------------------------------------------------------------------------------------------------------
 
 def test_the_fix_of_a_changed_reused_answer_names_the_command_the_agent_has() -> None:
-    from tools.fixes import FIXES
-
     assert "--reuse-from" in FIXES["MODEL_REUSE_MISMATCH"] and "--artifact" not in FIXES["MODEL_REUSE_MISMATCH"]
     assert "REUSE_SOURCE_INVALID" in FIXES and "prepare без --reuse-from" in FIXES["REUSE_SOURCE_INVALID"]

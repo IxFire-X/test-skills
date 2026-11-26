@@ -10,6 +10,11 @@ import pytest
 from tests.test_review_requested import _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
 from tests.test_f1 import _main, _pipeline
+from tests.test_first_run import _python_project
+from tools import context_marker_parts, pilot_state
+from tools.project_inventory import _context_receipt, read_inventory_receipt, read_execution_baseline
+from tools.project_inventory import select_context_batches, _digest
+from tests.test_reviewer_protocol import _new_run
 
 
 def _crash_nth(monkeypatch, owner, name: str, nth: int = 1) -> None:
@@ -29,8 +34,6 @@ def _crash_nth(monkeypatch, owner, name: str, nth: int = 1) -> None:
 # --- 8.2 = A2-3: scan cut between the context batches ---------------------------------------------------------------
 
 def _two_batch_project(tmp_path: Path) -> Path:
-    from tests.test_first_run import _python_project
-
     project = _python_project(tmp_path, runtime=False)
     for index in range(6):
         (project / "services" / "api" / "src" / f"part{index}.py").write_text(f"VALUE_{index} = {index}\n" * 40, encoding="utf-8")
@@ -82,8 +85,6 @@ def test_a_scan_cut_between_the_context_batches_is_finished_by_the_same_scan(tmp
 
 
 def test_the_cut_run_is_named_incomplete_until_the_scan_is_repeated(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools import context_marker_parts
-
     project, expected, _cut = _cut_scan(tmp_path, monkeypatch, capsys, nth=2)
     [root] = _runs(project)
     code, status = _pipeline(capsys, ["status", "--project", str(project), "--run", root.name])
@@ -117,8 +118,6 @@ def test_a_scan_cut_before_the_first_batch_leaves_a_named_abandoned_run(tmp_path
 
 
 def test_a_whole_scan_marks_its_batches_and_runs_before_the_mark_are_complete(tmp_path: Path, capsys) -> None:
-    from tools import pilot_state
-
     project = _two_batch_project(tmp_path)
     code, done = _pipeline(capsys, _scan_argv(project))
     assert code == 0, done
@@ -176,9 +175,6 @@ def test_plan_after_a_context_file_drift_names_the_drift(tmp_path: Path, capsys)
 # --- the receipts are the old ones plus batch_count; an honest scan has at least one batch ----------------------------
 
 def test_the_receipts_are_the_old_ones_with_batch_count_added(tmp_path: Path, capsys) -> None:
-    from tools import pilot_state
-    from tools.project_inventory import _context_receipt, read_inventory_receipt
-
     project = _two_batch_project(tmp_path)
     code, done = _pipeline(capsys, _scan_argv(project))
     assert code == 0, done
@@ -197,10 +193,6 @@ def test_the_receipts_are_the_old_ones_with_batch_count_added(tmp_path: Path, ca
 
 
 def test_a_receipt_without_batch_count_is_a_whole_set(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.project_inventory import _context_receipt, read_execution_baseline, read_inventory_receipt
-    from tests.test_reviewer_protocol import _new_run
-
     project = tmp_path / "project"
     (project / "src").mkdir(parents=True)
     (project / "src" / "evidence.py").write_text("value = 1\n", encoding="utf-8")
@@ -212,11 +204,9 @@ def test_a_receipt_without_batch_count_is_a_whole_set(tmp_path: Path) -> None:
     legacy = _context_receipt(inventory, 1, [item], int(item["size"]), b"")  # the receipt of a run before F3: no batch_count
     assert "batch_count" not in legacy
     # a legacy receipt needs the real byte-set digest to bind: take the one select_context_batches makes
-    from tools.project_inventory import select_context_batches
 
     made = select_context_batches(inventory, project, [item["opaque_id"]], byte_budget=4096)[0]["receipt"]
     legacy = {key: value for key, value in made.items() if key not in {"batch_count", "digest"}}
-    from tools.project_inventory import _digest
 
     legacy["digest"] = _digest(legacy)
     pilot_state.publish_context_selection(run_root, attempt_id, legacy)

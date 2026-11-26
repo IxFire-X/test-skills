@@ -1,5 +1,9 @@
 from pathlib import Path
 import pytest
+from tests.test_reviewer_protocol import _bind_session, _completed, _session, _started, _verdict
+from tools import pilot_state
+from tools.finalize_attempt import finalize_attempt
+from tools.orchestrate_test_case_revision import validate_reviewer_session
 
 
 def _facts(run_id: str, attempt_id: str, *, reason: str, verdict: str | None, abort: bool) -> dict:
@@ -22,11 +26,6 @@ def _facts(run_id: str, attempt_id: str, *, reason: str, verdict: str | None, ab
 
 @pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
 def test_rejected_reviewer_branch_closes_without_effective_canonical(tmp_path: Path, profile: str) -> None:
-    from tests.test_reviewer_protocol import _bind_session, _completed, _session, _started, _verdict
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_attempt
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     session, binding, review = _session(
         _started(), _verdict(), _completed(), review_verdict="ТРЕБУЕТ ДОРАБОТКИ",
     )
@@ -52,11 +51,6 @@ def test_rejected_reviewer_branch_closes_without_effective_canonical(tmp_path: P
 
 @pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
 def test_pre_verdict_context_abort_closes_with_zero_verdict_and_not_applicable_execution(tmp_path: Path, profile: str) -> None:
-    from tests.test_reviewer_protocol import _bind_session, _session, _started
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_attempt
-    from tools.orchestrate_test_case_revision import validate_reviewer_session
-
     aborted_event = {
         "ordinal": 2,
         "event_type": "REVIEW_SESSION_ABORTED",

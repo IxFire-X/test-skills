@@ -11,6 +11,10 @@ import pytest
 from tests.helpers import answer_stage, submit_stage
 from tests.test_review_requested import build_generated_run, _generated_run, _put
 from tests.test_review_two_commands import _events, _open, _select_verdict, _verdict
+from tools import step_size, pilot_state
+from tools.fixes import human_for
+from tools.run_report import render_markdown
+from tests.test_finish import _project
 
 
 def _main(capsys, argv: list[str]) -> tuple[int, dict]:
@@ -106,8 +110,6 @@ def _batch_request(run: dict, index: int) -> tuple[str, Path]:
 
 
 def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path: Path, capsys, monkeypatch) -> None:
-    from tools import step_size
-
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
     run = build_generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
@@ -124,9 +126,6 @@ def test_an_edited_output_sizes_file_does_not_silence_step_output_large(tmp_path
 
 
 def test_a_large_answer_carries_the_phrase_for_the_tester_beside_the_warning(tmp_path: Path, monkeypatch) -> None:
-    from tools import step_size
-    from tools.fixes import human_for
-
     monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
     run = build_generated_run(tmp_path, generated=False)
     stage, fragment = _batch_request(run, 0)
@@ -138,8 +137,6 @@ def test_a_large_answer_carries_the_phrase_for_the_tester_beside_the_warning(tmp
 
 def test_the_number_of_refusals_comes_from_the_journal(tmp_path: Path) -> None:
     """J1 (A1-1): the F1 caption «по файлу refusals.jsonl, журналом не подтверждено» is gone — every refusal is a COMMAND_REFUSED event."""
-    from tools.run_report import render_markdown
-
     run = _opened(tmp_path)
     code, refused = submit_stage(run["run_root"], "tc-unknown:x")  # a stage the run has no step for
     assert code == 2, refused
@@ -235,9 +232,6 @@ def test_an_unreadable_published_plan_never_gives_the_scope_to_the_decision_file
 
 
 def test_an_accepted_verdict_whose_effective_file_is_gone_is_not_reported_as_the_candidate(tmp_path: Path) -> None:
-    from tests.test_finish import _project
-    from tools import pilot_state
-
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
     before = _report_of(_project_path, run_root)
     assert before["counts"]["cases"] and before["counts"]["canon_basis"] is None, before["counts"]
@@ -265,8 +259,6 @@ def test_a_planted_receipt_with_the_right_digest_field_but_another_body_does_not
 
 def test_the_report_of_a_run_without_a_run_by_its_profile_does_not_print_accepted_in_the_numbers(tmp_path: Path) -> None:
     """G6: the cases-only profile runs no tests, so `accepted: False` there only reads as a contradiction of the first line; a run with tests keeps it."""
-    from tools.run_report import render_markdown
-
     report = _report(_opened(tmp_path))
     assert "- accepted:" in render_markdown({**report, "policy_profile": "local-pilot-v1"})
     only_cases = render_markdown({**report, "policy_profile": "cases-only-v1"})

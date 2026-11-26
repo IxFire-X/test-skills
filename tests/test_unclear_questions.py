@@ -8,6 +8,7 @@ import pytest
 
 from tests.test_marker_parts import _marker, _requirements, _run
 from tools import pilot_state, scope_pause
+from tools.run_report import write_report, build_report
 
 FIRST = "SREQ-batch-a-001"
 ASK = f"{FIRST} вопрос (docs/feature.md:3) — не сказано, какой код вернёт отказ — какой код ответа должен вернуть отказ?"
@@ -83,8 +84,6 @@ def test_the_requirement_the_human_left_out_gets_no_question_of_its_own(tmp_path
 
 
 def test_the_questions_file_holds_the_text_and_the_report_only_the_number(tmp_path: Path) -> None:
-    from tools.run_report import write_report
-
     root, _attempt_id = _marked_run(tmp_path, "REQ-1 Размер страницы — TBD.")
     write_report(root.parent.parent, root.name)
     questions = (root / "questions-for-analyst.md").read_text(encoding="utf-8")
@@ -95,8 +94,6 @@ def test_the_questions_file_holds_the_text_and_the_report_only_the_number(tmp_pa
 
 
 def test_a_run_without_marks_has_no_unconfirmed_entry(tmp_path: Path) -> None:
-    from tools.run_report import build_report
-
     root, _attempt_id = _marked_run(tmp_path, "REQ-1 Оплата заказа картой.")
     report, _warnings = build_report(root.parent.parent, root.name)
     assert "unconfirmed" not in report

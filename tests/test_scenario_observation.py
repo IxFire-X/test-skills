@@ -2,11 +2,15 @@
 read back — the producer, the journal binding, a tampered or hand-placed file."""
 import pytest
 from pathlib import Path
+from tests.test_durable_execution_trace import _publish_execution
+from tests.test_execution_receipt import _execution_facts
+from tools.finalize_attempt import finalize_durable_execution_attempt
+from tools.pilot_state import read_scenario_observation, scenario_observation_target, append_event, derive_state
+from tools.pilot_state import _canonical_bytes, _sealed, _terminal_retry_snapshot, read_terminal_result
+from tools import pilot_state
 
 
 def _terminal_retry_observation(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
     from tools.finalize_attempt import finalize_durable_execution_attempt
 
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
@@ -21,11 +25,6 @@ def _terminal_retry_observation(tmp_path: Path):
 
 
 def test_fresh_non_git_observation_is_produced_by_public_finalizer(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import read_scenario_observation
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     assert not (tmp_path / "project" / ".git").exists()
     _publish_execution(run_root, attempt_id, report, request=request)
@@ -42,11 +41,6 @@ def test_fresh_non_git_observation_is_produced_by_public_finalizer(tmp_path: Pat
 
 
 def test_waiting_for_model_resume_observation_is_produced_after_real_model_pair(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import read_scenario_observation
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     _publish_execution(run_root, attempt_id, report, request=request)
 
@@ -65,11 +59,6 @@ def test_waiting_for_model_resume_observation_is_produced_after_real_model_pair(
 
 
 def test_one_user_question_resume_observation_is_produced_after_answered_model_pair(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import read_scenario_observation
-
     run_root, attempt_id, report, request, _durable = _execution_facts(
         tmp_path, wait_for_input=True,
     )
@@ -92,7 +81,6 @@ def test_one_user_question_resume_observation_is_produced_after_answered_model_p
 def test_the_observation_schemas_name_only_the_scenarios_that_can_be_observed(pack_root: Path):
     text = (pack_root / "schemas" / "scenario-observation-receipt.schema.json").read_text(encoding="utf-8")
     assert "retained-native-rerun" not in text and "terminal-idempotent-retry" in text
-    from tools.pilot_state import scenario_observation_target
 
     with pytest.raises(ValueError):
         scenario_observation_target(Path("."), "a" * 32, "retained-native-rerun")
@@ -101,8 +89,6 @@ def test_the_observation_schemas_name_only_the_scenarios_that_can_be_observed(pa
 def test_a_journal_with_the_events_of_the_old_rerun_and_process_stop_is_still_read(tmp_path: Path):
     """Old runs are read (P4b, Q3): the writers of RETAINED_NATIVE_RERUN and PROCESS_STOPPED are gone, the event types stay known to the journal
     and to the guard, so a run that holds them is not a corrupt journal."""
-    from tools import pilot_state
-
     assert "RETAINED_NATIVE_RERUN" in pilot_state._EVENT_TYPES and "PROCESS_STOPPED" in pilot_state._EVENT_TYPES
     assert "RETAINED_NATIVE_RERUN" in pilot_state._ATTEMPT_EVENTS and "PROCESS_STOPPED" in pilot_state._ATTEMPT_EVENTS
     with pytest.raises(ValueError, match="verified process-scope recovery"):
@@ -110,8 +96,6 @@ def test_a_journal_with_the_events_of_the_old_rerun_and_process_stop_is_still_re
 
 
 def test_retained_native_rerun_event_cannot_be_appended_directly(tmp_path: Path):
-    from tools.pilot_state import append_event
-
     with pytest.raises(ValueError, match="retained-rerun controller"):
         append_event(
             tmp_path, "RETAINED_NATIVE_RERUN", actor="controller",
@@ -120,8 +104,6 @@ def test_retained_native_rerun_event_cannot_be_appended_directly(tmp_path: Path)
 
 
 def test_terminal_retry_scenario_uses_controller_owned_durable_observation(tmp_path: Path):
-    from tools.pilot_state import derive_state, read_scenario_observation
-
     run_root, attempt_id, published = _terminal_retry_observation(tmp_path)
     loaded = read_scenario_observation(
         run_root, attempt_id, "terminal-idempotent-retry", published["digest"],
@@ -141,11 +123,6 @@ def test_terminal_retry_scenario_uses_controller_owned_durable_observation(tmp_p
 
 
 def test_terminal_retry_observation_cannot_be_published_outside_second_finalize(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     _publish_execution(run_root, attempt_id, report, request=request)
     first = finalize_durable_execution_attempt(run_root, attempt_id)
@@ -164,8 +141,6 @@ def test_terminal_retry_observation_cannot_be_published_outside_second_finalize(
 
 
 def test_release_scenario_observation_tamper_fails_closed(tmp_path: Path):
-    from tools.pilot_state import read_scenario_observation
-
     run_root, attempt_id, published = _terminal_retry_observation(tmp_path)
     target = run_root / published["path"]
     target.write_bytes(published["bytes"].replace(b'"terminal_event_count":1', b'"terminal_event_count":2'))
@@ -176,14 +151,6 @@ def test_release_scenario_observation_tamper_fails_closed(tmp_path: Path):
 
 
 def test_hand_placed_terminal_retry_observation_without_journal_is_rejected(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import (
-        _canonical_bytes, _sealed, _terminal_retry_snapshot, derive_state,
-        read_scenario_observation, read_terminal_result,
-    )
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     _publish_execution(run_root, attempt_id, report, request=request)
     first = finalize_durable_execution_attempt(run_root, attempt_id)
@@ -222,11 +189,6 @@ def test_hand_placed_terminal_retry_observation_without_journal_is_rejected(tmp_
         )
 
 def test_a_repeated_finish_gives_the_same_result_with_one_start_and_one_terminal(tmp_path: Path):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import derive_state
-
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
     _publish_execution(run_root, attempt_id, report, request=request)
     first = finalize_durable_execution_attempt(run_root, attempt_id)

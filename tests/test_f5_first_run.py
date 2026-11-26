@@ -19,9 +19,12 @@ import pytest
 
 from tests.test_first_run import _write
 from tests.test_phase2_scan import _skillsrc
-from tools import run_pipeline
+from tools import run_pipeline, pilot_state
 from tools.init_skillsrc import _payload
 from tools.module_ids import module_id_for
+from tools.pilot_state import module_path_problem
+from tools.schema_validation import schema_diagnostics
+from tools.discover_project import discover_project
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,15 +81,11 @@ def test_a_module_folder_with_cyrillic_or_a_space_is_ready_and_scans(tmp_path: P
 
 @pytest.mark.parametrize("value", ["..", "a/../b", "a/./b", "a//b", "/abs", "a/", "C:/x", "a\x00b", "a\nb", "", "../x"])
 def test_the_code_refuses_a_module_path_the_schema_would_let_through(tmp_path: Path, value: str) -> None:
-    from tools.pilot_state import module_path_problem
-
     (tmp_path / "a").mkdir()
     assert module_path_problem(tmp_path, value), value
 
 
 def test_module_path_problem_names_a_missing_folder_and_accepts_an_existing_one(tmp_path: Path) -> None:
-    from tools.pilot_state import module_path_problem
-
     (tmp_path / "сервис").mkdir()
     assert module_path_problem(tmp_path, "сервис") is None and module_path_problem(tmp_path, ".") is None
     assert "нет" in str(module_path_problem(tmp_path, "нет-такой"))
@@ -97,8 +96,6 @@ def test_module_path_problem_names_a_missing_folder_and_accepts_an_existing_one(
     pytest.param("a/" * 49_999 + "a", id="a-slash-valid"), pytest.param("я" * 100_000, id="cyrillic"),
     pytest.param("a/" * 49_999 + "/", id="double-slash-at-the-end")])
 def test_the_module_pattern_of_the_attempt_schema_is_linear(value: str) -> None:
-    from tools.schema_validation import schema_diagnostics
-
     attempt = {"schema_version": "1.0.0", "run_id": "0" * 32, "attempt_id": "1" * 32, "project": "p", "module": value,
                "policy_profile": "cases-only-v1", "baseline_digest": "sha256:" + "0" * 64, "digest": "sha256:" + "0" * 64}
     started = time.monotonic()
@@ -107,8 +104,6 @@ def test_the_module_pattern_of_the_attempt_schema_is_linear(value: str) -> None:
 
 
 def test_the_module_pattern_takes_unicode_and_spaces_and_not_separators() -> None:
-    from tools.schema_validation import schema_diagnostics
-
     def bad(module: str) -> bool:
         attempt = {"schema_version": "1.0.0", "run_id": "0" * 32, "attempt_id": "1" * 32, "project": "p", "module": module,
                    "policy_profile": "cases-only-v1", "baseline_digest": "sha256:" + "0" * 64, "digest": "sha256:" + "0" * 64}
@@ -119,8 +114,6 @@ def test_the_module_pattern_takes_unicode_and_spaces_and_not_separators() -> Non
 
 
 def test_a_schema_failure_of_the_attempt_names_its_cause_and_a_fix_without_project_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     project, module_id, doc = _project(tmp_path, "svc")
 
     def refuse(*_a, **_k):
@@ -220,8 +213,6 @@ def test_a_skillsrc_that_is_a_junction_stops_the_scan_before_a_run(tmp_path: Pat
 # --- 8.13: the skill pack inside the project ----------------------------------------------------------------------------
 
 def test_the_skill_pack_inside_a_project_without_skillsrc_is_no_module(tmp_path: Path) -> None:
-    from tools.discover_project import discover_project
-
     project = tmp_path / "project"
     _write(project, "svc/pyproject.toml", "[project]\nname = 'm'\n")
     _write(project, "svc/src/app.py", "X = 1\n")

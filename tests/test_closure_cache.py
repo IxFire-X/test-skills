@@ -6,6 +6,9 @@ import functools
 from pathlib import Path
 
 import pytest
+from tests import test_durable_execution_trace as trace
+from tools.finalize_attempt import finalize_durable_execution_attempt
+from tools import pilot_state
 
 # About 1.5x the measured closure after FaT-9: 12 state derivations and 75 validations (before: 189 and 3593).
 DERIVE_STATE_LIMIT = 18
@@ -13,8 +16,6 @@ VALIDATION_LIMIT = 113
 
 
 def _passed(tmp_path: Path):
-    from tests import test_durable_execution_trace as trace
-
     root, attempt_id, report, request, _durable = trace._execution_facts(tmp_path)
     trace._publish_execution(root, attempt_id, report, request=request)
     return root, attempt_id
@@ -34,8 +35,6 @@ def _count(monkeypatch: pytest.MonkeyPatch, counts: collections.Counter, name: s
 
 
 def test_one_closure_derives_the_state_and_validates_receipts_far_less_often(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-
     root, attempt_id = _passed(tmp_path)
     counts: collections.Counter = collections.Counter()
     for name in ("_derive_state", "_validate_factual_receipt"):
@@ -47,9 +46,6 @@ def test_one_closure_derives_the_state_and_validates_receipts_far_less_often(tmp
 
 
 def test_a_write_inside_the_closure_is_seen_by_the_next_read(tmp_path: Path) -> None:
-    from tests import test_durable_execution_trace as trace
-    from tools import pilot_state
-
     root, attempt_id, report, request, _durable = trace._execution_facts(tmp_path)
     with pilot_state.closure_cache():
         before = pilot_state.derive_state(root)
@@ -63,8 +59,6 @@ def test_a_write_inside_the_closure_is_seen_by_the_next_read(tmp_path: Path) -> 
 
 
 def test_a_forged_receipt_is_refused_even_after_a_cached_read(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     root, attempt_id = _passed(tmp_path)
     with pilot_state.closure_cache():
         first = pilot_state.read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
@@ -80,8 +74,6 @@ def test_a_forged_receipt_is_refused_even_after_a_cached_read(tmp_path: Path) ->
 def test_a_resealed_forged_receipt_is_validated_again_not_taken_from_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """FaT-WT: a forgery with a valid seal passes ``_check_sealed``; only a cache key over the receipt bytes sends it to
     ``_validate_factual_receipt`` again (the unsealed forgery above is refused by the seal before the cache)."""
-    from tools import pilot_state
-
     root, attempt_id = _passed(tmp_path)
     counts: collections.Counter = collections.Counter()
     _count(monkeypatch, counts, "_validate_factual_receipt")
@@ -102,10 +94,7 @@ def test_a_resealed_forged_receipt_is_validated_again_not_taken_from_the_cache(t
 
 
 def test_a_nested_execution_receipt_is_validated_on_every_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     root, attempt_id = _passed(tmp_path)
-    from tools.finalize_attempt import finalize_durable_execution_attempt
 
     finalize_durable_execution_attempt(root, attempt_id)
     counts: collections.Counter = collections.Counter()
@@ -121,8 +110,6 @@ def test_a_nested_execution_receipt_is_validated_on_every_read(tmp_path: Path, m
 
 
 def test_a_pending_marker_bypasses_the_cached_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     root, _attempt_id = _passed(tmp_path)
     counts: collections.Counter = collections.Counter()
     monkeypatch.setattr(pilot_state, "_derive_state", lambda run_root: counts.update(["_derive_state"]) or {"events": [], "attempts": []})
@@ -135,8 +122,6 @@ def test_a_pending_marker_bypasses_the_cached_state(tmp_path: Path, monkeypatch:
 
 
 def test_a_cached_state_still_checks_the_module_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     root, _attempt_id = _passed(tmp_path)
     counts: collections.Counter = collections.Counter()
     with pilot_state.closure_cache():
@@ -148,8 +133,6 @@ def test_a_cached_state_still_checks_the_module_selection(tmp_path: Path, monkey
 
 
 def test_a_cached_state_is_a_copy(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     root, _attempt_id = _passed(tmp_path)
     with pilot_state.closure_cache():
         state = pilot_state.derive_state(root)
@@ -158,8 +141,6 @@ def test_a_cached_state_is_a_copy(tmp_path: Path) -> None:
 
 
 def test_without_the_block_nothing_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     root, _attempt_id = _passed(tmp_path)
     counts: collections.Counter = collections.Counter()
     _count(monkeypatch, counts, "_events")

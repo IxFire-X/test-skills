@@ -16,6 +16,9 @@ from tests.test_review_requested import build_generated_run, _generated_run, _jo
 from tests.journal_helpers import assert_refused_once, refusal_log
 from tests.test_review_two_commands import _autofix, _cycle, _open, _select_verdict, _shape, _verdict
 from tests.test_f1 import _opened
+from tools import orchestrate_test_case_revision as otcr, pilot_state
+from tools.run_pipeline import main
+from tools.run_report import build_report
 
 LEDGER = "reviewer-ledger-v1"
 
@@ -101,8 +104,6 @@ def test_prepare_cut_between_the_ledger_file_and_its_events(tmp_path: Path, monk
 # --------------------------------------------------------------------------------------
 
 def test_submit_cut_after_the_answer_before_the_completed_ledger(tmp_path: Path, monkeypatch) -> None:
-    from tools import orchestrate_test_case_revision as otcr
-
     run = _opened(tmp_path)
     verdict = _verdict(run)
     with monkeypatch.context() as broken:
@@ -131,8 +132,6 @@ def test_submit_cut_between_the_completed_ledger_file_and_its_events(tmp_path: P
 
 
 def test_submit_cut_before_the_effective_canonical(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools import pilot_state
-
     run = _opened(tmp_path)
     verdict = _verdict(run)
     with monkeypatch.context() as broken:
@@ -169,8 +168,6 @@ EVIDENCE_LEDGER = ["REVIEW_SESSION_STARTED", "EVIDENCE_REQUESTED", "EVIDENCE_PRO
 
 
 def test_submit_with_evidence_cut_after_the_receipt_before_the_ledger(tmp_path: Path, monkeypatch) -> None:
-    from tools import orchestrate_test_case_revision as otcr
-
     run = _opened(tmp_path)
     answer = _evidence_verdict(run, "src/extra.py")
     with monkeypatch.context() as broken:
@@ -240,8 +237,6 @@ def test_a_ledger_file_without_events_and_with_other_bytes_is_refused_with_its_c
 def test_after_a_cut_between_published_and_read_back_the_repeat_finishes_and_the_strict_reader_refuses(tmp_path: Path, monkeypatch) -> None:
     """The COMPLETED revision is published, its READ_BACK is not: the strict reader (evidence consumers) refuses, not rolls back to the WAITING
     one; the second submit finishes it."""
-    from tools import pilot_state
-
     run = _opened(tmp_path)
     verdict = _verdict(run)
     with monkeypatch.context() as broken:
@@ -279,8 +274,6 @@ def test_another_verdict_after_the_cut_does_not_become_a_second_decision(tmp_pat
 
 
 def test_status_after_the_cut_leads_to_the_submit_and_the_repeat_closes_the_review(tmp_path: Path, monkeypatch, capsys) -> None:
-    from tools.run_pipeline import main
-
     run, verdict = _cut_after_published(monkeypatch, tmp_path)
     capsys.readouterr()
     code = main(["status", "--project", str(run["project"]), "--run", run["run_root"].name])
@@ -311,8 +304,6 @@ def _status(capsys, run: dict) -> dict:
 
 def test_a_closed_ledger_cut_before_the_effective_canonical_says_not_yet(tmp_path: Path, monkeypatch, capsys) -> None:
     """Ledger COMPLETED and read back, the effective canonical not published (the cut is between the two writes of the selection)."""
-    from tools import pilot_state
-
     run = _opened(tmp_path)
     verdict = _verdict(run)
     with monkeypatch.context() as broken:
@@ -328,8 +319,6 @@ def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_
     """J1 (backlog of F2): the write order of AUTO_FIX_APPLIED is the COMPLETED ledger, the r2 bundle, then the effective canonical.  A cut after
     the bundle is «ещё нет» for status and the reader of the effective canonical (not a refusal, not a new run), and the same submit writes the rest: the
     publisher of the r2 bundle is run again on the very same document and the effective canonical is published once."""
-    from tools import pilot_state
-
     run = _opened(tmp_path)
     answer = _autofix(run)
     published = run["run_root"] / "published"
@@ -355,8 +344,6 @@ def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_
 
 def test_a_fully_closed_review_whose_effective_file_is_gone_is_still_a_refusal(tmp_path: Path, capsys) -> None:
     """The guard of PT2/F1: ACCEPTED, the ledger paired, the effective canonical published — and the file deleted."""
-    from tools.run_report import build_report
-
     run = _opened(tmp_path)
     assert _select_verdict(run, _verdict(run))[0] == 0
     (run["run_root"] / "effective-canonicals" / f"{run['attempt_id']}.json").unlink()

@@ -16,6 +16,8 @@ from tests.journal_helpers import assert_refused_in_order
 from tests.test_review_requested import build_generated_run, _generated_run, _journal
 from tests.test_f1 import _main  # noqa: F401  (other test files import it from here)
 from tests.test_review_two_commands import _cycle, _open, _select_verdict, _shape, _verdict
+from tests.test_scope_pause import _paused_run, _submit_plan
+from tools import review_canaries
 
 
 def _crash_once(monkeypatch, owner, name: str, when=lambda *a, **k: True) -> None:
@@ -113,8 +115,6 @@ def test_a_verdict_after_the_review_was_aborted_is_refused_before_it_is_recorded
 # 7.4 --------------------------------------------------------------------------------------
 
 def test_plan_still_publishes_header_then_plan_when_the_checks_pass(tmp_path: Path, capsys) -> None:
-    from tests.test_scope_pause import _paused_run, _submit_plan
-
     root, *_ = _paused_run(tmp_path, warnings=[])
     code, done = _submit_plan(capsys, root)
     assert code == 0, done
@@ -122,8 +122,6 @@ def test_plan_still_publishes_header_then_plan_when_the_checks_pass(tmp_path: Pa
 
 def test_a_canary_binding_cut_short_is_finished_and_a_real_divergence_is_not(tmp_path: Path, monkeypatch) -> None:
     """P7: the same call again finishes the binding of the canaries; a map that does not match the receipt is still REVIEW_CANARY_MISMATCH."""
-    from tools import review_canaries
-
     run = _generated_run(tmp_path)
     with monkeypatch.context() as broken:
         _crash_points(broken, "canary-published")

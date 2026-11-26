@@ -9,11 +9,14 @@ import pytest
 
 from tests.journal_helpers import assert_refused_once, refusal_log
 from tests.test_api_cli import _api, _marker_run, _marker_value, _reversed
+from tools import pilot_state, stage_steps
+from tests import test_durable_execution_trace as trace
+from tools.run_pipeline import main
+from tests.test_first_run import _python_project
+from tests.test_reviewer_protocol import _new_run
 
 
 def _count_full_checks(monkeypatch: pytest.MonkeyPatch) -> collections.Counter:
-    from tools import pilot_state
-
     counts: collections.Counter = collections.Counter()
     original = pilot_state._events_full
 
@@ -26,9 +29,6 @@ def _count_full_checks(monkeypatch: pytest.MonkeyPatch) -> collections.Counter:
 
 
 def test_finish_checks_the_whole_journal_a_few_times_not_once_per_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests import test_durable_execution_trace as trace
-    from tools.run_pipeline import main
-
     root, attempt_id, report, request, _durable = trace._execution_facts(tmp_path)
     trace._publish_execution(root, attempt_id, report, request=request)
     counts = _count_full_checks(monkeypatch)
@@ -37,8 +37,6 @@ def test_finish_checks_the_whole_journal_a_few_times_not_once_per_read(tmp_path:
 
 
 def test_api_prepare_and_submit_check_the_journal_in_one_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools import stage_steps
-
     root, _attempt_id, _digests = _marker_run(tmp_path)
     counts = _count_full_checks(monkeypatch)
     assert _api(["prepare", "--run-root", str(root), "--stage", "context-marker:baseline", "--model-id", "m", "--invocation-id", "inv"], capsys)[0] == 0
@@ -50,10 +48,6 @@ def test_api_prepare_and_submit_check_the_journal_in_one_block(tmp_path: Path, m
 
 def test_a_copy_forged_during_scan_gives_the_error_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """scan prints inside its body: its answer is held until the final full check, so the success is never printed before the error."""
-    from tests.test_first_run import _python_project
-    from tools import pilot_state
-    from tools.run_pipeline import main
-
     project = _python_project(tmp_path, runtime=False)
     derive, forged = pilot_state._derive_state, {"done": False}
 
@@ -74,9 +68,6 @@ def test_a_copy_forged_during_scan_gives_the_error_alone(tmp_path: Path, monkeyp
 
 
 def test_a_refusal_printed_inside_the_block_is_printed_and_journaled(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_reviewer_protocol import _new_run
-    from tools.run_pipeline import main
-
     run_root, _attempt_id = _new_run(tmp_path)
     capsys.readouterr()
     seen = refusal_log(run_root)
@@ -87,8 +78,6 @@ def test_a_refusal_printed_inside_the_block_is_printed_and_journaled(tmp_path: P
 
 def test_a_copy_forged_during_an_api_submit_gives_the_error_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """An ordinary stage runs through ``_cached`` and ``api.main`` prints after the handler: the success is never printed before the error."""
-    from tools import pilot_state, stage_steps
-
     root, _attempt_id, _digests = _marker_run(tmp_path)
     assert _api(["prepare", "--run-root", str(root), "--stage", "context-marker:baseline", "--model-id", "m", "--invocation-id", "inv"], capsys)[0] == 0
     stage_steps.slot(root, "context-marker:baseline").write_text(json.dumps(_reversed(_marker_value()), ensure_ascii=False), encoding="utf-8")

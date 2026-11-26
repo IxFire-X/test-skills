@@ -12,7 +12,9 @@ from tests.helpers import prepare_stage
 from tests.test_profile_flows import mode_b_pack  # noqa: F401  (the fixture: a copy of the delivery of mode B)
 from tests.test_review_stage import STAGE, _answer, _prepare, _run, _submit
 from tests.test_stage_steps import _call, _events, _status
-from tools import pilot_state
+from tests.test_rework_review import REVIEW, _answered, _open
+from tests.test_review_canaries import _boundary_and_removed, _finding, _ids
+from tools import pilot_state, orchestrate_test_case_revision as orchestrate
 
 FLAG = "--accept-self-review"
 SAME_SESSION = ("--fresh-context", "no")
@@ -107,10 +109,6 @@ def test_an_independent_review_opened_before_is_not_changed_by_a_later_consent(t
 # ---- the second round ----
 
 def test_the_second_round_goes_in_the_same_session_without_the_flag_after_the_consent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    from tests.test_rework_review import REVIEW, _answered, _open
-    from tests.test_review_canaries import _boundary_and_removed, _finding, _ids
-    from tools import orchestrate_test_case_revision as orchestrate
-
     monkeypatch.setattr(orchestrate, "reject_share", lambda *_args: 50)
     monkeypatch.setattr(orchestrate, "rework_rounds", lambda *_args: 1)
     run = _run(tmp_path, monkeypatch)

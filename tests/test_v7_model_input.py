@@ -10,7 +10,11 @@ import pytest
 from tests.test_first_run import _python_project, _write
 from tests.test_review_requested import _generated_run, _journal
 from tests.test_scan_guard import _scan
+from tests.test_scope_pause import _paused_run
 from tools import pilot_state, step_size
+from tools.scan_rules import non_code_class
+from tools.step_size import plan_view_bytes
+from tools.run_report import _composition
 
 MODULE = "services/api"
 
@@ -31,16 +35,12 @@ MODULE = "services/api"
     ("NOTICE", "license"), ("LICENSE", "license"),
 ])
 def test_the_class_of_a_file_that_is_no_code(path: str, expected: str | None) -> None:
-    from tools.scan_rules import non_code_class
-
     known = {"res/messages.properties", "res/application.properties"}
     found = non_code_class(path, known)
     assert (found[0] if found else None) == expected, found
 
 
 def test_a_translation_without_its_main_file_stays_code() -> None:
-    from tools.scan_rules import non_code_class
-
     assert non_code_class("res/messages_de.properties", {"res/messages_de.properties"}) is None
     assert non_code_class("res/messages_de.properties", {"other/messages.properties"}) is None  # the main file of another folder is no sibling
 
@@ -106,8 +106,6 @@ def _marker_stage(run_root: Path) -> str:
 
 
 def test_the_marker_reads_the_projection_of_the_inventory(tmp_path: Path) -> None:
-    from tests.test_scope_pause import _paused_run
-
     root, attempt_id, baseline, _receipts_ = _paused_run(tmp_path)
     before = _journal(root)
     found = step_size.stage_inputs(root, "context-marker:baseline")
@@ -128,8 +126,6 @@ def test_the_marker_reads_the_projection_of_the_inventory(tmp_path: Path) -> Non
 
 
 def test_a_changed_projection_file_is_rewritten_and_does_not_change_the_measure(tmp_path: Path) -> None:
-    from tests.test_scope_pause import _paused_run
-
     root, _attempt_id, baseline, _receipts_ = _paused_run(tmp_path)
     first = step_size.stage_inputs(root, "context-marker:baseline")
     [row] = [item for item in first["files"] if item["digest"] == baseline["inventory_digest"]]
@@ -174,8 +170,6 @@ def test_the_generator_reads_the_plan_without_the_texts_of_the_requirements(tmp_
 
 
 def test_a_stage_that_is_no_generator_batch_gets_the_plan_as_it_is(tmp_path: Path) -> None:
-    from tools.step_size import plan_view_bytes
-
     run = _generated_run(tmp_path)
     plan = json.loads(Path(run["plan"]).read_text(encoding="utf-8"))
     found = step_size.stage_inputs(run["run_root"], _generator_stage(run))
@@ -184,8 +178,6 @@ def test_a_stage_that_is_no_generator_batch_gets_the_plan_as_it_is(tmp_path: Pat
 
 
 def test_the_report_measures_the_projection_of_the_plan(tmp_path: Path) -> None:
-    from tools.run_report import _composition
-
     run = _generated_run(tmp_path)
     root = run["run_root"]
     found = step_size.stage_inputs(root, _generator_stage(run), write_views=False)

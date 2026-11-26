@@ -16,6 +16,16 @@ import pytest
 
 from tests.test_closure_deadlocks import _run
 from tests.test_finish import _automation_chain
+from tools.run_pipeline import main
+from tools.pilot_state import derive_state, publish_model_stage_artifact, read_model_stage_artifact
+from tests.test_review_requested import _generated_run
+from tests.test_review_two_commands import _cycle, _open
+from tests.test_first_run import _python_project
+from tests.test_scan_guard import _runs, _scan
+from tools import run_pipeline
+from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
+from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+from tools.canonical_document import validate_canonical_document
 
 pytestmark = pytest.mark.contract
 
@@ -73,8 +83,6 @@ def test_a_pending_automation_is_closed_by_the_abandon_its_fix_names(tmp_path: P
 
 @pytest.mark.slow
 def test_abandon_is_refused_where_finish_or_ingest_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import main
-
     rejected, _attempt = _automation_chain(tmp_path / "rejected", ["ТРЕБУЕТ ДОРАБОТКИ", "ТРЕБУЕТ ДОРАБОТКИ"])
     capsys.readouterr()
     code = main(["finish", "--project", str(tmp_path / "rejected"), "--run", rejected.name, "--abandon", "STAGE_RETRY_EXHAUSTED"])
@@ -87,7 +95,6 @@ def test_abandon_is_refused_where_finish_or_ingest_closes(tmp_path: Path, capsys
     code = main(["finish", "--project", str(tmp_path / "accepted"), "--run", accepted.name, "--abandon", "AUTOMATION_NOT_MATERIALIZABLE"])
     refused = json.loads(capsys.readouterr().out)
     assert code == 2 and refused["reason"] == "FINISH_FACT_UNDETERMINED" and _command(refused["fix"], "materialize")[1] == "materialize", refused
-    from tools.pilot_state import derive_state
 
     assert derive_state(accepted)["attempts"][-1]["state"] != "TERMINAL"
 
@@ -99,9 +106,6 @@ def test_abandon_is_refused_where_finish_or_ingest_closes(tmp_path: Path, capsys
 
 @pytest.mark.slow
 def test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_review_requested import _generated_run
-    from tests.test_review_two_commands import _cycle, _open
-
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0  # the request is out; the answer twice failed its check
     code, refused = _run(capsys, "finish", run["project"], run["run_root"])
@@ -168,10 +172,6 @@ def test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_n
 
 
 def test_c_before_the_review_finish_and_scan_name_the_same_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_first_run import _python_project
-    from tests.test_scan_guard import _runs, _scan
-    from tools import run_pipeline
-
     project = _python_project(tmp_path, runtime=False)
     code, first = _scan(project, monkeypatch)
     assert code == 0, first
@@ -197,10 +197,6 @@ def test_c_before_the_review_finish_and_scan_name_the_same_new_run(tmp_path: Pat
 
 
 def test_c1_two_batches_in_skill_order_spend_no_retry_on_batch_one() -> None:
-    from tests.test_batch_assembly import _context_receipt, _fragment, _header, _plan
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
-    from tools.canonical_document import validate_canonical_document
-
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
     assert len(plan["batches"]) == 2
@@ -223,8 +219,6 @@ def test_c1_two_batches_in_skill_order_spend_no_retry_on_batch_one() -> None:
 
 
 def test_c5_a_third_answer_and_a_replacing_answer_are_refused_by_name_and_write_nothing(tmp_path: Path) -> None:
-    from tools.pilot_state import derive_state, publish_model_stage_artifact, read_model_stage_artifact
-
     root, attempt_id = _automation_chain(tmp_path, [None])
     stage = "tc-to-autotest:r1"
     event = next(row for row in derive_state(root)["events"]

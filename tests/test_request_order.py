@@ -8,10 +8,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.test_self_review import _reviewed
+from tools.pilot_state import ModelRequestOutOfOrder
+from tools import pilot_state
 
 
 def _selected(tmp_path: Path) -> tuple[Path, str, list[str]]:
-    from tests.test_self_review import _reviewed
     from tools.pilot_state import read_effective_canonical
 
     run_root, attempt_id, _document, _selected = _reviewed(tmp_path, "local-pilot-v1", flag=False, fresh_context=True)
@@ -33,8 +35,6 @@ def _requests(run_root: Path) -> list[str]:
 
 
 def test_r2_before_r1_is_refused_with_the_right_stage_and_nothing_is_written(tmp_path: Path) -> None:
-    from tools.pilot_state import ModelRequestOutOfOrder
-
     run_root, attempt_id, inputs = _selected(tmp_path)
     with pytest.raises(ModelRequestOutOfOrder) as refused:
         _request(run_root, attempt_id, "tc-to-autotest:r2", inputs)
@@ -46,8 +46,6 @@ def test_r2_before_r1_is_refused_with_the_right_stage_and_nothing_is_written(tmp
 
 
 def test_an_old_journal_with_an_orphan_request_still_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-
     run_root, attempt_id, inputs = _selected(tmp_path)
     monkeypatch.setattr(pilot_state, "_require_next_automation_stage", lambda *args: None)  # a journal written before FaT-RQ
     orphan = _request(run_root, attempt_id, "tc-to-autotest:r2", inputs)

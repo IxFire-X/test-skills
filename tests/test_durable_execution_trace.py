@@ -7,7 +7,11 @@ import pytest
 
 from tests.test_execution_receipt import _execution_facts
 from tests.test_exit_policy import _local
-from tools import exec_commands
+from tests.spine_helpers import finalize_phase_one_spine
+from tools import exec_commands, pilot_state, finalize_attempt
+from tools.execution_adapters import request_digest
+from tools.project_inventory import read_execution_baseline
+from tools.finalize_attempt import FinalizationError
 
 
 def _publish_execution(root: Path, attempt_id: str, report: dict, *, request=None) -> dict:
@@ -93,9 +97,6 @@ def _event_index(events: list[dict], event_type: str, digest: str) -> int:
 
 
 def test_pass_trace_order(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, report, request=request)
 
@@ -118,9 +119,6 @@ def test_pass_trace_order(tmp_path: Path) -> None:
 
 
 def test_not_runnable_closure(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, _passed, _request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, _prestart_report(root, durable))
 
@@ -137,10 +135,6 @@ def test_not_runnable_closure(tmp_path: Path) -> None:
 
 
 def test_sparse_unknown_closure(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.execution_adapters import request_digest
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, _passed, request, durable = _execution_facts(tmp_path)
     execution = _publish_execution(root, attempt_id, _unknown_report(root, attempt_id, durable, request), request=request)
 
@@ -164,7 +158,6 @@ def test_sparse_unknown_closure(tmp_path: Path) -> None:
     assert _event_index(events, "ARTIFACT_READ_BACK", execution["digest"]) < events.index(unknown[0])
 
     attempt = next(row for row in pilot_state.derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
-    from tools.project_inventory import read_execution_baseline
 
     baseline = read_execution_baseline(root.parent.parent, root, root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
     child_identity = {
@@ -176,8 +169,6 @@ def test_sparse_unknown_closure(tmp_path: Path) -> None:
 
 
 def test_generic_event_api_cannot_fabricate_execution_unknown(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     root, attempt_id, _passed, request, durable = _execution_facts(tmp_path)
     execution = _publish_execution(
         root, attempt_id, _unknown_report(root, attempt_id, durable, request), request=request,
@@ -191,9 +182,6 @@ def test_generic_event_api_cannot_fabricate_execution_unknown(tmp_path: Path) ->
 
 
 def test_public_execution_receipt_records_unknown_immediately_after_readback(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.execution_adapters import request_digest
-
     root, attempt_id, _passed, request, durable = _execution_facts(tmp_path)
     state = pilot_state.derive_state(root)
     attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
@@ -221,9 +209,6 @@ def test_public_execution_receipt_records_unknown_immediately_after_readback(tmp
 
 
 def test_invalid_finalization_closure(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, report, request=request)
     branch = _branch(
@@ -248,9 +233,6 @@ def test_invalid_finalization_closure(tmp_path: Path) -> None:
 def test_late_resume_validation_closes_without_rewriting_pretrace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tools import finalize_attempt, pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, report, request=request)
     original_verify = finalize_attempt.verify_finalization
@@ -314,9 +296,6 @@ def test_late_resume_validation_closes_without_rewriting_pretrace(
 
 
 def test_resume_reuses_first_durable_invalid_finalization_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, report, request=request)
     invalid_branch = _branch(
@@ -360,9 +339,6 @@ def test_resume_reuses_first_durable_invalid_finalization_receipt(tmp_path: Path
 
 
 def test_resume_recovers_installed_finalization_receipt_before_readback_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import pilot_state
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, report, request, durable = _execution_facts(tmp_path)
     _publish_execution(root, attempt_id, report, request=request)
     branch = _branch(root, attempt_id, durable)
@@ -408,11 +384,6 @@ def test_resume_recovers_installed_finalization_receipt_before_readback_event(tm
 
 
 def test_preexecution_closure_is_rejected_before_disposition_after_execution_started(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.execution_adapters import request_digest
-    from tools.finalize_attempt import FinalizationError
-    from tests.spine_helpers import finalize_phase_one_spine
-
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
     facts = _facts(

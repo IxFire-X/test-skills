@@ -1,11 +1,17 @@
 from pathlib import Path
 from tests.helpers import MODULE_PYTHON
+from tests.test_project_native_pytest import _request, _reviewed_inputs
 import shutil
 
 import pytest
+import subprocess
 
 from helpers import build_phase_two_baseline
+from dataclasses import replace
 from tools import pilot_state
+from tools.execution_adapters import request_digest
+from tools.pilot_state import publish_attempt_receipt
+from tools.schema_validation import schema_diagnostics
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
@@ -102,7 +108,6 @@ def test_generic_event_api_cannot_forge_execution_start(tmp_path: Path) -> None:
 def test_ingest_refuses_noop_or_foreign_start_callback_before_the_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The callback cannot itself be treated as proof that execution was claimed."""
     from tests.test_project_native_pytest import _request, _reviewed_inputs
-    from tools.execution_adapters import request_digest
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -115,7 +120,6 @@ def test_ingest_refuses_noop_or_foreign_start_callback_before_the_claim(tmp_path
     request = _request(project, document, artifact)
     calls: list[object] = []
 
-    import subprocess
 
     monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: calls.append("subprocess") or pytest.fail("project process must not start"))
     noop = _ingest_reports(
@@ -182,8 +186,6 @@ def _attempt_with_a_start(tmp_path: Path, digest_of_the_start):
 def test_ingest_goes_on_with_the_start_a_cut_ingest_left_for_this_very_request_and_claims_nothing_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Formerly a start found before the run was a replay and was refused.  An ingest that was cut after its claim left the start of this
     request, and the next ingest is its continuation: no second claim (the callback must not be asked), the result is made of the reports given."""
-    import subprocess
-
     request, document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _attempt_with_a_start(tmp_path, lambda digest: digest)
     monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("nothing is replayed: nothing is started"))
 
@@ -212,12 +214,6 @@ def test_ingest_refuses_a_start_that_is_bound_to_another_request(tmp_path: Path)
 
 def test_ingest_preserves_closed_request_for_admission_and_isolation_rejections(tmp_path: Path) -> None:
     """Admission failures remain publishable, request-bound prestart evidence."""
-    from dataclasses import replace
-    from tests.test_project_native_pytest import _request, _reviewed_inputs
-    from tools.execution_adapters import request_digest
-    from tools.pilot_state import publish_attempt_receipt
-    from tools.schema_validation import schema_diagnostics
-
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
     shutil.copytree(fixture, project)

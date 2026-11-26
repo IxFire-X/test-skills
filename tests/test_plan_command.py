@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.journal_helpers import assert_no_refusal_event, journal_minus_refusals
-from tests.test_scope_pause import GAP, _marker_rows, _paused_run, _submit_plan
+from tests.test_scope_pause import GAP, _marker_rows, _paused_run, _submit_plan, _submit_scope
 from tools import pilot_state
 from tools.batch_assembly import plan_batches_for_project
 
@@ -50,7 +50,6 @@ def test_the_pause_after_the_marker_stops_the_plan_before_it_publishes_anything(
     assert code == 2 and refused["code"] == "SCOPE_PENDING", refused
     assert journal_minus_refusals(root) == before
     assert_no_refusal_event(root, before)  # the pause of the human is routine (tools.api._record_refusal): a SCOPE_PENDING stop is no refusal and adds no event
-    from tests.test_scope_pause import _submit_scope
 
     assert _submit_scope(capsys, root, {"decision": "continue"})[0] == 0  # the human answers on the stage `scope`, then the plan goes
     code, answered = _submit_plan(capsys, root)

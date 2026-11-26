@@ -8,11 +8,15 @@ import json
 from pathlib import Path
 
 import pytest
+import hashlib
+import ast
 
 from tests.test_profile_flows import mode_b_pack  # noqa: F401  (the fixture: a copy of the delivery of mode B)
 from tests.helpers import prepare_stage, put_in_slot, submit_stage
 from tests.test_stage_steps import _events, _status
+from tests.test_automation_revision_budget import automation
 from tools import pilot_state, stage_steps
+from tools.run_report import build_report
 
 GENERATOR, REVIEWER = "tc-to-autotest:r1", "autotest-reviewer:r1"
 INDEPENDENT = ("--invocation-id", "autotest-reviewer-subagent-1", "--fresh-context", "yes")
@@ -128,8 +132,6 @@ def test_a_submit_again_says_answered_and_writes_nothing(tmp_path: Path) -> None
 
 
 def test_submit_dry_run_checks_and_writes_nothing(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automation
-
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
     put_in_slot(run["root"], GENERATOR, automation(run["document"], effective_bundle_receipt_digest=run["bundle"]))
@@ -166,8 +168,6 @@ def test_a_canon_the_journal_accepted_and_the_disk_lost_is_a_damaged_run_not_an_
 
 
 def test_the_slot_of_another_stage_is_not_read(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automation
-
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
     put_in_slot(run["root"], "tc-to-autotest:r2", automation(run["document"], 2, effective_bundle_receipt_digest=run["bundle"]))
@@ -186,8 +186,6 @@ def test_an_answer_of_another_shape_is_refused_and_the_slot_stays(tmp_path: Path
 
 
 def test_an_answer_that_is_wrong_by_its_meaning_is_refused_before_it_is_written(tmp_path: Path) -> None:
-    from tests.test_automation_revision_budget import automation
-
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
     artifact = automation(run["document"], effective_bundle_receipt_digest=run["bundle"])
@@ -226,9 +224,6 @@ def test_relations_out_of_order_are_refused_with_the_order(tmp_path: Path) -> No
 
 
 def test_code_that_the_runner_cannot_take_is_refused_before_it_is_written(tmp_path: Path) -> None:
-    import hashlib
-
-    from tests.test_automation_revision_budget import automation
 
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
@@ -245,7 +240,6 @@ def test_code_that_the_runner_cannot_take_is_refused_before_it_is_written(tmp_pa
 def test_a_closed_attempt_takes_no_answer_and_no_request(tmp_path: Path, capsys) -> None:
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
-    from tests.test_automation_revision_budget import automation
 
     put_in_slot(run["root"], GENERATOR, automation(run["document"], effective_bundle_receipt_digest=run["bundle"]))
     _closed(run, capsys)
@@ -256,9 +250,6 @@ def test_a_closed_attempt_takes_no_answer_and_no_request(tmp_path: Path, capsys)
 
 
 def test_a_big_answer_is_taken_with_the_warning_of_its_size(tmp_path: Path) -> None:
-    import hashlib
-
-    from tests.test_automation_revision_budget import automation
 
     run = autotest_run(tmp_path)
     prepare_stage(run["root"], GENERATOR)
@@ -390,7 +381,6 @@ def test_the_report_names_the_automation_that_was_reviewed_in_the_same_session(t
     assert run_generator(run)[0] == 0
     assert run_reviewer(run, "ПРИНЯТО", 1, "--fresh-context", "no")[0] == 0
     assert next_of(run)[:2] == ("materialize", "materialize")
-    from tools.run_report import build_report
 
     report = build_report(run["root"].parents[1], run["root"].name)[0]
     assert "автотесты проверены в той же сессии" in report["review"] and "независимость не засчитана" in report["review"]
@@ -545,8 +535,6 @@ def test_a_closed_attempt_takes_no_answer_of_the_reviewer(tmp_path: Path, capsys
 
 
 def test_the_calls_of_the_cycle_start_no_process_and_no_model() -> None:
-    import ast
-
     tree = ast.parse(Path(stage_steps.__file__).read_text(encoding="utf-8"))
     names = {alias.name for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
     assert not names & {"subprocess", "os", "socket", "urllib", "tools.exec_runner"}

@@ -13,6 +13,10 @@ import pytest
 
 from tests.test_review_open_recovery import _main
 from tests.test_review_requested import _generated_run, _journal
+from tools import pilot_state, api, run_pipeline
+from tools.project_inventory import read_execution_baseline
+from tools.orchestrate_test_case_revision import review_inputs
+from tests.test_cases_import import _project, _scan
 
 
 def _attempt(run: dict) -> dict:
@@ -36,9 +40,6 @@ def _forge(run: dict, **changes) -> Path:
 
 
 def test_the_baseline_of_a_real_attempt_is_read(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.project_inventory import read_execution_baseline
-
     run = _generated_run(tmp_path)
     attempt = _attempt(run)
     baseline = pilot_state.frozen_baseline(run["run_root"], attempt)
@@ -47,8 +48,6 @@ def test_the_baseline_of_a_real_attempt_is_read(tmp_path: Path) -> None:
 
 
 def test_a_baseline_with_another_digest_under_the_right_name_is_unbound(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     attempt = _attempt(run)
     _forge(run, adapter_id="forged:adapter")
@@ -58,8 +57,6 @@ def test_a_baseline_with_another_digest_under_the_right_name_is_unbound(tmp_path
 
 
 def test_a_missing_baseline_is_unbound_too(tmp_path: Path) -> None:
-    from tools import pilot_state
-
     run = _generated_run(tmp_path)
     attempt = _attempt(run)
     (run["run_root"] / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json")).unlink()
@@ -71,7 +68,6 @@ def test_prepare_refuses_a_forged_baseline_and_writes_nothing(tmp_path: Path, ca
     run = _generated_run(tmp_path)
     _forge(run, adapter_id="forged:adapter")
     before = _journal(run["run_root"])
-    from tools import api
 
     code = api.main(["prepare", "--run-root", str(run["run_root"]), "--stage", "context-marker:baseline"])
     refusal = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -80,9 +76,6 @@ def test_prepare_refuses_a_forged_baseline_and_writes_nothing(tmp_path: Path, ca
 
 
 def test_the_review_inputs_refuse_a_forged_baseline(tmp_path: Path) -> None:
-    from tools import pilot_state
-    from tools.orchestrate_test_case_revision import review_inputs
-
     run = _generated_run(tmp_path)
     _forge(run, adapter_id="forged:adapter")
     with pytest.raises(pilot_state.BaselineUnbound):
@@ -90,8 +83,6 @@ def test_the_review_inputs_refuse_a_forged_baseline(tmp_path: Path) -> None:
 
 
 def test_status_of_an_open_run_with_a_forged_baseline_names_the_baseline_not_a_drift(tmp_path: Path, capsys) -> None:
-    from tools import run_pipeline
-
     run = _generated_run(tmp_path)
     _forge(run, adapter_id="forged:adapter")
     result = run_pipeline._status_drift(run["project"], run["run_root"], {}, _attempt(run))
@@ -101,8 +92,6 @@ def test_status_of_an_open_run_with_a_forged_baseline_names_the_baseline_not_a_d
 def test_cases_import_refuses_a_forged_baseline_before_it_publishes_anything(tmp_path: Path, monkeypatch, capsys) -> None:
     """Scenario 1 of the review: the skeleton of the import is built from the CSV the baseline's inventory binds — a forged pair
     must not let it be published."""
-    from tests.test_cases_import import _project, _scan
-
     project = _project(tmp_path)
     _code, scan = _scan(project, monkeypatch)
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]

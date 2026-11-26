@@ -9,7 +9,9 @@ from tests.test_openspec_selection import _scan
 from tests.test_requirement_labels import DOC, NUMBERED, _marker, _project
 from tests.test_sections import _doc
 from tests.test_stage_steps import _junction
+from tests.test_partial_report import _acceptance
 from tools import pilot_state, step_size
+from tools.run_report import build_report, _acceptance_lines
 
 
 def _numbers(scan: dict) -> list[dict]:
@@ -41,8 +43,6 @@ def test_a_document_that_became_a_link_after_the_scan_is_not_read(tmp_path: Path
 
 
 def test_a_document_name_with_a_line_break_is_no_path_of_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_report import build_report
-
     project = _project(tmp_path, NUMBERED)
     scan = _scan(project, monkeypatch, [DOC])
     assert _marker(project, scan, 9, capsys)[0] == 0
@@ -52,9 +52,6 @@ def test_a_document_name_with_a_line_break_is_no_path_of_the_report(tmp_path: Pa
 
 
 def test_a_document_name_with_a_line_break_makes_one_line_of_the_warning() -> None:
-    from tests.test_partial_report import _acceptance
-    from tools.run_report import _acceptance_lines
-
     report = {"acceptance": _acceptance(), "review_canaries": None, "reviewer_isolation_state": "verified", "quarantine": [], "counts": {"automation": False},
               "requirement_labels": {"documents": [{"path": "docs/a.md\n# Fake", "labels": 12}], "requirements": 9}}
     text = "\n".join(_acceptance_lines(report))
