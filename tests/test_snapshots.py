@@ -75,3 +75,9 @@ def test_a_test_that_patched_anything_before_the_review_gets_a_review_of_its_own
 
     monkeypatch.setenv("C4_ANY_PATCH", "1")
     assert not _reviewed(tmp_path, monkeypatch)[0]["project"].parent.name.startswith("reviewed-")
+
+
+def test_a_test_that_patched_nothing_gets_the_snapshot(tmp_path: Path) -> None:
+    from tests.test_review_requested import _generated_run
+
+    assert _generated_run(tmp_path)["project"].parent.name.startswith("generated-run-")

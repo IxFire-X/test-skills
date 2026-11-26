@@ -72,9 +72,9 @@ _AS_IMPORTED = _called_by_the_build()  # before any test patched them
 
 
 def _build_is_patched() -> bool:
-    """A function the build calls is not the one of the import, or is a lambda or a local function put there."""
-    return any(function is not _AS_IMPORTED[place] or (function.__module__, function.__qualname__) != (place[0].__name__, place[1])
-               for place, function in _called_by_the_build().items())
+    """A function the build calls is not the one of the import, or is a lambda or a local function put there (a module may serve the
+    function of another one under its name, as pilot_state the steps of model_steps)."""
+    return any(function is not _AS_IMPORTED[place] or function.__qualname__ != place[1] for place, function in _called_by_the_build().items())
 
 
 def build_generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
