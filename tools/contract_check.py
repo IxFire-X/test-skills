@@ -299,16 +299,6 @@ def _module_assignment(tree: "ast.Module", name: str) -> Any:
     return None
 
 
-def _receipt_directories(tree: "ast.Module") -> dict[str, str]:
-    """The ``directories = {kind: folder}`` literal inside ``_receipt_target``."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_receipt_target":
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Assign) and any(getattr(target, "id", None) == "directories" for target in inner.targets):
-                    return dict(ast.literal_eval(inner.value))
-    return {}
-
-
 def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
     rows = contract.get("published_artifacts")
     if not isinstance(rows, list) or not rows:
@@ -318,9 +308,9 @@ def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, error
     if state is None:
         errors.append("published_artifacts: tools/run_receipts.py unavailable")
         return
-    directories = _receipt_directories(state[1])
-    folders = set(_module_assignment(state[1], "_RECEIPT_FOLDERS") or ())
+    directories = _module_assignment(state[1], "RECEIPT_DIRECTORIES") or {}
     prefixes = {"prior-capabilities-<batch>": _module_assignment(state[1], "_PRIOR_KIND"), "imported-cases-<batch>": _module_assignment(state[1], "_SKELETON_KIND")}
+    folders = {*directories.values(), *(prefix.removesuffix("-") for prefix in prefixes.values() if isinstance(prefix, str))}  # as _RECEIPT_FOLDERS
     registry_ids = {row.get("id") for row in contract.get("artifact_registry", []) if isinstance(row, Mapping)}
     stages = {row.get("stage") for row in contract.get("stage_registry", []) if isinstance(row, Mapping)}
     kinds, row_folders, seen_ids = set(), set(), []
@@ -355,7 +345,7 @@ def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, error
                 if first != "imported-cases":
                     errors.append(f"{label}: folder does not follow its kind")
             elif directories.get(kind) != first:
-                errors.append(f"{label}: kind {kind} is not written to {first} by _receipt_target")
+                errors.append(f"{label}: kind {kind} is not written to {first} by RECEIPT_DIRECTORIES")
             elif kind.startswith("automation-review-boundary-r") and not path.endswith(f".{kind[-2:]}.json"):
                 errors.append(f"{label}: the suffix of {kind} is not {kind[-2:]}")
         writer = row.get("writer")
@@ -381,10 +371,10 @@ def _validate_published_artifacts(contract: Mapping[str, Any], root: Path, error
             if literal not in text:
                 errors.append(f"{label}: {module} has no literal {literal!r}")
     if folders != row_folders & folders or row_folders - folders:
-        errors.append(f"published_artifacts: the folders of the rows {sorted(row_folders)} are not the folders of _RECEIPT_FOLDERS {sorted(folders)}")
+        errors.append(f"published_artifacts: the folders of the rows {sorted(row_folders)} are not the folders of run_receipts {sorted(folders)}")
     missing = sorted(set(directories) - kinds)
     if missing:
-        errors.append(f"published_artifacts: kinds of _receipt_target without a row: {missing}")
+        errors.append(f"published_artifacts: kinds of RECEIPT_DIRECTORIES without a row: {missing}")
 
 
 def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_drift: bool = False) -> dict[str, Any]:

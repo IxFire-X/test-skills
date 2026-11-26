@@ -41,8 +41,11 @@ _DEDICATED_RECEIPT_TOKEN = object()
 _UNCACHED_RECEIPT_KINDS = frozenset({"phase1-artifact", "execution-receipt", "resume-validation", "execution-trace", "trace-audit"})
 
 
+# a kind of factual receipt -> its folder under the run (a family by its prefix: _receipt_target); contract_check reads this literal
+RECEIPT_DIRECTORIES = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "style-samples": "style-samples", "review-canaries": "review-canaries", "rework-round": "rework-rounds"}
+
+
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "materialization-command": "materialization-commands", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "style-samples": "style-samples", "review-canaries": "review-canaries", "rework-round": "rework-rounds"}
     if kind.startswith(_SKELETON_KIND):  # the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -55,10 +58,10 @@ def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_PRIOR_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
         return root / "prior-capabilities" / f"{attempt_id}.{kind[len(_PRIOR_KIND):]}.json"
-    if kind not in directories or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+    if kind not in RECEIPT_DIRECTORIES or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
         raise ValueError("invalid factual receipt")
     suffix = "" if not kind.startswith("automation-review-boundary-r") else f".{kind[-2:]}"
-    return root / directories[kind] / f"{attempt_id}{suffix}.json"
+    return root / RECEIPT_DIRECTORIES[kind] / f"{attempt_id}{suffix}.json"
 
 
 def _phase5_generated_delta(
@@ -227,10 +230,7 @@ def read_attempt_receipt(
     )
 
 
-_RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-boundaries", "effective-canonicals", "automation-review-boundaries",
-                    "execution-inputs", "materialization-ownership", "generated-deltas", "materialization-commands", "execution-receipts", "resume-validations", "execution-traces",
-                    "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "style-samples", "review-canaries",
-                    "imported-cases", "prior-capabilities", "rework-rounds")
+_RECEIPT_FOLDERS = (*dict.fromkeys(RECEIPT_DIRECTORIES.values()), "imported-cases", "prior-capabilities")  # the two of the families last
 
 
 def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> list[str]:
