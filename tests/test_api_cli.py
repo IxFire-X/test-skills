@@ -217,7 +217,5 @@ def test_the_tester_documents_carry_the_p9_sections_and_no_word_of_the_security_
                  "FINISH_FACT_UNDETERMINED", "ZEPHYR_CSV_COLUMNS"):
         assert f"| `{code}` |" in table, code
     assert "## Памятка: модель запуталась" in how_to and "`next`" in how_to and "--new-run" in how_to
-    from tests.test_texts_cases_only import DATA_SAFETY  # the approved line on the cleanup: the safety of others' data, not a security review
-
     for text in (readme, how_to):
-        assert "безопасн" not in " ".join(text.split()).replace(DATA_SAFETY, "").lower()
+        assert "безопасн" not in text.lower()
