@@ -118,6 +118,7 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
         symbols.add(pair)
         locators.add(locator)
     required: set[tuple[str, str]] = set()
+    helpers: set[tuple[str, str]] = set()
     relation_keys: set[tuple[Any, ...]] = set()
     setups = {(row["case_id"], row["setup_id"]): row for row in trace.get("setups") or []}  # canonical 1.2.0
     for index, relation in enumerate(trace["implementation_relations"]):
@@ -128,7 +129,7 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
                 rows.append(_diag(path, "TRACE_RELATION_SETUP")); continue
             if pair not in symbols or relation["file_id"] not in files:
                 rows.append(_diag(path, "TRACE_RELATION_SYMBOL")); continue
-            required.add(pair)
+            helpers.add(pair)  # owned (no orphan), but no test: never run, never awaited in the evidence
             continue
         if relation["case_id"] not in cases or (relation["case_id"], relation["step_id"]) not in steps:
             rows.append(_diag(path, "TRACE_RELATION_STEP")); continue
@@ -151,9 +152,9 @@ def _internal(trace: Any, require_execution: bool, subtraction: bool | None = No
         relation_order.append((case_order.get(relation["case_id"], 10**9), step_order.get((relation["case_id"], relation["step_id"]), 10**9), 0 if relation["kind"] == "operation" else 1, expectation_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id")), -1), assertion_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id"), relation.get("assertion_id")), -1), relation["file_id"], relation["symbol_id"]))
     if relation_order != sorted(relation_order): rows.append(_diag("/implementation_relations", "TRACE_RELATION_ORDER"))
     for pair in symbols:
-        if pair not in required: rows.append(_diag("/symbols", "TRACE_ORPHAN_SYMBOL"))
+        if pair not in required | helpers: rows.append(_diag("/symbols", "TRACE_ORPHAN_SYMBOL"))
     for file_id in files:
-        if not any(pair[0] == file_id for pair in required): rows.append(_diag("/files", "TRACE_ORPHAN_FILE"))
+        if not any(pair[0] == file_id for pair in required | helpers): rows.append(_diag("/files", "TRACE_ORPHAN_FILE"))
     # the cases with blockers left manual as a whole by the automation
     excluded = {row["case_id"] for row in trace.get("excluded_cases") or []}
     blocked_case_ids = {key[0] for key, step in steps.items() if step["blocker_ids"]}
@@ -276,7 +277,7 @@ def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, a
     rows = sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
     required = []
     if isinstance(trace, Mapping) and isinstance(trace.get("implementation_relations"), list):
-        required = [{"file_id": file_id, "symbol_id": symbol_id} for file_id, symbol_id in sorted({(row.get("file_id"), row.get("symbol_id")) for row in trace["implementation_relations"] if isinstance(row, Mapping) and isinstance(row.get("file_id"), str) and isinstance(row.get("symbol_id"), str) and re.fullmatch(r"FILE-[A-Za-z0-9_.:-]+", row["file_id"]) and re.fullmatch(r"SYMBOL-[A-Za-z0-9_.:-]+", row["symbol_id"])})]
+        required = [{"file_id": file_id, "symbol_id": symbol_id} for file_id, symbol_id in sorted({(row.get("file_id"), row.get("symbol_id")) for row in trace["implementation_relations"] if isinstance(row, Mapping) and row.get("kind") != "setup" and isinstance(row.get("file_id"), str) and isinstance(row.get("symbol_id"), str) and re.fullmatch(r"FILE-[A-Za-z0-9_.:-]+", row["file_id"]) and re.fullmatch(r"SYMBOL-[A-Za-z0-9_.:-]+", row["symbol_id"])})]
     from tools.build_trace_document import trace_sha256
     source = _audit_source(trace)
     lifecycle = trace.get("lifecycle") if isinstance(trace, Mapping) and isinstance(trace.get("lifecycle"), Mapping) else {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE"}

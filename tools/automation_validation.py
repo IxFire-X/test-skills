@@ -423,11 +423,12 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
 
 
 def required_symbol_pairs(artifact: Any, document: dict[str, Any]) -> set[tuple[str, str]]:
-    """Return required runtime pairs or raise an immutable diagnostic error."""
+    """Return required runtime pairs (the tests to run and to find in the reports) or raise an immutable diagnostic error.  A setup helper
+    (a ``setup`` relation, canonical 1.2.0) is no test: it is called by the tests, never selected (``-Dtest``) nor awaited in a report."""
     diagnostics = validate_automation_artifact(artifact, document)
     if diagnostics:
         raise AutomationArtifactError(diagnostics)
-    return {(row["file_id"], row["symbol_id"]) for row in artifact["artifacts"]["implementation_relations"]}
+    return {(row["file_id"], row["symbol_id"]) for row in artifact["artifacts"]["implementation_relations"] if row["kind"] != "setup"}
 
 
 def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], host_isolation_receipt: Mapping[str, Any] | None, *, run_root: Path | None = None, attempt_id: str | None = None) -> list[dict[str, str]]:
