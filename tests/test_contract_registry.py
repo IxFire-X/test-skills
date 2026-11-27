@@ -221,3 +221,18 @@ def test_full_checker_rejects_a_stale_release_manifest(pack_root: Path, tmp_path
     assert validate_pipeline_contract(contract, copy, check_drift=True)["errors"] == []  # the copy is sound before the damage
     (copy / contract["release_qualification"]["manifest_path"]).write_text("{}", encoding="utf-8")
     assert any("release manifest" in error for error in validate_pipeline_contract(contract, copy, check_drift=True)["errors"])
+
+
+def test_a_schema_outside_the_registry_is_an_error(pack_root: Path, tmp_path: Path) -> None:  # review 9b2e8a65 C2
+    copy = _copy_of_the_pack(pack_root, tmp_path / "pack")
+    (copy / "schemas" / "notes.schema.json").write_text("{}", encoding="utf-8")
+    assert "schema outside the registry: notes.schema.json" in _errors(_contract(copy), copy)
+
+
+def test_an_auxiliary_schema_with_an_open_object_is_an_error(pack_root: Path, tmp_path: Path) -> None:  # review 9b2e8a65 C2
+    copy = _copy_of_the_pack(pack_root, tmp_path / "pack")
+    path = copy / "schemas" / "review-canaries.schema.json"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    schema["additionalProperties"] = True
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    assert "auxiliary schema closure mismatch: review-canaries.schema.json" in _errors(_contract(copy), copy)

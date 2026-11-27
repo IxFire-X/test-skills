@@ -64,6 +64,9 @@ RELEASE_QUALIFICATION = {  # package_version is the contract's own (the one plac
 }
 PACKAGE_VERSION_FORMAT = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.]+)?")
 CONTROLLER_SCHEMAS = [row[0] for row in SCHEMA_ROWS if row[2] == "IMPLEMENTED"]
+# schemas the code reads that are no artifact of the pipeline contract (no row of its registry): checked for the same form; any other file of
+# schemas/ outside both lists is an error — a schema nobody checks
+AUXILIARY_SCHEMAS = ("project-discovery-output.schema.json", "review-canaries.schema.json")
 VERSIONLESS_RECEIPT_SCHEMAS = {"materialization-receipt.schema.json", "disposition-receipt.schema.json"}
 EXPECTED_EVENT_ORDER = [
     "RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND",
@@ -201,6 +204,19 @@ def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: l
             _load_json(path)
         elif status == "NOT_IMPLEMENTED" and path.exists():
             errors.append(f"future placeholder schema forbidden: {name}")
+    for name in AUXILIARY_SCHEMAS:  # the form of an implemented schema: its id, the draft, closed objects
+        path = root / "schemas" / name
+        if not path.is_file():
+            if not _left_out_by_profile(root, f"schemas/{name}"):
+                errors.append(f"auxiliary schema missing: {name}")
+            continue
+        schema = _load_json(path)
+        if schema.get("$id") != f"schemas/{name}" or schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+            errors.append(f"auxiliary schema id or draft mismatch: {name}")
+        if not _known_object_boundaries_are_closed(schema):
+            errors.append(f"auxiliary schema closure mismatch: {name}")
+    known = {row.get("id") for row in rows if isinstance(row, Mapping)} | set(AUXILIARY_SCHEMAS)
+    errors.extend(f"schema outside the registry: {path.name}" for path in sorted((root / "schemas").glob("*.json")) if path.name not in known)
 
 
 def _validate_registry_shape(contract: Mapping[str, Any], errors: list[str]) -> None:

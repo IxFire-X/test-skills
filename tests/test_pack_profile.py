@@ -101,7 +101,7 @@ def test_a_pack_without_a_manifest_says_so_in_one_line(tmp_path: Path) -> None:
 # ---- the exact set of files ----------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("extra", ["tools/evil.py", "tools/exec_commands.py", "tools/notes.txt", "skills/orchestrate/run.sh", "tools/x.pyc",
-                                   "schemas/extra.schema.json"])
+                                   "schemas/extra.schema.json", "json.py", "sitecustomize.py", "conftest.py", "evil/__init__.py"])
 def test_an_extra_file_is_refused_with_its_name_and_a_fix(tmp_path: Path, extra: str) -> None:
     pack = copy_profile(tmp_path / "pack", "cases-only")
     (pack / extra).parent.mkdir(parents=True, exist_ok=True)

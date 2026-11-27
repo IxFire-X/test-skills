@@ -337,6 +337,11 @@ def _nonfinite_number_diagnostics(value: Any, path: list[object]) -> list[dict[s
     return []
 
 
+def _listed(value: Any) -> list[Any]:
+    """``value`` when it is a list; ``[]`` for null or any other type (the schema names it)."""
+    return value if isinstance(value, list) else []
+
+
 def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
     """Checks canonical array order and conditional ownership beyond JSON Schema."""
     if not isinstance(instance, dict):
@@ -351,7 +356,8 @@ def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
     diagnostics.extend(_sorted_field_diagnostics(instance.get("operation_capabilities"), ["operation_capabilities"], "capability_id", "CANONICAL_CAPABILITY_ORDER"))
     diagnostics.extend(_display_order_diagnostics(instance.get("requirements"), ["requirements"]))
     cases = instance.get("test_cases")
-    if instance.get("revision", 1) >= 2 and instance.get("parent_sha256") is not None and isinstance(cases, list):
+    revision = instance.get("revision", 1)  # a model's answer may hold anything here: the schema refuses it, this reads it without a TypeError
+    if type(revision) is int and revision >= 2 and instance.get("parent_sha256") is not None and isinstance(cases, list):
         # a subtraction successor keeps the display_order of its cases, so it has holes; whether it is one is the lineage check's (revision_selection)
         orders = [case.get("display_order") for case in cases if isinstance(case, dict)]
         if all(type(order) is int and order >= 1 for order in orders) and orders == sorted(set(orders)):
@@ -359,17 +365,17 @@ def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
     diagnostics.extend(_display_order_diagnostics(cases, ["test_cases"]))
     rank = {category: index for index, category in enumerate(CATEGORY_PRECEDENCE)}
 
-    for capability_index, capability in enumerate(instance.get("operation_capabilities", [])):
+    for capability_index, capability in enumerate(_listed(instance.get("operation_capabilities"))):
         if not isinstance(capability, dict):
             continue
         diagnostics.extend(_sorted_field_diagnostics(capability.get("arguments"), ["operation_capabilities", capability_index, "arguments"], "name", "CANONICAL_ARGUMENT_ORDER"))
         diagnostics.extend(_sorted_field_diagnostics(capability.get("results"), ["operation_capabilities", capability_index, "results"], "name", "CANONICAL_RESULT_ORDER"))
 
-    for case_index, case in enumerate(instance.get("test_cases", [])):
+    for case_index, case in enumerate(_listed(instance.get("test_cases"))):
         if not isinstance(case, dict):
             continue
         categories = case.get("categories")
-        if isinstance(categories, list) and all(category in rank for category in categories):
+        if isinstance(categories, list) and all(isinstance(category, str) and category in rank for category in categories):
             if categories != sorted(categories, key=rank.__getitem__):
                 diagnostics.append(_semantic_error(_pointer(["test_cases", case_index, "categories"]), "CANONICAL_CATEGORY_ORDER", "categories must follow V3 precedence"))
         steps = case.get("steps")

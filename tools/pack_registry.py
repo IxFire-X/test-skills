@@ -31,6 +31,9 @@ RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
 ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "QUICKSTART.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "requirements.txt", "requirements-dev.txt",
               ".skillsrc.example")
 RUNTIME_SUFFIXES = {".json", ".md", ".py"}
+# a module in the root of a pack (``json.py``, ``sitecustomize.py``, a ``.pyc``, a package with ``__init__.py``) is imported before the stdlib
+# and the pack's own: stray.  Other files of the root (a note, the .git of a checkout) are not the pack's and import nothing
+ROOT_MODULE_SUFFIXES = {".py", ".pyc", ".pyd", ".so", ".pth"}
 PROFILES = ("universal", "mode-b", "cases-only")
 
 # What a cases-only delivery does not carry, and why: development tools (checks of the contract, its rendering, the gate, the
@@ -145,6 +148,9 @@ def scan_disk(root: Path) -> tuple[list[str], list[str]]:
     for name in ROOT_FILES:
         if (root / name).is_file():
             registry.append(name)
+    for path in sorted(root.iterdir()) if root.is_dir() else []:  # what ``python -m tools.x`` started here would import before the pack and the stdlib
+        if (path.is_file() and path.suffix.lower() in ROOT_MODULE_SUFFIXES) or (path.name not in RUNTIME_ROOTS and (path / "__init__.py").is_file()):
+            stray.append(_under(root, path / "__init__.py") if path.is_dir() else path.name)
     return sorted(registry), sorted(stray)
 
 
