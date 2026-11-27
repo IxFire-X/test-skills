@@ -898,6 +898,31 @@ def build_file_rows(project: Path, inventory: Mapping[str, Any], module_root: Pa
             for row, path in found if row and (raw := held_bytes(project, row)) is not None]
 
 
+STAND_CASES_RULE = ("уровень автотестов — стенд: HTTP-шаг берёт адрес из переменной окружения {name} — base_url_source "
+                    "{{kind: environment, name: {name}}}; другое имя submit отклонит (STAND_URL_NAME)")
+STAND_TESTS_RULE = "уровень автотестов — стенд: тесты ходят только во внешний API по адресу из переменной {name} (System.getenv); без MockMvc, SpringBootTest и классов приложения"
+
+
+def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``{"service_url_env": name, "tests_only": bool}`` when the attempt's module tests against a stand (``test.level`` ``stand``, declared or
+    derived) by the ``.skillsrc`` the run froze: the live file counts only while its bytes are those of the baseline.  The name of the variable
+    only — the package never reads its value.  None in a delivery without autotests, a cases-only run, at ``in-process``, on a drifted file."""
+    from tools.execution_gate import execution_available
+    from tools.pilot_state import frozen_skillsrc_matches
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, module_test_level, normalize_skillsrc
+
+    if not execution_available() or attempt.get("policy_profile") == "cases-only-v1" or frozen_skillsrc_matches(project, root, attempt) is not True:
+        return None
+    try:
+        modules = normalize_skillsrc(load_skillsrc(Path(project) / ".skillsrc"))["modules"]
+    except (OSError, SkillsrcError, ValueError, KeyError, TypeError):
+        return None
+    module = next((item for item in modules if item.get("root") == attempt.get("module")), None)
+    if module is None or (module_test_level(module) or ("",))[0] != "stand" or not module.get("service_url_env"):
+        return None
+    return {"service_url_env": str(module["service_url_env"]), "tests_only": bool((module.get("paths") or {}).get("context"))}
+
+
 def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, state: Any = None) -> dict[str, Any]:
     """*found* of a generator batch plus the ``adapter`` the run froze (when it froze one); *found* of an automation stage plus it, the build files of the module and the imports of the project's tests
     (``basis: файл сборки`` / ``окружение тестов``); the frozen baseline and inventory are read strictly — a bad receipt is a refusal."""
@@ -912,12 +937,15 @@ def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, stat
     if batch and not attempt.get("baseline_digest"):
         return found
     baseline = frozen_baseline(root, attempt)  # strict: a receipt that is not the frozen one is a refusal
+    stand = module_stand(project, root, attempt)
+    rule = "" if stand is None else (STAND_CASES_RULE if batch else STAND_TESTS_RULE + ("; классов приложения нет на пути тестов модуля" if stand["tests_only"] else "")).format(name=stand["service_url_env"])
+    found = {**found, "stand": {**stand, "rule": rule}} if stand else found  # the level and the name of the address, not its value
     if batch:  # a cases-only baseline freezes no adapter: nothing to tell
         return {**found, "adapter": {"id": baseline["adapter_id"], "rule": "`capability.adapter` — этот id"}} if baseline.get("adapter_id") else found
     inventory = frozen_inventory(project, root, baseline["inventory_digest"])
     module = str(attempt.get("module") or ".")
     files = build_file_rows(project, inventory, project.joinpath(*module.split("/")))
-    data = env_view(project, inventory, ["# Окружение тестов проекта", f"- модуль: {module}; test_root: {baseline.get('test_root')}; адаптер: {baseline['adapter_id']}"])
+    data = env_view(project, inventory, ["# Окружение тестов проекта", f"- модуль: {module}; test_root: {baseline.get('test_root')}; адаптер: {baseline['adapter_id']}"], module=module)
     if data:  # written like the map of existing tests: by the code, again when its bytes differ
         target = root / "review-views" / (hashlib.sha256(data).hexdigest() + ".test-env.md")
         _write_view(project, root, target, data, write)

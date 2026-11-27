@@ -333,11 +333,13 @@ def held_bytes(project: Path, row: Mapping[str, Any]) -> bytes | None:
     return raw if "sha256:" + hashlib.sha256(raw).hexdigest() == row.get("content_digest") else None
 
 
-def env_view(project: Path, inventory: Mapping[str, Any], head: list[str], limit: int = 8192) -> bytes:
-    """*head*, then ``<files> <import>`` for each import line of the top level of the project's tests (not those the package wrote: a model's guess), most common first, cut at *limit*; b"" with none."""
+def env_view(project: Path, inventory: Mapping[str, Any], head: list[str], limit: int = 8192, module: str = ".") -> bytes:
+    """*head*, then ``<files> <import>`` for each import line of the top level of the tests of *module* (not those the package wrote: a model's guess;
+    not those of an application in ``paths.context``: not on the module's test path), most common first, cut at *limit*; b"" with none."""
     own, counts = own_files(Path(project), inventory)[0], {}
     for row in inventory.get("files") or []:
-        if row.get("kind") == "test" and Path(str(row.get("project_path"))).suffix in {".java", ".py"} and str(row.get("project_path")) not in own:
+        inside = module in {"", "."} or str(row.get("project_path")).startswith(module.rstrip("/") + "/")
+        if inside and row.get("kind") == "test" and Path(str(row.get("project_path"))).suffix in {".java", ".py"} and str(row.get("project_path")) not in own:
             for line in {text.rstrip() for text in (held_bytes(project, row) or b"").decode("utf-8", errors="replace").splitlines() if _IMPORT_LINE.match(text)}:
                 counts[line] = counts.get(line, 0) + 1
     lines, shown = [f"{count} {line}" for line, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))], 0

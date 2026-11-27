@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_marker_parts import _marker, _requirements, _run
-from tools import api, pilot_state, run_pipeline, run_scan, stage_steps
+from tools import api, pilot_state, run_pipeline, run_scan, stage_steps, step_size
 
 
 def _call(capsys: pytest.CaptureFixture[str], command: str, root: Path, stage: str, *extra: str) -> tuple[int, dict]:
@@ -498,6 +498,13 @@ def test_prepare_of_a_batch_names_the_slot_the_files_and_the_control_word_once(t
     before = _events(run["root"])
     code, again = _call(capsys, "prepare", run["root"], run["stages"][0])
     assert code == 0 and _events(run["root"]) == before and "nonce" not in again["result"] and "CODEWORD_LOST" in again["result"]["nonce_note"]
+
+
+def test_prepare_of_a_batch_at_a_stand_names_the_variable(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _generator(tmp_path)
+    monkeypatch.setattr(step_size, "module_stand", lambda *_: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
+    code, out = _call(capsys, "prepare", run["root"], run["stages"][0])
+    assert code == 0 and out["result"]["read"]["stand"]["service_url_env"] == "PETCLINIC_URL"
 
 
 def test_a_batch_waits_for_the_answer_of_the_batch_before_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
