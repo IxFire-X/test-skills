@@ -184,6 +184,21 @@ def _machine_contract(document: dict[str, Any]) -> dict[str, Any]:
     return {"operation_capabilities": document["operation_capabilities"], "cases": cases}
 
 
+def _locked(document: dict[str, Any]) -> dict[str, Any]:
+    """The document without what an edit may change (``review_edits.EDITABLE``: title, objective, the text of each precondition, action, test_data,
+    the text of an expectation) and without revision and parent_sha256 (checked on their own): the rest a reviewer successor keeps field for field —
+    setup, param_group, priority and any later field of the schema included."""
+    locked = {key: value for key, value in copy.deepcopy(document).items() if key not in {"revision", "parent_sha256"}}
+    for case in locked.get("test_cases") or []:
+        case.pop("title", None), case.pop("objective", None)
+        case["preconditions"] = len(case.get("preconditions") or [])  # an edit replaces a precondition, never adds or drops one
+        for step in case.get("steps") or []:
+            step.pop("action", None), step.pop("test_data", None)
+            for expectation in step.get("expectations") or []:
+                expectation.pop("text", None)
+    return locked
+
+
 def _successor_diagnostics(candidate: dict[str, Any], successor: dict[str, Any]) -> list[dict[str, str]]:
     diagnostics: list[dict[str, str]] = []
     candidate_digest = document_sha256(candidate)
@@ -206,6 +221,9 @@ def _successor_diagnostics(candidate: dict[str, Any], successor: dict[str, Any])
         return [_diagnostic("/test_cases", "TRACEABILITY_CHANGED", "a reviewer successor must preserve canonical requirement ownership and the order of every case")]
     if _machine_contract(successor) != _machine_contract(candidate):
         return [_diagnostic("/test_cases", "MACHINE_SEMANTICS_CHANGED", "a reviewer successor cannot rewrite confirmed operation, input, output, assertion, blocker, or literal semantics")]
+    if _locked(successor) != _locked(candidate):
+        return [_diagnostic("/test_cases", "SUCCESSOR_FIELD_NOT_EDITABLE",
+                            "a reviewer successor may change only the fields an edit may change (title, objective, precondition, action, test_data, expectation text)")]
 
     source, revised = _identity_graph(candidate), _identity_graph(successor)
     revised_by_local: dict[tuple[str, str], list[_Identity]] = {}

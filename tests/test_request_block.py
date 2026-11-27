@@ -130,3 +130,11 @@ def test_the_reader_drops_the_block_of_a_crlf_cell() -> None:
     payload = render_zephyr_csv(json.loads(EXAMPLE.read_text(encoding="utf-8")), V6).payload.decode("utf-8-sig")
     crlf = payload.replace("\r\n", "\x00").replace("\n", "\r\n").replace("\x00", "\r\n").encode("utf-8-sig")  # Excel keeps CRLF inside a cell
     assert REQUEST_HEAD.encode() in crlf and REQUEST_HEAD not in json.dumps(parse_zephyr_csv(crlf), ensure_ascii=False)
+
+
+def test_a_literal_zero_in_the_body_stays_beside_a_variable() -> None:
+    step = {"operation": {"kind": "http", "binding_profile": "http-binding-v1", "method": "POST", "path": "/codes",
+                          "base_url_source": {"kind": "environment", "name": "PETCLINIC_URL", "provenance": ["README"]}},
+            "inputs": [_in(1, {"location": "body", "pointer": "/code"}, {"kind": "literal", "value": "0"}),
+                       _in(2, {"location": "body", "pointer": "/id"}, {"kind": "step_output", "step_id": "STEP-1", "output_id": "id"}, "integer")]}
+    assert "--data-raw '{\"code\":\"0\",\"id\":{{id}}}'" in request_block(step, {"STEP-1": 1}, CASE)  # a key «0» is an array member: no block

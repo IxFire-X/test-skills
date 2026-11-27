@@ -162,6 +162,17 @@ def test_authoritative_verdict_records_normalized_semantics_and_binds_rejection(
             contradictory, binding, review, run_root=run_root, attempt_id=attempt_id,
         )
 
+@pytest.mark.parametrize(("field", "value", "code"), [("title", "Уточнённый заголовок", None), ("priority", "low", "SUCCESSOR_FIELD_NOT_EDITABLE")])
+def test_a_whole_successor_changes_only_the_fields_an_edit_may_change(field, value, code):
+    from tools.revision_selection import validate_successor
+
+    candidate = canonical_fixture()
+    successor = deepcopy(candidate)
+    successor["revision"], successor["parent_sha256"] = 2, document_sha256(candidate)
+    successor["test_cases"][0][field] = value
+    assert [row["code"] for row in validate_successor(candidate, successor)] == ([code] if code else [])
+
+
 def test_auto_fix_successor_is_produced_by_the_reviewer_artifact():
     candidate = canonical_fixture()
     successor = deepcopy(candidate)

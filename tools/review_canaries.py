@@ -208,7 +208,7 @@ def _options(cls: str, case: dict[str, Any], digest: str) -> list[tuple[dict[str
 
 _NUMBER = re.compile(r"(?<![\w.])(\d{1,6})(?![\w.])")
 _QUOTED = re.compile(r"«([^«»]{2,60})»")
-_FLIP = (("принимается", "отклоняется"), ("отклоняется", "принимается"), ("принят", "отклонён"), ("принято", "отклонено"),
+_TEXT_FLIP = (("принимается", "отклоняется"), ("отклоняется", "принимается"), ("принят", "отклонён"), ("принято", "отклонено"),
          ("отклонён", "принят"), ("отклонено", "принято"), ("сохраняется", "не сохраняется"), ("сохранён", "не сохранён"),
          ("сохранено", "не сохранено"), ("создаётся", "не создаётся"), ("создан", "не создан"), ("появляется", "не появляется"),
          ("показана", "не показана"), ("показано", "не показано"), ("показаны", "не показаны"), ("показан", "не показан"),
@@ -229,7 +229,7 @@ def _flip(text: str, linked: str) -> tuple[str, str, str] | None:
     """``(mutated, word, new word)``: the first outcome word whose stem the requirement has, turned over.  Not a word already
     after «не», not one before «без» («создан без исключения» → «не создан без …» is no clear contradiction); the case of the
     first letter is kept («Показан» → «Не показан»)."""
-    for word, other in _FLIP:
+    for word, other in _TEXT_FLIP:
         hit = re.search(rf"(?<![\w-]){word}(?![\w-])", text, re.I)
         if hit is None or word[:5] not in linked:
             continue
@@ -607,6 +607,9 @@ def refuse_if_only_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mappi
     tail = ("этих ошибок нет в кандидате, их поставил код в вид ревьюера; оставь эти находки с severity INFO, правки по ним убери, "
             "вердикт вынеси по остальному (ПРИНЯТО, если больше ничего); отдай ответ единственным повтором стадии (--transport-attempts 2), "
             "ничего не записано")
+    if canaries and (answer.get("artifacts") or {}).get("successor_document") is not None:  # it would carry the seeded text into the set;
+        raise ValueError("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимаетс"  # the words never name the errors:
+                         "я — только правки; fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")  # the reviewer must not learn of them
     if verdict == "AUTO_FIX_APPLIED" and edits_dropped and "successor_edits" not in _filtered(canaries, answer) \
             and "successor_document" not in (answer.get("artifacts") or {}):
         named = ", ".join(sorted(set(edits_dropped)))

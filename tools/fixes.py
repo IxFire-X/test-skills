@@ -53,6 +53,9 @@ FIXES: dict[str, str] = {
     "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией review-canaries журнала: ничего не правь руками; "
                               "вид и карту строит `tools.api prepare --stage tc-reviewer:canonical` (или `python -m tools.review_view --candidate`) — если файлы "
                               "испорчены или удалены, начни прогон заново (scan --new-run) и сообщи код и run_id владельцу пакета",
+    "REVIEW_SUCCESSOR_DOCUMENT": "в этом ревью целый документ (successor_document) не принимается — только правки: дай исправления правками "
+                                 "artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; отдай ответ единственным "
+                                 "повтором стадии (--transport-attempts 2)",
     "REVIEW_ONLY_CANARY_FIXES": "все правки ответа — по контрольным ошибкам, которые код поставил в вид ревьюера: оставь эти находки с "
                                 "severity INFO, правки по ним убери, вердикт вынеси по остальному (ПРИНЯТО, если больше ничего); отдай "
                                 "ответ единственным повтором стадии (--transport-attempts 2)",

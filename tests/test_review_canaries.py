@@ -814,3 +814,23 @@ def test_a_finding_addressed_to_the_step_that_names_another_step_or_expectation_
 
 def test_a_finding_that_names_the_expectation_but_not_the_step_in_related_ids_is_not_a_canary_by_text_alone() -> None:
     assert not _is_canary(_canary(**REMOVED), {**_blocking(["TC-S"]), "evidence": ["EXP-S1"]}, {"TC-S"})
+
+
+def test_a_boundary_canary_flips_the_operator_of_a_comparison() -> None:
+    check = {"assertion_id": "ASSERT-1", "operator": "greater_than", "actual": {"kind": "http_body", "pointer": "/count"},
+             "expected": {"kind": "literal", "value": "x"}}
+    case = {"case_id": "TC-1", "steps": [{"step_id": "STEP-1", "expectations": [{"expectation_id": "EXP-1", "text": "больше", "assertions": [check]}]}]}
+    options = _options("boundary", case, "sha256:" + "0" * 64)
+    assert [row["field"] for row, _apply in options] == ["assertions"]
+    options[0][1]()
+    assert check["operator"] == "greater_or_equal"
+
+
+def test_a_whole_successor_document_is_refused_when_errors_are_seeded_and_the_refusal_names_none() -> None:
+    answer = {"artifacts": {"validation_report": {"verdict": "AUTO_FIX_APPLIED"}, "successor_document": {"revision": 2}}}
+    with pytest.raises(ValueError) as refused:
+        review_canaries.refuse_if_only_canaries([{"canary_id": "CAN-1", "class": "boundary"}], answer, [])
+    assert str(refused.value) == ("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимается — только правки; "
+                                  "fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; "
+                                  "отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")  # approved 27.11
+    review_canaries.refuse_if_only_canaries([], answer, [])  # no errors seeded: the document goes on to its own checks
