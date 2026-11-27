@@ -79,7 +79,7 @@ _TOKEN_SIGNATURES = (
 )
 # token-assignment-v1 in a settings file: the key may be quoted («"api_key": "…"», YAML «"token": …»).  Not in documents and API-test collections
 # (.md .txt .bru .hurl): there it is an example of the requirement, and the task document must never fall out (live/ 27.11: 58 such, none a secret).
-_OPENAPI = re.compile(rb"(?m)^[ \t{]*[\'\"]?(?:openapi|swagger)[\'\"]?[ \t]*:")  # an OpenAPI/Swagger document in .json/.yaml
+_OPENAPI = re.compile(rb"(?m)^[ \t{]*[\'\"]?(?:openapi|swagger)[\'\"]?[ \t]*:[ \t]*[\'\"]?\d")  # an OpenAPI/Swagger document (its version) in .json/.yaml
 _SETTINGS_SUFFIXES = frozenset({".json", ".yml", ".yaml", ".properties", ".ini", ".cfg", ".toml", ".conf"})
 _QUOTED_ASSIGNMENT = re.compile(rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{8,}")
 # token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
@@ -91,7 +91,8 @@ _PROPERTY_NAME = re.compile(rb"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
 # ${X:default} with a default, a short secret.  Not a secret: an empty value, ${X} or ${X:}, a true/false/yes/no/on/off
 # flag.  Message bundles (messages*.properties, ValidationMessages*.properties) are texts, never passwords.
 _CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties", ".ini", ".cfg", ".toml", ".conf", ".sh"})  # not .txt: requirement documents are .txt too
-_SHELL_REFERENCE = re.compile(rb"\s*['\"]?\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])['\"]?\s*")  # $VAR, ${VAR}, $1 of a script: no secret
+_SHELL_REFERENCE = re.compile(rb"\s*['\"]?\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?[-=+]|:?\?[^}]*)?\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])['\"]?\s*")  # $VAR, ${VAR}, ${VAR:-} (empty), $1: a reference
+_SHELL_DEFAULT = re.compile(rb"\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=][^}]")  # ${VAR:-v} ${VAR-v} ${VAR:=v} ${VAR=v}: v is a value of the script, a secret
 # the key is one atomic group.  What follows a key (a quote, a blank, «:», «=», «>») is not a word character, so the key must run to the end of its
 # word run whichever keyword it holds — and trying every keyword of a long run, each with a second ``[\w.-]*`` to the end of the run, was k x n (100 KB of
 # «pwd» did not finish).  The earliest keyword is enough.
@@ -363,8 +364,8 @@ def _has_password(path: Path, contents: bytes) -> bool:
     if suffix in _CONFIG_SUFFIXES:
         if _MESSAGE_BUNDLE.match(path.name):
             return False
-        return any(_secret_value(match.group("value")) and not (suffix == ".sh" and _SHELL_REFERENCE.fullmatch(match.group("value")))
-                   for match in _PASSWORD_LINE.finditer(contents))
+        return any((_secret_value(value := match.group("value")) or suffix == ".sh" and _SHELL_DEFAULT.search(value))
+                   and not (suffix == ".sh" and _SHELL_REFERENCE.fullmatch(value)) for match in _PASSWORD_LINE.finditer(contents))
     if suffix == ".json":
         return any(_secret_value(match.group("value")) for match in _PASSWORD_JSON.finditer(contents))
     if suffix == ".xml":

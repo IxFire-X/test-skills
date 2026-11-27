@@ -26,6 +26,12 @@ from tools.stack_catalog import confined_files
     ("deploy2.sh", b'PASSWORD="$1"\n', None),  # a reference of the script, no secret
     ("env.sh", b"export DB_PASSWORD=hunter2\n", "password-assignment-v1"),  # review 7d38d7ce: the usual form of a script
     ("env2.sh", b'export PASSWORD="$1"\n', None),
+    ("env3.sh", b"DB_PASSWORD=${DB_PASSWORD:=s3cr3t!}\n", "password-assignment-v1"),  # review 6778d0da: a default is a value
+    ("env4.sh", b'export PASSWORD="${PASSWORD:-secret}"\n', "password-assignment-v1"),
+    ("env5.sh", b"PASSWORD=${PASSWORD}\n", None),
+    ("env6.sh", b"PASSWORD=${PASSWORD:-}\n", None),
+    ("app/application.yml", b'openapi:\n  title: x\n"api_key": "abcd1234efgh"\n', "token-assignment-v1"),  # a block «openapi:» is no spec
+    ("api/openapi.yaml", b'openapi: 3.0.1\n"api_key": "abcd1234efgh"\n', None),
     ("api/openapi.json", b'{\n  "openapi": "3.0.0",\n  "example": {"api_key": "abcd1234efgh"}}', None),  # a spec is a document
     ("notes.txt", b"password: hunter2\n", None),  # .txt is a document format
     ("secrets.json", b"{}", "secret-filename-v1"),  # S3: the plural
