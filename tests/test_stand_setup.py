@@ -84,3 +84,13 @@ def test_the_key_wins_over_the_default_and_a_stand_is_shared(monkeypatch) -> Non
     assert step_size.module_shared({"shared_data": False}) is False and check_shared_data({"shared_data": False}) is None
     monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", False)
     assert step_size.module_shared({"test": {"level": "stand"}}) is True
+
+
+def test_the_approved_texts_of_a_shared_environment() -> None:
+    row = check_shared_data({"id": "api", "test": {"framework": "junit5"}})
+    assert row["message"] == "среда модуля считается общей (shared_data нет): кейсы создают записи с меткой прогона и удаляют их шагом «Уборка»"
+    assert row["fix"] == 'если среда только ваша — впишите в .skillsrc у модуля api "shared_data": false'
+    how_to = " ".join((Path(__file__).resolve().parents[1] / "HOW-TO-USE.md").read_text(encoding="utf-8").split())
+    assert ("**Общая среда.** Пакет считает, что кейсы проходят в общей среде (там есть записи других людей и демо-данные): кейсы создают "
+            "свои записи с меткой прогона, удаляют их последним шагом «Уборка» и чужие не трогают. Если среда только ваша, впишите у модуля "
+            "в `.skillsrc` `\"shared_data\": false`.") in how_to

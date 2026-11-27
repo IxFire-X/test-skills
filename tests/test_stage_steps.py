@@ -505,7 +505,7 @@ def test_prepare_of_a_batch_at_a_stand_names_the_variable(tmp_path: Path, capsys
     monkeypatch.setattr(step_size, "module_stand", lambda *_: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
     code, out = _call(capsys, "prepare", run["root"], run["stages"][0])
     assert code == 0 and out["result"]["read"]["stand"]["service_url_env"] == "PETCLINIC_URL"
-    assert out["result"]["read"]["role_files"][-1].endswith("stand.md")  # the insert of the mode (W3.2)
+    assert [Path(path).name for path in out["result"]["read"]["role_files"][-2:]] == ["stand.md", "shared-data.md"]  # the inserts of the modes (W3.2)
 
 
 def test_a_batch_waits_for_the_answer_of_the_batch_before_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -973,7 +973,7 @@ def _frozen_module(project: Path, root: Path, attempt: Mapping[str, Any]) -> Map
     return next((item for item in modules if item.get("root") == attempt.get("module")), None)
 
 
-SHARED_DATA_DEFAULT = False  # a module without ``shared_data``: False — its own environment (A); True — shared, ``"shared_data": false`` turns it off (B)
+SHARED_DATA_DEFAULT = True  # a module without ``shared_data``: False — its own environment (A); True — shared, ``"shared_data": false`` turns it off (B)
 
 
 def module_shared(module: Mapping[str, Any]) -> bool:

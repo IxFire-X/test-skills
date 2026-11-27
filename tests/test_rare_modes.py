@@ -23,7 +23,7 @@ def _modes(stage: str) -> tuple[str, ...]:
 def plain(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     monkeypatch.setattr(pilot_state, "derive_state", lambda _root: STATE)
     monkeypatch.setattr(step_size, "module_stand", lambda *_args: None)
-    monkeypatch.setattr(step_size, "_frozen_module", lambda *_args: {})
+    monkeypatch.setattr(step_size, "_frozen_module", lambda *_args: {"shared_data": False})  # the data insert off: the other modes alone
     monkeypatch.setattr(cases_import, "cases_path", lambda _root: None)
     monkeypatch.setattr(step_size, "_grouped", lambda *_args: False)
     return monkeypatch
