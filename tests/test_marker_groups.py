@@ -80,3 +80,21 @@ def test_a_part_with_a_gap_or_out_of_order_is_refused(tmp_path, order):
     requirements = _publish_requirements(root, attempt_id, baseline)
     with pytest.raises(ValueError, match="must bind context receipts in a row"):
         _part(root, attempt_id, baseline, 1, [receipts[index] for index in order], requirements)
+
+
+def test_the_inventory_view_counts_in_the_worst_case_of_a_part(tmp_path, monkeypatch):  # review 9b2e8a65 M1
+    monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 240_000)  # two receipts a part without the inventory view (the test above)
+    monkeypatch.setattr(step_size, "inventory_view_bytes", lambda *_args: b"x" * 60_000)
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    _publish_requirements(root, attempt_id, baseline)
+    assert _groups(root) == [[receipt["digest"]] for receipt in receipts]
+
+
+def test_a_part_asked_past_a_regrouped_receipt_is_refused(tmp_path, monkeypatch):  # review 9b2e8a65 M5
+    monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 240_000)
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    _part(root, attempt_id, baseline, 2, receipts[2:], requirements)  # part 001 would hold receipts 1 and 2
+    monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 0)  # now it holds receipt 1 alone: receipt 2 falls out
+    with pytest.raises(ValueError, match="CONTEXT_MARKER_PARTS_REGROUPED: .*квитанции batch-002 не попали"):
+        plan(root)

@@ -1,7 +1,8 @@
 """The one lexer of Java text (W2.3): the spans of comments and literals, and the masks built on them — for the map of existing tests
 (mode A), the hints on generated tests and the checks of generated tests (mode B).  A literal ends at its quote or at the end of its
 line (a Java string does not cross lines), a text block ``\"\"\"`` at an unescaped ``\"\"\"``, a comment at its end or at the end of the
-text.  String operations only; every mask keeps each offset and every line break."""
+text; a Kotlin name in backticks (``fun `doesn't fail`()``) is code up to its closing backtick on its line.  String operations only;
+every mask keeps each offset and every line break."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ _STRINGS, _CHAR = frozenset({"string", "text"}), frozenset({"char"})  # the kind
 
 def java_spans(text: str) -> list[tuple[str, int, int, int, int]]:
     """``[(kind, start, end, opening, closing)]`` of the comments and literals in order: kind ``comment``, ``string``, ``text`` (a text
-    block) or ``char``; ``opening`` and ``closing`` — the length of the delimiters inside ``[start, end)``, ``closing`` 0 when unclosed."""
+    block), ``char`` or ``name`` (a Kotlin name in backticks, kept by every mask); ``opening`` and ``closing`` — the length of the delimiters inside ``[start, end)``, ``closing`` 0 when unclosed."""
     found, index, length = [], 0, len(text)
     while index < length:
         char = text[index]
@@ -29,6 +30,9 @@ def java_spans(text: str) -> list[tuple[str, int, int, int, int]]:
             closed = 3 if end < length else 0
             end += closed
             found.append(("text", index, end, 3, closed))
+        elif char == "`" and (end := text.find("`", index + 1)) > 0 and "\n" not in text[index:end]:  # a quote inside it opens nothing
+            end += 1
+            found.append(("name", index, end, 1, 1))
         elif char in "\"'":
             end, escaped = index + 1, False
             while end < length and text[end] != "\n" and (escaped or text[end] != char):

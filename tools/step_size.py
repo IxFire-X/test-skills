@@ -247,6 +247,17 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
     return list(dict.fromkeys(files))
 
 
+def requirements_read_bytes(project: Path, root: Path, attempt_id: str, state: Any) -> int:
+    """The bytes the step that reads the documents (``context-marker:requirements``, the single ``baseline``) reads of them, as ``stage_inputs``
+    opens its requirements digest: the files of :func:`_requirement_files` (the view of ``path#Section``, the CSV of an import with ``--docs``)
+    and the view of their numbers."""
+    from tools.build_context import numbering_view
+    from tools.pilot_state import label_texts
+
+    numbers = numbering_view(label_texts(root, attempt_id, state), project)
+    return sum(path.stat().st_size for path in _requirement_files(project, root) if path.is_file()) + len((numbers or "").encode("utf-8"))
+
+
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:
     """The input files of ``stage`` as the journal knows them before the call (context-marker only); the view of a part not asked yet
     has no file — its bytes are the second value of ``journal_inputs``."""

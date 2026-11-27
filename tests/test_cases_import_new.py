@@ -220,3 +220,10 @@ def test_a_review_fix_of_an_import_is_refused_when_the_receipt_of_the_import_is_
 def test_a_review_fix_of_the_text_of_an_imported_case_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     code, refused = _autofix(_to_plan(tmp_path, monkeypatch), 1)
     assert code == 2 and "IMPORT_HUMAN_FIELD_CHANGED" in refused["message"], refused
+
+
+def test_requirements_one_imported_case_joins_stay_one_batch_over_the_budget() -> None:  # review 9b2e8a65 G1
+    case = {"source_requirement_ids": ["SREQ-1", "SREQ-2"], "title": "т" * 300, "objective": "o", "preconditions": [], "steps": []}
+    source = [{"source_requirement_id": f"SREQ-{number}", "display_order": number, "text": "x"} for number in (1, 2)]
+    batches, notes = _size_split(source, 2000, 0, None, {}, {"cases": [case]})  # the case is over the batch budget
+    assert batches == [["SREQ-1", "SREQ-2"]] and "кейс не делится между пачками" in notes[-1], notes

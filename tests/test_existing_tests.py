@@ -342,3 +342,38 @@ def test_the_report_takes_the_map_prepare_wrote_and_none_without_its_file(tmp_pa
     assert maps(stage_inputs(root, "tc-generator:BATCH-fixture", write_views=False)) == []
     written = maps(request_files(root, "tc-generator:BATCH-fixture"))
     assert written and maps(stage_inputs(root, "tc-generator:BATCH-fixture", write_views=False)) == written
+
+
+PY_CLASSES = """import unittest
+from app import create_app
+
+
+class TestItems:
+    def test_missing_item(self, client):
+        assert client.get("/items/17").status_code == 404
+
+
+class ItemsCase(unittest.TestCase):
+    def test_missing_item(self):
+        def test_helper():
+            pass
+        self.assertIsNone(create_app())
+"""
+
+
+def test_python_tests_in_classes_are_in_the_map_by_their_node_names(tmp_path: Path) -> None:  # review 9b2e8a65 M2
+    from tools.existing_tests import build_map
+
+    rows = [_write(tmp_path, "app.py", "def create_app(value=None):\n    return value\n"), _write(tmp_path, "tests/test_classes.py", PY_CLASSES)]
+    found = build_map(tmp_path, {"files": rows}, ["app.py"])
+    assert set(found["app"]["test_classes"]) == {"TestItems::test_missing_item", "ItemsCase::test_missing_item"}
+
+
+def test_a_kotlin_name_in_backticks_may_hold_a_quote(tmp_path: Path) -> None:  # review 9b2e8a65 M3
+    from tools.existing_tests import build_map
+
+    text = KOTLIN_TESTS.replace("`adds an owner`", "`doesn't add an owner`")
+    rows = [_write(tmp_path, "src/main/kotlin/org/example/owner/OwnerService.kt", "class OwnerService\n"),
+            _write(tmp_path, "src/test/kotlin/org/example/owner/OwnerServiceTest.kt", text)]
+    found = build_map(tmp_path, {"files": rows}, ["src/main/kotlin/org/example/owner/OwnerService.kt"])
+    assert set(found["OwnerService"]["OwnerServiceTest"]) == {"doesn't add an owner", "rejectsNegativeId"}

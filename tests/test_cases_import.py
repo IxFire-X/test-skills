@@ -24,7 +24,7 @@ from tools import api, context_marker_parts, exec_commands, ready
 from tools.automation_validation import automation_sha256
 from tools.batch_assembly import IMPORT_ANSWER_PER_HUMAN_BYTE, fill_fragment_mechanics, plan_batches
 from tools.batch_assembly import require_imported_human_fields, with_digest
-from tools.cases_import import imported_value, password_cells, read_cases, source_requirements
+from tools.cases_import import imported_value, password_cells, read_cases, source_requirements, split_expected
 from tools.pilot_state import append_event, closure_cached, derive_state, publish_model_request, publish_model_stage_artifact
 from tools.pilot_state import read_attempt_receipt, read_effective_canonical, read_model_request
 from tools.pilot_state import read_model_stage_artifact, read_terminal_result
@@ -559,3 +559,8 @@ def test_the_sample_of_an_imported_case_is_a_case_of_the_schema(tmp_path: Path) 
     target.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "schemas/sample-case.schema.json",
                                   "$ref": "canonical-test-document.schema.json#/$defs/test_case"}), encoding="utf-8")
     assert schema_diagnostics(laid["test_cases"][0], target, tmp_path) == []
+
+
+@pytest.mark.parametrize("cell, parts", [("a\r\n\r\nb", ["a", "b"]), ("a\r\n\r\nHTTP 200 OK", ["a\r\n\r\nHTTP 200 OK"])])
+def test_a_cell_with_crlf_is_split_like_one_with_lf(cell: str, parts: list[str]) -> None:  # review 9b2e8a65 M4
+    assert split_expected(cell) == parts

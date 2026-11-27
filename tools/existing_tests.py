@@ -13,6 +13,7 @@ the reviewer's hint ``CV_EXISTING_TEST`` and the run report.  A hint, never a ve
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -45,7 +46,8 @@ _NAMED_STATUS = {"isOk": 200, "isCreated": 201, "isAccepted": 202, "isNoContent"
                  "NO_CONTENT": 204, "FOUND": 302, "BAD_REQUEST": 400, "UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404,
                  "CONFLICT": 409}
 _KOTLIN_FUN = re.compile(r"\bfun\s+(?:`([^`\n]+)`|(\w+))\s*\(")  # a Kotlin test is often named in backticks, blanks and all
-_PY_TEST = re.compile(r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE)
+_PY_TEST = re.compile(r"^([ \t]*)(?:async[ \t]+)?def[ \t]+(test_\w+)[ \t]*\(", re.MULTILINE)  # a method of a class too (pytest, unittest)
+_PY_CLASS = re.compile(r"^([ \t]*)class[ \t]+(\w+)", re.MULTILINE)
 _PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import\s+(\([^)]*\)|[\w, ]+)|import\s+([\w., ]+))", re.MULTILINE)  # ``( … )`` over lines too
 _PY_DEFINED = re.compile(r"^(?:class|def|async\s+def)\s+([A-Za-z]\w*)", re.MULTILINE)  # the top level of a module: what a test imports by name
 _JVM = {".java", ".kt"}
@@ -98,11 +100,45 @@ def _java_methods(text: str, kotlin: bool = False) -> Iterable[tuple[str, str]]:
             yield name[-1], text[start:end]
 
 
+def _python_owner(text: str, match: re.Match[str]) -> str | None:
+    """The class an indented ``def test_*`` is a method of: the nearest class above it indented less, with no line of code between them
+    indented as little as that class (such a line closes it); None — a function nested in a function, no test."""
+    classes = [found for found in _PY_CLASS.finditer(text, 0, match.start()) if len(found.group(1)) < len(match.group(1))]
+    if not classes:
+        return None
+    closing = re.compile(rf"^[ \t]{{0,{len(classes[-1].group(1))}}}[^ \t\r\n#]", re.MULTILINE)
+    return None if closing.search(text, classes[-1].end(), match.start()) else classes[-1].group(2)
+
+
+def _python_parsed(text: str) -> dict[int, str] | None:
+    """``{line of the def: name}`` of the test functions and the test methods of classes (nested ones too) as the parser sees them; None — the
+    text does not parse (a newer Python, say): the indents decide (:func:`_python_owner`)."""
+    def walk(body: list[ast.stmt], prefix: str) -> Iterable[tuple[int, str]]:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                yield node.lineno, prefix + node.name
+            elif isinstance(node, ast.ClassDef):
+                yield from walk(node.body, f"{prefix}{node.name}::")
+    try:
+        return dict(walk(ast.parse(text).body, ""))
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+
+
 def _python_tests(text: str) -> Iterable[tuple[str, str]]:
+    """(name, body) of each test function and test method — a method named ``Class::test_x``, as pytest names its node (two classes may
+    hold one method name); a body runs to the next test."""
+    parsed = _python_parsed(text)
     marks = list(_PY_TEST.finditer(text))
     for index, match in enumerate(marks):
         end = marks[index + 1].start() if index + 1 < len(marks) else len(text)
-        yield match.group(1), text[match.start():end]
+        if parsed is not None:
+            name = parsed.get(text.count("\n", 0, match.start()) + 1)  # a def the parser does not see as a test (in a string, nested in a function): none
+        else:
+            owner = _python_owner(text, match) if match.group(1) else ""
+            name = None if owner is None else f"{owner}::{match.group(2)}" if owner else match.group(2)
+        if name is not None:
+            yield name, text[match.start():end]
 
 
 def _python_names(text: str) -> set[str]:

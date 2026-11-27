@@ -49,16 +49,18 @@ class CasesImportError(ValueError):
 
 
 _HTTP_LINE = re.compile(r"HTTP [1-5]\d\d ")
-_BLANK = "\n\n"  # v5 joins the expectations of a step with one blank line
+# v5 joins the expectations of a step with one blank line; a cell of a CSV saved on Windows keeps its CRLF (zephyr_csv reads cells byte for byte)
+_BLANKS = re.compile(r"(\r?\n\r?\n)")
 
 
 def split_expected(text: str) -> list[str]:
-    """The expectations of a v5 Expected Result cell: v5 joins them with a blank line; an ``HTTP <code> <reason>`` part
-    belongs to the expectation before it (the canonical HTTP form «result, blank line, status»)."""
+    """The expectations of a v5 Expected Result cell: v5 joins them with a blank line (``\\r\\n`` too); an ``HTTP <code> <reason>`` part
+    belongs to the expectation before it (the canonical HTTP form «result, blank line, status»), joined by the blank line of the cell."""
     parts: list[str] = []
-    for part in text.split(_BLANK):
+    pieces = _BLANKS.split(text)
+    for part, blank in zip(pieces[::2], ["", *pieces[1::2]]):
         if parts and _HTTP_LINE.match(part):
-            parts[-1] += _BLANK + part
+            parts[-1] += blank + part
         elif part.strip():
             parts.append(part)
     return parts
@@ -123,8 +125,8 @@ def read_cases(data: bytes) -> list[dict[str, Any]]:
             expectations = split_expected(step["expected"])
             if not expectations:
                 errors.append(f"строка {step['row']}: пустой Expected Result")
-            errors += [f"строка {step['row']}: служебный ожидаемый результат «{text.split(_BLANK)[0].strip()}»"
-                       for text in expectations if service_expected(text.split(_BLANK)[0])]
+            errors += [f"строка {step['row']}: служебный ожидаемый результат «{_BLANKS.split(text)[0].strip()}»"
+                       for text in expectations if service_expected(_BLANKS.split(text)[0])]
     if errors:
         raise CasesImportError("ZEPHYR_CSV_ROWS", "; ".join(errors))
     return cases

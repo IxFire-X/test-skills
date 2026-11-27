@@ -3,7 +3,7 @@
 ``plan(root)`` lists the marker steps of the current attempt: with one context batch the single ``context-marker:baseline`` as before; with more,
 ``context-marker:requirements`` (documents only), then ``context-marker:batch-NNN`` parts — each the receipts in a row whose worst case fits the
 model window (``_groups``) — and the merge.  A part binds the inventory, its receipts and the requirements answer — the documents are read once, by the requirements step.  Each step
-comes with its ``input_digests``, its bytes (batch / requirements / role instructions) against the step budget of
+comes with its ``input_digests``, its bytes (batch / requirements / inventory view / role instructions) against the step budget of
 ``tools.step_size`` and the next step to take.  ``merge_parts`` publishes ``context-marker:baseline`` from the recorded answers:
 a merge of the parts by code, recorded with the model id ``controller:context-marker-merge`` — not a model call.
 """
@@ -40,7 +40,7 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], asked: Mapping[str, str], code: Callable[[str, Mapping[str, Any]], int],
             head: list[str], fixed: int, limit: int, budget: int) -> list[list[Mapping[str, Any]]]:
     """The receipts of each part, in publication order.  A part asked keeps the receipts its request binds; any other takes receipts
-    in a row while its worst case — ``fixed`` (the requirements view and the role), the maps and every file of its receipts whole —
+    in a row while its worst case — ``fixed`` (the requirements view, the inventory view and the role), the maps and every file of its receipts whole —
     stays within ``limit``, the share of the model window of the generator's batches (the model may open every file of its map), and what it
     is sure to read — ``fixed`` and the maps — within ``budget``, the step budget: a group never makes a part that one receipt would not.
     Recorded bytes only (the byte counts of the receipts, the maps of their files); a window of 0 keeps one receipt a part."""
@@ -55,6 +55,13 @@ def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], aske
     while at < len(receipts):
         stage = f"context-marker:batch-{len(groups) + 1:03d}"
         group = [by_digest[digest] for digest in bound[stage]] if stage in bound else [receipts[at]]
+        if group != receipts[at:at + len(group)]:  # a part asked, then the parts before it regrouped (limits or role changed): a receipt would fall out
+            names = lambda rows: ", ".join(f"batch-{int(row['batch_index']):03d}" for row in rows)
+            start = receipts.index(group[0])
+            lost = receipts[at:start] if start > at else group  # skipped by every part, or taken by a part before this one too
+            raise ValueError(f"CONTEXT_MARKER_PARTS_REGROUPED: часть {stage} спрошена с квитанциями {names(group)}, а по порядку ей идут "
+                             f"{names(receipts[at:at + len(group)])}: квитанции {names(lost)} не попали бы ни в одну часть (лимиты или роль "
+                             "изменились после запроса части); fix: начните разметку заново — scan --new-run")
         while (stage not in bound and limit and at + len(group) < len(receipts) and str(receipts[at + len(group)]["digest"]) not in held
                and fixed + sum(code(stage, row) + int(row["byte_count"]) for row in [*group, receipts[at + len(group)]]) <= limit
                and fixed + sum(code(stage, row) for row in [*group, receipts[at + len(group)]]) <= budget):
@@ -65,8 +72,8 @@ def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], aske
 
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
-    from tools.step_size import (code_map_bytes, code_map_path, requirements_view_bytes, requirements_view_path, role_files, run_limits, step_budget,
-                                 step_window)
+    from tools.step_size import (code_map_bytes, code_map_path, inventory_view_bytes, requirements_read_bytes, requirements_view_bytes, requirements_view_path,
+                                 role_files, run_limits, step_budget, step_window)
 
     root = Path(root).resolve()
     project = project_of(root)
@@ -82,7 +89,8 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     limits = run_limits(project, root, state, attempt_id)[0]  # the limits the run froze, as prepare measures a part (review 332f9f60 item 3)
     budget = step_budget(project, limits) if budget is None else budget
     role = sum(path.stat().st_size for path in role_files("context-marker"))
-    documents = sum((project / row["path"]).stat().st_size for row in baseline["requirements"].get("docs", []))
+    documents = requirements_read_bytes(project, root, attempt_id, state)  # as the step reads them: section views, the CSV with --docs, the numbers
+    inventory = len(inventory_view_bytes(project, root, str(baseline["inventory_digest"])))  # every marker step reads the view of the inventory
 
     asked = {str(event.get("stage_instance_id")): str(event["artifact_digest"]) for event in state["events"]
              if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"}
@@ -107,12 +115,13 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     openspec = pilot_state.openspec_marker_by_code(root)  # so are those of OpenSpec files alone: the model never copies them
     if len(receipts) <= 1 and not imported and not openspec and not any(stage.startswith("context-marker:batch-") for stage in asked):  # parts asked: parts
         parts = [step("context-marker:baseline", [*head, *(receipt["digest"] for receipt in receipts)],
-                      {"batch": sum(batch("context-marker:baseline", receipt) for receipt in receipts), "requirements": documents, "role": role},
+                      {"batch": sum(batch("context-marker:baseline", receipt) for receipt in receipts), "requirements": documents,
+                       "inventory": inventory, "role": role},
                       "вход разметки больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")]
         mode = "single"
     else:
         answer = responses.get("context-marker:requirements")
-        parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
+        parts = [step("context-marker:requirements", head, {"requirements": documents, "inventory": inventory, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
         if openspec or imported and not docs_run(root):  # code, not a model call: no prompt, no budget (an import with --docs: the model)
             parts[0].update(fits=True, hint=None, by_code=True)
@@ -123,17 +132,18 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
             view = len(requirements_view_bytes(read["artifact"], answer))
             old = not requirements_view_path(root, answer).is_file()  # a part asked before the view (none on the disk) read the answer
             limit = int(step_window(project, limits) * WINDOW_SHARE)
-            for number, group in enumerate(_groups(root, attempt_id, receipts, asked, batch, head, view + role, limit, budget), start=1):
+            for number, group in enumerate(_groups(root, attempt_id, receipts, asked, batch, head, view + inventory + role, limit, budget), start=1):
                 stage = f"context-marker:batch-{number:03d}"
                 requirements_bytes = read["byte_count"] if old and stage in asked else view
                 parts.append(step(stage, [baseline["inventory_digest"], *(receipt["digest"] for receipt in group), answer],  # no documents digest in a part
-                                  {"batch": sum(batch(stage, receipt) for receipt in group), "requirements": requirements_bytes, "role": role},
+                                  {"batch": sum(batch(stage, receipt) for receipt in group), "requirements": requirements_bytes,
+                                   "inventory": inventory, "role": role},
                                   "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                                   + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else "")))
         else:  # before the answer: an estimate a receipt a row (the documents for the view), so status warns of a part over the budget early;
             for receipt in receipts:  # no input digests and a «waits»: prepare refuses it (STAGE_WAITS) — review 332f9f60 item 2
                 stage = f"context-marker:batch-{int(receipt['batch_index']):03d}"
-                part = step(stage, [], {"batch": batch(stage, receipt), "requirements": documents, "role": role},
+                part = step(stage, [], {"batch": batch(stage, receipt), "requirements": documents, "inventory": inventory, "role": role},
                             "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")
                 del part["input_digests"]
                 parts.append({**part, "waits": "ждёт ответа context-marker:requirements"})

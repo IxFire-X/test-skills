@@ -294,6 +294,11 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
             batches.append(list(members))
             notes.append(_alone_note(members[0], size, cap))
             continue
+        if imported is not None:  # cases join its requirements: a cut gives a case of two sources to two batches, IMPORT_TRACE_CHANGED refuses both
+            batches.append(list(members))
+            notes.append(f"BATCH_GROUP_OVER_BUDGET: группа {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
+                         "кейсы импорта связывают её требования, кейс не делится между пачками — одна пачка")
+            continue
         # a group over the batch budget is cut in display order, one requirement per unit — else a document of
         # FR-1…FR-40 is one prefix group and the split gives nothing
         parts: list[list[str]] = []

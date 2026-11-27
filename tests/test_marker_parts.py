@@ -342,3 +342,26 @@ def test_the_input_size_of_a_part_has_no_documents(tmp_path: Path, monkeypatch: 
     rows = step_size.stage_inputs(root, "context-marker:batch-002")["files"]
     assert legacy == sum(row["bytes"] for row in rows) and [row["bytes"] for row in rows if row["path"] == str(document)] == [5000]
     assert fresh == sum(row["bytes"] for row in found["files"]) and fresh < legacy
+
+
+def _read(root: Path, stage: str) -> int:
+    """The bytes the step reads beyond its role, as prepare measures them."""
+    return step_size.input_size(step_size.stage_inputs(root, stage))
+
+
+def test_the_steps_are_planned_with_the_bytes_they_read(tmp_path: Path) -> None:  # review 9b2e8a65 M1: the inventory view, the numbers
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    _publish_part(root, attempt_id, baseline, 1, receipts[0], requirements, _marker(["src/part0.py — x"]))
+    read = {stage: _read(root, stage) for stage in ("context-marker:requirements", "context-marker:batch-001")}
+    planned = {part["stage"]: part["bytes"]["total"] - part["bytes"]["role"] for part in plan(root)["parts"][:2]}
+    assert planned == read
+
+
+def test_a_single_marker_is_planned_with_the_bytes_it_reads(tmp_path: Path) -> None:  # review 9b2e8a65 M1
+    root, attempt_id, baseline, receipts = _run(tmp_path, files=1)
+    pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="model-context", invocation_id="single",
+                                      input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"]])
+    read = _read(root, "context-marker:baseline")
+    part = plan(root)["parts"][0]
+    assert part["bytes"]["total"] - part["bytes"]["role"] == read
