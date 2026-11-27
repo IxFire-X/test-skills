@@ -59,8 +59,12 @@ def test_the_delivered_texts_do_not_describe_mode_b() -> None:
     assert offenders == []
 
 
+# The approved line on the cleanup in a shared environment (27.11): «безопасно» there is the safety of others' data, not a security review.
+DATA_SAFETY = "удалите сами, когда убедитесь, что это безопасно."
+
+
 def test_readme_and_how_to_use_say_nothing_about_a_security_review() -> None:
-    texts = _profile_texts()
+    texts = {name: " ".join(text.split()).replace(DATA_SAFETY, "") for name, text in _profile_texts().items()}
     offenders = [f"{name}: {word}" for name in ("README.md", "HOW-TO-USE.md") for word in SECURITY_WORDS if re.search(word, texts[name], re.IGNORECASE)]
     assert offenders == []
 

@@ -83,6 +83,10 @@ def test_every_insert_is_small() -> None:
     ("tc-reviewer", "param-groups", "A parameter group (`param_group`) is shown once"),
     ("tc-to-autotest", "param-groups", "Группа `param_group` в Java:"),
     ("autotest-reviewer", "param-groups", "Группа `param_group` (Java):"),
+    ("tc-generator", "shared-data", "No code is no proof."),
+    ("tc-reviewer", "shared-data", "BLOCKING `SHARED_CLEANUP_LINK`"),
+    ("tc-to-autotest", "stand", "is not deleted, whatever the case says"),
+    ("autotest-reviewer", "stand", "`SHARED_CLEANUP_LINK`: deletes a record"),
 ])
 def test_a_moved_line_is_in_its_insert_only(role: str, mode: str, words: str) -> None:
     ordinary = "".join(path.read_text(encoding="utf-8") for path in step_size.role_files(role))

@@ -34,7 +34,8 @@ Generate functional application tests for the accepted cases. Use the declared a
 boundary: prefer the external API when both routes are available; MockMvc with real
 application components is also allowed unless this run explicitly requires the external
 API. A module whose `.skillsrc` has `paths.context` holds only tests: no MockMvc and no application classes
-(they are not on its classpath). Reuse the project's client, configuration and setup/cleanup; credentials only as runtime secret handles. An
+(they are not on its classpath). The HTTP client the build already has (RestAssured), else
+`java.net.http.HttpClient`; no new dependency. Reuse the project's client, configuration and setup/cleanup; credentials only as runtime secret handles. An
 isolated class or method test cannot substitute for an application case. One request is
 enough when it exercises that case and observes its required outcome.
 
