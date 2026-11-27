@@ -121,10 +121,7 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
     still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``)."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
-    if (stand := step_size.module_stand(project_of(root), root, state["attempts"][-1])) and (wrong := _other_address(value, stand["service_url_env"])):
-        name = stand["service_url_env"]
-        raise ValueError(f"STAND_URL_NAME: {wrong[0]}, а адрес стенда модуля — в переменной {name} (.skillsrc, service_url_env); "
-                         f"fix: в base_url_source этого шага укажи kind: environment, name: {name} — другую переменную тестировщик не задаёт")
+    _stand_address(root, state, value)
     plan, header = (pilot_state.generator_input(project_of(root), root, state, attempt_id, kind) for kind in ("plan", "header"))
     if stage != _batch_stage(max(plan["batches"], key=pilot_state.batch_ordinal)):
         return None
@@ -135,6 +132,14 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
 def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, summary: Mapping[str, Any]) -> tuple[str, ...]:
     """The inserts of rare modes the step reads (W3.2): ``step_size.step_modes`` — the one source every count of the role's bytes reads too."""
     return step_size.step_modes(root, stage)
+
+
+def _stand_address(root: Path, state: Mapping[str, Any], value: Any) -> None:
+    """STAND_URL_NAME: an answer of the generator (a batch, the rework — written or taken from a source run) whose HTTP step takes its address elsewhere."""
+    if (stand := step_size.module_stand(project_of(root), root, state["attempts"][-1])) and (wrong := _other_address(value, stand["service_url_env"])):
+        name = stand["service_url_env"]
+        raise ValueError(f"STAND_URL_NAME: {wrong[0]}, а адрес стенда модуля — в переменной {name} (.skillsrc, service_url_env); "
+                         f"fix: в base_url_source этого шага укажи kind: environment, name: {name} — другую переменную тестировщик не задаёт")
 
 
 def _other_address(value: Any, name: str, case: str = "?", step: str = "?") -> list[str]:
@@ -538,7 +543,8 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
         except (ValueError, OSError) as error:
             raise _stuck(stage, reuse["run_id"], str(error)) from error
         pilot_state.publish_model_stage_artifact(root, attempt_id, stage, source["artifact"],
-                                                 before_write=(lambda value: _automation_check(root, stage, value)) if stage == "tc-to-autotest:r1" else None)  # the checks of a submit
+                                                 before_write=(lambda value: _automation_check(root, stage, value)) if stage == "tc-to-autotest:r1" else  # the checks of a submit
+                                                 (lambda value: _stand_address(root, state, value)) if stage.startswith("tc-generator:") else None)
         return {"stage": stage, "answered": True, "model_call": False, "reused_from": reuse["run_id"], **_accepted(root, stage)}
     if not (root / SLOT_DIR).is_dir():
         confined_output.create_confined_directory_exclusive(project, root, root / SLOT_DIR)

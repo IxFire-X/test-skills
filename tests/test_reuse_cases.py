@@ -11,7 +11,7 @@ import pytest
 from tests.test_review_canaries import _answer, _fake_seed, _select
 from tests.test_review_codeword import _with_words
 from tests.test_review_requested import _generated_run
-from tools import pilot_state, review_canaries, run_report, stage_steps
+from tools import pilot_state, review_canaries, run_report, stage_steps, step_size
 from tools.fixes import FIXES
 
 REVIEW = "tc-reviewer:canonical"
@@ -130,6 +130,15 @@ def test_the_request_of_a_reused_batch_records_the_source_the_package_and_the_la
     request = pilot_state.read_model_request(run["run_root"], run["attempt_id"], run["stages"][0], asked["artifact_digest"])
     assert request["reuse"]["run_id"] == src["run_root"].name and request["skill_pack_digest"] == pilot_state.skill_pack_digest()
     assert request["invocation_id"] == "invoke-1"  # the label of the source's request: the comparison of the generator's and the reviewer's labels means something
+
+
+def test_a_reused_batch_with_another_address_is_refused_at_a_stand(accepted: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _follow(accepted)
+    monkeypatch.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": True})
+    monkeypatch.setattr(stage_steps, "_other_address", lambda *_args: ["кейс TC-1, шаг S-1: адрес HTTP-шага берётся из переменной BASE_URL"])
+    with pytest.raises(ValueError, match="STAND_URL_NAME"):
+        _reuse(run, run["stages"][0])
+    assert run["stages"][0] not in _answers(run["run_root"])
 
 
 def test_one_call_is_one_stage(accepted: dict) -> None:
