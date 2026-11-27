@@ -96,5 +96,8 @@ def test_a_part_asked_past_a_regrouped_receipt_is_refused(tmp_path, monkeypatch)
     requirements = _publish_requirements(root, attempt_id, baseline)
     _part(root, attempt_id, baseline, 2, receipts[2:], requirements)  # part 001 would hold receipts 1 and 2
     monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 0)  # now it holds receipt 1 alone: receipt 2 falls out
-    with pytest.raises(ValueError, match="CONTEXT_MARKER_PARTS_REGROUPED: .*квитанции batch-002 не попали"):
+    with pytest.raises(ValueError) as refused:
         plan(root)
+    assert str(refused.value) == ("CONTEXT_MARKER_PARTS_REGROUPED: часть context-marker:batch-002 спрошена с квитанциями batch-003, а по порядку ей идут "
+                                  "batch-002: квитанции batch-002 не попали бы ни в одну часть (лимиты или роль изменились после запроса части); "
+                                  "fix: начните разметку заново — scan --new-run")  # approved 27.11, texts p. 8

@@ -226,4 +226,6 @@ def test_requirements_one_imported_case_joins_stay_one_batch_over_the_budget() -
     case = {"source_requirement_ids": ["SREQ-1", "SREQ-2"], "title": "т" * 300, "objective": "o", "preconditions": [], "steps": []}
     source = [{"source_requirement_id": f"SREQ-{number}", "display_order": number, "text": "x"} for number in (1, 2)]
     batches, notes = _size_split(source, 2000, 0, None, {}, {"cases": [case]})  # the case is over the batch budget
-    assert batches == [["SREQ-1", "SREQ-2"]] and "кейс не делится между пачками" in notes[-1], notes
+    assert batches == [["SREQ-1", "SREQ-2"]]
+    assert notes[-1] == ("BATCH_GROUP_OVER_BUDGET: группа SREQ-1, SREQ-2 — оценка ответа 3993 Б больше порога пачки 1571 Б; "
+                         "кейсы импорта связывают её требования, кейс не делится между пачками — одна пачка")  # approved 27.11, texts p. 9
