@@ -124,7 +124,7 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
     if (stand := step_size.module_stand(project_of(root), root, state["attempts"][-1])) and (wrong := _other_address(value, stand["service_url_env"])):
         name = stand["service_url_env"]
         raise ValueError(f"STAND_URL_NAME: {wrong[0]}, а адрес стенда модуля — в переменной {name} (.skillsrc, service_url_env); "
-                         f"fix: в base_url_source этого шага укажи name: {name} — другую переменную тестировщик не задаёт")
+                         f"fix: в base_url_source этого шага укажи kind: environment, name: {name} — другую переменную тестировщик не задаёт")
     plan, header = (pilot_state.generator_input(project_of(root), root, state, attempt_id, kind) for kind in ("plan", "header"))
     if stage != _batch_stage(max(plan["batches"], key=pilot_state.batch_ordinal)):
         return None
@@ -138,13 +138,16 @@ def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str,
 
 
 def _other_address(value: Any, name: str, case: str = "?", step: str = "?") -> list[str]:
-    """«кейс <id>, шаг <id>: адрес HTTP-шага берётся из переменной <имя>» for every step of the answer whose address is another variable than *name*."""
+    """«кейс <id>, шаг <id>: адрес HTTP-шага берётся из переменной <имя>» for every step of the answer whose address is another variable than *name*
+    (or «адрес не из переменной окружения (kind: <kind>)» when it is no variable at all)."""
     if isinstance(value, list):
         return [row for item in value for row in _other_address(item, name, case, step)]
     if not isinstance(value, Mapping):
         return []
     case, step, source = str(value.get("case_id", case)), str(value.get("step_id", step)), value.get("base_url_source")
-    wrong = [f"кейс {case}, шаг {step}: адрес HTTP-шага берётся из переменной {source.get('name')}"] if isinstance(source, Mapping) and source.get("name") != name else []
+    environment = isinstance(source, Mapping) and source.get("kind") == "environment"
+    said = f"адрес HTTP-шага берётся из переменной {source.get('name')}" if environment else f"адрес не из переменной окружения (kind: {source.get('kind')})" if isinstance(source, Mapping) else ""
+    wrong = [f"кейс {case}, шаг {step}: {said}"] if isinstance(source, Mapping) and (not environment or source.get("name") != name) else []
     return wrong + [row for item in value.values() for row in _other_address(item, name, case, step)]
 
 

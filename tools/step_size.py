@@ -978,11 +978,12 @@ def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[
 
 def stand_skip_note(project: Path, root: Path, attempt: Mapping[str, Any], report: Mapping[str, Any], verdict: str | None) -> dict[str, str]:
     """The line of ``ingest`` for a module at a stand whose tests JUnit skipped (``@EnabledIfEnvironmentVariable``: the variable was not set):
-    the verdict is not known (``run_tests.classify_evidence``: a skipped test is never a pass), the line names the variable."""
+    the verdict is not known (``run_tests.classify_evidence``: a skipped test is never a pass), the line names the variable as a guess: the
+    reason of a skip is not kept (``run_tests._testcase_status`` takes the tag only), so any skip may be another one."""
     if verdict != "UNKNOWN" or not any(row.get("status") == "SKIPPED" for row in report.get("execution_evidence") or []):
         return {}
     stand = module_stand(project, root, attempt)
-    return {"stand_note": f"тесты стенда пропущены: переменная {stand['service_url_env']} не была задана при запуске — задайте её и выполните "
+    return {"stand_note": f"часть тестов пропущена; если не была задана переменная {stand['service_url_env']} — задайте её и выполните "
                           "напечатанную команду ещё раз"} if stand else {}
 
 

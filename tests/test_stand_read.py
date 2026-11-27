@@ -46,6 +46,11 @@ def test_a_batch_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypat
         stage_steps._assemble(run_root, "tc-generator:BATCH-fixture", {"cases": [{"case_id": "TC-1", "steps": [step]}]}, False, None)
 
 
+def test_an_address_that_is_no_variable_names_its_kind():
+    [row] = stage_steps._other_address({"case_id": "TC-1", "step_id": "S-1", "base_url_source": {"kind": "literal"}}, "PETCLINIC_URL")
+    assert "kind: literal" in row and "None" not in row
+
+
 def test_the_test_environment_of_a_module_holds_only_its_tests(tmp_path):
     rows = [_write(tmp_path, "app/src/test/AppTest.java", "import org.springframework.test.web.servlet.MockMvc;\n"),
             _write(tmp_path, "tests/src/test/ApiTest.java", "import java.net.http.HttpClient;\n")]
