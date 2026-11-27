@@ -10,7 +10,7 @@ import pytest
 
 from tests.journal_helpers import assert_no_refusal_event, journal_minus_refusals
 from tests.test_scope_pause import GAP, _marker_rows, _paused_run, _submit_plan, _submit_scope
-from tools import pilot_state
+from tools import pilot_state, step_size
 from tools.batch_assembly import plan_batches_for_project
 
 
@@ -36,7 +36,8 @@ def test_submit_plan_gives_the_events_and_the_plan_of_the_three_steps_of_before(
     marker = old_root / pilot_state.read_model_stage_artifact(old_root, old_attempt, "context-marker:baseline", answer)["path"]
     value = json.loads(marker.read_text(encoding="utf-8"))
     sources = (value.get("artifact") or value)["artifacts"]["source_code_and_diff"]["sources"]  # v0.8: the files the marker named are read whole
-    old_plan = plan_batches_for_project(_marker_rows(), evidence, tmp_path / "old", [marker], old_receipts, None, None, sources)
+    old_plan = plan_batches_for_project(_marker_rows(), evidence, tmp_path / "old", [marker], old_receipts, None, None, sources,
+                                        modes=step_size.step_modes(old_root, "tc-generator:BATCH-", old_attempt))  # the inserts the submit of the plan counts
     pilot_state.publish_generator_input(old_root, old_attempt, "plan", dict(old_plan))
     assert _shape(root) == _shape(old_root)
     assert plan["header_digest"] == header["digest"] == old_plan["header_digest"] and planned["result"]["plan"]["digest"] == plan["digest"]

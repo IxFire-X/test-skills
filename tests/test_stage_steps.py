@@ -771,7 +771,8 @@ def test_submit_plan_publishes_the_header_and_the_plan_of_the_journal_in_one_cal
     evidence = {"header_digest": header["digest"], "context_receipt_digest": receipts[0]["digest"], "context_receipt_digests": [receipts[0]["digest"]]}
     digest = next(row["artifact_digest"] for row in pilot_state.derive_state(root)["events"] if row.get("stage_instance_id") == BASELINE and row["event_type"] == "MODEL_RESPONSE_RECEIVED")
     answer = root / pilot_state.read_model_stage_artifact(root, attempt_id, BASELINE, digest)["path"]  # the file of the marker answer: its size is measured
-    expected = plan_batches_for_project(_marker_rows(), evidence, tmp_path, [answer], receipts, None, None)
+    expected = plan_batches_for_project(_marker_rows(), evidence, tmp_path, [answer], receipts, None, None,
+                                        modes=step_size.step_modes(root, "tc-generator:BATCH-", attempt_id))  # the inserts the submit of the plan counts
     assert plan["source_requirements"] == expected["source_requirements"] and [row["owned_source_requirement_ids"] for row in plan["batches"]] == [
         row["owned_source_requirement_ids"] for row in expected["batches"]]
 
