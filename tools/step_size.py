@@ -973,16 +973,27 @@ def _frozen_module(project: Path, root: Path, attempt: Mapping[str, Any]) -> Map
     return next((item for item in modules if item.get("root") == attempt.get("module")), None)
 
 
-def shared_data(project: Path, root: Path, attempt: Mapping[str, Any]) -> bool:
-    """The data of the attempt's module are shared — other people's and demo records live there: ``shared_data: true`` in the frozen ``.skillsrc``,
-    or a module at a stand.  Any delivery and profile (the cases of a cases-only run keep the same rule); a drifted file says no."""
+SHARED_DATA_DEFAULT = False  # a module without ``shared_data``: False — its own environment (A); True — shared, ``"shared_data": false`` turns it off (B)
+
+
+def module_shared(module: Mapping[str, Any]) -> bool:
+    """The data of *module* are shared — other people's and demo records live there: its ``shared_data``; without the key a module at a stand is,
+    any other is ``SHARED_DATA_DEFAULT``."""
     from tools.skillsrc_manifest import module_test_level
 
+    if isinstance(module.get("shared_data"), bool):
+        return bool(module["shared_data"])
+    return (module_test_level(module) or ("",))[0] == "stand" or SHARED_DATA_DEFAULT
+
+
+def shared_data(project: Path, root: Path, attempt: Mapping[str, Any]) -> bool:
+    """:func:`module_shared` of the attempt's module by the frozen ``.skillsrc``.  Any delivery and profile (the cases of a cases-only run keep the
+    same rule); a drifted file says no."""
     try:
         module = _frozen_module(project, root, attempt)
     except (OSError, KeyError, TypeError, ValueError):
         return False
-    return module is not None and (module.get("shared_data") is True or (module_test_level(module) or ("",))[0] == "stand")
+    return module is not None and module_shared(module)
 
 
 def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:

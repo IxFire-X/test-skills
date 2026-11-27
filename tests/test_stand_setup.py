@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from tools import step_size
 from tools.discover_project import discover_project
 from tools.init_skillsrc import ensure_skillsrc
-from tools.ready import check_test_level
+from tools.ready import check_shared_data, check_test_level
 from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc
 
 POM = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>{}</artifactId><version>1</version></project>"
@@ -67,3 +70,17 @@ def test_a_stand_without_application_code_has_no_context(tmp_path: Path) -> None
 def test_ready_warns_of_a_context_without_the_variable() -> None:
     row = check_test_level({"id": "api-tests", "test": {"framework": "junit5"}, "paths": {"context": ["app"]}})
     assert row["level"] == "WARN" and "service_url_env" in row["fix"], row
+
+
+@pytest.mark.parametrize("default", [False, True])
+def test_a_module_without_the_key_follows_the_default_and_ready_names_the_other_value(monkeypatch, default) -> None:
+    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", default)
+    row = check_shared_data({"id": "api", "test": {"framework": "junit5"}})
+    assert step_size.module_shared({}) is default and f'"shared_data": {str(not default).lower()}' in row["fix"], row
+
+
+def test_the_key_wins_over_the_default_and_a_stand_is_shared(monkeypatch) -> None:
+    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", True)
+    assert step_size.module_shared({"shared_data": False}) is False and check_shared_data({"shared_data": False}) is None
+    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", False)
+    assert step_size.module_shared({"test": {"level": "stand"}}) is True
