@@ -34,3 +34,9 @@ def test_the_import_requirements_refusal_names_a_defect_of_the_package() -> None
     from tools.fixes import fix_for
 
     assert "дефект пакета" in fix_for("IMPORT_REQUIREMENTS_INVALID") and "ячейки CSV" not in fix_for("IMPORT_REQUIREMENTS_INVALID")
+
+
+def test_the_empty_csv_is_named_by_the_approved_phrase(tmp_path: Path) -> None:
+    report = ready.check(_project(tmp_path, HEADER + "\r\n"), [], "cases-only-v1", cases="cases/zephyr.csv")
+    row = next(item for item in report["checks"] if item["id"] == "cases")
+    assert "в CSV нет ни одного кейса: нет строки с заполненным Name" in row["message"]  # approved by the user 27.11, word for word

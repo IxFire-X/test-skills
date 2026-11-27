@@ -28,3 +28,9 @@ def test_a_setup_output_in_the_path_builds_every_view() -> None:
     assert "&lt;ownerId из подготовки к предусловию 1&gt;" in render_html_preview(document).payload.decode("utf-8")
     assert "SETUP-batch-a-001-01.ownerId" in render(document).decode("utf-8")
     assert "{{ownerId}} — ownerId из подготовки к предусловию 1" in request_block(case["steps"][0], _orders(case), case)
+
+
+def test_the_tester_reads_the_approved_setup_phrases() -> None:
+    document = _document()
+    machine = render_zephyr_csv(document, "zephyr-scale-step-row-24-v4").payload.decode("utf-8-sig")
+    assert "path:ownerId = ownerId, полученный в подготовке к предусловию 1" in machine  # approved by the user 27.11, word for word
