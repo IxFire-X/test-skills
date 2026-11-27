@@ -123,3 +123,8 @@ def test_the_report_counts_the_role_prepare_gave(tmp_path, monkeypatch: pytest.M
     call = {"stage": stage, "attempt_id": run["attempt_id"]}
     run_report._size(run["project"], run["root"], call)
     assert code == 0 and call["role_bytes"] == given and Path(out["result"]["read"]["role_files"][-1]).name == "import.md"
+
+
+def test_the_rework_and_its_review_read_the_stand_insert(plain) -> None:
+    plain.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": True})
+    assert _modes("tc-generator:rework-1") == _modes("tc-reviewer:rework-1") == ("stand",)

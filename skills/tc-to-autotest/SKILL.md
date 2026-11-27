@@ -33,7 +33,8 @@ attempt-local/isolated project copy and never authorizes execution.
 Generate functional application tests for the accepted cases. Use the declared application
 boundary: prefer the external API when both routes are available; MockMvc with real
 application components is also allowed unless this run explicitly requires the external
-API. Reuse the project's client, configuration and setup/cleanup; credentials only as runtime secret handles. An
+API. A module whose `.skillsrc` has `paths.context` holds only tests: no MockMvc and no application classes
+(they are not on its classpath). Reuse the project's client, configuration and setup/cleanup; credentials only as runtime secret handles. An
 isolated class or method test cannot substitute for an application case. One request is
 enough when it exercises that case and observes its required outcome.
 

@@ -906,7 +906,7 @@ STAND_TESTS_RULE = "уровень автотестов — стенд: тест
 
 
 MODES = ("stand", "import", "param-groups")  # one order for every step: a repeat reads the same files in the same order
-_STAND_STAGES = ("tc-generator:BATCH-", "tc-to-autotest:", "autotest-reviewer:")  # the steps whose read carries ``stand`` (compact_inputs), and the review of the cases
+_STAND_STAGES = ("tc-generator:BATCH-", "tc-generator:rework-", "tc-reviewer:rework-", "tc-to-autotest:", "autotest-reviewer:")  # the steps whose read carries ``stand`` (compact_inputs), and the review of the cases
 
 
 def _grouped(root: Path, attempt_id: str, family: str) -> bool:
@@ -993,11 +993,17 @@ def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, stat
     from tools.existing_tests import env_view
     from tools.pilot_state import derive_state, frozen_baseline, frozen_inventory
 
+    from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
+
     batch = found["stage"].startswith("tc-generator:BATCH-")  # the stage that writes ``capability.adapter``
-    if not batch and not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
+    rework = found["stage"] in (REWORK_STAGE, REWORK_REVIEW_STAGE)  # the rework of the cases and its review keep the stand's rule of the batches
+    if not batch and not rework and not found["stage"].startswith(("tc-to-autotest:", "autotest-reviewer:")):
         return found
     project = project_of(root := Path(root).resolve())
     attempt = next(item for item in (state or derive_state(root))["attempts"] if item["attempt_id"] == found["attempt_id"])
+    if rework:  # the stand only (its insert: ``step_modes`` by ``_STAND_STAGES``): nothing of the build
+        stand = module_stand(project, root, attempt)
+        return {**found, "stand": {**stand, "rule": STAND_CASES_RULE.format(name=stand["service_url_env"])}} if stand else found
     if batch and not attempt.get("baseline_digest"):
         return found
     baseline = frozen_baseline(root, attempt)  # strict: a receipt that is not the frozen one is a refusal

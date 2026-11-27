@@ -46,6 +46,22 @@ def test_a_batch_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypat
         stage_steps._assemble(run_root, "tc-generator:BATCH-fixture", {"cases": [{"case_id": "TC-1", "steps": [step]}]}, False, None)
 
 
+@pytest.mark.parametrize("stage", ["tc-generator:rework-1", "tc-reviewer:rework-1"])
+def test_the_rework_and_its_review_read_the_variable(tmp_path, monkeypatch, stage):
+    _project_path, run_root, attempt_id, _values = _project(tmp_path)
+    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    found = step_size.with_test_env(run_root, {"stage": stage, "attempt_id": attempt_id, "files": []})
+    assert found["stand"]["service_url_env"] == "PETCLINIC_URL" and "name: PETCLINIC_URL" in found["stand"]["rule"]
+
+
+def test_a_rework_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypatch):
+    _project_path, run_root, _attempt_id, _values = _project(tmp_path)
+    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    step = {"step_id": "STEP-B1-001-01", "operation": {"kind": "http", "base_url_source": {"kind": "environment", "name": "BASE_URL"}}}
+    with pytest.raises(ValueError, match="STAND_URL_NAME: кейс TC-1"):
+        stage_steps._assemble(run_root, "tc-generator:rework-1", {"cases": [{"case_id": "TC-1", "steps": [step]}]}, False, None)
+
+
 def test_an_address_that_is_no_variable_names_its_kind():
     [row] = stage_steps._other_address({"case_id": "TC-1", "step_id": "S-1", "base_url_source": {"kind": "literal"}}, "PETCLINIC_URL")
     assert "kind: literal" in row and "None" not in row
