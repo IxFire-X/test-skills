@@ -119,8 +119,6 @@ Write every ordinary human field in clear Russian, including requirement text, o
 
 ### Case form
 
-Not for imported cases (`imported`): their human fields stay as given.
-
 1. **Title** — action + condition; the outcome goes last, only when it is not the ordinary success: «Регистрация без username: отказ». Never start with «Проверка», «Отказ», «Отклонение». Up to 80 characters; data values go to the steps, except a value that is itself the condition («длина city 80»). «и» / «или» in a title: split the case or make a `param_group`; an end-to-end scenario is the exception. Titles in a set are unique. Do not repeat an environment without a cross-environment distinction.
 2. **Objective** — «Убедиться, что …»: the requirement or risk the case covers, not a retelling of the title.
 3. **Preconditions** — the system state with data and how to reach it; setup the case does not check goes here, not into a step; where steps get operations, its machine side is a `setup` item (`precondition_index` from 0, `operation`, `inputs`, `outputs`, no expectations; a step reads `setup_output`). No implementation facts (source path, setting name) and no oracle caveats; a case does not depend on the order of other cases.

@@ -132,12 +132,40 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
     return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
 
 
+_MODES = ("stand", "import", "param-groups")  # one order for every step: a repeat reads the same files in the same order
+
+
+def _grouped(root: Path, attempt_id: str, family: str) -> bool:
+    """A case of the step's document has a ``param_group``: the candidate of the journal for the review of the cases, the effective
+    document for the automation and its review.  A document that cannot be read has no group: such a step does not pass without it anyway."""
+    try:
+        if family == "tc-reviewer":
+            from tools.orchestrate_test_case_revision import journal_assembly  # the candidate the view is built from; the assembly receipt has no sign of groups
+
+            document = journal_assembly(root, attempt_id)[0]
+        else:
+            effective = pilot_state.read_effective_canonical_if_present(root, attempt_id)
+            document = effective["document"] if effective is not None else {}
+        return any(case.get("param_group") for case in document.get("test_cases") or [])
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+
+
 def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, summary: Mapping[str, Any]) -> tuple[str, ...]:
-    """The inserts of rare modes the step reads (W3.2): ``stand`` when the module tests against a stand — the batch and the automation
-    carry ``stand`` in their read, the review of the cases asks the same frozen ``.skillsrc``."""
+    """The inserts of rare modes the step reads (W3.2), in the order of ``_MODES``: ``stand`` when the module tests against a stand (the batch and
+    the automation carry ``stand`` in their read, the review of the cases asks the same frozen ``.skillsrc``); ``import`` for the generator and the
+    review of the cases of a run with ``--cases``; ``param-groups`` when the document of the review or of the automation has a parameter group —
+    never for the generator: it decides on a group itself, so its role keeps that paragraph."""
     attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
-    at_stand = "stand" in summary or (stage == "tc-reviewer:canonical" and step_size.module_stand(project, root, attempt) is not None)
-    return ("stand",) if at_stand else ()
+    family = stage.split(":", 1)[0]
+    found = set()
+    if "stand" in summary or (stage == "tc-reviewer:canonical" and step_size.module_stand(project, root, attempt) is not None):
+        found.add("stand")
+    if family in ("tc-generator", "tc-reviewer") and cases_import.cases_path(root) is not None:
+        found.add("import")
+    if family in ("tc-reviewer", "tc-to-autotest", "autotest-reviewer") and _grouped(root, attempt_id, family):
+        found.add("param-groups")
+    return tuple(mode for mode in _MODES if mode in found)
 
 
 def _other_address(value: Any, name: str, case: str = "?", step: str = "?") -> list[str]:

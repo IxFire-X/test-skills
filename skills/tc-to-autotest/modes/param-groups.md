@@ -1,0 +1,3 @@
+# Parameter groups — automation
+
+Группа `param_group` в Java: один `@ParameterizedTest(name = "[{index}] {0}")` на все её кейсы, строки — литералы в том же классе: провайдер `@MethodSource` вида `static Stream<Arguments> rows() { return Stream.of(Arguments.of("<case ID>", …), …); }` или `@CsvSource({"<case ID>, …", …})`; первый аргумент строки — case ID, строки — все кейсы группы по display_order, связи всех кейсов — на этот один symbol. Без вычислений, циклов, внешних вызовов, `@CsvFileSource`/`@ValueSource`/`@ArgumentsSource`. При `junit_params.available: false` в `read` — по методу `@Test` на кейс; зависимость не добавляй. Иначе `submit` отклонит как `RUNNER_PARAM_ROWS`/`RUNNER_PARAMS_UNAVAILABLE`.
