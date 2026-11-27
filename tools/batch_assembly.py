@@ -290,14 +290,9 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
         if segment:
             batches.extend(_balanced(segment, cap))
             segment = []
-        if len(members) == 1:
+        if len(members) == 1 or imported is not None:  # an import: cases join its requirements, a cut gives a case of two sources to two batches (IMPORT_TRACE_CHANGED)
             batches.append(list(members))
-            notes.append(_alone_note(members[0], size, cap))
-            continue
-        if imported is not None:  # cases join its requirements: a cut gives a case of two sources to two batches, IMPORT_TRACE_CHANGED refuses both
-            batches.append(list(members))
-            notes.append(f"BATCH_GROUP_OVER_BUDGET: группа {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
-                         "кейсы импорта связывают её требования, кейс не делится между пачками — одна пачка")
+            notes.append(_alone_note(members, size, cap))
             continue
         # a group over the batch budget is cut in display order, one requirement per unit — else a document of
         # FR-1…FR-40 is one prefix group and the split gives nothing
@@ -312,7 +307,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
                 units = []
             if member:
                 parts.append([member])
-                notes.append(_alone_note(member, expected[member], cap))
+                notes.append(_alone_note([member], expected[member], cap))
         batches.extend(parts)
         notes.append(f"BATCH_GROUP_OVER_BUDGET: группа {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
                      f"разрезана подряд по требованиям на {len(parts)} пачек: " + " | ".join(", ".join(part) for part in parts))
@@ -331,9 +326,9 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
     return batches, notes
 
 
-def _alone_note(member: str, size: int, cap: int) -> str:
-    return (f"BATCH_GROUP_OVER_BUDGET: требование {member} — оценка ответа {size} Б больше порога пачки {cap} Б; "
-            "оно не делится и идёт отдельной пачкой")
+def _alone_note(members: list[str], size: int, cap: int) -> str:  # one requirement, or a group of an import that is never cut
+    return (f"BATCH_GROUP_OVER_BUDGET: {'группа' if len(members) > 1 else 'требование'} {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
+            + ("кейсы импорта связывают её требования, кейс не делится между пачками — одна пачка" if len(members) > 1 else "оно не делится и идёт отдельной пачкой"))
 
 
 def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> list[str]:
