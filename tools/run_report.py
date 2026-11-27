@@ -364,7 +364,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer, limits) is not None)
     role = str(call["stage"]).split(":", 1)[0]
     try:
-        role_bytes = sum(path.stat().st_size for path in role_files(role, step_modes(root, str(call["stage"])))) if role in _ROLES else 0  # the inserts prepare gave
+        role_bytes = sum(path.stat().st_size for path in role_files(role, step_modes(root, str(call["stage"]), call.get("attempt_id")))) if role in _ROLES else 0  # the inserts prepare gave
     except ValueError:
         role_bytes = 0
     total = resolved + role_bytes

@@ -131,7 +131,7 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
 
 def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, summary: Mapping[str, Any]) -> tuple[str, ...]:
     """The inserts of rare modes the step reads (W3.2): ``step_size.step_modes`` — the one source every count of the role's bytes reads too."""
-    return step_size.step_modes(root, stage)
+    return step_size.step_modes(root, stage, attempt_id)
 
 
 def _stand_address(root: Path, state: Mapping[str, Any], value: Any) -> None:

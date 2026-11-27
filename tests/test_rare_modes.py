@@ -9,6 +9,7 @@ import pytest
 from tests.test_param_groups import EXAMPLE, grouped
 from tools import cases_import, pilot_state, stage_steps, step_size
 
+REAL_GROUPED = step_size._grouped
 STATE = {"attempts": [{"attempt_id": "a" * 32, "baseline_digest": "sha256:" + "0" * 64}]}
 PACK = Path(__file__).resolve().parents[1]
 ROOT = PACK / ".pilot-runs" / ("a" * 32)  # a run root by its shape; the journal is the STATE of the test
@@ -140,3 +141,15 @@ def test_a_module_at_a_stand_reads_the_stand_and_the_data_inserts(plain) -> None
     plain.setattr(step_size, "_frozen_module", lambda *_args: {"test": {"level": "stand"}, "service_url_env": "PETCLINIC_URL"})
     plain.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
     assert _modes("tc-generator:BATCH-a") == ("stand", "shared-data")
+
+
+def test_the_modes_of_a_call_are_those_of_its_own_attempt(plain) -> None:
+    import json
+
+    first, last = "b" * 32, "c" * 32
+    plain.setattr(pilot_state, "derive_state", lambda _root: {"attempts": [{"attempt_id": first}, {"attempt_id": last}]})
+    plain.setattr(step_size, "_grouped", REAL_GROUPED)  # the real reading of the document, per attempt
+    documents = {first: grouped(), last: json.loads(EXAMPLE.read_text(encoding="utf-8"))}
+    plain.setattr(pilot_state, "read_effective_canonical_if_present", lambda _root, attempt_id: {"document": documents[attempt_id]})
+    assert step_size.step_modes(ROOT, "tc-to-autotest:r1", first) == ("param-groups",)
+    assert step_size.step_modes(ROOT, "tc-to-autotest:r1", last) == step_size.step_modes(ROOT, "tc-to-autotest:r1") == ()

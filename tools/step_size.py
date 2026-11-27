@@ -927,7 +927,7 @@ def _grouped(root: Path, attempt_id: str, family: str) -> bool:
         return False
 
 
-def step_modes(root: Path, stage: str) -> tuple[str, ...]:
+def step_modes(root: Path, stage: str, attempt_id: str | None = None) -> tuple[str, ...]:
     """The inserts of rare modes a step reads (W3.2), in the order of ``MODES`` — the one source of prepare's ``read.role_files``, the budget of the
     step, the record of its size and the report: ``stand`` when the module tests against a stand (a batch with a baseline, the automation, its review
     and the review of the cases); ``shared-data`` for the generator and the review of the cases when the module's data are shared (``shared_data``);
@@ -939,9 +939,9 @@ def step_modes(root: Path, stage: str) -> tuple[str, ...]:
 
     root = Path(root)
     attempts = derive_state(root)["attempts"]
-    if not attempts:
+    attempt = attempts[-1] if attempts and attempt_id is None else next((row for row in attempts if row["attempt_id"] == attempt_id), None)
+    if attempt is None:  # no attempt, or not the one asked for: no insert
         return ()
-    attempt = attempts[-1]
     family, found = stage.split(":", 1)[0], set()
     stands = stage.startswith(_STAND_STAGES) or stage == "tc-reviewer:canonical"
     if stands and not (stage.startswith("tc-generator:BATCH-") and not attempt.get("baseline_digest")):

@@ -1208,7 +1208,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
     plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
                                     project, [found["answer"], *_style_samples_file(root, attempt_id)], found["receipts"], run_skeleton(root, attempt),
-                                    found["out_of_scope"], found["sources"], modes=step_modes(root, "tc-generator:BATCH-"))  # the samples and the inserts (stand, import): the common input of every batch
+                                    found["out_of_scope"], found["sources"], modes=step_modes(root, "tc-generator:BATCH-", attempt_id))  # the samples and the inserts (stand, import): the common input of every batch
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)
