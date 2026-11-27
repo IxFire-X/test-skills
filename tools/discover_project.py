@@ -296,8 +296,10 @@ def _source_dir_has_code(root: Path, directory: Path, suffixes: frozenset[str]) 
     return False
 def _paths(root:Path, base:Path)->dict[str,list[str]]:
     """Return source/test/resource dirs relative to the module root, not the project.  ``src`` that holds ``src/test`` and no
-    ``src/main`` is no source root: the module has tests only (its source question carries ``…:tests-only``)."""
-    tests_only=_usable_dir(root,base/"src/test") and not _usable_dir(root,base/"src/main")
+    ``src/main`` and no code of its own beside it is no source root: the module has tests only (its source question carries ``…:tests-only``)."""
+    src,suffixes=base/"src",frozenset().union(*SOURCE_SUFFIXES.values())
+    tests_only=_usable_dir(root,src/"test") and not _usable_dir(root,src/"main") and not any(
+        _source_dir_has_code(root,item,suffixes) if _usable_dir(root,item) else item.suffix in suffixes and _ok(root,item) and item.is_file() for item in sorted(src.iterdir()) if item.name!="test")
     sets={"source":("src/main/java","src/main/kotlin") if tests_only else ("src","src/main/java","src/main/kotlin"),"tests":("tests","test","src/test/java","src/test/kotlin"),"resources":("resources","src/main/resources","src/test/resources")}; out={}
     for k,names in sets.items():
         vals=sorted(name.replace("\\", "/") for name in names if _usable_dir(root, base/name))

@@ -94,3 +94,21 @@ def test_the_approved_texts_of_a_shared_environment() -> None:
     assert ("**Общая среда.** Пакет считает, что кейсы проходят в общей среде (там есть записи других людей и демо-данные): кейсы создают "
             "свои записи с меткой прогона, удаляют их последним шагом «Уборка» и чужие не трогают. Если среда только ваша, впишите у модуля "
             "в `.skillsrc` `\"shared_data\": false`.") in how_to
+
+
+@pytest.mark.parametrize("default", [False, True])
+def test_a_drifted_skillsrc_gives_the_default(tmp_path: Path, monkeypatch, default) -> None:
+    from tools import pilot_state
+
+    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", default)
+    monkeypatch.setattr(pilot_state, "frozen_skillsrc_matches", lambda *_args: False)
+    assert step_size.shared_data(tmp_path, tmp_path, {"module": "."}) is default
+
+
+def test_own_code_beside_src_test_is_no_tests_only_module(tmp_path: Path) -> None:
+    for path, java in (("src/test/java/a/ApiTest.java", "ApiTest"), ("src/tools/a/Seed.java", "Seed")):
+        (tmp_path / path).parent.mkdir(parents=True)
+        (tmp_path / path).write_text(f"package a;\npublic class {java} {{}}\n", encoding="utf-8")
+    (tmp_path / "pom.xml").write_text(POM.format("api"), encoding="utf-8")
+    questions = discover_project(tmp_path)["questions"]
+    assert not [item for question in questions for option in question["options"] for item in option["evidence"] if item.endswith(":tests-only")]

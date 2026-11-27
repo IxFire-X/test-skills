@@ -993,12 +993,12 @@ def module_shared(module: Mapping[str, Any]) -> bool:
 
 def shared_data(project: Path, root: Path, attempt: Mapping[str, Any]) -> bool:
     """:func:`module_shared` of the attempt's module by the frozen ``.skillsrc``.  Any delivery and profile (the cases of a cases-only run keep the
-    same rule); a drifted file says no."""
+    same rule); a drifted or unreadable file is ``SHARED_DATA_DEFAULT`` — a change after the scan never turns the rule off silently."""
     try:
         module = _frozen_module(project, root, attempt)
     except (OSError, KeyError, TypeError, ValueError):
-        return False
-    return module is not None and module_shared(module)
+        module = None
+    return SHARED_DATA_DEFAULT if module is None else module_shared(module)
 
 
 def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
