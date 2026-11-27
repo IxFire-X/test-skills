@@ -10,7 +10,7 @@ permissions:
   rollback: "delete <project>/.pilot-runs/<run_id>/ and the created <project>/.skillsrc"
 ---
 
-# Trassa orchestration — test cases
+# Kamerton orchestration — test cases
 
 You are the controller in a model-enabled CLI. Do not launch the model from Python and do not pass model credentials. Python tools check and publish
 artifacts; they do not run the build or tests. Cases go with the profile `cases-only-v1`; autotests (`local-pilot-v1`, mode B) are in the delivery of the profile `mode-b` (`doctor` names it): run them by `references/mode-b.md`; `cases-only` has none.
