@@ -134,6 +134,7 @@
         "test": {"$ref": "#/$defs/module_test"},
         "feature_sources": {"$ref": "#/$defs/feature_sources"},
         "service_url_env": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "shared_data": {"type": "boolean"},
         "detected_from": {"$ref": "#/$defs/nonempty_unique_strings"}
       },
       "allOf": [

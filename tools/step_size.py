@@ -905,7 +905,7 @@ STAND_CASES_RULE = ("уровень автотестов — стенд: HTTP-ш
 STAND_TESTS_RULE = "уровень автотестов — стенд: тесты ходят только во внешний API по адресу из переменной {name} (System.getenv); без MockMvc, SpringBootTest и классов приложения"
 
 
-MODES = ("stand", "import", "param-groups")  # one order for every step: a repeat reads the same files in the same order
+MODES = ("stand", "shared-data", "import", "param-groups")  # one order for every step: a repeat reads the same files in the same order
 _STAND_STAGES = ("tc-generator:BATCH-", "tc-generator:rework-", "tc-reviewer:rework-", "tc-to-autotest:", "autotest-reviewer:")  # the steps whose read carries ``stand`` (compact_inputs), and the review of the cases
 
 
@@ -930,7 +930,8 @@ def _grouped(root: Path, attempt_id: str, family: str) -> bool:
 def step_modes(root: Path, stage: str) -> tuple[str, ...]:
     """The inserts of rare modes a step reads (W3.2), in the order of ``MODES`` — the one source of prepare's ``read.role_files``, the budget of the
     step, the record of its size and the report: ``stand`` when the module tests against a stand (a batch with a baseline, the automation, its review
-    and the review of the cases); ``import`` for the generator and the review of the cases of a run with ``--cases``; ``param-groups`` when the document
+    and the review of the cases); ``shared-data`` for the generator and the review of the cases when the module's data are shared (``shared_data``);
+    ``import`` for the generator and the review of the cases of a run with ``--cases``; ``param-groups`` when the document
     of the review or of the automation has a parameter group — never for the generator (it decides on a group itself).  Everything is read from the
     run and does not change after the step: the report rebuilds the modes of a call made earlier."""
     from tools.cases_import import cases_path
@@ -949,6 +950,8 @@ def step_modes(root: Path, stage: str) -> tuple[str, ...]:
                 found.add("stand")
         except (OSError, KeyError, TypeError, ValueError):
             pass
+    if family in ("tc-generator", "tc-reviewer") and shared_data(project_of(root), root, attempt):
+        found.add("shared-data")
     if family in ("tc-generator", "tc-reviewer") and cases_path(root) is not None:
         found.add("import")
     if family in ("tc-reviewer", "tc-to-autotest", "autotest-reviewer") and _grouped(root, str(attempt["attempt_id"]), family):
@@ -956,21 +959,42 @@ def step_modes(root: Path, stage: str) -> tuple[str, ...]:
     return tuple(mode for mode in MODES if mode in found)
 
 
-def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
-    """``{"service_url_env": name, "tests_only": bool}`` when the attempt's module tests against a stand (``test.level`` ``stand``, declared or
-    derived) by the ``.skillsrc`` the run froze: the live file counts only while its bytes are those of the baseline.  The name of the variable
-    only — the package never reads its value.  None in a delivery without autotests, a cases-only run, at ``in-process``, on a drifted file."""
-    from tools.execution_gate import execution_available
+def _frozen_module(project: Path, root: Path, attempt: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The attempt's module in the ``.skillsrc`` the run froze (the live file while its bytes are those of the baseline); None on a drifted or unreadable file."""
     from tools.pilot_state import frozen_skillsrc_matches
-    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, module_test_level, normalize_skillsrc
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 
-    if not execution_available() or attempt.get("policy_profile") == "cases-only-v1" or frozen_skillsrc_matches(project, root, attempt) is not True:
+    if frozen_skillsrc_matches(project, root, attempt) is not True:
         return None
     try:
         modules = normalize_skillsrc(load_skillsrc(Path(project) / ".skillsrc"))["modules"]
     except (OSError, SkillsrcError, ValueError, KeyError, TypeError):
         return None
-    module = next((item for item in modules if item.get("root") == attempt.get("module")), None)
+    return next((item for item in modules if item.get("root") == attempt.get("module")), None)
+
+
+def shared_data(project: Path, root: Path, attempt: Mapping[str, Any]) -> bool:
+    """The data of the attempt's module are shared — other people's and demo records live there: ``shared_data: true`` in the frozen ``.skillsrc``,
+    or a module at a stand.  Any delivery and profile (the cases of a cases-only run keep the same rule); a drifted file says no."""
+    from tools.skillsrc_manifest import module_test_level
+
+    try:
+        module = _frozen_module(project, root, attempt)
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return module is not None and (module.get("shared_data") is True or (module_test_level(module) or ("",))[0] == "stand")
+
+
+def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``{"service_url_env": name, "tests_only": bool}`` when the attempt's module tests against a stand (``test.level`` ``stand``, declared or
+    derived) by the ``.skillsrc`` the run froze: the live file counts only while its bytes are those of the baseline.  The name of the variable
+    only — the package never reads its value.  None in a delivery without autotests, a cases-only run, at ``in-process``, on a drifted file."""
+    from tools.execution_gate import execution_available
+    from tools.skillsrc_manifest import module_test_level
+
+    if not execution_available() or attempt.get("policy_profile") == "cases-only-v1":
+        return None
+    module = _frozen_module(project, root, attempt)
     if module is None or (module_test_level(module) or ("",))[0] != "stand" or not module.get("service_url_env"):
         return None
     return {"service_url_env": str(module["service_url_env"]), "tests_only": bool((module.get("paths") or {}).get("context"))}

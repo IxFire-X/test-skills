@@ -22,6 +22,7 @@ def _modes(stage: str) -> tuple[str, ...]:
 def plain(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     monkeypatch.setattr(pilot_state, "derive_state", lambda _root: STATE)
     monkeypatch.setattr(step_size, "module_stand", lambda *_args: None)
+    monkeypatch.setattr(step_size, "_frozen_module", lambda *_args: {})
     monkeypatch.setattr(cases_import, "cases_path", lambda _root: None)
     monkeypatch.setattr(step_size, "_grouped", lambda *_args: False)
     return monkeypatch
@@ -72,7 +73,7 @@ def test_the_modes_go_in_one_order(plain) -> None:
 
 def test_every_insert_is_small() -> None:
     inserts = sorted((PACK / "skills").glob("*/modes/*.md"))
-    assert len(inserts) == 9 and all(path.stat().st_size <= 1600 for path in inserts), [(path.name, path.stat().st_size) for path in inserts]
+    assert len(inserts) == 11 and all(path.stat().st_size <= 1600 for path in inserts), [(path.name, path.stat().st_size) for path in inserts]
 
 
 @pytest.mark.parametrize(("role", "mode", "words"), [
@@ -128,3 +129,14 @@ def test_the_report_counts_the_role_prepare_gave(tmp_path, monkeypatch: pytest.M
 def test_the_rework_and_its_review_read_the_stand_insert(plain) -> None:
     plain.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": True})
     assert _modes("tc-generator:rework-1") == _modes("tc-reviewer:rework-1") == ("stand",)
+
+
+def test_shared_data_gives_the_data_insert_to_the_cases_and_their_review_only(plain) -> None:
+    plain.setattr(step_size, "_frozen_module", lambda *_args: {"shared_data": True})
+    assert _modes("tc-generator:BATCH-a") == _modes("tc-reviewer:canonical") == ("shared-data",) and _modes("tc-to-autotest:r1") == ()
+
+
+def test_a_module_at_a_stand_reads_the_stand_and_the_data_inserts(plain) -> None:
+    plain.setattr(step_size, "_frozen_module", lambda *_args: {"test": {"level": "stand"}, "service_url_env": "PETCLINIC_URL"})
+    plain.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
+    assert _modes("tc-generator:BATCH-a") == ("stand", "shared-data")
