@@ -9,7 +9,8 @@ import pytest
 from tools import pack_registry
 
 ROOT = Path(__file__).resolve().parents[1]
-TITLES = {"README.md": "# Камертон\n", "HOW-TO-USE.md": "# Камертон: ", "HOW-TO-USE-MODE-B.md": "# Камертон, ", "QUICKSTART.md": "# Камертон: "}
+TITLES = {"README.md": "# Камертон\n", "HOW-TO-USE.md": "# Камертон: ", "HOW-TO-USE-MODE-B.md": "# Камертон, ", "QUICKSTART.md": "# Камертон: ",
+          "FOR-PROJECT-TEAM.md": "# Камертон: что нужно от команды проекта\n"}  # the page: approved 27.11, texts-approval p. 18
 
 
 @pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
@@ -22,3 +23,17 @@ def test_the_texts_of_the_delivery_have_no_old_name(profile: str) -> None:
 
 def test_the_documents_of_the_tester_start_with_the_name() -> None:
     assert [name for name, title in TITLES.items() if not (ROOT / name).read_text(encoding="utf-8").startswith(title)] == []
+
+
+def test_the_readme_leads_to_cases_and_asks_five_questions() -> None:  # approved 27.11, texts-approval p. 17 (R1, R5)
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = text.split("## Что принести после прогона\n", 1)[1].split("\n## ", 1)[0]
+    assert "**Начните с кейсов.** Первый прогон — тест-кейсы и их ревью, без автотестов" in text
+    assert [line.split(". ", 1)[0] for line in section.splitlines() if line[:1].isdigit()] == ["1", "2", "3", "4", "5"]
+
+
+@pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
+def test_the_page_for_the_project_team_is_in_the_delivery(profile: str) -> None:  # approved 27.11, texts-approval p. 18
+    paths = [row["path"] for row in pack_registry.registry_rows(ROOT)]
+    assert "FOR-PROJECT-TEAM.md" in pack_registry.profile_paths(paths, profile)
+    assert "[FOR-PROJECT-TEAM.md](FOR-PROJECT-TEAM.md)" in (ROOT / "README.md").read_text(encoding="utf-8")

@@ -29,7 +29,12 @@ ALLOWED = (
     "Режим автотестов (режим Б) входит в поставку профиля `mode-b`; в поставку `cases-only` он не входит. Профиль называет `doctor`.",
     # V8-W3: HOW-TO-USE.md is the same in both deliveries; this is the one place that names the file of mode B, true with and without it
     "Если в папке пакета есть файл `HOW-TO-USE-MODE-B.md`, в вашей поставке есть и режим автотестов (режим Б): начните с этого файла; если файла нет, поставка — только для кейсов.",
+    # утверждено пользователем 27.11, texts-approval п. 17: README R1, R3 и QUICKSTART Q3 — верны в обеих поставках («в поставке с …»)
+    "Автотесты (режим Б) есть только в поставке с файлом `HOW-TO-USE-MODE-B.md`; к ним переходите, когда кейсы уже есть.",
+    "В поставке с автотестами он сначала спросит имя переменной окружения с адресом стенда.",
+    "При первом запуске агент может спросить ещё: какой модуль, если их несколько; где код приложения, если модуль только с тестами (или «кода приложения нет»); в поставке с автотестами — имя переменной с адресом стенда.",
 )
+APPROVED_27_11 = {ALLOWED[3]: "README.md", ALLOWED[4]: "README.md", ALLOWED[5]: "QUICKSTART.md"}  # each sentence of the exception stands in its file
 MODE_B_WORDS = [
     r"local-pilot", r"rerun-retained", r"run_pipeline exec", r"service_url_env", r"SERVICE_URL", r"SERVICE_UNREACHABLE", r"стенд", r"maven",
     r"gradle", r"\bmvn\b", r"pytest", r"карантин", r"@Disabled", r"accepted=true", r"tc-to-autotest", r"autotest-reviewer", r"mode-b",
@@ -40,7 +45,7 @@ SECURITY_WORDS = [r"безопасн", r"AppSec", r"Amber", r"Green", r"Red flag
 
 def _profile_texts() -> dict[str, str]:
     paths = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only")
-    names = ["README.md", "QUICKSTART.md", "HOW-TO-USE.md", *(path for path in paths if path.startswith("skills/") and path.endswith(".md"))]
+    names = ["README.md", "QUICKSTART.md", "HOW-TO-USE.md", "FOR-PROJECT-TEAM.md", *(path for path in paths if path.startswith("skills/") and path.endswith(".md"))]
     return {name: (ROOT / name).read_text(encoding="utf-8").replace("\r\n", "\n") for name in names}
 
 
@@ -71,6 +76,11 @@ def test_the_one_sentence_about_mode_b_is_in_the_skill_and_the_readme() -> None:
     assert " ".join(ALLOWED[1].split()) in " ".join(texts["README.md"].split())
     flat = " ".join(texts["skills/orchestrate/SKILL.md"].split())
     assert flat.count("mode-b") == 2 and flat.replace(" ".join(ALLOWED[0].split()), "").count("mode-b") == 0, "the delivery names no other file it does not carry"
+
+
+def test_the_sentences_approved_on_27_11_stand_in_their_files() -> None:  # an exception of ALLOWED does not outlive its text
+    texts = _profile_texts()
+    assert [name for sentence, name in APPROVED_27_11.items() if " ".join(sentence.split()) not in " ".join(texts[name].split())] == []
 
 
 def test_the_controller_skill_is_not_longer_than_before_and_the_mode_b_text_is_kept_for_the_development_build() -> None:

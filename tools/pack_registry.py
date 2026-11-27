@@ -28,8 +28,8 @@ from tools.schema_validation import StrictJsonError, load_json_strict, schema_di
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
 # The files of the root a pack carries, so that the check covers them: the two documents generated from the contract, the texts a
 # human follows (README, HOW-TO-USE), what ``pip`` would read (``requirements*.txt``) and the example of ``.skillsrc``.
-ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "QUICKSTART.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "requirements.txt", "requirements-dev.txt",
-              ".skillsrc.example")
+ROOT_FILES = ("CONTRACTS.md", "PIPELINE.md", "README.md", "QUICKSTART.md", "HOW-TO-USE.md", "HOW-TO-USE-MODE-B.md", "FOR-PROJECT-TEAM.md", "requirements.txt",
+              "requirements-dev.txt", ".skillsrc.example")
 RUNTIME_SUFFIXES = {".json", ".md", ".py"}
 # a module in the root of a pack (``json.py``, ``sitecustomize.py``, a ``.pyc``, a package with ``__init__.py``) is imported before the stdlib
 # and the pack's own: stray.  Other files of the root (a note, the .git of a checkout) are not the pack's and import nothing

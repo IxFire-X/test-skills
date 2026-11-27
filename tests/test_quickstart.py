@@ -18,3 +18,9 @@ def test_quickstart_is_in_the_delivery(profile: str) -> None:
 
 def test_quickstart_is_short() -> None:
     assert len((ROOT / "QUICKSTART.md").read_text(encoding="utf-8").splitlines()) <= 95
+
+
+def test_quickstart_leads_to_cases_only_first() -> None:  # approved 27.11, texts-approval p. 17 (Q1, Q3)
+    text = (ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+    assert "Первый прогон — только тест-кейсы и их ревью, без автотестов: так работает любая поставка." in text
+    assert "До первого шага модели от вас нужно от одного до пяти решений:" in text
