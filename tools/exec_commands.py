@@ -941,6 +941,7 @@ def _record_late_drift(coordinates: Mapping[str, Any], request: Any, report: Map
 
 def _finish_ingest(coordinates: Mapping[str, Any], report: Mapping[str, Any]) -> int:
     from tools.finalize_attempt import finalize_durable_execution_attempt
+    from tools.step_size import stand_skip_note
 
     root, attempt_id = Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])
     try:
@@ -958,6 +959,7 @@ def _finish_ingest(coordinates: Mapping[str, Any], report: Mapping[str, Any]) ->
         **_style_notes(Path(coordinates["manifest"]["project"]), root, attempt_id),
         **_report_mismatch(root, attempt_id),
         **_automation_split(root, attempt_id),
+        **stand_skip_note(Path(coordinates["manifest"]["project"]), root, coordinates["attempt"], report, result.get("verification")),
     })
     return int(closed["exit_code"])
 

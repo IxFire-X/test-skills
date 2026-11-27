@@ -132,6 +132,14 @@ def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, 
     return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
 
 
+def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, summary: Mapping[str, Any]) -> tuple[str, ...]:
+    """The inserts of rare modes the step reads (W3.2): ``stand`` when the module tests against a stand — the batch and the automation
+    carry ``stand`` in their read, the review of the cases asks the same frozen ``.skillsrc``."""
+    attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
+    at_stand = "stand" in summary or (stage == "tc-reviewer:canonical" and step_size.module_stand(project, root, attempt) is not None)
+    return ("stand",) if at_stand else ()
+
+
 def _other_address(value: Any, name: str, case: str = "?", step: str = "?") -> list[str]:
     """«кейс <id>, шаг <id>: адрес HTTP-шага берётся из переменной <имя>» for every step of the answer whose address is another variable than *name*."""
     if isinstance(value, list):
@@ -542,7 +550,7 @@ def _prepare(run_root: Path, stage: str, *, model_id: str | None = None, invocat
     told = {key: opened[key] for key in ("reviewer_view", "canaries", "for_human", "generator_checks") if key in opened}
     summary = step_size.compact_inputs(root, stage, found)
     read = {**summary["files_summary"], **{key: summary[key] for key in ("adapter", "java_level", "junit_params", "occupied_paths", "stand") if key in summary},  # what the automation stages keep to
-            "role_files": [str(path) for path in step_size.role_files(stage.split(":", 1)[0])]}  # the files of the role the stage is done by
+            "role_files": [str(path) for path in step_size.role_files(stage.split(":", 1)[0], _modes(project, root, state, attempt_id, stage, summary))]}  # the files of the role the stage is done by
     return {"stage": stage, "request_digest": request["digest"], "answer_slot": str(slot(root, stage)), "read": read,
             "budget": _budget(root, step, found), **word, **told, **({"prior_capabilities": prior} if prior and stage.startswith("tc-generator:BATCH-") else {})}  # only the batch's: the automation's ``before`` returns the whole view of the document
 

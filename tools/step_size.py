@@ -207,12 +207,14 @@ def output_warning(project: Path, byte_count: int, limits: Mapping[str, Any] | N
     return OUTPUT_LARGE if byte_count > limit else None
 
 
-def role_files(role: str) -> list[Path]:
+def role_files(role: str, modes: tuple[str, ...] = ()) -> list[Path]:
+    """The files of a role; ``modes`` adds the insert of a rare mode (``modes/<mode>.md``, W3.2), read only by a run in that mode."""
     base = PACK / "skills" / role
     if not (base / "SKILL.md").is_file():
         raise ValueError(f"unknown role: {role}")
     # tc-to-autotest also reads assets/ (the Java/Python conventions)
-    return [base / "SKILL.md", *sorted(path for folder in ("references", "assets") for path in (base / folder).rglob("*") if path.is_file())]
+    return [base / "SKILL.md", *sorted(path for folder in ("references", "assets") for path in (base / folder).rglob("*") if path.is_file()),
+            *(insert for mode in modes if (insert := base / "modes" / f"{mode}.md").is_file())]
 
 
 def _requirement_files(project: Path, root: Path) -> list[Path]:
@@ -921,6 +923,16 @@ def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[
     if module is None or (module_test_level(module) or ("",))[0] != "stand" or not module.get("service_url_env"):
         return None
     return {"service_url_env": str(module["service_url_env"]), "tests_only": bool((module.get("paths") or {}).get("context"))}
+
+
+def stand_skip_note(project: Path, root: Path, attempt: Mapping[str, Any], report: Mapping[str, Any], verdict: str | None) -> dict[str, str]:
+    """The line of ``ingest`` for a module at a stand whose tests JUnit skipped (``@EnabledIfEnvironmentVariable``: the variable was not set):
+    the verdict is not known (``run_tests.classify_evidence``: a skipped test is never a pass), the line names the variable."""
+    if verdict != "UNKNOWN" or not any(row.get("status") == "SKIPPED" for row in report.get("execution_evidence") or []):
+        return {}
+    stand = module_stand(project, root, attempt)
+    return {"stand_note": f"тесты стенда пропущены: переменная {stand['service_url_env']} не была задана при запуске — задайте её и выполните "
+                          "напечатанную команду ещё раз"} if stand else {}
 
 
 def with_test_env(root: Path, found: dict[str, Any], *, write: bool = True, state: Any = None) -> dict[str, Any]:
