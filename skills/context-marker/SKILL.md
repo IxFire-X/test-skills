@@ -38,8 +38,8 @@ A module whose context does not fit one call is marked in parts (`status` names 
   RENAMES, and every unlinked row when it REMOVES one; no `verdict` elsewhere. An archived delta gives names, never
   requirements. In doubt: `fits` with the doubt in `reason`.
 - `context-marker:batch-NNN` — the requirements view (`requirements-view-v1`: id, order, `path:line` and text of each
-  requirement of the requirements step) and the maps of its context batches (`*.code-map.md`: each file by path, code as declarations with line numbers). The map is not the code: before you write, open whole every file of it a requirement touches. Write only the code
-  observations of this batch in `sources` and `warnings`: code puts the requirements of the requirements step into the part. A requirement whose code is not in this batch is the warning
+  requirement of the requirements step) and the maps of its context batches (`*.code-map.md`: each file by path, code as declarations with line numbers). The map is not the code: before you write, open whole every file of it a requirement touches; a file the map gives by path and size only (SQL, YAML, XML) is in the part too —
+  open it whole when a requirement touches it. Write only the code observations of this part in `sources` and `warnings`: code puts the requirements of the requirements step into the part. A requirement whose code is not in this part is the warning
   `часть N — код для <требование> не найден`, not a requirement gap; the task document met in a batch is not rewritten.
 - the merge into `context-marker:baseline` is done by code (`merge`), not by a model call.
 

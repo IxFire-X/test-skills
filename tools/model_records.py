@@ -96,10 +96,10 @@ def _published_context_receipts(state: Mapping[str, Any], attempt_id: str, stage
                               and (cutoff is None or event["seq"] < cutoff)))
 
 
-def _part_receipts(inputs: Sequence[str], published: Sequence[str]) -> list[str]:
-    """The receipts a part binds: ``[inventory, receipt…, answer]``; a run before FaT-P3 bound the documents first and one receipt
-    (its second input is the inventory, never a published receipt)."""
-    return [str(digest) for digest in (inputs[2:-1] if len(inputs) == 4 and inputs[1] not in published else inputs[1:-1])]
+def _part_receipts(inputs: Sequence[str], head: Sequence[str]) -> list[str]:
+    """The receipts a part binds: ``[inventory, receipt…, answer]``; a run before FaT-P3 bound ``head`` — the documents and the inventory of
+    the attempt — first, then its one receipt.  Anything else in a receipt's place is read as a receipt, and the check refuses it."""
+    return [str(digest) for digest in (inputs[2:-1] if list(inputs[:2]) == list(head) else inputs[1:-1])]
 
 
 def _context_marker_receipt_digests(
@@ -114,6 +114,8 @@ def _context_marker_receipt_digests(
     """
     requirements, batches = _context_marker_parts(state, attempt_id)
     published = _published_context_receipts(state, attempt_id, stage_instance_id)
+    baseline = frozen_baseline(root, next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)) if batches or "batch-" in stage_instance_id else None
+    head = [] if baseline is None else [baseline["requirements"]["digest"], baseline["inventory_digest"]]
     if stage_instance_id == "context-marker:requirements":
         if len(inputs) != 2:
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")
@@ -121,8 +123,8 @@ def _context_marker_receipt_digests(
     if stage_instance_id.startswith("context-marker:batch-"):
         if len(inputs) < 3 or requirements is None or requirements[1] is None or inputs[-1] != requirements[1]:
             raise ValueError("context-marker part must bind its context receipts and the requirements answer")
-        number, receipts = int(stage_instance_id.rsplit("-", 1)[1]), _part_receipts(inputs, published)
-        before = [_part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], published)
+        number, receipts = int(stage_instance_id.rsplit("-", 1)[1]), _part_receipts(inputs, head)
+        before = [_part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], head)
                   for stage, request, _response in batches if int(stage.rsplit("-", 1)[1]) < number]
         at = [published.index(digest) if digest in published else -1 for digest in receipts]
         start = sum(map(len, before)) if len(before) == number - 1 else number - 1  # every part before it holds one receipt at least
@@ -136,7 +138,7 @@ def _context_marker_receipt_digests(
     if requirements is None or requirements[1] is None or any(response is None for _stage, _request, response in batches):
         raise ValueError("merged context-marker request requires every part answer")
     receipts = [digest for stage, request, _response in batches
-                for digest in _part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], published)]
+                for digest in _part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], head)]
     if receipts != published:
         missing = [f"receipt {index}" for index, digest in enumerate(published, start=1) if digest not in receipts]
         raise ValueError(f"CONTEXT_MARKER_PARTS_INCOMPLETE: the parts must cover every context receipt of the attempt once, in order; missing {missing}")

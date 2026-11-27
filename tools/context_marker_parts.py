@@ -38,15 +38,16 @@ def _responses(state: Mapping[str, Any], attempt_id: str) -> dict[str, str]:
 
 
 def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], asked: Mapping[str, str], code: Callable[[str, Mapping[str, Any]], int],
-            fixed: int, limit: int) -> list[list[Mapping[str, Any]]]:
+            head: list[str], fixed: int, limit: int, budget: int) -> list[list[Mapping[str, Any]]]:
     """The receipts of each part, in publication order.  A part asked keeps the receipts its request binds; any other takes receipts
     in a row while its worst case — ``fixed`` (the requirements view and the role), the maps and every file of its receipts whole —
-    stays within ``limit``, the share of the model window of the generator's batches: the model may open every file of its map.
+    stays within ``limit``, the share of the model window of the generator's batches (the model may open every file of its map), and what it
+    is sure to read — ``fixed`` and the maps — within ``budget``, the step budget: a group never makes a part that one receipt would not.
     Recorded bytes only (the byte counts of the receipts, the maps of their files); a window of 0 keeps one receipt a part."""
     from tools.model_records import part_receipts
 
     by_digest = {str(receipt["digest"]): receipt for receipt in receipts}
-    bound = {stage: part_receipts(pilot_state.read_model_request(root, attempt_id, stage, digest)["input_digests"], list(by_digest))
+    bound = {stage: part_receipts(pilot_state.read_model_request(root, attempt_id, stage, digest)["input_digests"], head)
              for stage, digest in asked.items() if stage.startswith("context-marker:batch-")}
     held = {digest for digests in bound.values() for digest in digests}  # a receipt of a part asked is no other part's
     groups: list[list[Mapping[str, Any]]] = []
@@ -55,7 +56,8 @@ def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], aske
         stage = f"context-marker:batch-{len(groups) + 1:03d}"
         group = [by_digest[digest] for digest in bound[stage]] if stage in bound else [receipts[at]]
         while (stage not in bound and limit and at + len(group) < len(receipts) and str(receipts[at + len(group)]["digest"]) not in held
-               and fixed + sum(code(stage, row) + int(row["byte_count"]) for row in [*group, receipts[at + len(group)]]) <= limit):
+               and fixed + sum(code(stage, row) + int(row["byte_count"]) for row in [*group, receipts[at + len(group)]]) <= limit
+               and fixed + sum(code(stage, row) for row in [*group, receipts[at + len(group)]]) <= budget):
             group.append(receipts[at + len(group)])
         groups.append(group)
         at += len(group)
@@ -119,7 +121,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
             view = len(requirements_view_bytes(read["artifact"], answer))
             old = not requirements_view_path(root, answer).is_file()  # a part asked before the view (none on the disk) read the answer
             limit = int(step_window(project) * WINDOW_SHARE)
-            for number, group in enumerate(_groups(root, attempt_id, receipts, asked, batch, view + role, limit), start=1):
+            for number, group in enumerate(_groups(root, attempt_id, receipts, asked, batch, head, view + role, limit, budget), start=1):
                 stage = f"context-marker:batch-{number:03d}"
                 requirements_bytes = read["byte_count"] if old and stage in asked else view
                 parts.append(step(stage, [baseline["inventory_digest"], *(receipt["digest"] for receipt in group), answer],  # no documents digest in a part

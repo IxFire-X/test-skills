@@ -43,8 +43,23 @@ def test_a_part_asked_keeps_its_receipts(tmp_path):
 
 
 def test_a_part_before_fat_p3_binds_one_receipt():
-    assert part_receipts(["docs", "inventory", "r1", "answer"], ["r1", "r2"]) == ["r1"]
-    assert part_receipts(["inventory", "r1", "r2", "answer"], ["r1", "r2"]) == ["r1", "r2"]
+    assert part_receipts(["docs", "inventory", "r1", "answer"], ["docs", "inventory"]) == ["r1"]
+    assert part_receipts(["inventory", "r1", "r2", "answer"], ["docs", "inventory"]) == ["r1", "r2"]
+
+
+def test_a_part_grows_only_while_its_maps_fit_the_step_budget(tmp_path):
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    _publish_requirements(root, attempt_id, baseline)
+    assert [len(part["input_digests"]) - 2 for part in plan(root, budget=1_000)["parts"][1:]] == [1, 1, 1]
+
+
+def test_an_unpublished_digest_in_the_place_of_a_receipt_is_refused(tmp_path):
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    _part(root, attempt_id, baseline, 1, receipts[:1], requirements)
+    with pytest.raises(ValueError, match="must bind context receipts in a row"):
+        pilot_state.publish_model_request(root, attempt_id, "context-marker:batch-002", model_id="model-context", invocation_id="part-x",
+                                          input_digests=[baseline["inventory_digest"], "sha256:" + "0" * 64, receipts[1]["digest"], requirements["content_digest"]])
 
 
 def test_a_merge_refuses_parts_that_miss_a_receipt(tmp_path):
