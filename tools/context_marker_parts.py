@@ -58,10 +58,11 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     asked = {str(event.get("stage_instance_id")) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"}
 
     def batch(stage: str, receipt: Mapping[str, Any]) -> int:
-        """The code a marker step reads of its receipt: the map (hybrid C); a step asked with no map on the disk read the files whole."""
+        """The code a marker step reads of its receipt: the map (hybrid C); a step asked with no map on the disk read the files whole, and so
+        does a step whose map is empty (no file of the receipt reads back: ``stage_inputs`` gives the files)."""
         if stage in asked and not code_map_path(root, receipt["digest"]).is_file():
             return int(receipt["byte_count"])
-        return len(code_map_bytes(project, root, attempt_id, str(receipt["digest"])))
+        return len(code_map_bytes(project, root, attempt_id, str(receipt["digest"]))) or int(receipt["byte_count"])
 
     def step(stage: str, inputs: list[Any], sizes: dict[str, int], over_hint: str) -> dict[str, Any]:
         total = sum(sizes.values())

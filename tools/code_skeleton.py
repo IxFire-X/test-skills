@@ -120,7 +120,9 @@ def skeleton_files(receipts: Iterable[Mapping[str, Any]], whole: Iterable[str]) 
 
 def _part(project: Path, row: Mapping[str, Any], every: bool) -> str | None:
     """«## path» and «N: line» of a code file as the scan saw it, «## path (N B)» for a language without a reading (with ``every``, a file
-    with nothing declared too); None for a generated file, one the guard refuses (outside the project, a link) or that does not read back."""
+    with nothing declared too); a generated file is None, with ``every`` «## path (N B, generated)» — the map of a marker part names every
+    file of its receipt, the model opens one if a requirement needs it.  None for a file the guard refuses (outside the project, a link) or
+    that does not read back: nobody can open it."""
     from tools.existing_tests import held_bytes
     from tools.output_guard import OutputRefused, project_file
 
@@ -129,8 +131,10 @@ def _part(project: Path, row: Mapping[str, Any], every: bool) -> str | None:
         data = held_bytes(project, row) if project_file(project, path) else None  # by its text inside the project, then the bytes of the scan
     except (OutputRefused, OSError):
         return None
-    if data is None or generated(path, text := data.decode("utf-8", errors="replace")):
+    if data is None:
         return None
+    if generated(path, text := data.decode("utf-8", errors="replace")):
+        return f"## {path} ({len(data)} B, generated)\n" if every else None
     if lines := skeleton(text, suffix):
         return f"## {path}\n" + "".join(f"{number}: {line}\n" for number, line in lines)
     return None if (suffix in LANGUAGES or suffix == ".py") and not every else f"## {path} ({len(data)} B)\n"
