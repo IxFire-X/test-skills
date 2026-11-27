@@ -417,18 +417,18 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
     elif stage_instance_id in ("tc-reviewer:canonical", _REWORK_REVIEW_STAGE):
         schema_name = "tc-reviewer-output.schema.json"
     elif stage_instance_id.startswith("tc-to-autotest:"):
-        schema_name = "tc-to-autotest-output.schema.json"
-        revision = value.get("artifacts", {}).get("automation_revision")
-        if stage_instance_id != f"tc-to-autotest:r{revision}":
-            raise ValueError("invalid automation generator artifact")
+        schema_name, revision_path = "tc-to-autotest-output.schema.json", ("automation_revision",)
     elif stage_instance_id.startswith("autotest-reviewer:"):
-        schema_name = "autotest-reviewer-output.schema.json"
-        revision = value.get("artifacts", {}).get("autotest_review", {}).get("automation_revision")
-        if stage_instance_id != f"autotest-reviewer:r{revision}":
-            raise ValueError("invalid automation reviewer artifact")
+        schema_name, revision_path = "autotest-reviewer-output.schema.json", ("autotest_review", "automation_revision")
     else:
         raise ValueError("unsupported model stage artifact")
     diagnostics = schema_diagnostics(dict(value), _SCHEMA_ROOT / schema_name, _PACK_ROOT)
+    if not diagnostics and stage_instance_id.startswith(("tc-to-autotest:", "autotest-reviewer:")):  # the revision once the schema holds the path (artifacts may be null)
+        revision, wanted = value["artifacts"], stage_instance_id.rsplit(":r", 1)[1]
+        for key in revision_path:
+            revision = revision[key]
+        if str(revision) != wanted:
+            diagnostics = [{"path": "/artifacts/" + "/".join(revision_path), "code": "STAGE_REVISION", "message": f"номер ревизии — из имени стадии: {wanted}"}]
     if diagnostics:  # the same retry_prompt validate_artifact gives, so the one retry needs no second command
         from tools.validate_artifact import retry_prompt
 
