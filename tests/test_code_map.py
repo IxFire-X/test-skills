@@ -100,16 +100,17 @@ def test_a_batch_of_generated_files_is_a_map_of_their_paths_and_the_plan_counts_
     root, attempt_id, baseline, receipts = _run(tmp_path, files=0)
     answer = _publish_requirements(root, attempt_id, baseline)
     receipt = next(row for row in receipts if all("generated" in Path(item["project_path"]).parts for item in row["files"]))
-    stage = f"context-marker:batch-{int(receipt['batch_index']):03d}"
+    part = next(row for row in plan(root)["parts"] if receipt["digest"] in row.get("input_digests", []))  # a part is receipts in a row (q8)
     text = code_map_bytes(root.parent.parent, root, attempt_id, receipt["digest"]).decode("utf-8")
     assert [line for line in text.splitlines() if line.startswith("## ")] == [
         f"## {item['project_path']} ({item['size']} B, generated)" for item in receipt["files"]] and "X = 1" not in text
-    assert next(part for part in plan(root)["parts"] if part["stage"] == stage)["bytes"]["batch"] == len(text.encode("utf-8"))
-    pilot_state.publish_model_request(root, attempt_id, stage, model_id="model-context", invocation_id="part-1",
-                                      input_digests=[baseline["inventory_digest"], receipt["digest"], answer["content_digest"]])
-    files = stage_inputs(root, stage)["files"]
-    assert [row["bytes"] for row in files if row.get("basis") == CODE_MAP_VIEW] == [len(text.encode("utf-8"))]
-    assert _code(files) == []  # the map, not the files whole
+    maps = {digest: len(code_map_bytes(root.parent.parent, root, attempt_id, digest)) for digest in part["input_digests"][1:-1]}
+    assert part["bytes"]["batch"] == sum(maps.values()) and maps[receipt["digest"]] == len(text.encode("utf-8"))
+    pilot_state.publish_model_request(root, attempt_id, part["stage"], model_id="model-context", invocation_id="part-1",
+                                      input_digests=part["input_digests"])
+    files = stage_inputs(root, part["stage"])["files"]
+    assert len(text.encode("utf-8")) in [row["bytes"] for row in files if row.get("basis") == CODE_MAP_VIEW]
+    assert not any("generated" in Path(row["path"]).parts for row in files)  # the map, not the generated files whole
 
 
 def test_an_empty_map_counts_the_files_of_its_receipt_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # review 0f424788 item 3
@@ -117,4 +118,6 @@ def test_an_empty_map_counts_the_files_of_its_receipt_whole(tmp_path: Path, monk
     root, attempt_id, baseline, receipts = _run(tmp_path)
     _publish_requirements(root, attempt_id, baseline)
     monkeypatch.setattr(step_size, "code_map_bytes", lambda *_args: b"")
-    assert next(part for part in plan(root)["parts"] if part["stage"] == PART)["bytes"]["batch"] == int(receipts[0]["byte_count"]) > 0
+    part = next(row for row in plan(root)["parts"] if row["stage"] == PART)
+    byte_counts = {receipt["digest"]: int(receipt["byte_count"]) for receipt in receipts}
+    assert part["bytes"]["batch"] == sum(byte_counts[digest] for digest in part["input_digests"][1:-1]) > 0  # each receipt of the part whole
