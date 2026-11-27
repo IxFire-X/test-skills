@@ -74,7 +74,8 @@ def test_an_added_with_another_text_leaves_the_run() -> None:
 
 def test_an_incomplete_scope_is_counted() -> None:
     _names, said = _composed("## ADDED Requirements\n" + SEARCH + "### Requirement: Create\nCreate two owners.\n#### Scenario: Ok\n- WHEN saved\n- THEN stored\n")
-    assert "Объём неполный: применено 1 из 2 требований изменения add-search; не взято 1 — причины и вопросы в questions-for-analyst.md" in said
+    assert ("Объём неполный: применено 1 из 2 требований изменения add-search; не взято 1 — причины в строках «Не применено» (scan, status, report.md); "
+            "вопросы аналитику — в questions-for-analyst.md после report") in said
 
 
 def test_nothing_applied_stops() -> None:
@@ -168,7 +169,8 @@ def test_an_added_beside_a_modified_not_applied_is_asked() -> None:
     assert "- ADDED «Search» связан с неприменённым MODIFIED «Lookup»: его кейсы написаны по нынешнему тексту базы. Верно ли это?" in analyst_questions(said)
 
 
-PARTIAL = "Объём неполный: применено 1 из 2 требований изменения add-search; не взято 1 — причины и вопросы в questions-for-analyst.md"
+PARTIAL = ("Объём неполный: применено 1 из 2 требований изменения add-search; не взято 1 — причины в строках «Не применено» (scan, status, report.md); "
+           "вопросы аналитику — в questions-for-analyst.md после report")
 
 
 def test_the_report_shows_the_scope() -> None:

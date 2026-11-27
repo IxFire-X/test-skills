@@ -262,12 +262,15 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     # Requirement gaps survive later empty warning arrays. Current-source drift must
     # not erase an independently valid historical terminal result.
     responses = [row for row in events if row["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-    marker = next((row for row in responses if row.get("stage_instance_id") == "context-marker:baseline"), None)
+    # a change only: until the parts are merged into the baseline, the warnings of the requirements the code wrote (the lines of the scope,
+    # «Не применено» among them) — the merge takes them in (context_marker_merge), so they are shown once and to the end of the run
+    marker = next((row for row in responses if row.get("stage_instance_id") == "context-marker:baseline"), None) or next(
+        (row for row in responses if row.get("stage_instance_id") == "context-marker:requirements"), None)
     model_outputs = {}
     if marker:
         marker_path = f"model-stage-artifacts/{attempt_id}/{marker['artifact_digest'][7:]}.json"
         try:
-            publication = pilot.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", marker["artifact_digest"])
+            publication = pilot.read_model_stage_artifact(root, attempt_id, marker["stage_instance_id"], marker["artifact_digest"])
             model_outputs[marker["artifact_digest"]] = publication
             result["warnings"] = list(publication["artifact"]["warnings"])
             result["warning_evidence_path"] = str(root / publication["path"])

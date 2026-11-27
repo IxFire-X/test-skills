@@ -102,7 +102,8 @@ def lines(change: str, areas: Sequence[str], applied: Sequence[tuple[str, str, s
                      f"полная регрессия области — {_regression(sorted({area for area, _other in near}))}")
     if disputed:
         found.append(f"{PARTIAL} применено {len(applied)} из {len(applied) + len(disputed)} требований изменения {change}; "
-                     f"не взято {len(disputed)} — причины и вопросы в questions-for-analyst.md")
+                     f"не взято {len(disputed)} — причины в строках «{DISPUTED.removesuffix(':')}» (scan, status, report.md); "
+                     "вопросы аналитику — в questions-for-analyst.md после report")
     for operation, own, name, text, path, line, cause in disputed:  # an ADDED the base has with another text is no neighbour of itself
         others = [row for row in pool if (row[0], row[1]) != (own, name)]
         close = ", ".join(f"{area}/«{other}»" for _score, area, other in neighbours(weights, text, others, impact, own))

@@ -44,3 +44,25 @@ def test_scan_of_a_project_that_is_not_there_is_project_not_found(tmp_path: Path
 def test_ready_of_a_project_that_is_not_there_is_one_row(tmp_path: Path) -> None:
     report = ready.check(tmp_path / "absent", ["docs/a.md"], "cases-only-v1")
     assert [row["id"] for row in report["checks"] if row["level"] == "STOP"] == ["project"] and report["status"] == "BLOCKED", report
+
+
+def test_status_keeps_the_lines_not_applied_to_the_end_of_the_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """2а: a change only — «Не применено» in status after the requirements step and, once, after the parts are merged into the baseline."""
+    import json
+
+    from tests.test_openspec_marker import _part, _prepare
+    from tests.test_openspec_selection import ADD, ADDED, _project, _scan as _scan_docs
+    from tests.test_task_docs_context import _write
+    from tools import api
+    from tools.run_scan import durable_status
+
+    project = _project(tmp_path)
+    _write(project, ADD, ADDED + "### Requirement: Create\nCreate two owners.\n#### Scenario: Ok\n- WHEN saved\n- THEN stored\n")
+    root = Path(_scan_docs(project, monkeypatch, ["openspec/changes/add-search"])["run_root"])
+    not_applied = lambda: [line for line in durable_status(project.resolve(), root, stage="status")["warnings"] if line.startswith("Не применено:")]  # noqa: E731
+    _prepare(root, "context-marker:requirements", capsys)
+    assert len(not_applied()) == 1
+    slot = Path(_prepare(root, "context-marker:batch-001", capsys)["answer_slot"])
+    slot.write_text(json.dumps(_part(["openspec/specs/owners/spec.md — the base of the change"])), encoding="utf-8")
+    assert api.main(["submit", "--run-root", str(root), "--stage", "context-marker:batch-001"]) == 0, capsys.readouterr().out
+    assert len(not_applied()) == 1
