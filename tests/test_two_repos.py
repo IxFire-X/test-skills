@@ -58,6 +58,25 @@ def test_a_tests_only_module_is_asked_for_its_context_root_and_the_answer_is_wri
     assert not [key for key in _questions(ensure_skillsrc(root, {}, False)) if key.endswith((":paths.context", ":paths.source", ":service_url_env"))]
 
 
+def test_the_output_that_asks_the_context_root_is_valid_by_its_schema(tmp_path: Path) -> None:
+    """The options of the paths.context question are module roots ("app"): the output schema takes a path as an option id, not only the
+    closed list of words (review of part 4 of the stand, 27.11)."""
+    from jsonschema import Draft202012Validator
+
+    from tools.init_skillsrc import ensure_skillsrc
+    from tools.schema_validation import schema_diagnostics
+
+    root = _stand(tmp_path)
+    answers, _second = _past_the_stand(root)
+    output = ensure_skillsrc(root, answers, False)
+    assert [option["id"] for question in output["questions"] if question["id"].endswith(":paths.context") for option in question["options"]] == [
+        "app", "no-application-code"], output
+    pack = Path(__file__).resolve().parents[1]
+    schema = pack / "schemas" / "skillsrc-init-output.schema.json"
+    assert list(Draft202012Validator(json.loads(schema.read_text(encoding="utf-8"))).iter_errors(output)) == []
+    assert schema_diagnostics(output, schema, pack) == []
+
+
 @pytest.mark.parametrize("answer", ["../outside", "autotests", "autotests/src", "missing", "/abs", ""])
 def test_a_context_root_outside_the_project_inside_the_module_or_missing_is_refused(tmp_path: Path, answer: str) -> None:
     from tools.init_skillsrc import ensure_skillsrc

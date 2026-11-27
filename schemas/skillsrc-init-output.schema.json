@@ -30,7 +30,9 @@
               "additionalProperties": false,
               "required": ["id", "value", "evidence"],
               "properties": {
-                "id": {"enum": ["keep-existing", "use-detected", "replace-proposed", "java", "python", "go", "typescript", "kotlin", "maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn", "junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing", "provide-source-root", "no-stand", "no-application-code"]},
+                "id": {"anyOf": [{"enum": ["keep-existing", "use-detected", "replace-proposed", "java", "python", "go", "typescript", "kotlin", "maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn", "junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing", "provide-source-root", "no-stand", "no-application-code"]},
+                                 {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$",
+                                  "description": "an option of paths.context: a folder from the project root (the root of a module with sources), forward slashes, no .. part"}]},
                 "value": {"type": "string"},
                 "evidence": {"type": "array", "items": {"type": "string"}}
               }

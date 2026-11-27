@@ -457,6 +457,7 @@ _PATH_FIELDS = [  # (schema, path of the field inside it): the path fields that 
     ("retained-native-rerun-receipt.schema.json", "$defs/relative_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/0/properties/source_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/1/properties/source_path"),
+    ("skillsrc-init-output.schema.json", "properties/questions/items/properties/options/items/properties/id/anyOf/1"),  # an option of paths.context
 ]
 
 
