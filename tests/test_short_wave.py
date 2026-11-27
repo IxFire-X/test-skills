@@ -66,3 +66,35 @@ def test_status_keeps_the_lines_not_applied_to_the_end_of_the_marker(tmp_path: P
     slot.write_text(json.dumps(_part(["openspec/specs/owners/spec.md — the base of the change"])), encoding="utf-8")
     assert api.main(["submit", "--run-root", str(root), "--stage", "context-marker:batch-001"]) == 0, capsys.readouterr().out
     assert len(not_applied()) == 1
+
+
+# the words the user approved (texts-approval-20261127 p. 13-15, «Утверждаю»), word for word
+EMPTY_HUMAN = ("В файле кейсов нет ни одного кейса — в нём только заголовки колонок. Выгрузите кейсы из Zephyr заново "
+               "(проверьте папку и фильтр выгрузки) и скажите агенту, когда файл будет готов.")
+ABSENT_HUMAN = "Папки проекта по этому пути нет. Проверьте путь к проекту и скажите агенту правильный."
+
+
+def test_the_approved_words_of_an_empty_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.run_pipeline import _envelope
+
+    project = _project(tmp_path, HEADER + "\r\n")
+    row = next(item for item in ready.check(project, [], "cases-only-v1", cases="cases/zephyr.csv")["checks"] if item["id"] == "cases")
+    assert row["message"] == EMPTY_HUMAN + " (ZEPHYR_CSV_ROWS: в CSV нет ни одного кейса: нет строки с заполненным Name)"
+    assert _envelope(_scan(project, monkeypatch)[1])["human"] == EMPTY_HUMAN
+
+
+def test_the_approved_words_of_a_project_that_is_not_there(tmp_path: Path) -> None:
+    from tools.fixes import human_for
+
+    row = ready.check(tmp_path / "absent", [], "cases-only-v1")["checks"][-1]
+    assert row["message"] == f"{ABSENT_HUMAN} (PROJECT_NOT_FOUND: проект не найден: {(tmp_path / 'absent').resolve()} — такой папки нет)"
+    assert human_for("PROJECT_NOT_FOUND") == ABSENT_HUMAN
+
+
+def test_the_approved_tail_of_an_incomplete_scope() -> None:
+    from tools.openspec_scope import lines
+
+    said = lines("c", ["owners"], [("ADDED", "owners", "A", "a")], [("MODIFIED", "owners", "B", "b", "d.md", 1, "x")], [], "")
+    assert next(line for line in said if line.startswith("Объём неполный:")) == (
+        "Объём неполный: применено 1 из 2 требований изменения c; не взято 1 — причины в строках «Не применено» (scan, status, report.md); "
+        "вопросы аналитику — в questions-for-analyst.md после report")
