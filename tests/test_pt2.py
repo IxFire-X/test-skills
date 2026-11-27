@@ -21,7 +21,7 @@ from tests.test_review_requested import _generated_run, build_generated_run
 from tests.test_review_two_commands import _open, _select_verdict, _verdict
 from tests.test_self_review import _run
 from tools import api, orchestrate_test_case_revision as orchestrate, pilot_state
-from tools.pilot_state import effective_canonical_or_reason
+from tools.pilot_state import closure_cache, effective_canonical_or_reason
 from tools.ready import check
 from tools.run_report import build_report, render_markdown
 from tools.schema_validation import schema_diagnostics
@@ -169,7 +169,8 @@ def test_no_effective_document_before_the_verdict_is_an_answer_not_a_refusal_of_
 @pytest.mark.slow
 def test_the_report_of_a_run_without_an_effective_document_counts_the_candidate_and_says_so(tmp_path: Path) -> None:
     run = _generated_run(tmp_path)
-    report = build_report(run["project"], Path(run["run_root"]).name)[0]
+    with closure_cache():  # W4.1: one closure_cache, as write_report
+        report = build_report(run["project"], Path(run["run_root"]).name)[0]
     counts = report["counts"]
     assert counts["cases"] and counts["canonical_requirements"] and counts["canon_basis"] == "кандидат r1, не принят", counts
     assert "кандидат r1, не принят" in render_markdown(report)

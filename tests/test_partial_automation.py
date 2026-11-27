@@ -23,7 +23,7 @@ from tests.test_finish import _project
 from tools.automation_validation import validate_automation_artifact
 from tools.canonical_document import blocked_cases, blocker_count, document_sha256, validate_canonical_document
 from tools.finalize_attempt import split_cases
-from tools.pilot_state import _result_facts, read_terminal_result
+from tools.pilot_state import _result_facts, closure_cache, read_terminal_result
 from tools.review_view import render
 
 pytestmark = pytest.mark.contract
@@ -208,7 +208,8 @@ def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: P
     # the report says it is not the whole set
     from tools.run_report import build_report, render_markdown
 
-    report, _warnings = build_report(project, run_root.name)
+    with closure_cache():  # W4.1: one closure_cache, as write_report
+        report, _warnings = build_report(project, run_root.name)
     assert report["automation_split"] == split and report["counts"]["accepted"] is False
     assert "- Автоматизация частичная: автоматизировано 2 из 3 кейсов, вручную 1: TC-batch-a-003 — UNRESOLVED_OPERATION" in render_markdown(report)
 

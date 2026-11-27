@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from tests.journal_helpers import assert_refused_once
+from tools.pilot_state import closure_cached
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,6 +42,7 @@ def _journal(run_root: Path) -> bytes:
     return journal_minus_refusals(run_root)
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
                    requirements: list | None = None) -> dict:
     """The run of build_generated_run, built once per test process for these arguments and restored in its own project folder
@@ -88,6 +90,7 @@ def _build_is_patched() -> bool:
     return any(function is not _AS_IMPORTED[place] or function.__qualname__ != place[1] for place, function in _called_by_the_build().items())
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def build_generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True, header: dict | None = None,
                         requirements: list | None = None) -> dict:
     """A run in ``tmp_path / "project"`` with the context, the marker and two generator answers published (as test_reviewer_protocol

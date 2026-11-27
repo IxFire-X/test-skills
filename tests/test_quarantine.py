@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.pilot_state import closure_cached
+
 JAVA = """package org.example;
 
 import org.junit.jupiter.api.Test;
@@ -240,6 +242,7 @@ def test_a_failure_that_cannot_be_tied_to_a_method_is_unresolved(payload: dict) 
 
 # --- the durable FAIL branch ------------------------------------------------------------------
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _fail(tmp_path: Path, *, content: str | None = None, message: str | None = FAILURE, kind: str = "assertion_failed"):
     from tests.test_durable_execution_trace import _publish_execution
     from tests.test_execution_receipt import _execution_facts

@@ -17,6 +17,7 @@ from tests.test_quarantine import THREE_FUNCTIONS, _fail
 from tests.test_run_report import _finished_run
 from tools.automation_validation import automation_sha256
 from tools.finalize_attempt import decide_dispositions
+from tools.pilot_state import closure_cache
 from tools.quarantine import failure_cause, failure_groups, failure_line, failure_texts, one_cause, status_checks
 from tools.run_report import _acceptance_lines, _cause_lines, build_report, render_markdown
 from tools.run_tests import _failure_message
@@ -197,7 +198,8 @@ def test_the_summary_tells_the_causes() -> None:
 def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
 
     run_root = _finished_run(tmp_path)
-    report = build_report(run_root.parents[1], run_root.name)[0]
+    with closure_cache():  # W4.1: one closure_cache, as write_report
+        report = build_report(run_root.parents[1], run_root.name)[0]
     before = render_markdown({key: value for key, value in report.items() if key != "failure_groups"}).splitlines()
     after = render_markdown({**report, "failure_groups": failure_groups(report["quarantine"])}).splitlines()
     method = after.index(next(line for line in before if " :: " in line))
@@ -209,6 +211,7 @@ def test_report_keeps_the_method_lines(tmp_path: Path) -> None:
 def test_the_report_groups_a_failure_by_its_text_and_the_check_of_the_canon(tmp_path: Path) -> None:
     # the label is the check ASSERT-batch-a-001 of the canon of the fixture, an http_status; the text has no word of the status
     run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS, message="ASSERT-batch-a-001 expected: <200> but was: <403>")
-    decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
-    [group] = build_report(tmp_path, run_root.name)[0]["failure_groups"]
+    with closure_cache():  # W4.1: one closure_cache, as write_report
+        decide_dispositions(tmp_path, delta, "FAIL", pre_trace_valid=True, run_root=run_root, attempt_id=attempt_id)
+        [group] = build_report(tmp_path, run_root.name)[0]["failure_groups"]
     assert (group["rule"], group["methods"]) == ("status", ["test_selected"]) and "403" in group["cause"]

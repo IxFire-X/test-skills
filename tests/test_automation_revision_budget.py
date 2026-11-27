@@ -12,7 +12,7 @@ from tests.test_generated_delta import _effective_bundle, _effective_bundle_dige
 from tests.test_requirement_traceability import canonical_fixture
 from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
 from tools.automation_validation import validate_automation_artifact, validate_automation_revision_chain
-from tools.pilot_state import append_event, open_automation_review_boundary, publish_effective_canonical
+from tools.pilot_state import append_event, closure_cached, open_automation_review_boundary, publish_effective_canonical
 from tools.pilot_state import publish_model_request, publish_model_stage_artifact
 from tools.schema_validation import schema_diagnostics
 
@@ -76,6 +76,7 @@ def host_evidence(session_id: str, *, generator: str = "generator-1", reviewer: 
     }
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def durable_boundary(tmp_path, artifact: dict, session_id: str, evidence: dict, *, run_root: Path | None = None, attempt_id: str | None = None, generator: str = "generator-1", reviewer: str = "reviewer-1", policy_profile: str = "cases-only-v1", document: dict | None = None) -> tuple[Path, str, dict]:
     from tests.test_reviewer_protocol import _new_run
     from tools.automation_validation import automation_sha256

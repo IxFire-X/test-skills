@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.pilot_state import closure_cached
+
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[1]
 DEV_TOOLS = {"ci_gate.py", "release_manifest.py"}  # development tools, no delivery carries them
@@ -99,6 +101,7 @@ def _git(project: Path, *args: str) -> None:
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], cwd=project, check=True, capture_output=True)
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _run_with_foreign_changes(tmp_path: Path):
     """A project with git history, then: a tracked file changed, a tracked file deleted, an untracked file added — all before the run."""
     from tests.test_durable_execution_trace import _publish_execution

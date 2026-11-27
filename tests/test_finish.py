@@ -15,12 +15,13 @@ from tools import pilot_state
 from tools.exec_commands import cmd_exec
 from tools.finalize_attempt import finalize_attempt
 from tools.orchestrate_test_case_revision import validate_reviewer_session
-from tools.pilot_state import derive_state, read_attempt_receipt, read_terminal_result
+from tools.pilot_state import closure_cached, derive_state, read_attempt_receipt, read_terminal_result
 from tools.run_pipeline import HostStop, build_parser, cmd_finish
 
 CARRIERS = ("canonical_document", "automation_artifact", "autotest_review", "authorization_receipt", "host_isolation_receipt", "generated_delta_receipt")
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _project(tmp_path: Path) -> tuple[Path, Path, str, dict]:
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -220,6 +221,7 @@ def _blocked_document() -> dict:
     return document
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _automation_chain(tmp_path: Path, verdicts: list[str], *, blocked: bool = False, document: dict | None = None,
                       edit_review=None) -> tuple[Path, str]:
     from tests.test_automation_revision_budget import automated_document, automation, durable_boundary, host_evidence, review

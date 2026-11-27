@@ -25,7 +25,7 @@ from tools.automation_validation import automation_sha256
 from tools.batch_assembly import IMPORT_ANSWER_PER_HUMAN_BYTE, fill_fragment_mechanics, plan_batches
 from tools.batch_assembly import require_imported_human_fields, with_digest
 from tools.cases_import import imported_value, password_cells, read_cases, source_requirements
-from tools.pilot_state import append_event, derive_state, publish_model_request, publish_model_stage_artifact
+from tools.pilot_state import append_event, closure_cached, derive_state, publish_model_request, publish_model_stage_artifact
 from tools.pilot_state import read_attempt_receipt, read_effective_canonical, read_model_request
 from tools.pilot_state import read_model_stage_artifact, read_terminal_result
 from tools.review_view import IMPORT_NOTE, render
@@ -187,6 +187,7 @@ def _manual_fragment(plan: dict, context: dict, imported: dict, index: int) -> d
     return with_digest(fragment)
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str = CSV, **plan_options) -> dict:
     """scan --cases → the requirements answered by code (prepare) → the code part of the marker → merge → header and plan published."""
     from tests.test_batch_assembly import _header

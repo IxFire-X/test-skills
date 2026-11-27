@@ -14,7 +14,7 @@ from tests.test_automation_revision_budget import automated_document, automation
 from tests.test_generated_delta import _effective_bundle_digest
 from tests.helpers import MODULE_PYTHON
 from tools.execution_adapters import PYTEST, ExecutionRequest
-from tools.pilot_state import derive_state, read_attempt_receipt, read_effective_canonical, read_terminal_result
+from tools.pilot_state import closure_cached, derive_state, read_attempt_receipt, read_effective_canonical, read_terminal_result
 from tools.run_tests import validate_artifact_runner_compatibility
 
 
@@ -146,6 +146,7 @@ def _local_attempt(project: Path, *, module: str = ".") -> tuple[Path, str, dict
     return run_root, result["state"]["attempts"][0]["attempt_id"], dict(read_run(run_root)["authorization"]), baseline
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _reviewed_inputs(
     project: Path, *, module: str = ".", generated_content: str | None = None,
     wait_for_input: bool = False, materialize: bool = True, publish_static_review: bool = True, static_verdict: str = "ПРИНЯТО",

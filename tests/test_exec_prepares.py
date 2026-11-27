@@ -13,13 +13,14 @@ from tests.helpers import MODULE_PYTHON
 from tools import exec_commands, execution_core, pilot_state, project_inventory
 from tools.exec_commands import cmd_materialize
 from tools.execution_adapters import PYTEST
-from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact, read_terminal_result
+from tools.pilot_state import closure_cached, derive_state, publish_execution_inputs, read_model_stage_artifact, read_terminal_result
 
 PACK_ROOT = Path(__file__).resolve().parents[1]  # V0 (A6-3): the package, not the directory the run started in
 
 pytestmark = pytest.mark.contract
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def _project(tmp_path: Path, **options) -> tuple[Path, Path, str]:
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"

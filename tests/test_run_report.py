@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.pilot_state import closure_cached
+
 GAP_A = (
     "REQ-owner-create сценарий «пустое имя» (specs/owner.md#create) — не задан код ответа при пустом имени"
     " — блокирует проверку отказа POST /owners — какой статус вернуть: 400 или 422?"
@@ -141,6 +143,7 @@ def test_model_calls_are_timed_from_request_to_response_and_show_attempts() -> N
     assert second["step_sec"] is None and second["transport_attempts"] == 1
 
 
+@closure_cached  # W4.1: built in one closure_cache, as a command builds it
 def build_finished_run(project: Path) -> Path:
     """A failed execution of the three-function file with its dispositions decided, built in *project*; its run root."""
     from tests.test_quarantine import THREE_FUNCTIONS, _fail
