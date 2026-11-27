@@ -15,7 +15,7 @@ from tests.test_task_docs_context import _write
 from tools import api, pilot_state, ready
 from tools.build_context import RequirementConflict, build_context, openspec_applied, openspec_change_diff
 from tools.model_records import openspec_snapshots
-from tools.openspec_scope import Weights, impact_areas, lines, neighbours, question, summary_tail
+from tools.openspec_scope import SAME_AREA, THRESHOLD, Weights, impact_areas, lines, neighbours, question, summary_tail
 from tools.run_report import _acceptance_lines, _scope_lines, analyst_questions, openspec_scope_lines
 from tools.step_size import CHANGE_DIFF_VIEW, _change_diff
 
@@ -63,7 +63,7 @@ def test_ready_says_the_scope(tmp_path: Path) -> None:
 def test_a_modified_the_base_lacks_leaves_the_run() -> None:
     names, said = _composed("## ADDED Requirements\n" + SEARCH + "## MODIFIED Requirements\n### Requirement: Creat\nCreate fast.\n#### Scenario: Ok\n- WHEN saved\n- THEN stored\n")
     assert names == ["### Requirement: Search"]
-    assert (f"Не применено: MODIFIED «Creat» ({DELTA}:8) — в spec.md области owners нет требования с таким именем; ближайшие: «Create»") in [
+    assert (f"Не применено: MODIFIED «Creat» ({DELTA}:8) — в spec.md области owners нет требования с таким именем; ближайшие: «Create» ({BASE}:2)") in [
         line.split("; смежные с ним: ")[0] for line in said]
 
 
@@ -93,9 +93,24 @@ def test_a_repeated_name_still_stops() -> None:
 
 
 def test_a_shared_rare_word_makes_a_neighbour() -> None:
-    pool = [("visits", "Book", "Book a visit by «телефон»."), ("visits", "Cancel", "Cancel a visit.")]
-    weights = Weights([text for _area, _name, text in pool] + ["Find an owner by «телефон»."])
-    assert [name for _score, _area, name in neighbours(weights, "Find an owner by «телефон».", pool, set())] == ["Book"]
+    pool = [("visits", "Phone", "Book a visit by phone «телефон»."), ("visits", "Cancel", "Cancel a visit.")]
+    weights = Weights([text for _area, _name, text in pool] + ["Find an owner by phone «телефон»."])
+    assert [name for _score, _area, name in neighbours(weights, "Find an owner by phone «телефон».", pool, set())] == ["Phone"]
+
+
+def test_a_shared_class_of_input_without_the_subject_makes_no_neighbour() -> None:  # S1 of 27.11: the empty search is not the empty description
+    text = "Поиск владельцев: пустая строка и три пробела означают поиск всех владельцев."
+    pool = [("visits", "Описание визита", "Описание визита: пустая строка и три пробела дают ошибку описания."), ("pets", "Порода", "Порода питомца выбирается из списка.")]
+    weights = Weights([body for _area, _name, body in pool] + [text])
+    assert weights.score(text, pool[0][2]) >= THRESHOLD and neighbours(weights, text, pool, set(), "owners") == []
+
+
+def test_the_area_of_the_change_has_the_lower_threshold() -> None:  # S1 of 27.11: the pages of the found owners
+    text, body = "Поиск владельцев находит запись по части фамилии.", "Страницы найденных владельцев: пять записей на странице и номер."
+    pool = [("owners", "Страницы найденных владельцев", body), ("visits", "Страницы найденных владельцев", body), ("pets", "Порода", "Порода питомца выбирается из длинного списка пород.")]
+    weights = Weights([row[2] for row in pool] + [text])
+    assert SAME_AREA <= weights.score(text, body) < THRESHOLD
+    assert [area for _score, area, _name in neighbours(weights, text, pool, set(), "owners")] == ["owners"]
 
 
 def test_an_area_of_impact_gives_a_neighbour_below_the_threshold() -> None:
@@ -111,7 +126,7 @@ def test_an_impact_of_windows_line_ends_is_read() -> None:
 
 
 def test_scan_shows_eight_neighbours() -> None:
-    pool = [("visits", f"N{index}", f"Book «{'альфа' if index < 5 else 'бета'}» {index}0") for index in range(9)]  # five near S, four near T
+    pool = [("visits", f"{'Альфа' if index < 5 else 'Бета'} {index}", f"Book «{'альфа' if index < 5 else 'бета'}» {index}0") for index in range(9)]  # five near S, four near T
     changed = [("ADDED", "owners", "S", "Find «альфа»"), ("ADDED", "owners", "T", "Find «бета»")]
     [said] = [line for line in lines("c", ["owners"], changed, [], pool, "", 8) if line.startswith("Проверьте")]
     assert said.count(" (рядом с «") == 8 and " и ещё 1 — в report.md; полная регрессия области — --docs openspec/specs/visits" in said

@@ -425,10 +425,16 @@ def _close_names(baseline: Mapping[tuple[str, str], Any], key: tuple[str, str]) 
     return difflib.get_close_matches(key[1], [name for capability, name in baseline if capability == key[0] and name != key[1]], n=3, cutoff=0.4)
 
 
+def _at(baseline: Mapping[tuple[str, str], Any], area: str, name: str) -> str:
+    """`` (path:line)`` of a requirement of the specification — the place a tester opens to compare the name (S3 of the campaign of 27.11)."""
+    row = baseline[(area, name)]
+    return f" ({row['path']}:{row['line']})"
+
+
 def _close(baseline: Mapping[tuple[str, str], Any], key: tuple[str, str]) -> str:
-    """``; ближайшие имена …`` of ``_close_names``."""
+    """``; ближайшие имена …`` of ``_close_names``, each with its place."""
     names = _close_names(baseline, key)
-    return f"; ближайшие имена в spec.md области: {', '.join(names)}" if names else ""
+    return f"; ближайшие имена в spec.md области: {', '.join(name + _at(baseline, key[0], name) for name in names)}" if names else ""
 
 
 def _blocks(text: str, section: str = "") -> list[tuple[str, str]]:
@@ -584,7 +590,7 @@ def _openspec_rows(entries: list[dict[str, str]], applied: Counter[str] | None =
         if operation == "MODIFIED" and have is None and key[0] in based_only:
             names = _close_names(baseline, key)
             disputed.append((operation, *key, row["text"], row["path"], row["line"], f"в spec.md области {key[0]} нет требования с таким именем"
-                             + (f"; ближайшие: {', '.join(f'«{name}»' for name in names)}" if names else "")))
+                             + (f"; ближайшие: {', '.join(f'«{name}»' + _at(baseline, key[0], name) for name in names)}" if names else "")))
             seen.add(key)
             continue
         if operation == "MODIFIED" and have is None:

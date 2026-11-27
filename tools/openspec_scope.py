@@ -2,7 +2,9 @@
 
 A requirement of the base is a neighbour of a requirement of the change when they share rare words: stems (a Russian word cut
 to five letters, a latin identifier, a number, a quoted literal) weighted by rarity over the whole base, the share of the
-smaller text at or above ``THRESHOLD``.  Code only, no model; stdlib only, no input or output: the texts come from the
+smaller text at or above ``THRESHOLD`` (``SAME_AREA`` in the area of the requirement of the change), and the text of the change
+names its subject: a stem of the name of the neighbour (the class of an input — «пустая строка», «три пробела» — is shared by
+requirements of different subjects; 15 pairs of base and change of live/ on 27.11: 25 neighbours, 4 false → 23, 0).  Code only, no model; stdlib only, no input or output: the texts come from the
 composition (``build_context``).  The heads of the lines are one constant: the report finds the lines by them.
 """
 from __future__ import annotations
@@ -18,6 +20,7 @@ SCOPE, NEIGHBOURS, PARTIAL, DISPUTED = SCOPE_HEADS
 LINKED = re.compile(r"^(?:.+?:\d+ — )?(ADDED «.+» связан с неприменённым MODIFIED «.+»: его кейсы написаны по нынешнему тексту базы\. Верно ли это\?)$")
 QUESTIONS = "## Требования изменения, которые не применились"
 THRESHOLD = 0.3
+SAME_AREA = 0.25  # a requirement of the base in the area of the requirement of the change
 MOST = 5  # neighbours of one requirement of the change
 IMPACT_MOST = 3  # neighbours of an area the proposal names under «Impact», below the threshold too
 SHOWN = 8  # neighbours in the line of scan and ready; report.md has them all
@@ -58,11 +61,12 @@ def impact_areas(proposal: str, areas: Iterable[str]) -> set[str]:
     return {area for area in areas if area.casefold() in words}
 
 
-def neighbours(weights: Weights, text: str, pool: Sequence[tuple[str, str, str]], impact: set[str]) -> list[tuple[float, str, str]]:
-    """``(score, area, name)`` of the requirements of ``pool`` near ``text``: up to ``MOST`` at or above the threshold, and up to
-    ``IMPACT_MOST`` of each area of ``impact`` below it."""
+def neighbours(weights: Weights, text: str, pool: Sequence[tuple[str, str, str]], impact: set[str], own: str | None = None) -> list[tuple[float, str, str]]:
+    """``(score, area, name)`` of the requirements of ``pool`` near ``text`` of the area ``own``: up to ``MOST`` at or above the threshold
+    whose name ``text`` names by a stem, and up to ``IMPACT_MOST`` of each area of ``impact`` below it."""
     scored = sorted(((weights.score(text, body), area, name) for area, name, body in pool), key=lambda row: (-row[0], row[1], row[2]))
-    near = [row for row in scored if row[0] >= THRESHOLD][:MOST]
+    named = stems(text)
+    near = [row for row in scored if row[0] >= (SAME_AREA if row[1] == own else THRESHOLD) and stems(row[2]) & named][:MOST]
     for area in sorted(impact):
         near += [row for row in scored if row[1] == area and 0 < row[0] < THRESHOLD][:IMPACT_MOST]
     return near
@@ -85,8 +89,8 @@ def lines(change: str, areas: Sequence[str], applied: Sequence[tuple[str, str, s
     impact = impact_areas(proposal, {area for area, _name, _body in pool})
     found = [_regression_line(change, areas)]
     near: dict[tuple[str, str], tuple[float, str]] = {}
-    for _operation, _area, name, text in applied:
-        for score, area, other in neighbours(weights, text, pool, impact):
+    for _operation, own, name, text in applied:
+        for score, area, other in neighbours(weights, text, pool, impact, own):
             if score > near.get((area, other), (-1.0, ""))[0]:
                 near[(area, other)] = (score, name)
     if near:
@@ -101,7 +105,7 @@ def lines(change: str, areas: Sequence[str], applied: Sequence[tuple[str, str, s
                      f"не взято {len(disputed)} — причины и вопросы в questions-for-analyst.md")
     for operation, own, name, text, path, line, cause in disputed:  # an ADDED the base has with another text is no neighbour of itself
         others = [row for row in pool if (row[0], row[1]) != (own, name)]
-        close = ", ".join(f"{area}/«{other}»" for _score, area, other in neighbours(weights, text, others, impact))
+        close = ", ".join(f"{area}/«{other}»" for _score, area, other in neighbours(weights, text, others, impact, own))
         found.append(f"{DISPUTED} {operation} «{name}» ({path}:{line}) — {cause}" + (f"; смежные с ним: {close}" if close else ""))
     for operation, _area, name, text in applied:
         for _operation, _other_area, other, other_text, other_path, other_line, _cause in disputed:

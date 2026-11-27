@@ -97,7 +97,7 @@ def test_an_added_text_that_differs_names_the_place_in_the_specification_too(tmp
 def test_a_modified_name_the_specification_lacks_names_the_three_nearest(tmp_path: Path) -> None:
     spec = _named("Search owners", "Search owner list", "Search owner by name", "Search owner by city", "Visits")
     near = _said(_project(tmp_path, spec, MODIFY + _named("Search owner"))).split(NEAR)[1].split(", ")
-    assert len(near) == 3 and "Visits" not in near and "Search owners" in near
+    assert len(near) == 3 and "Search owners (openspec/specs/owners/spec.md:2)" in near and not any(item.startswith("Visits") for item in near)
 
 
 def test_a_rename_that_fits_nothing_names_the_nearest_old_name(tmp_path: Path) -> None:
@@ -153,3 +153,8 @@ def test_every_cause_of_the_table_starts_a_message_the_package_raises() -> None:
 def test_every_cause_of_the_composition_has_a_fix_of_its_own() -> None:
     fixes = [fix for prefix, fix, _human in OPENSPEC_REASONS if prefix.isascii()]  # the messages of build_context are English, those of the scan Russian
     assert all(fixes) and len(set(fixes)) == len(fixes)
+
+
+def test_a_nearest_name_carries_its_place_in_the_specification(tmp_path: Path) -> None:  # S3 of 27.11, the text of п. 16
+    said = _said(_project(tmp_path, _named("Create", "Search owners"), MODIFY + _named("Search owner")))
+    assert said.endswith(NEAR + f"Search owners ({BASE}:7)"), said
