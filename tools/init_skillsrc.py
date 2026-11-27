@@ -725,7 +725,7 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
                 continue
             problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))] + [
                 f"{item}: пересекается с {other} — назовите один из них" for index, item in enumerate(chosen) for other in chosen[:index]
-                if item == other or item.startswith(other + "/") or other.startswith(item + "/")]
+                if Path(item) == Path(other) or Path(other) in Path(item).parents or Path(item) in Path(other).parents]  # as skillsrc_context
             if not chosen or problems:
                 raise InitError("context_root_invalid", "; ".join(problems) or "paths.context: пустой ответ")
             context[module_id] = chosen

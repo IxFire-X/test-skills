@@ -607,9 +607,12 @@ def refuse_if_only_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mappi
     tail = ("этих ошибок нет в кандидате, их поставил код в вид ревьюера; оставь эти находки с severity INFO, правки по ним убери, "
             "вердикт вынеси по остальному (ПРИНЯТО, если больше ничего); отдай ответ единственным повтором стадии (--transport-attempts 2), "
             "ничего не записано")
-    if canaries and (answer.get("artifacts") or {}).get("successor_document") is not None:  # it would carry the seeded text into the set;
-        raise ValueError("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимаетс"  # the words never name the errors:
-                         "я — только правки; fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")  # the reviewer must not learn of them
+    # a whole document would carry the seeded text into the set: with errors seeded, edits only (filter_edits sees them).  The words never name
+    # the errors — the refusal must not confirm that this view holds them (approved 27.11, texts-approval п. 11).
+    if canaries and (answer.get("artifacts") or {}).get("successor_document") is not None:
+        raise ValueError("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимается — только правки; "
+                         "fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; "
+                         "отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")
     if verdict == "AUTO_FIX_APPLIED" and edits_dropped and "successor_edits" not in _filtered(canaries, answer) \
             and "successor_document" not in (answer.get("artifacts") or {}):
         named = ", ".join(sorted(set(edits_dropped)))

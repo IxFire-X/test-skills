@@ -79,6 +79,7 @@ _TOKEN_SIGNATURES = (
 )
 # token-assignment-v1 in a settings file: the key may be quoted («"api_key": "…"», YAML «"token": …»).  Not in documents and API-test collections
 # (.md .txt .bru .hurl): there it is an example of the requirement, and the task document must never fall out (live/ 27.11: 58 such, none a secret).
+_OPENAPI = re.compile(rb"(?m)^[ \t{]*[\'\"]?(?:openapi|swagger)[\'\"]?[ \t]*:")  # an OpenAPI/Swagger document in .json/.yaml
 _SETTINGS_SUFFIXES = frozenset({".json", ".yml", ".yaml", ".properties", ".ini", ".cfg", ".toml", ".conf"})
 _QUOTED_ASSIGNMENT = re.compile(rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{8,}")
 # token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
@@ -95,7 +96,7 @@ _SHELL_REFERENCE = re.compile(rb"\s*['\"]?\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|
 # word run whichever keyword it holds — and trying every keyword of a long run, each with a second ``[\w.-]*`` to the end of the run, was k x n (100 KB of
 # «pwd» did not finish).  The earliest keyword is enough.
 _PASSWORD_KEY = rb"(?>[\w.-]*?(?:password|passwd|pwd|secret)[\w.-]*)"
-_PASSWORD_LINE = re.compile(rb"(?im)^[ \t]*(?:-[ \t]+)?(['\"]?)" + _PASSWORD_KEY + rb"\1[ \t]*[:=][ \t]*(?P<value>[^\r\n]*)")
+_PASSWORD_LINE = re.compile(rb"(?im)^[ \t]*(?:-[ \t]+|(?:export|declare|local|readonly)[ \t]+(?:-\w+[ \t]+)*)?(['\"]?)" + _PASSWORD_KEY + rb"\1[ \t]*[:=][ \t]*(?P<value>[^\r\n]*)")
 _PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*+)"')
 # A tag is read up to its «>» and never over a «<»: neither may stand inside a start tag of well-formed XML, and a look-ahead that runs to the end of the text
 # from every «<» of a file with no «>» was n squared (100 KB of «<a » — it did not finish).
@@ -335,7 +336,8 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
     # Secret directories are left out by place (scan_rules.directory_reason); inside src/ only their non-source files (above).
     if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
-    rule_id = token_signature_rule(contents, source=is_source(path.name), settings=path.suffix.casefold() in _SETTINGS_SUFFIXES)
+    settings = path.suffix.casefold() in _SETTINGS_SUFFIXES and not _OPENAPI.search(contents[:4096])  # a spec is a document: its examples stay
+    rule_id = token_signature_rule(contents, source=is_source(path.name), settings=settings)
     if rule_id is not None:
         return rule_id, "token-signature"
     if _has_password(path, contents):
