@@ -11,7 +11,7 @@ import pytest
 from tests.test_review_canaries import _answer, _fake_seed, _select
 from tests.test_review_codeword import _with_words
 from tests.test_review_requested import _generated_run
-from tools import pilot_state, review_canaries, run_report, stage_steps, step_size
+from tools import pilot_state, review_canaries, run_report, stage_steps, stand
 from tools.fixes import FIXES
 
 REVIEW = "tc-reviewer:canonical"
@@ -134,7 +134,7 @@ def test_the_request_of_a_reused_batch_records_the_source_the_package_and_the_la
 
 def test_a_reused_batch_with_another_address_is_refused_at_a_stand(accepted: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     run = _follow(accepted)
-    monkeypatch.setattr(step_size, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": True})
+    monkeypatch.setattr(stand, "module_stand", lambda *_args: {"service_url_env": "PETCLINIC_URL", "tests_only": True})
     monkeypatch.setattr(stage_steps, "_other_address", lambda *_args: ["кейс TC-1, шаг S-1: адрес HTTP-шага берётся из переменной BASE_URL"])
     with pytest.raises(ValueError, match="STAND_URL_NAME"):
         _reuse(run, run["stages"][0])

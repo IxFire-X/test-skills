@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tools import step_size
+from tools import stand
 from tools.discover_project import discover_project
 from tools.init_skillsrc import ensure_skillsrc
 from tools.ready import check_shared_data, check_test_level
@@ -74,16 +74,16 @@ def test_ready_warns_of_a_context_without_the_variable() -> None:
 
 @pytest.mark.parametrize("default", [False, True])
 def test_a_module_without_the_key_follows_the_default_and_ready_names_the_other_value(monkeypatch, default) -> None:
-    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", default)
+    monkeypatch.setattr(stand, "SHARED_DATA_DEFAULT", default)
     row = check_shared_data({"id": "api", "test": {"framework": "junit5"}})
-    assert step_size.module_shared({}) is default and f'"shared_data": {str(not default).lower()}' in row["fix"], row
+    assert stand.module_shared({}) is default and f'"shared_data": {str(not default).lower()}' in row["fix"], row
 
 
 def test_the_key_wins_over_the_default_and_a_stand_is_shared(monkeypatch) -> None:
-    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", True)
-    assert step_size.module_shared({"shared_data": False}) is False and check_shared_data({"shared_data": False}) is None
-    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", False)
-    assert step_size.module_shared({"test": {"level": "stand"}}) is True
+    monkeypatch.setattr(stand, "SHARED_DATA_DEFAULT", True)
+    assert stand.module_shared({"shared_data": False}) is False and check_shared_data({"shared_data": False}) is None
+    monkeypatch.setattr(stand, "SHARED_DATA_DEFAULT", False)
+    assert stand.module_shared({"test": {"level": "stand"}}) is True
 
 
 def test_the_approved_texts_of_a_shared_environment() -> None:
@@ -102,9 +102,9 @@ def test_the_approved_texts_of_a_shared_environment() -> None:
 def test_a_drifted_skillsrc_gives_the_default(tmp_path: Path, monkeypatch, default) -> None:
     from tools import pilot_state
 
-    monkeypatch.setattr(step_size, "SHARED_DATA_DEFAULT", default)
+    monkeypatch.setattr(stand, "SHARED_DATA_DEFAULT", default)
     monkeypatch.setattr(pilot_state, "frozen_skillsrc_matches", lambda *_args: False)
-    assert step_size.shared_data(tmp_path, tmp_path, {"module": "."}) is default
+    assert stand.shared_data(tmp_path, tmp_path, {"module": "."}) is default
 
 
 def test_own_code_beside_src_test_is_no_tests_only_module(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@ import pytest
 
 from tests.test_existing_tests import _write
 from tests.test_finish import _project
-from tools import pilot_state, skillsrc_manifest, stage_steps, step_size
+from tools import pilot_state, skillsrc_manifest, stage_steps, stand, step_size
 from tools.existing_tests import env_view
 
 STAND = {"service_url_env": "PETCLINIC_URL", "tests_only": True}
@@ -22,25 +22,25 @@ def _skillsrc(monkeypatch: pytest.MonkeyPatch, level: str) -> None:
 
 def test_a_stand_module_gives_the_name_of_its_variable(tmp_path, monkeypatch):
     _skillsrc(monkeypatch, "stand")
-    assert step_size.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "local-pilot-v1"}) == STAND
-    assert step_size.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "cases-only-v1"}) is None
+    assert stand.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "local-pilot-v1"}) == STAND
+    assert stand.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "cases-only-v1"}) is None
 
 
 def test_an_in_process_module_gives_none(tmp_path, monkeypatch):
     _skillsrc(monkeypatch, "in-process")
-    assert step_size.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "local-pilot-v1"}) is None
+    assert stand.module_stand(tmp_path, tmp_path, {"module": ".", "policy_profile": "local-pilot-v1"}) is None
 
 
 def test_a_batch_at_a_stand_reads_the_variable(tmp_path, monkeypatch):
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    monkeypatch.setattr(stand, "module_stand", lambda *_: STAND)
     found = step_size.with_test_env(run_root, {"stage": "tc-generator:BATCH-fixture", "attempt_id": attempt_id, "files": []})
     assert found["stand"]["service_url_env"] == "PETCLINIC_URL" and "name: PETCLINIC_URL" in found["stand"]["rule"]
 
 
 def test_a_batch_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypatch):
     _project_path, run_root, _attempt_id, _values = _project(tmp_path)
-    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    monkeypatch.setattr(stand, "module_stand", lambda *_: STAND)
     step = {"step_id": "STEP-B1-001-01", "operation": {"kind": "http", "base_url_source": {"kind": "environment", "name": "BASE_URL"}}}
     with pytest.raises(ValueError, match="STAND_URL_NAME: кейс TC-1, шаг STEP-B1-001-01"):
         stage_steps._assemble(run_root, "tc-generator:BATCH-fixture", {"cases": [{"case_id": "TC-1", "steps": [step]}]}, False, None)
@@ -49,14 +49,14 @@ def test_a_batch_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypat
 @pytest.mark.parametrize("stage", ["tc-generator:rework-1", "tc-reviewer:rework-1"])
 def test_the_rework_and_its_review_read_the_variable(tmp_path, monkeypatch, stage):
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    monkeypatch.setattr(stand, "module_stand", lambda *_: STAND)
     found = step_size.with_test_env(run_root, {"stage": stage, "attempt_id": attempt_id, "files": []})
     assert found["stand"]["service_url_env"] == "PETCLINIC_URL" and "name: PETCLINIC_URL" in found["stand"]["rule"]
 
 
 def test_a_rework_with_another_variable_is_refused_at_a_stand(tmp_path, monkeypatch):
     _project_path, run_root, _attempt_id, _values = _project(tmp_path)
-    monkeypatch.setattr(step_size, "module_stand", lambda *_: STAND)
+    monkeypatch.setattr(stand, "module_stand", lambda *_: STAND)
     step = {"step_id": "STEP-B1-001-01", "operation": {"kind": "http", "base_url_source": {"kind": "environment", "name": "BASE_URL"}}}
     with pytest.raises(ValueError, match="STAND_URL_NAME: кейс TC-1"):
         stage_steps._assemble(run_root, "tc-generator:rework-1", {"cases": [{"case_id": "TC-1", "steps": [step]}]}, False, None)

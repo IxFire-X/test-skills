@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools import pack_registry, step_size
+from tools import pack_registry, stand, step_size
 
 ROLES = ("tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
@@ -20,10 +20,10 @@ def test_a_stand_insert_is_small(role):
 
 
 def test_ingest_names_the_variable_when_the_stand_tests_were_skipped(tmp_path, monkeypatch):
-    monkeypatch.setattr(step_size, "module_stand", lambda *_: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
+    monkeypatch.setattr(stand, "module_stand", lambda *_: {"service_url_env": "PETCLINIC_URL", "tests_only": False})
     skipped = {"execution_evidence": [{"status": "SKIPPED"}]}
-    assert "PETCLINIC_URL" in step_size.stand_skip_note(tmp_path, tmp_path, {}, skipped, "UNKNOWN")["stand_note"]
-    assert step_size.stand_skip_note(tmp_path, tmp_path, {}, skipped, "PASS") == {}
+    assert "PETCLINIC_URL" in stand.stand_skip_note(tmp_path, tmp_path, {}, skipped, "UNKNOWN")["stand_note"]
+    assert stand.stand_skip_note(tmp_path, tmp_path, {}, skipped, "PASS") == {}
 
 
 @pytest.mark.parametrize("role", ("tc-generator", "tc-reviewer"))

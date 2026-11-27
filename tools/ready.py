@@ -328,7 +328,7 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
 
 
-SHARED_ROWS = {  # by step_size.SHARED_DATA_DEFAULT: what a module without the key gets, and the key that says otherwise
+SHARED_ROWS = {  # by stand.SHARED_DATA_DEFAULT: what a module without the key gets, and the key that says otherwise
     False: ("общая среда не отмечена (shared_data нет): кейсы пишутся как для среды, где других записей нет",
             "если кейсы проходят там, где есть чужие записи, — впишите в .skillsrc у модуля {id} \"shared_data\": true"),
     True: ("среда модуля считается общей (shared_data нет): кейсы создают записи с меткой прогона и удаляют их шагом «Уборка»",
@@ -339,7 +339,7 @@ SHARED_ROWS = {  # by step_size.SHARED_DATA_DEFAULT: what a module without the k
 def check_shared_data(module: Mapping[str, Any]) -> dict[str, Any] | None:
     """One OK row for a module without ``shared_data`` (a module at a stand is shared and needs none): what the package takes and the key that says otherwise."""
     from tools.skillsrc_manifest import module_test_level
-    from tools.step_size import SHARED_DATA_DEFAULT
+    from tools.stand import SHARED_DATA_DEFAULT
 
     if "shared_data" in module or (module_test_level(module) or ("",))[0] == "stand":
         return None

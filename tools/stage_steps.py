@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from tools import batch_assembly, cases_import, confined_output, context_marker_parts, output_guard, pilot_state, scope_pause, step_size
+from tools import stand as stand_rules
 from tools.context_marker_merge import with_requirements
 from tools.fixes import human_for, spent_abandon
 from tools.json_cli import spent_stages
@@ -136,7 +137,7 @@ def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str,
 
 def _stand_address(root: Path, state: Mapping[str, Any], value: Any) -> None:
     """STAND_URL_NAME: an answer of the generator (a batch, the rework — written or taken from a source run) whose HTTP step takes its address elsewhere."""
-    if (stand := step_size.module_stand(project_of(root), root, state["attempts"][-1])) and (wrong := _other_address(value, stand["service_url_env"])):
+    if (stand := stand_rules.module_stand(project_of(root), root, state["attempts"][-1])) and (wrong := _other_address(value, stand["service_url_env"])):
         name = stand["service_url_env"]
         raise ValueError(f"STAND_URL_NAME: {wrong[0]}, а адрес стенда модуля — в переменной {name} (.skillsrc, service_url_env); "
                          f"fix: в base_url_source этого шага укажи kind: environment, name: {name} — другую переменную тестировщик не задаёт")

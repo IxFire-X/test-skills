@@ -940,7 +940,7 @@ def _record_late_drift(coordinates: Mapping[str, Any], request: Any, report: Map
 
 def _finish_ingest(coordinates: Mapping[str, Any], report: Mapping[str, Any]) -> int:
     from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.step_size import stand_skip_note
+    from tools.stand import stand_skip_note
 
     root, attempt_id = Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])
     try:
