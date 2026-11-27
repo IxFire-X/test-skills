@@ -1185,8 +1185,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     from tools.doc_sections import resolve_spec
     from tools.run_scan import relative_to_project
     from tools.scope_pause import check_plan
-    from tools import step_size
-    from tools.step_size import require_generator_context_all
+    from tools.step_size import require_generator_context_all, step_modes
 
     subject = answer.get("subject") if isinstance(answer, Mapping) and set(answer) == {"subject"} else None
     if not (isinstance(subject, str) and subject.strip() and len(subject) <= 200 and not re.search(r"[\x00-\x1f\x7f-\x9f]", subject)):
@@ -1209,8 +1208,7 @@ def publish_plan(run_root: Path, attempt_id: str, answer: Any, dry_run: bool = F
     receipts = [str(receipt["digest"]) for receipt in found["receipts"]]
     plan = plan_batches_for_project(found["requirements"], {"header_digest": header_digest, "context_receipt_digest": receipts[0], "context_receipt_digests": receipts},
                                     project, [found["answer"], *_style_samples_file(root, attempt_id)], found["receipts"], run_skeleton(root, attempt),
-                                    found["out_of_scope"], found["sources"],  # the samples are part of the common input of every batch
-                                    modes=step_size.step_modes(root, "tc-generator:BATCH-"))  # the inserts every batch reads (stand, import)
+                                    found["out_of_scope"], found["sources"], modes=step_modes(root, "tc-generator:BATCH-"))  # the samples and the inserts (stand, import): the common input of every batch
     item_plan = {**plan, "digest": _generator_input_digest(plan)}
     check_plan(root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
     _check_plan_against(root, attempt_id, item_plan, state)

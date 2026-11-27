@@ -422,8 +422,7 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
                              input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
                              imported: Mapping[str, Any] | None = None,
-                             out_of_scope: Sequence[Mapping[str, Any]] | None = None, sources: Sequence[str] = (),
-                             modes: tuple[str, ...] = ()) -> BatchPlan:
+                             out_of_scope: Sequence[Mapping[str, Any]] | None = None, sources: Sequence[str] = (), modes: tuple[str, ...] = ()) -> BatchPlan:
     """The plan of ``submit --stage plan``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipts, the map of existing project tests, the skeleton of an
     import and the tc-generator role), the documents of the receipts.
