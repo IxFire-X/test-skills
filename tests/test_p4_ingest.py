@@ -88,17 +88,26 @@ def attempt(tmp_path: Path):
     return project, run_root, attempt_id
 
 
-def test_the_command_of_a_maven_module_of_a_reactor_names_the_module_and_carries_the_word() -> None:
+def test_the_command_of_a_maven_module_of_a_reactor_names_the_module_and_carries_the_word(tmp_path: Path) -> None:
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")  # the root of the reactor
     selectors = ("org.demo.AppTest#works", "org.demo.AppTest#fails")
-    reports, argv = command_for(MAVEN, "/p/mvnw", "default", selectors)
-    request = ExecutionRequest(MAVEN, "/p/mvnw", argv, "/p/services/api", selectors, 600, reports, ("PROJECT_NATIVE_ENV",), "default", ())
+    reports, argv = command_for(MAVEN, str(tmp_path / "mvnw"), "default", selectors)
+    request = ExecutionRequest(MAVEN, str(tmp_path / "mvnw"), argv, str(tmp_path / "services/api"), selectors, 600, reports, ("PROJECT_NATIVE_ENV",), "default", ())
     challenge = exec_commands._challenge(request, "0123456789abcdef")
-    working, command = exec_commands._human_command(Path("/p"), Path("/p/services/api"), "services/api", request, challenge)
+    working, command = exec_commands._human_command(tmp_path, tmp_path / "services/api", "services/api", request, challenge)
     assert working == "." and command[0] == "mvnw"
     assert command[command.index("-pl") + 1] == "services/api" and "-am" in command
     assert "-Dpilot.run=0123456789abcdef" in command and command[-1] == "test"
     assert "-Dsurefire.failIfNoSpecifiedTests=false" in command
     assert challenge == {"kind": "system-property", "name": "pilot.run", "value": "0123456789abcdef"}
+
+
+def test_a_module_without_a_reactor_runs_from_its_own_directory(tmp_path: Path) -> None:
+    """A tests repository beside the sources of an application, the folder has no pom.xml: no -pl, no -am (the stand run, phase 3)."""
+    reports, argv = command_for(MAVEN, str(tmp_path / "tests/mvnw"), "default", ("org.demo.ApiTest#works",))
+    request = ExecutionRequest(MAVEN, str(tmp_path / "tests/mvnw"), argv, str(tmp_path / "tests"), ("org.demo.ApiTest#works",), 600, reports, ("PROJECT_NATIVE_ENV",), "default", ())
+    working, command = exec_commands._human_command(tmp_path, tmp_path / "tests", "tests", request, {"value": "0123456789abcdef"})
+    assert working == "tests" and "-pl" not in command and "-am" not in command and command[-1] == "test"
 
 
 def test_gradle_has_no_word_to_carry_and_says_so() -> None:

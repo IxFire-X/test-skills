@@ -470,12 +470,13 @@ def _relative_executable(executable: str, base: Path) -> str:
 
 def _human_command(project: Path, module_root: Path, module_relative: str, request: Any, challenge: Mapping[str, Any]) -> tuple[str, list[str]]:
     """The directory and the argument list a human runs: the closed request, from the root of the reactor for a Maven module of a
-    multi-module project (``-pl <module> -am``), with the challenge in it."""
+    multi-module project (``-pl <module> -am``), with the challenge in it.  A module whose project root has no ``pom.xml`` is a build of
+    its own (a tests repository in one folder with the sources of an application): it runs from its own directory."""
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     argv = list(request.argv)
     if request.adapter_id in {MAVEN, SYSTEM_MAVEN}:
-        from_reactor = module_relative not in {"", "."}
+        from_reactor = module_relative not in {"", "."} and (project / "pom.xml").is_file()
         base = project if from_reactor else module_root
         executable = request.executable if request.adapter_id == SYSTEM_MAVEN else _relative_executable(request.executable, base)
         extra = ["-pl", module_relative, "-am", "-Dsurefire.failIfNoSpecifiedTests=false", "-DfailIfNoTests=false"] if from_reactor else []
