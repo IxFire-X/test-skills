@@ -62,5 +62,17 @@ def test_overlapping_context_roots_are_refused_with_the_key_to_fix(tmp_path: Pat
     root = _stand(tmp_path)
     (root / "app" / "src").mkdir(exist_ok=True)
     _declare(root, ["app", "app/src"])
-    with pytest.raises(InventoryError, match="CONTEXT_ROOT_INVALID: app/src: пересекается с другим корнем paths.context"):
+    with pytest.raises(InventoryError) as refused:
         skillsrc_context(root, root / "autotests")
+    assert str(refused.value) == "CONTEXT_ROOT_INVALID: app/src: пересекается с другим корнем paths.context — оставьте в .skillsrc у модуля один из них"
+
+
+def test_an_init_answer_with_overlapping_context_roots_names_both(tmp_path: Path) -> None:
+    from tools.discover_project import discover_project
+    from tools.init_skillsrc import InitError, _tests_only_context
+
+    root = _stand(tmp_path)
+    answers = {"module:autotests:service_url_env": "APP_URL", "module:autotests:paths.context": "app,app/src"}
+    with pytest.raises(InitError) as refused:
+        _tests_only_context(root, discover_project(root), answers, set())
+    assert str(refused.value) == "app/src: пересекается с app — назовите один из них"  # approved 27.11
