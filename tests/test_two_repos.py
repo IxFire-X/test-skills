@@ -32,22 +32,30 @@ def _questions(report: dict) -> dict:
     return {question["id"]: question for question in report.get("questions") or []}
 
 
+def _past_the_stand(root: Path) -> tuple[dict, dict]:
+    """The answers of the first round (the stand's variable is named) and the questions of the second."""
+    from tools.init_skillsrc import ensure_skillsrc
+
+    first = _questions(ensure_skillsrc(root, {}, False))
+    answers = {key: "APP_URL" if key.endswith(":service_url_env") else question["options"][0]["id"] for key, question in first.items()}
+    return answers, _questions(ensure_skillsrc(root, answers, False))
+
+
 def test_a_tests_only_module_is_asked_for_its_context_root_and_the_answer_is_written(tmp_path: Path) -> None:
     from tools.init_skillsrc import ensure_skillsrc
     from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc
 
     root = _stand(tmp_path)
-    report = ensure_skillsrc(root, {}, False)
-    questions = _questions(report)
+    answers, questions = _past_the_stand(root)
     context = [key for key in questions if key.endswith(":paths.context")]
-    assert report["status"] == "needs_input" and len(context) == 1, report
+    assert len(context) == 1, questions
     assert not [key for key in questions if key.endswith(":paths.source")]  # the old question that answers could not close
-    assert [option["id"] for option in questions[context[0]]["options"]] == ["app"]
-    answers = {key: question["options"][0]["id"] for key, question in questions.items()}
+    assert [option["id"] for option in questions[context[0]]["options"]] == ["app", "no-application-code"]
+    answers.update({key: question["options"][0]["id"] for key, question in questions.items()})
     assert ensure_skillsrc(root, answers, True)["status"] == "created"
     modules = {module["root"]: module for module in normalize_skillsrc(load_skillsrc(root / ".skillsrc"))["modules"]}
     assert modules["autotests"]["paths"]["context"] == ["app"]
-    assert not [key for key in _questions(ensure_skillsrc(root, {}, False)) if key.endswith((":paths.context", ":paths.source"))]
+    assert not [key for key in _questions(ensure_skillsrc(root, {}, False)) if key.endswith((":paths.context", ":paths.source", ":service_url_env"))]
 
 
 @pytest.mark.parametrize("answer", ["../outside", "autotests", "autotests/src", "missing", "/abs", ""])
@@ -56,8 +64,8 @@ def test_a_context_root_outside_the_project_inside_the_module_or_missing_is_refu
 
     root = _stand(tmp_path / "stand")
     (tmp_path / "outside").mkdir()
-    questions = _questions(ensure_skillsrc(root, {}, False))
-    answers = {key: question["options"][0]["id"] for key, question in questions.items()}
+    answers, questions = _past_the_stand(root)
+    answers.update({key: question["options"][0]["id"] for key, question in questions.items()})
     answers[next(key for key in questions if key.endswith(":paths.context"))] = answer
     report = ensure_skillsrc(root, answers, True)
     assert report["status"] == "error" and report["errors"] == ["context_root_invalid"] and not (root / ".skillsrc").exists()

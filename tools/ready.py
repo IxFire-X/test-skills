@@ -335,6 +335,10 @@ def check_test_level(module: Mapping[str, Any]) -> dict[str, Any]:
     found = module_test_level(module)
     if found is None:
         return _row("test:level", CASES, "OK", "у модуля нет блока test: уровня автотестов нет")
+    if (module.get("paths") or {}).get("context") and not module.get("service_url_env"):  # before the derived «stand»: it needs the variable
+        return _row("test:level", CASES, "WARN", f"у модуля {module.get('id')} есть paths.context, но нет service_url_env: scan сделает только кейсы",
+                    f"если нужны автотесты против стенда — впишите в .skillsrc у модуля {module.get('id')} service_url_env: <ИМЯ> — переменную "
+                    "окружения с адресом поднятого стенда")
     note = level_derived_note(module)
     if note is not None:
         return _row("test:level", CASES, "WARN", f"TEST_LEVEL_DERIVED: {note[0]}", note[1])

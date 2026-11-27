@@ -553,7 +553,7 @@ def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _input_exit_code(code: str) -> int:
-    return 2 if code in {"answer_unknown", "context_root_invalid", "discovery_invalid", "invalid_encoding", "invalid_json", "invalid_shape", "schema_invalid", "read_error"} else 1
+    return 2 if code in {"answer_unknown", "context_root_invalid", "service_url_env_invalid", "discovery_invalid", "invalid_encoding", "invalid_json", "invalid_shape", "schema_invalid", "read_error"} else 1
 
 
 def _safe_fingerprint(value: Any) -> str:
@@ -673,18 +673,27 @@ def _authority_question() -> dict[str, Any]:
 NOT_SELECTED_EVIDENCE = "default:not-selected-module"
 CONTEXT_IMPACT = ("Модуль только с тестами: исходники приложения лежат в соседнем каталоге проекта. Назовите его (paths.context): "
                   "пакет только читает его для контекста модели, ничего там не пишет и не собирает")
+NO_CODE = ("no-application-code", " Ответ no-application-code: кода приложения в этой папке нет — кейсы и автотесты пишутся по документу и тестам "
+           "модуля (разметке нечего сверять с кодом)")
+STAND_IMPACT = ("Тесты модуля ходят в поднятый стенд. Назовите переменную окружения, в которой лежит адрес API стенда (например, PETCLINIC_URL = "
+                "https://stand.example/petclinic/api — тот адрес, с которого начинаются пути в документе требований). Пакет хранит только имя "
+                "переменной и к стенду не обращается. Ответ no-stand: тесты модуля сами поднимают приложение (in-process, например "
+                "SpringBootTest в сборке проекта) — стенда нет")
 
 
-def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
-                        declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
-    """The ``paths.source`` question of a tests-only module becomes ``paths.context``; an answer (option IDs or
-    paths from the project root, comma-separated) closes both.  Returns (discovery, the other answers, {module: roots})."""
+def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str], declared: set[str]
+                        ) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]], dict[str, str | None]]:
+    """The ``paths.source`` question of a tests-only module becomes, in mode B, ``service_url_env`` (a variable name, or ``no-stand``:
+    ``in-process``, nothing more to ask) and then ``paths.context``; an answer (option IDs or paths from the project root, comma-separated,
+    or ``no-application-code``) closes both.  Returns (discovery, the other answers, {module: roots}, {module: variable or None})."""
+    from tools.execution_gate import execution_available
     from tools.project_inventory import context_root_problem
 
     modules = {str(module.get("id")): module for module in discovery.get("modules", []) if isinstance(module, Mapping)}
     questions: list[Any] = []
     rest = dict(answers)
     context: dict[str, list[str]] = {}
+    stand: dict[str, str | None] = {}
     for question in discovery.get("questions", []):
         field = str(question.get("field", "")) if isinstance(question, Mapping) else ""
         options = question.get("options") if isinstance(question, Mapping) else None
@@ -697,9 +706,23 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
         if module_id in declared:
             continue
         module_root = root / str((modules.get(module_id) or {}).get("root") or ".")
-        question_id = f"module:{module_id}:paths.context"
+        stand_id, question_id = f"module:{module_id}:service_url_env", f"module:{module_id}:paths.context"
+        if execution_available() and stand_id not in rest:  # the cases-only delivery has no autotests: no stand to name
+            evidence = sorted({str(item) for option in options or [] if isinstance(option, Mapping) for item in option.get("evidence") or []})
+            questions.append({"id": stand_id, "field": f"modules.{module_id}.service_url_env", "impact": STAND_IMPACT,
+                              "options": [{"id": "no-stand", "value": "no-stand", "evidence": evidence}]})
+            continue
+        if stand_id in rest:
+            name = rest.pop(stand_id).strip()
+            if name != "no-stand" and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise InitError("service_url_env_invalid", f"service_url_env: «{name}» — не имя переменной окружения: латиница, цифры и _, первый знак не цифра")
+            stand[module_id] = None if name == "no-stand" else name
+            if name == "no-stand":
+                continue
         if question_id in rest:
             chosen = [item.strip() for item in rest.pop(question_id).split(",") if item.strip()]
+            if chosen == [NO_CODE[0]]:  # a stand without the application's code in the project
+                continue
             problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))]
             if not chosen or problems:
                 raise InitError("context_root_invalid", "; ".join(problems) or "paths.context: пустой ответ")
@@ -707,9 +730,10 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
             continue
         candidates = sorted(str(other.get("root")) for other_id, other in modules.items() if other_id != module_id
                             and (other.get("paths") or {}).get("source") and context_root_problem(root, module_root, str(other.get("root"))) is None)
-        questions.append({"id": question_id, "field": f"modules.{module_id}.paths.context", "impact": CONTEXT_IMPACT,
-                          "options": [{"id": item, "value": item, "evidence": [f"{item}:sources"]} for item in candidates]})
-    return {**discovery, "questions": questions}, rest, context
+        questions.append({"id": question_id, "field": f"modules.{module_id}.paths.context", "impact": CONTEXT_IMPACT + NO_CODE[1],
+                          "options": [{"id": item, "value": item, "evidence": [f"{item}:sources"]} for item in candidates]
+                          + [{"id": NO_CODE[0], "value": NO_CODE[0], "evidence": []}]})
+    return {**discovery, "questions": questions}, rest, context, stand
 
 
 SOURCE_ROOT_FIX = ("ответ на вопрос о корне исходников — путь папки от корня модуля (несколько — через запятую), в ней должны лежать исходники; "
@@ -830,9 +854,10 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         if list((module.get("paths") or {}).get("source") or [])
         or list((module.get("paths") or {}).get("context") or [])  # a tests-only module reads its sources there
         or list((module.get("feature_sources") or {}).get("source") or [])
+        or module.get("service_url_env") or (module.get("test") or {}).get("level")  # a tests-only module answered without either
     }
     try:
-        working_discovery, answers, context_paths = _tests_only_context(root, working_discovery, answers, declared_existing)
+        working_discovery, answers, context_paths, stand = _tests_only_context(root, working_discovery, answers, declared_existing)
         working_discovery, answers, source_paths = _answered_sources(root, working_discovery, answers, declared_existing)
     except InitError as error:
         receipt = _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
@@ -847,7 +872,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         )
     ]
     source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)
-                        and str(question.get("field", "")).endswith((".paths.source", ".paths.context"))]
+                        and str(question.get("field", "")).endswith((".paths.source", ".paths.context", ".service_url_env"))]
     if source_questions:
         questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)]
         if not questions:
@@ -874,6 +899,9 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
             if (declared.get("paths") or {}).get("source") and not (module.get("paths") or {}).get("source"):
                 module.setdefault("paths", {})["source"] = list(declared["paths"]["source"])
             _keep_declared_test_keys(module, declared, new_file=existing is None)
+            if isinstance(module, dict) and module.get("id") in stand:  # the answered stand of a tests-only module (after the default level)
+                if stand[module["id"]]: module["service_url_env"] = stand[module["id"]]
+                if isinstance(module.get("test"), dict): module["test"]["level"] = "stand" if stand[module["id"]] else "in-process"
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:

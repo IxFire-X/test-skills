@@ -30,7 +30,7 @@
               "additionalProperties": false,
               "required": ["id", "value", "evidence"],
               "properties": {
-                "id": {"enum": ["keep-existing", "use-detected", "replace-proposed", "java", "python", "go", "typescript", "kotlin", "maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn", "junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing", "provide-source-root"]},
+                "id": {"enum": ["keep-existing", "use-detected", "replace-proposed", "java", "python", "go", "typescript", "kotlin", "maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn", "junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing", "provide-source-root", "no-stand", "no-application-code"]},
                 "value": {"type": "string"},
                 "evidence": {"type": "array", "items": {"type": "string"}}
               }
