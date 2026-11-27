@@ -107,9 +107,9 @@ def step_budget(project: Path, limits: Mapping[str, Any] | None = None) -> int:
     return _limit(project, "step_input_bytes", DEFAULT_BUDGET, limits=limits)
 
 
-def step_window(project: Path) -> int:
-    """The model window in bytes (``.skillsrc`` ``limits.step_window_bytes``); 0 turns the tc-generator split off."""
-    return _limit(project, "step_window_bytes", DEFAULT_WINDOW, zero=True)
+def step_window(project: Path, limits: Mapping[str, Any] | None = None) -> int:
+    """The model window in bytes (``.skillsrc`` ``limits.step_window_bytes``, or of *limits*); 0 turns the tc-generator split off."""
+    return _limit(project, "step_window_bytes", DEFAULT_WINDOW, zero=True, limits=limits)
 
 
 class GeneratorContextNotImplemented(ValueError):
@@ -272,10 +272,10 @@ def journal_inputs(project: Path, run_id: str, stage: str, batch: int | None) ->
     selected = [str(event["artifact_digest"]) for event in derive_state(root)["events"]
                 if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "CONTEXT_SELECTED"]
     part = None
-    if batch is not None:  # the receipts of part N as the plan groups them; before the requirements answer there are no parts: receipt N
+    if batch is not None:  # the receipts of part N as the plan groups them; before the requirements answer a part is an estimate with no inputs: receipt N
         from tools.context_marker_parts import plan as marker_plan
 
-        part = next((set(row["input_digests"][1:-1]) for row in marker_plan(root)["parts"] if row["stage"] == f"context-marker:batch-{batch:03d}"), None)
+        part = next((set(row["input_digests"][1:-1]) for row in marker_plan(root)["parts"] if row["stage"] == f"context-marker:batch-{batch:03d}" and "input_digests" in row), None)
     for digest in sorted(dict.fromkeys(selected)):  # the receipts the journal selected, read the strict way — never a glob of the folder
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if batch is None or (receipt.get("batch_index") == batch if part is None else digest in part):

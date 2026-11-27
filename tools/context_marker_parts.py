@@ -65,7 +65,8 @@ def _groups(root: Path, attempt_id: str, receipts: list[Mapping[str, Any]], aske
 
 
 def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
-    from tools.step_size import code_map_bytes, code_map_path, requirements_view_bytes, requirements_view_path, role_files, step_budget, step_window
+    from tools.step_size import (code_map_bytes, code_map_path, requirements_view_bytes, requirements_view_path, role_files, run_limits, step_budget,
+                                 step_window)
 
     root = Path(root).resolve()
     project = project_of(root)
@@ -78,7 +79,8 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         raise ValueError(pilot_state.scan_incomplete_message(*unfinished))
     receipts = _receipts(root, state, attempt_id)
     responses = _responses(state, attempt_id)
-    budget = step_budget(project) if budget is None else budget
+    limits = run_limits(project, root, state, attempt_id)[0]  # the limits the run froze, as prepare measures a part (review 332f9f60 item 3)
+    budget = step_budget(project, limits) if budget is None else budget
     role = sum(path.stat().st_size for path in role_files("context-marker"))
     documents = sum((project / row["path"]).stat().st_size for row in baseline["requirements"].get("docs", []))
 
@@ -120,7 +122,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
             read = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:requirements", answer)
             view = len(requirements_view_bytes(read["artifact"], answer))
             old = not requirements_view_path(root, answer).is_file()  # a part asked before the view (none on the disk) read the answer
-            limit = int(step_window(project) * WINDOW_SHARE)
+            limit = int(step_window(project, limits) * WINDOW_SHARE)
             for number, group in enumerate(_groups(root, attempt_id, receipts, asked, batch, head, view + role, limit, budget), start=1):
                 stage = f"context-marker:batch-{number:03d}"
                 requirements_bytes = read["byte_count"] if old and stage in asked else view
@@ -128,6 +130,13 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                                   {"batch": sum(batch(stage, receipt) for receipt in group), "requirements": requirements_bytes, "role": role},
                                   "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                                   + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else "")))
+        else:  # before the answer: an estimate a receipt a row (the documents for the view), so status warns of a part over the budget early;
+            for receipt in receipts:  # no input digests and a «waits»: prepare refuses it (STAGE_WAITS) — review 332f9f60 item 2
+                stage = f"context-marker:batch-{int(receipt['batch_index']):03d}"
+                part = step(stage, [], {"batch": batch(stage, receipt), "requirements": documents, "role": role},
+                            "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")
+                del part["input_digests"]
+                parts.append({**part, "waits": "ждёт ответа context-marker:requirements"})
         mode = "parts"
     pending = [part["stage"] for part in parts if not part["done"]]
     if "context-marker:baseline" in responses:

@@ -42,7 +42,8 @@ def _model_of(root: Path, attempt_id: str, stage: str) -> str:
 def test_an_openspec_run_goes_in_parts_even_with_one_batch_and_its_requirements_step_is_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _project_dir, root, _attempt = _run(tmp_path, monkeypatch)
     steps = plan(root)
-    assert steps["mode"] == "parts" and [part["stage"] for part in steps["parts"]] == ["context-marker:requirements"]  # the part comes with the answer
+    assert steps["mode"] == "parts" and [part["stage"] for part in steps["parts"]] == ["context-marker:requirements", "context-marker:batch-001"]
+    assert "input_digests" not in steps["parts"][1] and steps["parts"][1]["waits"]  # before the answer: an estimate (review 332f9f60 item 2)
     assert steps["parts"][0]["by_code"] is True
 
 

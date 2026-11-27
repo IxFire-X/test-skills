@@ -262,13 +262,30 @@ def test_a_single_marker_must_bind_every_receipt(tmp_path: Path) -> None:
 
 
 def test_no_part_before_the_requirements_answer(tmp_path: Path) -> None:
-    """A part is grouped by the bytes of the view of the requirements answer: before it the plan names the requirements step only."""
+    """A part is grouped by the bytes of the view of the requirements answer: before it the plan has an estimate a receipt a row — no inputs,
+    waiting for the answer, with its fits (review 332f9f60 item 2: status warns of a part over the budget before the answer)."""
     root, attempt_id, baseline, receipts = _run(tmp_path)
-    assert [part["stage"] for part in plan(root)["parts"]] == ["context-marker:requirements"]
+    early = plan(root)
+    assert [part["stage"] for part in early["parts"]] == ["context-marker:requirements", *(f"context-marker:batch-{index:03d}" for index in range(1, 4))]
+    assert all("input_digests" not in part and part["waits"] and "fits" in part for part in early["parts"][1:]) and early["next"] == "context-marker:requirements"
     requirements = _publish_requirements(root, attempt_id, baseline)
     parts = plan(root)["parts"][1:]
     assert [part["input_digests"] for part in parts] == [[baseline["inventory_digest"], receipt["digest"], requirements["content_digest"]]
                                                          for receipt in receipts]
+
+
+def test_a_receipt_over_the_budget_is_named_before_the_requirements_answer(tmp_path: Path) -> None:  # review 332f9f60 item 2
+    root, _attempt_id, _baseline, _receipts = _run(tmp_path)
+    early = plan(root, budget=1000)["parts"][1:]
+    assert early and all(part["fits"] is False and "context_batch_bytes" in part["hint"] for part in early)
+
+
+def test_the_parts_are_planned_by_the_limits_the_run_froze(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # review 332f9f60 item 3
+    """A .skillsrc edited after the scan (its bytes are not the frozen ones) does not reshape the parts: the plan takes run_limits, as prepare."""
+    root, _attempt_id, _baseline, _receipts = _run(tmp_path)
+    monkeypatch.setattr(step_size, "_live_limits", lambda _project: {"step_input_bytes": 2048, "step_window_bytes": 0})
+    monkeypatch.setattr(pilot_state, "frozen_skillsrc_matches", lambda *_args: False)
+    assert step_size.step_budget(tmp_path) == 2048 and plan(root)["budget_bytes"] == step_size.DEFAULT_BUDGET
 
 
 def test_a_part_without_the_documents_digest_is_planned_and_accepted(tmp_path: Path) -> None:
