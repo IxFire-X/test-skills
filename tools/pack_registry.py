@@ -44,6 +44,8 @@ CASES_ONLY_EXCLUDED_FILES = (
     "tools/autotest_hints.py", "tools/trace_check.py", "tools/build_trace_document.py", "tools/quarantine.py", "tools/code_slices.py", "tools/automation_text.py",
     "tools/execution_journal.py",
     "tools/execution_core.py",  # the interface of the core for the execution files
+    # the inserts of the stand (W3.2): read only by a run whose module tests against a stand, and that is mode B (``step_size.module_stand``)
+    "skills/tc-generator/modes/stand.md", "skills/tc-reviewer/modes/stand.md",
 )
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a
