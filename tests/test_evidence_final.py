@@ -37,7 +37,6 @@ def _two_tests(document: dict, **options) -> dict:
     return artifact
 
 
-@pytest.mark.slow
 def test_a_failed_test_beside_a_skipped_one_is_a_final_fail(tmp_path, capsys, monkeypatch) -> None:
     from tests.test_exec_prepares import _project
 
@@ -47,7 +46,6 @@ def test_a_failed_test_beside_a_skipped_one_is_a_final_fail(tmp_path, capsys, mo
     assert code == 1 and output["verdict"] == "FAIL" and output["finalization"] == "complete", output  # 1: a test failed
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("refusal", ["finalization", "delta"])
 def test_the_ingest_names_the_refusal_of_the_dispositions(tmp_path, capsys, monkeypatch, refusal) -> None:
     """F1: the refusal of the dispositions keeps its words — once lost under «durable execution closure evidence is unavailable»."""
@@ -96,7 +94,6 @@ while time.time() < end and not (flags / "release").exists():
 """
 
 
-@pytest.mark.slow
 def test_a_reader_of_the_old_runs_leaves_them_free(tmp_path) -> None:
     from tests.test_run_lock import _STATUS, _answer, _run, _spawn, _wait_for
 
@@ -112,7 +109,6 @@ def test_a_reader_of_the_old_runs_leaves_them_free(tmp_path) -> None:
     assert answer["status"] == "ok", answer
 
 
-@pytest.mark.slow
 def test_a_reader_of_the_old_runs_waits_for_a_short_holder_and_reads(tmp_path) -> None:
     from tests.test_run_lock import _HOLDER, _run, _spawn, _wait_for
 
