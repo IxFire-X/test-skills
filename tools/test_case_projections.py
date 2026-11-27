@@ -331,6 +331,18 @@ def _literal_url_value(value: Any) -> str:
     return str(value)
 
 
+def _orders(case: dict[str, Any]) -> dict[str, int]:
+    """``id -> number`` of the case for the text a tester reads: a step by its display order, a setup (canonical 1.2.0) by the number of the
+    precondition line it prepares (from 1) — the ids never collide (``STEP-…``, ``SETUP-…``)."""
+    return {**{step["step_id"]: step["display_order"] for step in case["steps"]},
+            **{item["setup_id"]: item["precondition_index"] + 1 for item in case.get("setup") or []}}
+
+
+def _setup_origin(source: dict[str, Any], display_orders: dict[str, int] | None) -> str:
+    number = (display_orders or {}).get(source["setup_id"])
+    return f"подготовки к предусловию {number}" if number is not None else f"подготовки {source['setup_id']}"
+
+
 def _url_placeholder(source: dict[str, Any], display_orders: dict[str, int] | None) -> str:
     """Tell a manual tester where a non-literal URL value comes from; never a secret handle."""
     kind = source["kind"]
@@ -342,7 +354,9 @@ def _url_placeholder(source: dict[str, Any], display_orders: dict[str, int] | No
         return f"<фикстура {source['name']}>"
     if kind == "environment":
         return f"<переменная окружения {source['name']}>"
-    return f"<{source['safe_label']}>"
+    if kind == "setup_output":
+        return f"<{source['output_id']} из {_setup_origin(source, display_orders)}>"
+    return f"<{source['safe_label']}>" if kind == "secret_handle" else f"<{kind}>"  # a kind no branch knows: its name, never a KeyError
 
 
 def _http_url(step: dict[str, Any], display_orders: dict[str, int] | None = None) -> str | None:
@@ -415,8 +429,10 @@ def _variable(source: dict[str, Any], display_orders: dict[str, int], setups: di
         name, line = source["name"], f"переменная окружения {source['name']}"
     elif kind == "fixture":
         name, line = source["name"], f"фикстура {source['name']}"
-    else:
+    elif kind == "secret_handle":
         name, line = source["safe_label"], "секрет, в файл не попадает"
+    else:  # a kind no branch knows: its name, never a KeyError
+        name, line = str(kind), str(kind)
     legend.setdefault(name, line)
     return "{{" + name + "}}"
 
@@ -609,7 +625,7 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
             + (("<h3>Предусловия</h3>" + ("<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in own) + "</ul>" if own else "<p>Не требуются.</p>")) if own or not common else ""),
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
         ))
-        display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
+        display_orders = _orders(case)
         for step_number, step in enumerate(case["steps"], 1):
             block = request_block(step, display_orders, case) if profile == _PROFILE_V6 and group is None else None
             request = "" if block is None else f"<pre>{html.escape(block, quote=True)}</pre>"
@@ -681,7 +697,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str, extras: d
             lines.extend(["", "**Шаги:**", "", "| № | Действие | Тестовые данные / запрос | Ожидаемый результат |", "|---|---|---|---|"])
         else:
             lines.extend(["", "**Шаги:**"])
-        display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
+        display_orders = _orders(case)
         capabilities = {item["capability_id"]: item for item in document["operation_capabilities"]}
         for step_number, step in enumerate(case["steps"], 1):
             if profile == _PROFILE_V1:
@@ -752,7 +768,9 @@ def _input_source(source: dict[str, Any], display_orders: dict[str, int]) -> str
         return "fixture:" + source["name"]
     if kind == "environment":
         return "env:" + source["name"]
-    return "secret:" + source["safe_label"]
+    if kind == "setup_output":
+        return f"{source['output_id']}, полученный в {_setup_origin(source, display_orders).replace('подготовки', 'подготовке', 1)}"
+    return "secret:" + source["safe_label"] if kind == "secret_handle" else str(kind)
 
 
 def _operation_text(step: dict[str, Any], capabilities: dict[str, dict[str, Any]]) -> str:
@@ -781,6 +799,8 @@ def _assertion_value(value: dict[str, Any], display_orders: dict[str, int]) -> s
         return _compact_json(value["value"])
     if kind == "step_output":
         return f"{value['output_id']}, полученный на шаге {display_orders[value['step_id']]}"
+    if kind == "setup_output":
+        return f"{value['output_id']}, полученный в {_setup_origin(value, display_orders).replace('подготовки', 'подготовке', 1)}"
     if kind in {"fixture", "environment"}:
         return kind + ":" + value["name"]
     if kind == "secret_handle":
@@ -856,7 +876,7 @@ def _render_zephyr_csv_validated(document: dict[str, Any], profile: str = _PROFI
     warnings: list[str] = []
     for case in document["test_cases"]:
         warnings.extend(_custom_field_warnings(case))
-        display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
+        display_orders = _orders(case)
         capabilities = {item["capability_id"]: item for item in document["operation_capabilities"]}
         metadata = _case_metadata(case)
         for step_index, step in enumerate(case["steps"]):
