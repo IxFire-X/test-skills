@@ -1006,10 +1006,7 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
             raise ValueError("execution receipt has no terminal verification")
         if verification == "UNKNOWN":
             execution_gate.from_mode_b("execution_journal", "record_execution_unknown")[0](run_root, attempt_id, str(execution_record["digest"]))
-        pilot_state.validate_execution_event_branch(
-            pilot_state.derive_state(run_root)["events"], attempt_id, verification,
-            str(execution_record["digest"]),
-        )
+        pilot_state.validate_execution_event_branch(pilot_state.derive_state(run_root)["events"], attempt_id, verification, str(execution_record["digest"]))
         trace_pair = execution_gate.from_mode_b("execution_journal", "publish_execution_trace_pair")[0](
             run_root, attempt_id, automation_artifact, autotest_review,
         )
@@ -1049,12 +1046,9 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
                 run_root=run_root, attempt_id=attempt_id,
                 execution_unknown_evidence_digest=unknown_digest,
             )
-    except FinalizationError:
-        raise  # its own words and way out (a conflict of the dispositions, a trace that cannot be built), never the general line
-    except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
-        if isinstance(error, execution_gate.load_mode_b("generated_delta").GeneratedDeltaError):
-            raise FinalizationError(str(error)) from error  # «<code>: <message>», as decide_dispositions says it
-        raise FinalizationError("durable execution closure evidence is unavailable") from error
+    except FinalizationError: raise  # noqa: E701 — its own words and way out (a conflict of the dispositions, a trace that cannot be built)
+    except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:  # a GeneratedDeltaError keeps «<code>: <message>», as in decide_dispositions
+        raise FinalizationError(str(error) if isinstance(error, execution_gate.load_mode_b("generated_delta").GeneratedDeltaError) else "durable execution closure evidence is unavailable") from error
 
     steps = [
         step
