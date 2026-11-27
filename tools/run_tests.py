@@ -802,12 +802,10 @@ def validate_execution_evidence(verdict: str, run_id: str | None, source: Mappin
         diagnostics.append(_diag("/exit_code", "RUNNER_EXIT_CODE_VERDICT", "PASS requires a zero process exit code."))
     if verdict == "FAIL" and run_id is not None and not any(value in {"FAILED", "ERROR"} for value in statuses.values()) and not process_evidence:
         diagnostics.append(_diag("/execution_evidence", "RUNNER_FAIL_EVIDENCE", "FAIL requires FAILED or ERROR current evidence."))
-    complete = (
-        not diagnostics
-        and not process_evidence
-        and len(statuses) == len(required)
-        and "SKIPPED" not in statuses.values()
-    )
+    covered = not diagnostics and not process_evidence and len(statuses) == len(required)
+    complete = covered and "SKIPPED" not in statuses.values()
+    # an exact framework failure is authoritative beside a skipped test (classify_evidence, trace_check): a skip hides a pass, not a failure
+    failed = covered and any(value in {"FAILED", "ERROR"} for value in statuses.values())
     zero_collect = (
         not diagnostics
         and not evidence
@@ -816,7 +814,7 @@ def validate_execution_evidence(verdict: str, run_id: str | None, source: Mappin
         and isinstance(stats, Mapping)
         and all(stats.get(key) == 0 for key in ("total", "passed", "failed", "errors", "skipped"))
     )
-    if zero_collect or complete and any(value in {"FAILED", "ERROR"} for value in statuses.values()):
+    if zero_collect or failed:
         derived = "FAIL"
     elif complete and exit_code in (None, 0):
         derived = "PASS"
@@ -826,7 +824,7 @@ def validate_execution_evidence(verdict: str, run_id: str | None, source: Mappin
         # therefore classifies it as UNKNOWN.
         derived = "UNKNOWN"
     if verdict != derived: diagnostics.append(_diag("/verdict", "RUNNER_EVIDENCE_VERDICT", "Verdict does not match current execution evidence."))
-    if authoritative != (complete or zero_collect): diagnostics.append(_diag("/evidence_authoritative", "RUNNER_EVIDENCE_AUTHORITATIVE", "Authoritative flag does not match current execution evidence."))
+    if authoritative != (complete or failed or zero_collect): diagnostics.append(_diag("/evidence_authoritative", "RUNNER_EVIDENCE_AUTHORITATIVE", "Authoritative flag does not match current execution evidence."))
     if run_id is not None and stats is not None:
         current = [row for row in evidence if row.get("run_id") == run_id]
         expected_stats = {"total": len(current), **{name: sum(row.get("status") == status for row in current) for name, status in (("passed", "PASSED"), ("failed", "FAILED"), ("errors", "ERROR"), ("skipped", "SKIPPED"))}}

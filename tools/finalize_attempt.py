@@ -1049,7 +1049,11 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
                 run_root=run_root, attempt_id=attempt_id,
                 execution_unknown_evidence_digest=unknown_digest,
             )
+    except FinalizationError:
+        raise  # its own words and way out (a conflict of the dispositions, a trace that cannot be built), never the general line
     except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
+        if isinstance(error, execution_gate.load_mode_b("generated_delta").GeneratedDeltaError):
+            raise FinalizationError(str(error)) from error  # «<code>: <message>», as decide_dispositions says it
         raise FinalizationError("durable execution closure evidence is unavailable") from error
 
     steps = [

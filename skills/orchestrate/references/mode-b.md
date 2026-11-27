@@ -44,7 +44,7 @@ python -m tools.run_pipeline materialize --project "$project" --module "$moduleI
 python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId"
 ```
 
-`ingest` takes the reports by `report_location` from `materialize`: `--reports` is not needed, with it — an absolute path in the module or `<run>/incoming/`. It checks the reports against the attempt and closes it; the build did not reach the tests — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. An interrupted `ingest` is repeated with the same reports.
+`ingest` takes the reports by `report_location` from `materialize` and from there only: `--reports` is not needed (another folder is refused). It checks the reports against the attempt and closes it; the build did not reach the tests — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`. An interrupted `ingest` is repeated with the same reports.
 No report — `UNKNOWN`; a timeout of an exact test by the framework's report — `FAIL`. After `EXECUTION_STARTED` do not restart an interruption automatically; the continuation is a new scan.
 
 ## 6. Closing

@@ -156,15 +156,20 @@ def test_story_materialize_refusals_then_a_real_run_cut_planted_and_repeated(tmp
     code, output = _ingest(project, run_root, capsys)
     assert code == 2 and output["reason"] == "INGEST_REPORT_MISSING" and "--no-reports" in output["fix"] and "materialize" in output["fix"], output
     assert _terminal(run_root, attempt_id) is None and not (run_root / "execution-receipts").exists()
-    # row: the report of another module, extra tests, a duplicate in two fresh files
+    # row: the report of another module, extra tests, a duplicate
     _write(project / REPORT, _junit([("other.module.tests", "test_x")], suite=suite))
     assert _reason(_ingest(project, run_root, capsys)) == "INGEST_REPORT_MISMATCH"
     _write(project / REPORT, _junit([("tests.test_generated", "test_selected"), ("tests.test_extra", "test_more")], suite=suite))
     assert _reason(_ingest(project, run_root, capsys)) == "INGEST_REPORT_MISMATCH"
+    _write(project / REPORT, _junit([("tests.test_generated", "test_selected")] * 2, suite=suite))
+    assert _reason(_ingest(project, run_root, capsys)) == "INGEST_REPORT_MISMATCH"
     (project / REPORT).unlink()
-    for name in ("a.xml", "b.xml"):
-        _write(project / "test-results" / name, _junit([("tests.test_generated", "test_selected")], suite=suite))
-    assert _reason(_ingest(project, run_root, capsys, reports=str(project / "test-results"))) == "INGEST_REPORT_MISMATCH"
+    # row: another folder of the module — ingest reads only where the build writes (E2: from elsewhere no attempt ever closed)
+    _write(project / "test-results" / "a.xml", _junit([("tests.test_generated", "test_selected")], suite=suite))
+    code, output = _ingest(project, run_root, capsys, reports=str(project / "test-results"))
+    assert output["reason"] == "INGEST_REPORT_OUTSIDE_MODULE", output  # the approved words (texts-approval-20261127 п. 7)
+    assert output["message"].endswith(" — не место отчётов сборки " + str((project / REPORT).resolve()) + ": ingest читает отчёты только там, куда их пишет команда из materialize")
+    assert output["fix"] == "перенесите отчёты туда, куда их пишет команда из materialize (report_location), и повторите ingest без --reports"
     shutil.rmtree(project / "test-results")
     # row: a path outside the module, a link
     outside = tmp_path / "elsewhere"
@@ -228,12 +233,12 @@ def test_story_an_old_report_a_stale_one_beside_a_fresh_one_the_flags_and_a_buil
     assert code == 2 and output["reason"] == "INGEST_WITHOUT_MATERIALIZE" and "materialize" in output["fix"], output
     assert not _has(run_root, attempt_id, "generated-delta")
     # row: an old report that lay there before materialize
-    _write(project / "test-results" / "old.xml", _junit([("tests.test_generated", "test_selected")]))
+    _write(project / REPORT, _junit([("tests.test_generated", "test_selected")]))
     printed = _materialize(project, run_root, capsys)
-    assert _reason(_ingest(project, run_root, capsys, reports=str(project / "test-results"))) == "INGEST_REPORT_STALE"
-    # row: the old report has the needed test, the fresh one does not — the old one does not make up for it
-    _write(project / "test-results" / "fresh.xml", _junit([("tests.test_other", "test_unrelated")], suite=_word(printed)))
-    assert _reason(_ingest(project, run_root, capsys, reports=str(project / "test-results"))) == "INGEST_REPORT_MISMATCH"
+    assert _reason(_ingest(project, run_root, capsys)) == "INGEST_REPORT_STALE"
+    # row: the old report had the needed test, the fresh one in its place does not
+    _write(project / REPORT, _junit([("tests.test_other", "test_unrelated")], suite=_word(printed)))
+    assert _reason(_ingest(project, run_root, capsys)) == "INGEST_REPORT_MISMATCH"
     # the flags of a statement
     assert _ingest(project, run_root, capsys, no_reports=True, reason="BUILD_FAILED", reports=str(project / "x"))[1]["reason"] == "INGEST_REASON_WITH_REPORTS"
     assert _ingest(project, run_root, capsys, no_reports=True)[1]["reason"] == "INGEST_REASON_UNKNOWN"

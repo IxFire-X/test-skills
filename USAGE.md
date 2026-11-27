@@ -226,7 +226,7 @@ AUTO_FIX_APPLIED, или ТРЕБУЕТ ДОРАБОТКИ, если исход 
 `run_pipeline status` и его поля `state` и `next`.
 
 **Закрытие.** `python -m tools.run_pipeline materialize --project <abs> --module <ID> --run <id>` кладёт тесты в проект и печатает
-команду; человек запускает её, затем `python -m tools.run_pipeline ingest --project <abs> --module <ID> --run <id> --reports <каталог>`
+команду; человек запускает её, затем `python -m tools.run_pipeline ingest --project <abs> --module <ID> --run <id>` (отчёты — там, куда их пишет напечатанная команда)
 принимает отчёты и закрывает попытку; квитанции берёт из журнала сам.
 `python -m tools.run_pipeline finish --project <abs> --run <id>` закрывает попытку без исполнения
 (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации — отвергнута последняя допустимая ревизия или BLOCKED при блокерах в каноне) и уже закрытую — идемпотентно.

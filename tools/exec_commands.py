@@ -446,7 +446,7 @@ def cmd_exec(args: Any) -> int:
     _print({"status": "error", "stage": "exec", "reason": "EXEC_REPLACED",
             "message": "exec больше не запускает сборку: тесты кладёт materialize, команду запускает человек, отчёты принимает ingest",
             "fix": "python -m tools.run_pipeline materialize --project <project> --run <run_id> → человек запускает напечатанную команду → "
-                   "python -m tools.run_pipeline ingest --project <project> --run <run_id> --reports <каталог с отчётами>"})
+                   "python -m tools.run_pipeline ingest --project <project> --run <run_id>"})
     return 2
 
 
@@ -605,7 +605,7 @@ def _report_files(location: Path, allowed: Sequence[Path]) -> list[tuple[Path, o
     location = Path(os.path.abspath(location))
     base = next((root for root in allowed if location == root or root in location.parents), None)
     if base is None:
-        raise HostStop("INGEST_REPORT_OUTSIDE_MODULE", f"каталог отчётов {location} лежит вне модуля и вне каталога incoming прогона")
+        raise HostStop("INGEST_REPORT_OUTSIDE_MODULE", f"{location} — не место отчётов сборки {allowed[0]}: ingest читает отчёты только там, куда их пишет команда из materialize")
     walk = base
     for part in location.relative_to(base).parts:
         walk = walk / part
@@ -724,8 +724,7 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
     working = printed["working_directory"]
     try:
         shown, shown_powershell = printed_forms(project, working, command)
-        tail = (f'--run {root.name} --reports <каталог с отчётами внутри модуля '
-                f'или {(root / "incoming").relative_to(project).as_posix()}/>')
+        tail = f'--run {root.name}'
         ingest = f'{command_text([sys.executable, "-m", "tools.run_pipeline", "ingest", "--project", str(project)])} {tail}'
         ingest_powershell = f'{command_text_powershell([sys.executable, "-m", "tools.run_pipeline", "ingest", "--project", str(project)])} {tail}'
     except HostStop as stop:
@@ -1098,9 +1097,11 @@ def cmd_ingest(args: Any) -> int:
     module_root = Path(coordinates["module_root"])
     location = Path(os.path.abspath(reports_given)) if reports_given else module_root / printed["report_location"]  # a relative path is the caller's
     try:
-        entries = _report_files(location, [module_root, root / "incoming"])
+        # only where the build writes them: a report elsewhere in the module is a drift of the baseline, one in <run>/incoming/ is outside
+        # the report path of the receipt (execution_journal) — neither ever closed an attempt
+        entries = _report_files(location, [module_root / printed["report_location"]])
     except HostStop as error:
-        return _ingest_refusal(attempt_id, error.code, str(error), "скопируйте отчёты в каталог внутри модуля или в <run>/incoming/ и повторите ingest")
+        return _ingest_refusal(attempt_id, error.code, str(error), "перенесите отчёты туда, куда их пишет команда из materialize (report_location), и повторите ingest без --reports")
     before = {row["path"]: (row["mtime_ns"], row["size"], row["sha256"]) for row in printed["report_inventory"]}
     taken = int(printed["inventory_taken_ns"])
     # fresh: not as it lay when materialize looked, and not older than that look (a copy that kept an old time is an old report)
@@ -1181,7 +1182,7 @@ def add_parsers(sub: Any, shared: Any) -> None:
     ingest_parser = sub.add_parser("ingest", parents=[shared], help="P4: take the reports of the human's run of the printed command.")
     ingest_parser.add_argument("--run", required=True)
     ingest_parser.add_argument("--language", choices=("python", "java"))
-    ingest_parser.add_argument("--reports", help="a folder of the reports inside the module (default: where the build writes them) or inside <run>/incoming/")
+    ingest_parser.add_argument("--reports", help="where the printed command writes the reports (report_location of materialize, the default) or a part of it; another folder is refused")
     ingest_parser.add_argument("--no-reports", action="store_true", help="the run left no reports (needs --reason); only a negative result can come of it")
     ingest_parser.add_argument("--reason", choices=("BUILD_FAILED", "TESTS_NOT_STARTED", "RESULT_UNAVAILABLE"))
 

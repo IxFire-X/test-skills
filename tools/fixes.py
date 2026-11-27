@@ -266,14 +266,15 @@ FIXES: dict[str, str] = {
                              "поставкой, продолжай её командами, а здесь начни новый — `scan --project <project> --new-run` без --profile",
     # --- the build is run by a human (materialize prints the command, ingest takes the reports) ---
     "EXEC_REPLACED": "exec заменён: `materialize --project <project> --run <run_id>` кладёт тесты в проект и печатает команду, человек её запускает, "
-                     "`ingest --project <project> --run <run_id> --reports <каталог с отчётами>` принимает отчёты",
+                     "`ingest --project <project> --run <run_id>` принимает отчёты",
     "COMMAND_NOT_PRINTABLE": "переименуйте или переместите проект (или интерпретатор/модуль) в каталог без символов, которые назвал ответ, и начните прогон заново "
                              "(scan --new-run): путь входит в напечатанную команду, а в cmd.exe, PowerShell и sh они меняют её смысл",
     "INGEST_WITHOUT_MATERIALIZE": "сначала `run_pipeline materialize --project <project> --run <run_id>`: он кладёт тесты в проект и печатает команду для человека",
     "INGEST_REPORT_MISSING": "запустите команду из materialize (`materialize --run <run_id>` напечатает её снова) и повторите ingest; отчёты ищутся там, где напечатал "
                              "materialize, — `--reports` не нужен, а с ним путь абсолютный; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED`",
     "INGEST_REPORT_STALE": "в каталоге только отчёты, лежавшие до materialize: запустите команду из materialize заново и повторите ingest",
-    "INGEST_REPORT_OUTSIDE_MODULE": "отчёты должны лежать внутри модуля (без ссылок) или в <run>/incoming/: скопируйте XML туда и повторите ingest с --reports",
+    "INGEST_REPORT_OUTSIDE_MODULE": "отчёты читаются только там, куда их пишет команда из materialize (report_location, без ссылок): перенесите XML туда "
+                                    "и повторите ingest без --reports",
     "INGEST_REPORT_MISMATCH": "в отчётах не те тесты, что рецензированы (чужой модуль, лишние, недостающие, дубликаты): запустите команду из materialize целиком "
                               "и повторите ingest",
     "INGEST_CHALLENGE_MISSING": "в отчёте нет слова команды из materialize: отчёт получен не этой командой; запустите её и повторите ingest",

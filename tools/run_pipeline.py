@@ -437,14 +437,12 @@ def _leave(root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _before_canonical_review(root: Path, attempt_id: str) -> bool:
-    """The attempt has no reviewer session yet — no closing command exists before the canonical review."""
-    from tools.pilot_state import read_reviewer_session_ledger
+    """The attempt has no reviewer session yet — no closing command exists before the canonical review.  Only the absence of the
+    ledger says so: a ledger published and then unreadable (damaged, unbound) is a review that began, and its refusal is the finish's own."""
+    from tools.pilot_state import derive_state
 
-    try:
-        read_reviewer_session_ledger(root, attempt_id)
-    except (KeyError, OSError, TypeError, ValueError):
-        return True
-    return False
+    return not any(event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1" and event.get("event_type") == "ARTIFACT_PUBLISHED"
+                   for event in derive_state(root)["events"])
 
 
 def _closed_before_review(project: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -531,7 +529,7 @@ def cmd_finish(args: Any) -> int:
         # attempt is read with report/status
         closes_by_ingest = executed and attempt.get("state") != "TERMINAL" and execution_gate.execution_available()
         raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает ingest или она уже закрыта: --abandon не нужен",
-                       _exact_fix("python -m tools.run_pipeline ingest --project <project> --run <run_id> --reports <каталог с отчётами>" if closes_by_ingest else
+                       _exact_fix("python -m tools.run_pipeline ingest --project <project> --run <run_id>" if closes_by_ingest else
                                   "попытка закрыта: итог — python -m tools.run_pipeline report --project <project> --run <run_id> "
                                   "(или status); следующий заход — next_run из ответа finish/status", project, root, attempt_id))
     if abandon == "LEFT_BEFORE_REVIEW":  # the run stays as it is; a plain scan of the request starts a new one

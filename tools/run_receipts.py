@@ -257,7 +257,16 @@ def written_files(run_root: Path) -> dict[str, set[str]]:
     """``{project path: {digests}}`` of the files the package wrote in this run: ``content_digest`` of the ownership receipt, ``quarantined_digest``
     of a quarantined row of the final dispositions.  A light read for the model input and the map, not a proof: each receipt is read through
     ``read_confined_bytes``, sealed, and counted only when the journal of the attempt read its digest back.  Anything unclear raises
-    ``ValueError`` — the caller then treats no file of the run as written by the package.  Needs no module of mode B; only reads."""
+    ``ValueError`` — the caller then treats no file of the run as written by the package.  Needs no module of mode B; only reads, and holds
+    the lock of the run for this read only (``run_lock.for_one_read``: a short command of another process is waited for)."""
+    from tools import run_lock
+
+    resolved = Path(run_root).resolve(strict=True)
+    with run_lock.for_one_read(resolved.parent.parent, resolved):
+        return _written_files(run_root)
+
+
+def _written_files(run_root: Path) -> dict[str, set[str]]:
     project, root = _run_root(run_root)
     state, found = derive_state(root), {}
     for attempt in state["attempts"]:
