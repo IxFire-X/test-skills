@@ -113,8 +113,8 @@ FIXES: dict[str, str] = {
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
     "IMPORT_NOT_CASES_RUN": "импорт — для прогона scan --cases; у этого прогона требования размечает модель",
     "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
-    "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
-                                   "ячейки CSV и повторите scan --cases --new-run",
+    "IMPORT_REQUIREMENTS_INVALID": "требования собрал код пакета из CSV, а не модель — повтор их не исправит: это дефект пакета; "
+                                   "покажи человеку это сообщение и сохрани папку прогона для разработчиков пакета",  # read_cases refuses every CSV that could fail it
     "ZEPHYR_CSV_PROFILE": "профиль CSV — zephyr-scale-step-row-24-v6 (по умолчанию, текст человека и запрос HTTP-шага), "
                           "zephyr-scale-step-row-24-v5 (только текст человека) или zephyr-scale-step-row-24-v4 "
                           "(плюс машинные колонки шагов); профили v1–v3 только читаются; других значений нет",

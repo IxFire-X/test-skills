@@ -106,7 +106,8 @@ def read_cases(data: bytes) -> list[dict[str, Any]]:
     """The cases of the CSV; a v4 export of the package is refused by the one check of the reference and import readers (``require_human_csv``).
 
     A cell no faithful answer could keep is refused by row — an empty Step or Expected Result, a service mark
-    as the expected result (the canonical rule ``service_expected``)."""
+    as the expected result (the canonical rule ``service_expected``); a CSV with no case at all (only the header, or no row with a Name) is
+    refused whole — with no case the run has no requirement, and scan and ready say so before a run, with ``--docs`` or without."""
     from tools.canonical_document import service_expected
 
     try:
@@ -114,7 +115,7 @@ def read_cases(data: bytes) -> list[dict[str, Any]]:
         require_human_csv(cases)
     except ZephyrCsvError as error:
         raise CasesImportError(error.code, str(error).split(": ", 1)[1]) from None
-    errors: list[str] = []
+    errors: list[str] = [] if cases else ["в CSV нет ни одного кейса: нет строки с заполненным Name"]  # no case, no requirement of the run: refused here, before any run
     for case in cases:
         for step in case["steps"]:
             if not step["action"].strip():
