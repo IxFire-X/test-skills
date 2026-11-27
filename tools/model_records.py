@@ -96,15 +96,21 @@ def _published_context_receipts(state: Mapping[str, Any], attempt_id: str, stage
                               and (cutoff is None or event["seq"] < cutoff)))
 
 
+def _part_receipts(inputs: Sequence[str], published: Sequence[str]) -> list[str]:
+    """The receipts a part binds: ``[inventory, receipt…, answer]``; a run before FaT-P3 bound the documents first and one receipt
+    (its second input is the inventory, never a published receipt)."""
+    return [str(digest) for digest in (inputs[2:-1] if len(inputs) == 4 and inputs[1] not in published else inputs[1:-1])]
+
+
 def _context_marker_receipt_digests(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str, inputs: Sequence[str],
 ) -> list[str]:
     """The context receipts a marker request binds after requirements and inventory.
 
-    The requirements step binds none (documents only).  A part binds exactly one receipt and then the requirements
-    answer.  The merged ``context-marker:baseline`` of a marker in parts binds every part's receipt in part order, the
-    requirements answer and every part answer in the same order (an identical answer once); a single marker binds the
-    receipts only, as before.
+    The requirements step binds none (documents only).  A part binds its receipts — one or more in a row, right after those of
+    the parts before it — and then the requirements answer.  The merged ``context-marker:baseline`` of a marker in parts binds
+    every part's receipts in part order (each receipt once, none skipped), the requirements answer and every part answer in the
+    same order (an identical answer once); a single marker binds the receipts only, as before.
     """
     requirements, batches = _context_marker_parts(state, attempt_id)
     published = _published_context_receipts(state, attempt_id, stage_instance_id)
@@ -113,22 +119,26 @@ def _context_marker_receipt_digests(
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")
         return []
     if stage_instance_id.startswith("context-marker:batch-"):
-        # [inventory, receipt, requirements answer]; the runs of an earlier version also bound the documents digest first
-        if len(inputs) not in (3, 4) or requirements is None or requirements[1] is None or inputs[-1] != requirements[1]:
-            raise ValueError("context-marker part must bind one context receipt and the requirements answer")
-        number = int(stage_instance_id.rsplit("-", 1)[1])
-        if not 1 <= number <= len(published) or inputs[-2] != published[number - 1]:
-            raise ValueError(f"{stage_instance_id} must bind context receipt {number} of the attempt (batch-NNN is the N-th published receipt)")
-        return [inputs[-2]]
+        if len(inputs) < 3 or requirements is None or requirements[1] is None or inputs[-1] != requirements[1]:
+            raise ValueError("context-marker part must bind its context receipts and the requirements answer")
+        number, receipts = int(stage_instance_id.rsplit("-", 1)[1]), _part_receipts(inputs, published)
+        before = [_part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], published)
+                  for stage, request, _response in batches if int(stage.rsplit("-", 1)[1]) < number]
+        at = [published.index(digest) if digest in published else -1 for digest in receipts]
+        start = sum(map(len, before)) if len(before) == number - 1 else number - 1  # every part before it holds one receipt at least
+        if -1 in at or at != list(range(at[0], at[0] + len(at))) or at[0] < start or (len(before) == number - 1 and at[0] != start):
+            raise ValueError(f"{stage_instance_id} must bind context receipts in a row after those of the parts before it, in publication order, none skipped")
+        return receipts
     if not batches:
         if list(inputs[2:]) != published:
             raise ValueError("context-marker:baseline must bind every context receipt of the attempt, once, in publication order")
         return list(inputs[2:])
     if requirements is None or requirements[1] is None or any(response is None for _stage, _request, response in batches):
         raise ValueError("merged context-marker request requires every part answer")
-    receipts = [_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"][-2] for stage, request, _response in batches]
+    receipts = [digest for stage, request, _response in batches
+                for digest in _part_receipts(_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"], published)]
     if receipts != published:
-        missing = [f"batch-{index:03d}" for index, digest in enumerate(published, start=1) if digest not in receipts]
+        missing = [f"receipt {index}" for index, digest in enumerate(published, start=1) if digest not in receipts]
         raise ValueError(f"CONTEXT_MARKER_PARTS_INCOMPLETE: the parts must cover every context receipt of the attempt once, in order; missing {missing}")
     if list(inputs[2:]) != [*receipts, requirements[1], *dict.fromkeys(str(response) for _stage, _request, response in batches)]:
         raise ValueError("merged context-marker request must bind every part receipt, the requirements answer and every part answer in order")
@@ -146,7 +156,7 @@ def _context_marker_snapshots(
     baseline = read_execution_baseline(project, root, root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     minimum = 2 if stage_instance_id == "context-marker:requirements" else 3
     head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
-    if stage_instance_id.startswith("context-marker:batch-") and len(inputs) == 3:
+    if stage_instance_id.startswith("context-marker:batch-") and list(inputs[:1]) == head[1:]:
         head = head[1:]  # a part binds the inventory, not the documents again (the answer of the requirements step does)
     if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:len(head)]) != head or len(inputs) < minimum:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
@@ -583,6 +593,7 @@ class ModelStageArtifactInvalid(ValueError):
 # of v0.8)
 context_marker_parts = _context_marker_parts
 context_marker_receipt_digests = _context_marker_receipt_digests
+part_receipts = _part_receipts
 context_marker_snapshots = _context_marker_snapshots
 context_selection_target = _context_selection_target
 model_request_target = _model_request_target

@@ -148,9 +148,10 @@ def test_a_dry_run_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert {path.relative_to(root): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()} == tree
 
 
-def test_the_last_part_merges_the_marker_and_only_the_last(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_last_part_merges_the_marker_and_only_the_last(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     from tools.context_marker_merge import merge_marker_artifacts
 
+    monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 0)  # no model window: a part a receipt, three parts
     root, attempt_id, _baseline, receipts = _run(tmp_path)
     _requirements_step(capsys, root)
     parts = [_marker([f"src/part{index}.py — наблюдение {index}"]) for index in range(len(receipts))]

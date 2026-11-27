@@ -881,7 +881,7 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
     stages = source["stages"]
     baseline = list(stages["context-marker:baseline"][0]["input_digests"])
     parts = sorted(stage for stage in stages if stage.startswith("context-marker:batch-"))
-    receipts = [str(stages[stage][0]["input_digests"][-2]) for stage in parts] if parts else baseline[2:]
+    receipts = [str(digest) for stage in parts for inputs in [stages[stage][0]["input_digests"]] for digest in inputs[1 if inputs[0] == baseline[1] else 2:-1]] if parts else baseline[2:]  # a part: [inventory, receipt…, answer] (before FaT-P3: the documents first)
     return [*baseline[:2], *receipts]
 
 

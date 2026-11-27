@@ -271,9 +271,14 @@ def journal_inputs(project: Path, run_id: str, stage: str, batch: int | None) ->
     files: list[Path] = []
     selected = [str(event["artifact_digest"]) for event in derive_state(root)["events"]
                 if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "CONTEXT_SELECTED"]
+    part = None
+    if batch is not None:  # the receipts of part N as the plan groups them; before the requirements answer there are no parts: receipt N
+        from tools.context_marker_parts import plan as marker_plan
+
+        part = next((set(row["input_digests"][1:-1]) for row in marker_plan(root)["parts"] if row["stage"] == f"context-marker:batch-{batch:03d}"), None)
     for digest in sorted(dict.fromkeys(selected)):  # the receipts the journal selected, read the strict way — never a glob of the folder
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
-        if batch is None or receipt.get("batch_index") == batch:
+        if batch is None or (receipt.get("batch_index") == batch if part is None else digest in part):
             files.extend(project_path(project, item["project_path"]) for item in receipt["files"])
     answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
                    if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"

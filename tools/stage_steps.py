@@ -382,6 +382,8 @@ def _locate(run_root: Path, stage: str) -> tuple[Path, Path, Mapping[str, Any], 
                          "автотесты строит новый прогон local-pilot-v1 (scan без --profile cases-only-v1) в поставке с режимом Б")
     steps = row[0](root) if row else []
     step = next((item for item in steps if item["stage"] == stage), None)
+    if step is None and stage.startswith("context-marker:batch-") and any(item["stage"] == "context-marker:requirements" and not item["done"] for item in steps):
+        raise ValueError(f"STAGE_WAITS: {stage}: ждёт ответа context-marker:requirements — по нему считаются части; fix: сначала prepare и submit этой стадии")
     if step is None:
         raise ValueError(f"STAGE_UNKNOWN: {stage} — не стадия, которую ведут prepare и submit; fix: next.stage из `status` "
                          f"({', '.join(item['stage'] for item in steps) or 'эта стадия идёт своей командой или её в этом прогоне нет (scope: разметка ещё не принята) — next.verb'})")

@@ -18,6 +18,12 @@ from tools.pilot_state import append_event, create_run
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _one_receipt_a_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mechanics of the parts: with no model window a part holds one receipt (the groups are test_marker_groups)."""
+    monkeypatch.setattr(step_size, "DEFAULT_WINDOW", 0)
+
+
 def _requirements() -> list[dict]:
     return automated_document()["source_requirements"]
 
@@ -68,11 +74,11 @@ def _publish_part(root: Path, attempt_id: str, baseline: dict, index: int, recei
 def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, attempt_id, baseline, receipts = _run(tmp_path)
     assert len(receipts) == 3
+    requirements = _publish_requirements(root, attempt_id, baseline)
     steps = plan(root)
     assert steps["mode"] == "parts" and [part["stage"] for part in steps["parts"]] == [
         "context-marker:requirements", "context-marker:batch-001", "context-marker:batch-002", "context-marker:batch-003"]
     assert all({"batch", "requirements", "role"} <= set(part["bytes"]) for part in steps["parts"][1:])
-    requirements = _publish_requirements(root, attempt_id, baseline)
     answers = []
     for index, receipt in enumerate(receipts, start=1):
         value = _marker([f"src/part{index - 1}.py — наблюдение части {index}"], [f"часть {index} — код для SREQ-x не найден", "док — требование без ожидаемого результата"])
@@ -241,10 +247,10 @@ def test_a_merge_over_part_of_the_receipts_is_rejected(tmp_path: Path) -> None:
 def test_a_part_must_bind_its_own_receipt(tmp_path: Path) -> None:
     root, attempt_id, baseline, receipts = _run(tmp_path)
     requirements = _publish_requirements(root, attempt_id, baseline)
-    with pytest.raises(ValueError, match="batch-002 must bind context receipt 2"):
+    with pytest.raises(ValueError, match="batch-002 must bind context receipts in a row"):
         _publish_part(root, attempt_id, baseline, 2, receipts[0], requirements, _marker(["src/part0.py — x"]))
     _publish_part(root, attempt_id, baseline, 1, receipts[0], requirements, _marker(["src/part0.py — x"]))
-    with pytest.raises(ValueError, match="must bind context receipt"):  # the same receipt again, as part 3
+    with pytest.raises(ValueError, match="must bind context receipts in a row"):  # the same receipt again, as part 3
         _publish_part(root, attempt_id, baseline, 3, receipts[0], requirements, _marker(["src/part0.py — x"]))
 
 
@@ -255,16 +261,14 @@ def test_a_single_marker_must_bind_every_receipt(tmp_path: Path) -> None:
                                           input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"]])
 
 
-def test_a_part_plan_names_no_digests_until_the_requirements_answer(tmp_path: Path) -> None:
-    """FaT-M (1.10): before the requirements answer a part has no input_digests with null in them — a note instead."""
+def test_no_part_before_the_requirements_answer(tmp_path: Path) -> None:
+    """A part is grouped by the bytes of the view of the requirements answer: before it the plan names the requirements step only."""
     root, attempt_id, baseline, receipts = _run(tmp_path)
-    parts = plan(root)["parts"][1:]
-    assert all("input_digests" not in part and part["waits"] == "ждёт ответа context-marker:requirements" for part in parts)
+    assert [part["stage"] for part in plan(root)["parts"]] == ["context-marker:requirements"]
     requirements = _publish_requirements(root, attempt_id, baseline)
     parts = plan(root)["parts"][1:]
     assert [part["input_digests"] for part in parts] == [[baseline["inventory_digest"], receipt["digest"], requirements["content_digest"]]
                                                          for receipt in receipts]
-    assert all("waits" not in part for part in parts)
 
 
 def test_a_part_without_the_documents_digest_is_planned_and_accepted(tmp_path: Path) -> None:

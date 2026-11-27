@@ -81,7 +81,7 @@ def test_the_plan_counts_the_map_of_a_part(tmp_path: Path) -> None:
     root, attempt_id, baseline, receipts = _run(tmp_path)
     _publish_requirements(root, attempt_id, baseline)
     part = next(row for row in plan(root)["parts"] if row["stage"] == PART)
-    assert part["bytes"]["batch"] == len(code_map_bytes(root.parent.parent, root, attempt_id, receipts[0]["digest"]))
+    assert part["bytes"]["batch"] == sum(len(code_map_bytes(root.parent.parent, root, attempt_id, digest)) for digest in part["input_digests"][1:-1])
 
 
 def test_the_plan_of_a_part_asked_before_the_map_counts_its_files(tmp_path: Path) -> None:
