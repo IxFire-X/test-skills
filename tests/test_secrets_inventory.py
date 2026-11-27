@@ -85,3 +85,21 @@ def test_an_init_answer_with_overlapping_context_roots_names_both(tmp_path: Path
     with pytest.raises(InitError) as refused:
         _tests_only_context(root, discover_project(root), answers, set())
     assert str(refused.value) == "app/src: пересекается с app — назовите один из них"  # approved 27.11
+
+
+def test_the_init_cli_prints_the_overlap_and_its_fix(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    from tests.test_two_repos import _past_the_stand
+
+    root = _stand(tmp_path)
+    answers, questions = _past_the_stand(root)
+    answers.update({key: question["options"][0]["id"] for key, question in questions.items()})
+    answers[next(key for key in questions if key.endswith(":paths.context"))] = "app,app/src"
+    (root / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    ran = subprocess.run([sys.executable, "-m", "tools.init_skillsrc", "--project", str(root), "--answers", str(root / "answers.json"), "--write"],
+                         cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, encoding="utf-8")
+    output = json.loads(ran.stdout)
+    assert (output["message"], output["fix"]) == ("app/src: пересекается с app — назовите один из них", "ответ на вопрос о коде приложения — путь папки от корня проекта вне модуля (несколько — через запятую), без пересечений между ними")  # approved 27.11, п. 10 and п. 12

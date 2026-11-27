@@ -738,6 +738,7 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
     return {**discovery, "questions": questions}, rest, context, stand
 
 
+CONTEXT_ROOT_FIX = "ответ на вопрос о коде приложения — путь папки от корня проекта вне модуля (несколько — через запятую), без пересечений между ними"  # approved 27.11, texts-approval п. 12
 SOURCE_ROOT_FIX = ("ответ на вопрос о корне исходников — путь папки от корня модуля (несколько — через запятую), в ней должны лежать исходники; "
                    "исходники прямо в корне модуля этим способом не задать — впишите paths.source в .skillsrc вручную")
 
@@ -863,7 +864,8 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         working_discovery, answers, source_paths = _answered_sources(root, working_discovery, answers, declared_existing)
     except InitError as error:
         receipt = _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
-        return receipt | ({"_message": str(error), "_fix": SOURCE_ROOT_FIX} if error.code == "source_root_invalid" else {})
+        fixes = {"source_root_invalid": SOURCE_ROOT_FIX, "context_root_invalid": CONTEXT_ROOT_FIX}  # the message is printed only beside a fix
+        return receipt | ({"_message": str(error), "_fix": fixes[error.code]} if error.code in fixes else {})
     working_discovery["questions"] = [
         question
         for question in working_discovery.get("questions", [])
