@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive, read_confined_bytes
-from tools.fixes import RETRY_SPENT, REVIEW_CHAIN, delete_field_fix, human_for, spent_abandon
+from tools.fixes import CODE_ANSWER_FIX, RETRY_SPENT, REVIEW_CHAIN, delete_field_fix, human_for, spent_abandon
 from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
 from tools.schema_validation import StrictJsonError, loads_json_strict
 from tools.pilot_state import (  # the names of the journal these bodies read (П1 of the cut of v0.8)
@@ -151,9 +151,6 @@ def openspec_marker_by_code(run_root: Path) -> bool:
     named = _named_docs(project, root) if cases_path(root) is None else []
     return bool(named) and all(path.startswith("openspec/") for path in named) and any(OPENSPEC_PATH.fullmatch(path) for path in named)
 
-
-CODE_ANSWER_FIX = ("ответ собрал код пакета из файлов OpenSpec, а не модель — повтор ответа модели его не исправит: это дефект пакета; "
-                   "покажи человеку это сообщение и сохрани папку прогона для разработчиков пакета")
 
 
 def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from tools.clock import utc_now_z
-from tools.fixes import RETRY_SPENT, SPENT_HUMAN, fix_for, human_for
+from tools.fixes import CODE_ANSWER_FIX, CODE_ANSWER_HUMAN, RETRY_SPENT, SPENT_HUMAN, fix_for, human_for
 
 
 _CODE_PREFIX = re.compile(r"^([A-Z][A-Z0-9_]+)(?::|$)")
@@ -62,7 +62,10 @@ def error_fields(error: BaseException, table: bool = True) -> dict[str, str]:
 def error_envelope(error: BaseException, next_step: str | None = None) -> dict[str, object]:
     """The one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null); ``human`` — the tester's phrase, when the code has one."""
     fields = error_fields(error)
-    human = SPENT_HUMAN if str(fields.get("fix") or "").startswith(RETRY_SPENT) else human_for(fields["code"], fields["message"])  # a spent retry says the same whatever the code
+    fix = str(fields.get("fix") or "")
+    human = (SPENT_HUMAN if fix.startswith(RETRY_SPENT)  # a spent retry says the same whatever the code
+             else CODE_ANSWER_HUMAN if fix == CODE_ANSWER_FIX  # an answer the code built: no repeat of a model mends it
+             else human_for(fields["code"], fields["message"]))
     return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step, **({"human": human} if human else {})}
 
 

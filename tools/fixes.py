@@ -441,6 +441,15 @@ def _reason(code: object, message: str) -> tuple[str, str | None, str | None] | 
     return next((row for row in OPENSPEC_REASONS if text.startswith(row[0])), None) if code in ("OPENSPEC_SOURCE_CONFLICT", "PLAN_REVIEW_TOO_LARGE") else None
 
 
+CODE_ANSWER_FIX = ("ответ собрал код пакета из файлов OpenSpec, а не модель — повтор ответа модели его не исправит: это дефект пакета; "
+                   "покажи человеку это сообщение и сохрани папку прогона для разработчиков пакета")
+# the tester's words when the answer that failed the check was built by the code of the package, not by a model: a repeat does not mend it
+# (approved by the user on 27.11: «На всё согласен»)
+CODE_ANSWER_HUMAN = ("Требования собрал код пакета, и они не прошли проверку формата — это ошибка пакета, а не модели. "
+                     "Покажите это сообщение разработчикам пакета.")
+HUMAN["IMPORT_REQUIREMENTS_INVALID"] = CODE_ANSWER_HUMAN  # the requirements of an import are always the code's (cases_import.requirements_answer)
+
+
 def human_for(code: object, message: str = "") -> str | None:
     """The tester's phrase of a refusal or a warning code (of its cause, when the message tells it), or None — the answer then carries no ``human``."""
     if (reason := _reason(code, message)) and reason[2]:
