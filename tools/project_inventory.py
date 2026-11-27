@@ -51,9 +51,10 @@ _BINARY_SUFFIXES = frozenset({
     ".jpg", ".lock", ".mp3", ".mp4", ".o", ".pdf", ".png", ".pyc", ".so", ".tar", ".war", ".webp", ".zip",
 })
 _GENERATED_SUFFIXES = frozenset({".coverage", ".map", ".min.js"})
-_PRIVATE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".kdbx", ".key", ".p12", ".pfx", ".pem"})
+_PRIVATE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".kdbx", ".key", ".p12", ".pfx", ".pem", ".ppk"})
 _PRIVATE_NAMES = frozenset({"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"})
-_SECRET_NAME = re.compile(r"(?:^|[._-])(credential|credentials|password|passwd|private|secret|token|api[_-]?key)(?:$|[._-])", re.I)
+# the plural too (secrets.json, passwords.txt, api_keys.yaml) — but not «tokens»: tokens.json is the common name of design tokens.
+_SECRET_NAME = re.compile(r"(?:^|[._-])(credentials?|passwords?|passwd|private|secrets?|token|api[_-]?keys?)(?:$|[._-])", re.I)
 # the form of «scheme://user:password@» for text (str), where the old ``[A-Za-z][A-Za-z0-9+.-]*://…`` was still written: one attempt per
 # run of scheme characters instead of one per letter of it (100 KB of letters — 8 s).  ``URL_CREDENTIALS_TEXT`` finds the credentials,
 # ``URL_USERINFO_TEXT`` any user info (group 1 is everything before the user info, so a sub keeps it); the matches are the old ones.
@@ -74,8 +75,12 @@ _TOKEN_SIGNATURES = (
     # the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
     # run: the old pattern re-read a long run of letters without «://» from each of its letters (140 KB — 28 s).
     ("url-credentials-v1", re.compile(rb"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")),
-    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),
+    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")),  # PEM, and «BEGIN PGP PRIVATE KEY BLOCK»
 )
+# token-assignment-v1 in a settings file: the key may be quoted («"api_key": "…"», YAML «"token": …»).  Not in documents and API-test collections
+# (.md .txt .bru .hurl): there it is an example of the requirement, and the task document must never fall out (live/ 27.11: 58 such, none a secret).
+_SETTINGS_SUFFIXES = frozenset({".json", ".yml", ".yaml", ".properties", ".ini", ".cfg", ".toml", ".conf"})
+_QUOTED_ASSIGNMENT = re.compile(rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{8,}")
 # token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
 _SOURCE_TOKEN_LITERAL = re.compile(
     rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*(['\"])(?P<value>[^'\"\r\n]{8,})\1")
@@ -84,7 +89,8 @@ _PROPERTY_NAME = re.compile(rb"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
 # the rule reads the value on the key's own line — YAML list items and quoted keys, any .json, XML elements, a
 # ${X:default} with a default, a short secret.  Not a secret: an empty value, ${X} or ${X:}, a true/false/yes/no/on/off
 # flag.  Message bundles (messages*.properties, ValidationMessages*.properties) are texts, never passwords.
-_CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties"})
+_CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties", ".ini", ".cfg", ".toml", ".conf", ".sh"})  # not .txt: requirement documents are .txt too
+_SHELL_REFERENCE = re.compile(rb"\s*['\"]?\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])['\"]?\s*")  # $VAR, ${VAR}, $1 of a script: no secret
 # the key is one atomic group.  What follows a key (a quote, a blank, «:», «=», «>») is not a word character, so the key must run to the end of its
 # word run whichever keyword it holds — and trying every keyword of a long run, each with a second ``[\w.-]*`` to the end of the run, was k x n (100 KB of
 # «pwd» did not finish).  The earliest keyword is enough.
@@ -301,8 +307,8 @@ def _kind(project_path: str, path: Path) -> str:
     return "resource"
 
 
-def token_signature_rule(contents: bytes, *, source: bool = False) -> str | None:
-    """Return the existing scanner rule for a credential-like byte sequence."""
+def token_signature_rule(contents: bytes, *, source: bool = False, settings: bool = False) -> str | None:
+    """Return the existing scanner rule for a credential-like byte sequence; ``settings``: a settings file, where the key may be quoted."""
     if source:
         # in source code only a string literal is a secret — `this.password = password;` or
         # `Token token = read();` assign a variable, and a dotted property name ("java.net.socks.password") is a name.
@@ -312,7 +318,8 @@ def token_signature_rule(contents: bytes, *, source: bool = False) -> str | None
     # Shell ${NAME:+word} substitutes word; it does not assign word to NAME.
     # Keep word visible, including any real assignment or service token inside it.
     assignments = re.sub(rb"(\$\{[A-Za-z_][A-Za-z0-9_]*):\+", rb"\1 ", contents)
-    return next((rule_id for rule_id, signature in _TOKEN_SIGNATURES if signature.search(assignments if rule_id == "token-assignment-v1" else contents)), None)
+    return next((rule_id for rule_id, signature in _TOKEN_SIGNATURES if rule_id != "token-assignment-v1" and signature.search(contents)
+                 or rule_id == "token-assignment-v1" and (_QUOTED_ASSIGNMENT if settings else signature).search(assignments)), None)
 
 
 def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -> tuple[str, str] | None:
@@ -320,7 +327,7 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
     if project_path is not None and not is_source(path.name) and any(
             part.casefold() in SECRET_DIRS for part in project_path.split("/")[:-1]):
         return "secret-directory-v1", "credential-material"
-    if name == ".env" or name.startswith(".env."):
+    if name == ".env" or name.startswith(".env.") or name.endswith(".env"):  # .env, .env.local, prod.env, secrets.env
         return "filename-dotenv-v1", "dotenv"
     if path.suffix.casefold() in _PRIVATE_SUFFIXES or name in _PRIVATE_NAMES:
         return "private-extension-v1", "private-material"
@@ -328,7 +335,7 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
     # Secret directories are left out by place (scan_rules.directory_reason); inside src/ only their non-source files (above).
     if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
-    rule_id = token_signature_rule(contents, source=is_source(path.name))
+    rule_id = token_signature_rule(contents, source=is_source(path.name), settings=path.suffix.casefold() in _SETTINGS_SUFFIXES)
     if rule_id is not None:
         return rule_id, "token-signature"
     if _has_password(path, contents):
@@ -354,7 +361,8 @@ def _has_password(path: Path, contents: bytes) -> bool:
     if suffix in _CONFIG_SUFFIXES:
         if _MESSAGE_BUNDLE.match(path.name):
             return False
-        return any(_secret_value(match.group("value")) for match in _PASSWORD_LINE.finditer(contents))
+        return any(_secret_value(match.group("value")) and not (suffix == ".sh" and _SHELL_REFERENCE.fullmatch(match.group("value")))
+                   for match in _PASSWORD_LINE.finditer(contents))
     if suffix == ".json":
         return any(_secret_value(match.group("value")) for match in _PASSWORD_JSON.finditer(contents))
     if suffix == ".xml":
@@ -407,7 +415,10 @@ def skillsrc_context(project_root: Path, module_root: Path) -> tuple[Path, ...]:
         problem = context_root_problem(project_root, module_root, relative)
         if problem is not None:
             raise InventoryError(f"CONTEXT_ROOT_INVALID: {problem}")
-        roots.append(Path(project_root).absolute() / relative)
+        root = Path(project_root).absolute() / relative
+        if any(root == other or other in root.parents or root in other.parents for other in roots):  # one file would be read twice (S5)
+            raise InventoryError(f"CONTEXT_ROOT_INVALID: {relative}: пересекается с другим корнем paths.context — оставьте в .skillsrc у модуля один из них")
+        roots.append(root)
     return tuple(roots)
 
 
@@ -524,7 +535,7 @@ def _tree_stamp(project_root: Path, skip: Iterable[Path]) -> tuple[tuple[str, in
     stamp: list[tuple[str, int, int]] = []
     for current, directories, files in os.walk(root, followlinks=False):
         base = Path(current)
-        directories[:] = sorted(name for name in directories if name != ".git" and (base / name).resolve() not in skipped)
+        directories[:] = sorted(name for name in directories if name != ".git" and not _is_reparse(base / name) and (base / name).resolve() not in skipped)
         for name in sorted(files):
             try:
                 stat = (base / name).stat(follow_symlinks=False)

@@ -723,7 +723,9 @@ def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mappi
             chosen = [item.strip() for item in rest.pop(question_id).split(",") if item.strip()]
             if chosen == [NO_CODE[0]]:  # a stand without the application's code in the project
                 continue
-            problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))]
+            problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))] + [
+                f"{item}: пересекается с {other} — назовите один из них" for index, item in enumerate(chosen) for other in chosen[:index]
+                if item == other or item.startswith(other + "/") or other.startswith(item + "/")]
             if not chosen or problems:
                 raise InitError("context_root_invalid", "; ".join(problems) or "paths.context: пустой ответ")
             context[module_id] = chosen

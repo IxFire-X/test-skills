@@ -113,7 +113,8 @@ def include_mode(project_path: str, include: Iterable[str]) -> str | None:
     through = False
     for pattern in (item.strip("/") for item in include):
         bare = pattern[:-3] if pattern.endswith("/**") else pattern
-        if any(fnmatchcase("/".join(parts[:depth]), bare) for depth in range(1, len(parts) + 1)):
+        bares = (bare, bare[3:]) if bare.startswith("**/") else (bare,)  # «**/x» is x at any depth, the root too
+        if any(fnmatchcase("/".join(parts[:depth]), one) for one in bares for depth in range(1, len(parts) + 1)):
             return "full"
         if bare.startswith("/".join(parts) + "/"):
             through = True

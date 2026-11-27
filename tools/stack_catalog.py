@@ -15,7 +15,7 @@ else:  # direct CLI execution of discover_project / init_skillsrc
 
 # The module search and the explicit paths of .skillsrc also skip task drafts; the inventory keeps them (a task's
 # requirements live in docs/to_do/<task>/ and reach the model only through the inventory).
-SEARCH_ONLY_DIRS = frozenset({"to_do"})
+SEARCH_ONLY_DIRS = frozenset({"to_do", ".pilot-runs"})  # .pilot-runs: the runs of the package, never project documents
 
 
 def is_ignored_dir(parents: tuple[str, ...], name: str) -> bool:

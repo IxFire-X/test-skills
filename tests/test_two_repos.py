@@ -77,7 +77,7 @@ def test_the_output_that_asks_the_context_root_is_valid_by_its_schema(tmp_path: 
     assert schema_diagnostics(output, schema, pack) == []
 
 
-@pytest.mark.parametrize("answer", ["../outside", "autotests", "autotests/src", "missing", "/abs", ""])
+@pytest.mark.parametrize("answer", ["../outside", "autotests", "autotests/src", "missing", "/abs", "", "app,app/src"])
 def test_a_context_root_outside_the_project_inside_the_module_or_missing_is_refused(tmp_path: Path, answer: str) -> None:
     from tools.init_skillsrc import ensure_skillsrc
 
