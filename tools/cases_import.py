@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
-from tools.fixes import FIXES
+from tools.fixes import FIXES, fix_for
 from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv, require_human_csv
 from tools.run_store import project_of
 
@@ -44,7 +44,7 @@ _FIXES = {code: FIXES[code] for code in (
 
 class CasesImportError(ValueError):
     def __init__(self, code: str, detail: str) -> None:
-        self.code, self.fix = code, _FIXES[code]
+        self.code, self.fix = code, fix_for(code, detail) or _FIXES[code]  # the fix of the cause, when the detail tells it (fixes.CSV_REASONS)
         super().__init__(f"{code}: {detail}")
 
 

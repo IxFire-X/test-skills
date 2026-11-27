@@ -43,6 +43,7 @@ from tools.run_scan import (  # what scan computes (C2); the command scan below 
     open_run_of as _open_run_of,
     outside_task_files as _outside_task_files,
     printed,
+    project_not_found,
     publish_context as _publish_context,
     read_skillsrc_binding as _read_skillsrc_binding,
     reference_cases as _reference_cases,
@@ -193,6 +194,8 @@ def cmd_scan(args: Any) -> int:
     _PRINTED.clear()
     try:
         _scan_profile(args)
+        if missing := project_not_found(Path(args.project).resolve()):  # not «docs path does not exist» for a project that is not there
+            raise missing
         args.docs = expand_docs(Path(args.project).resolve(), getattr(args, "docs", None))  # a folder is the files under it, before any reader sees the request
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})

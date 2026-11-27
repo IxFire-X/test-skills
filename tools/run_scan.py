@@ -37,6 +37,11 @@ ROOT = Path(__file__).resolve().parents[1]
 _SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024  # default of .skillsrc limits.context_batch_bytes
 
 
+def project_not_found(project: Path) -> "HostStop | None":
+    """``PROJECT_NOT_FOUND`` when ``--project`` is no folder — said first, before any reader of the request names a file of the project."""
+    return None if Path(project).is_dir() else HostStop("PROJECT_NOT_FOUND", f"проект не найден: {project} — такой папки нет")
+
+
 class HostStop(RuntimeError):
     def __init__(self, code: str, message: str = "", fix: str | None = None):
         super().__init__(message or code)

@@ -27,7 +27,7 @@ def test_scan_refuses_a_csv_without_a_case_and_makes_no_run(tmp_path: Path, monk
 def test_ready_refuses_a_csv_without_a_case(tmp_path: Path) -> None:
     report = ready.check(_project(tmp_path, HEADER + "\r\n"), [], "cases-only-v1", cases="cases/zephyr.csv")
     row = next(item for item in report["checks"] if item["id"] == "cases")
-    assert report["status"] == "BLOCKED" and row["level"] == "STOP" and row["message"].startswith("ZEPHYR_CSV_ROWS"), row
+    assert report["status"] == "BLOCKED" and row["level"] == "STOP" and row["message"].count("ZEPHYR_CSV_ROWS") == 1, row  # the code once (short wave C6)
 
 
 def test_the_import_requirements_refusal_names_a_defect_of_the_package() -> None:

@@ -111,6 +111,8 @@ FIXES: dict[str, str] = {
                        "наблюдаемый результат системы, не «успешно», «ok» или «—»; потом повторите scan --cases",
     "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе): замените значение плейсхолдером <…> "
                          "(например <пароль>) и повторите scan --cases; файл с секретом модель не увидит",
+    "PROJECT_NOT_FOUND": "проверь --project: абсолютный путь к корню проекта, и такая папка должна существовать (опечатка, переменная оболочки, "
+                         "подставленная в путь); повтори команду с исправленным путём",
     "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
     "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
@@ -380,6 +382,7 @@ HUMAN: dict[str, str] = {
     "MODEL_STAGE_ARTIFACT_INVALID": "Ответ модели не подошёл под нужный формат. Делать ничего не нужно: агент поправит его и подаст ещё раз.",
     "REVIEWER_EVIDENCE_PATH_UNKNOWN": "Проверяющий попросил файл, которого нет среди файлов проекта для этого прогона. Делать ничего не нужно: агент попросит его ответить без этого файла.",
     "STEP_OVER_BUDGET": "Вход этого шага больше бюджета модели, но шаг идёт дальше. Делать ничего не нужно; в следующий раз ограничьте запрос одним модулем или областью.",
+    "PROJECT_NOT_FOUND": "Папки проекта по этому пути нет. Проверьте путь к проекту и скажите агенту правильный.",
     "STEP_OUTPUT_LARGE": "Ответ модели получился очень большим — это только замер. Делать ничего не нужно, прогон идёт дальше.",
 }
 
@@ -439,10 +442,19 @@ OPENSPEC_REASONS: tuple[tuple[str, str | None, str | None], ...] = (
 )
 
 
+# ZEPHYR_CSV_ROWS of a CSV with no case at all (only the header): no cell to fill — the export is empty or not the one (short wave of v0.8, C6)
+CSV_REASONS: tuple[tuple[str, str | None, str | None], ...] = (
+    ("в CSV нет ни одного кейса", "в CSV нет ни одной строки кейса — это пустая или не та выгрузка, ячейки этого файла править нечего: попроси человека выгрузить кейсы из Zephyr заново и повтори scan --cases с новым файлом",
+     "В файле кейсов нет ни одного кейса — в нём только заголовки колонок. Выгрузите кейсы из Zephyr заново (проверьте папку и фильтр выгрузки) и скажите агенту, когда файл будет готов."),
+)
+
+
 def _reason(code: object, message: str) -> tuple[str, str | None, str | None] | None:
-    """The row of ``OPENSPEC_REASONS`` whose start the message of an OPENSPEC_SOURCE_CONFLICT or of a refused plan has (the message may begin with the code)."""
+    """The row of ``OPENSPEC_REASONS`` (``CSV_REASONS``) whose start the message of an OPENSPEC_SOURCE_CONFLICT or of a refused plan (of a
+    ZEPHYR_CSV_ROWS) has (the message may begin with the code)."""
     text = message.removeprefix(f"{code}: ")
-    return next((row for row in OPENSPEC_REASONS if text.startswith(row[0])), None) if code in ("OPENSPEC_SOURCE_CONFLICT", "PLAN_REVIEW_TOO_LARGE") else None
+    rows = OPENSPEC_REASONS if code in ("OPENSPEC_SOURCE_CONFLICT", "PLAN_REVIEW_TOO_LARGE") else CSV_REASONS if code == "ZEPHYR_CSV_ROWS" else ()
+    return next((row for row in rows if text.startswith(row[0])), None)
 
 
 CODE_ANSWER_FIX = ("ответ собрал код пакета из файлов OpenSpec, а не модель — повтор ответа модели его не исправит: это дефект пакета; "

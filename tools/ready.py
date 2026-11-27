@@ -663,7 +663,11 @@ def _cases_row(project: Path, cases: str) -> tuple[dict[str, Any], str | None]:
     try:
         rel, count = check_cases(project, cases)
     except (HostStop, CasesImportError) as refusal:
-        return _row("cases", CASES, "STOP", f"{refusal.code}: {refusal}", refusal.fix), None
+        from tools.fixes import human_for
+
+        said = str(refusal) if isinstance(refusal, CasesImportError) else f"{refusal.code}: {refusal}"  # the message of a CasesImportError carries its code
+        human = human_for(refusal.code, said)
+        return _row("cases", CASES, "STOP", f"{human} ({said})" if human else said, refusal.fix), None
     return _row("cases", CASES, "OK", f"{rel}: кейсов {count} — scan --cases возьмёт их"), rel
 
 
@@ -686,6 +690,13 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     requested_profile = profile or execution_gate.default_profile()  # what this package can do
     profile, refused = execution_gate.resolve_profile(profile or None)  # "" is no profile, as before; a refused profile runs as cases-only: no execution rows
     rows: list[dict[str, Any]] = [check_python()]
+    from tools.run_pipeline import project_not_found
+
+    if missing := project_not_found(project):  # one row, not the stops of docs, .skillsrc and module the absent folder would give
+        from tools.fixes import human_for
+
+        rows.append(_row("project", CASES, "STOP", f"{human_for(missing.code)} ({missing.code}: {missing})", missing.fix))
+        return {"status": "BLOCKED", "project": str(project), "profile": requested_profile, "checks": rows}
     paths: list[str] = []  # the inventory of the module and its paths.exclude, for the scope of a change only
     excludes: Sequence[str] = ()
     if refused:
