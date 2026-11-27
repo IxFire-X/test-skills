@@ -325,7 +325,7 @@ def _answer_bytes(root: Path, call: Mapping[str, Any]) -> int | None:
 def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[str, int] | None = None, *,
           state: Any = None, journals: dict[str, Any] | None = None, limits: Mapping[str, Any] | None = None) -> None:
     from tools import pilot_state as pilot
-    from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget, with_test_env
+    from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget, step_modes, with_test_env
 
     inputs: list[str] = []
     by_code = False
@@ -364,7 +364,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer, limits) is not None)
     role = str(call["stage"]).split(":", 1)[0]
     try:
-        role_bytes = sum(path.stat().st_size for path in role_files(role)) if role in _ROLES else 0
+        role_bytes = sum(path.stat().st_size for path in role_files(role, step_modes(root, str(call["stage"])))) if role in _ROLES else 0  # the inserts prepare gave
     except ValueError:
         role_bytes = 0
     total = resolved + role_bytes

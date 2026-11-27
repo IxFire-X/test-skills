@@ -165,7 +165,7 @@ def large_document(project: Path, documents: Mapping[str, str], named: Mapping[s
     *requirements*: the plan knows the requirements of the marker — the exact number, whatever the document is (without numbers, OpenSpec, ``id_pattern``): the estimate is theirs,
     the sections still come from the numbers of the document where it has them; *openspec*: the advice is fewer areas."""
     from tools.doc_sections import SectionMissing, find_section, split_sections
-    from tools.step_size import role_files, step_budget
+    from tools.step_size import MODES, role_files, step_budget
 
     if requirements is None and _project_id_pattern(project) is not None:
         return None
@@ -182,10 +182,10 @@ def large_document(project: Path, documents: Mapping[str, str], named: Mapping[s
             marks[path] = (text, lines, within)
     total = requirements if requirements is not None else sum(len(lines) for _text, lines, _within in marks.values())
     budget = step_budget(project)
-    room = budget - sum(item.stat().st_size for item in role_files("tc-reviewer"))
+    room = budget - sum(item.stat().st_size for item in role_files("tc-reviewer", MODES))  # no step yet: every insert the review may read
     pairs = [(total * REVIEW_PER_NUMBER, room)]
     if automation:
-        pairs.append((total * AUTOTEST_PER_NUMBER, budget - sum(item.stat().st_size for item in role_files("autotest-reviewer"))))
+        pairs.append((total * AUTOTEST_PER_NUMBER, budget - sum(item.stat().st_size for item in role_files("autotest-reviewer", MODES))))
     over = next(((size, limit) for size, limit in pairs if size > limit), None)
     if over is None and total * REVIEW_PER_NUMBER <= REVIEW_SOFT:
         return None

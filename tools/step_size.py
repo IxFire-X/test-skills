@@ -905,6 +905,57 @@ STAND_CASES_RULE = ("уровень автотестов — стенд: HTTP-ш
 STAND_TESTS_RULE = "уровень автотестов — стенд: тесты ходят только во внешний API по адресу из переменной {name} (System.getenv); без MockMvc, SpringBootTest и классов приложения"
 
 
+MODES = ("stand", "import", "param-groups")  # one order for every step: a repeat reads the same files in the same order
+_STAND_STAGES = ("tc-generator:BATCH-", "tc-to-autotest:", "autotest-reviewer:")  # the steps whose read carries ``stand`` (compact_inputs), and the review of the cases
+
+
+def _grouped(root: Path, attempt_id: str, family: str) -> bool:
+    """A case of the step's document has a ``param_group``: the candidate of the journal for the review of the cases, the effective
+    document for the automation and its review.  A document that cannot be read has no group: such a step does not pass without it anyway."""
+    from tools import pilot_state
+
+    try:
+        if family == "tc-reviewer":
+            from tools.orchestrate_test_case_revision import journal_assembly  # up the layers, inside the function: the candidate the view is built from
+
+            document = journal_assembly(root, attempt_id)[0]
+        else:
+            effective = pilot_state.read_effective_canonical_if_present(root, attempt_id)
+            document = effective["document"] if effective is not None else {}
+        return any(case.get("param_group") for case in document.get("test_cases") or [])
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+
+
+def step_modes(root: Path, stage: str) -> tuple[str, ...]:
+    """The inserts of rare modes a step reads (W3.2), in the order of ``MODES`` — the one source of prepare's ``read.role_files``, the budget of the
+    step, the record of its size and the report: ``stand`` when the module tests against a stand (a batch with a baseline, the automation, its review
+    and the review of the cases); ``import`` for the generator and the review of the cases of a run with ``--cases``; ``param-groups`` when the document
+    of the review or of the automation has a parameter group — never for the generator (it decides on a group itself).  Everything is read from the
+    run and does not change after the step: the report rebuilds the modes of a call made earlier."""
+    from tools.cases_import import cases_path
+    from tools.pilot_state import derive_state
+
+    root = Path(root)
+    attempts = derive_state(root)["attempts"]
+    if not attempts:
+        return ()
+    attempt = attempts[-1]
+    family, found = stage.split(":", 1)[0], set()
+    stands = stage.startswith(_STAND_STAGES) or stage == "tc-reviewer:canonical"
+    if stands and not (stage.startswith("tc-generator:BATCH-") and not attempt.get("baseline_digest")):
+        try:
+            if module_stand(project_of(root), root, attempt) is not None:
+                found.add("stand")
+        except (OSError, KeyError, TypeError, ValueError):
+            pass
+    if family in ("tc-generator", "tc-reviewer") and cases_path(root) is not None:
+        found.add("import")
+    if family in ("tc-reviewer", "tc-to-autotest", "autotest-reviewer") and _grouped(root, str(attempt["attempt_id"]), family):
+        found.add("param-groups")
+    return tuple(mode for mode in MODES if mode in found)
+
+
 def module_stand(project: Path, root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     """``{"service_url_env": name, "tests_only": bool}`` when the attempt's module tests against a stand (``test.level`` ``stand``, declared or
     derived) by the ``.skillsrc`` the run froze: the live file counts only while its bytes are those of the baseline.  The name of the variable
@@ -973,15 +1024,15 @@ def occupied_field(paths: list[str], limit: int = 4096) -> dict[str, Any]:  # pr
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
-            budget: int | None = None, extra_bytes: int = 0) -> dict[str, Any]:
+            budget: int | None = None, extra_bytes: int = 0, modes: tuple[str, ...] = ()) -> dict[str, Any]:
     """``extra_bytes``: what a step reads beyond the listed files — bindings inside a carrier, the map of existing
-    project tests before its file is written."""
+    project tests before its file is written; ``modes``: the inserts of the step's rare modes (``step_modes``), part of the role it reads."""
     paths = [Path(path) for path in files]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise ValueError(f"files are missing: {missing[:5]}")
     input_bytes = sum(path.stat().st_size for path in paths) + extra_bytes
-    instructions = role_files(role) if role else []
+    instructions = role_files(role, modes) if role else []
     role_bytes = sum(path.stat().st_size for path in instructions)
     total = input_bytes + role_bytes
     budget_bytes = step_budget(project) if budget is None else budget
@@ -1057,8 +1108,9 @@ def main(argv: list[str] | None = None) -> int:
             state = derive_state(run_root)
             if state["attempts"]:
                 budget = step_budget(project, run_limits(project, run_root, state, str(state["attempts"][-1]["attempt_id"]))[0])
+        modes = step_modes(project / ".pilot-runs" / args.run, args.stage) if args.run and args.stage and role == stage_role else ()
         report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=budget,
-                         extra_bytes=(sum(row["bytes"] for row in requested["bindings"]) if requested else 0) + held)
+                         extra_bytes=(sum(row["bytes"] for row in requested["bindings"]) if requested else 0) + held, modes=modes)
         if requested is not None:
             report.update(files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],
                           input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],

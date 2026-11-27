@@ -408,7 +408,7 @@ def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id:
         state = derive_state(root)
         limits, _note = step_size.run_limits(project, root, state, str(state["attempts"][-1]["attempt_id"]))  # the limits the run froze
         report = step_size.measure(project, [Path(row["path"]) for row in found["files"]], stage, budget=step_size.step_budget(project, limits),
-                                   extra_bytes=sum(row["bytes"] for row in found["bindings"]))
+                                   extra_bytes=sum(row["bytes"] for row in found["bindings"]), modes=step_size.step_modes(root, stage_instance_id))
         step_size.record(project, run_id, stage_instance_id, report)
     except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
         return None, {"code": "STEP_MEASURE_FAILED", "error": type(error).__name__}

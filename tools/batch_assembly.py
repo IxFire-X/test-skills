@@ -422,7 +422,8 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
                              input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
                              imported: Mapping[str, Any] | None = None,
-                             out_of_scope: Sequence[Mapping[str, Any]] | None = None, sources: Sequence[str] = ()) -> BatchPlan:
+                             out_of_scope: Sequence[Mapping[str, Any]] | None = None, sources: Sequence[str] = (),
+                             modes: tuple[str, ...] = ()) -> BatchPlan:
     """The plan of ``submit --stage plan``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipts, the map of existing project tests, the skeleton of an
     import and the tc-generator role), the documents of the receipts.
@@ -465,7 +466,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
             files.extend(paths)
             documents.update(texts)
         maps = len(view_bytes(for_context(project, taken)))  # one map of all the receipts the batch reads
-        step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps + (skeleton or 0))["bytes"]
+        step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps + (skeleton or 0), modes=modes)["bytes"]
         evidence = {key: item for key, item in grouping_evidence.items() if key != "context_receipt_digests"}
         if len(taken) > 1:
             evidence["context_receipt_digests"] = [str(receipt["digest"]) for receipt in taken]
