@@ -435,3 +435,37 @@ def test_thrown_by_without_a_type_is_any_exception_once() -> None:
     assert untyped == [_line(MOCKMVC, "assertThatThrownBy(() -> service.save(null));")], hints
     broad_line = _line(MOCKMVC, "isInstanceOf(Exception.class)")
     assert [rule for code, line, rule in hints if line == broad_line and code == "AT_ANY_EXCEPTION"] == ["broad-throws"], hints  # V5: AT_NO_STATE_CHECK may stand on the same line
+
+
+# --- the quality pass of a batch (state-check-hint, 28.11) ------------------------------------------------------------
+
+
+def _refused(text: str) -> list[dict]:
+    step = _step("STEP-x-2", REJECTED, method="POST")
+    return [{**step, "expectations": [{**step["expectations"][0], "text": text}]}]
+
+
+def _quality(claimed: int, plain: int, text: str = "Отказ 400, владелец не создан") -> dict | None:
+    from tools.test_design_hints import quality_pass
+
+    return quality_pass(_document(*([_refused(text)] * claimed), *([[_step("STEP-x-1", [_assert("status", "equals", 200)])]] * plain)))
+
+
+def test_a_batch_whose_refusals_claim_the_state_unchecked_gets_a_quality_pass() -> None:
+    found = _quality(5, 15)
+    assert found["code"] == "TD_NEGATIVE_NO_STATE_CHECK" and [row["case_id"] for row in found["cases"]] == [f"TC-x-{index:03d}" for index in range(1, 6)]
+
+
+@pytest.mark.parametrize("claimed, plain", [(4, 0), (5, 16)])  # fewer than five cases; under a quarter of the batch
+def test_a_batch_under_the_threshold_gets_no_quality_pass(claimed: int, plain: int) -> None:
+    assert _quality(claimed, plain) is None
+
+
+def test_a_refusal_whose_expectation_claims_no_state_is_not_listed() -> None:
+    assert _quality(5, 0, text="Отказ 400 с полем name") is None
+
+
+def test_the_agent_is_told_what_to_do_with_quality() -> None:
+    text = (PACK_ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
+    assert ("An answer with `quality` is no refusal: ask the generator once to fix the listed cases (the same request of the stage, its answer and "
+            "`quality`), put the new answer into the slot and check it again; no `quality`, or that one pass made — step 4.") in text

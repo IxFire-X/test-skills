@@ -321,3 +321,30 @@ def code_hints(document: Mapping[str, Any]) -> list[dict[str, str]]:
 def technique_counts(document: Mapping[str, Any]) -> dict[str, int]:
     counts = Counter(case.get("technique", "none") for case in document.get("test_cases", []))
     return {name: counts.get(name, 0) for name in (*TECHNIQUES, "none")}
+
+
+# The quality pass of a batch (state-check-hint, 28.11): a refused write whose expectation claims the state — nothing created, saved, changed
+# or added — and no step checks it.  The claim is what makes the hint precise: on the runs of live/ the bare hint named a case the review
+# blocked on the state in 20 % (94 of 464), with the claim in 62 % (72 of 116; C1 35 of 35).  Offered at ``submit --dry-run`` of the batch,
+# never a refusal: the agent may ask the generator once to add the check, the one repeat of the stage stays.
+_STATE_CLAIM = re.compile(r"не\s+(?:был[аио]?\s+)?(?:созда|сохран|измен|добав|появ|запис|удал)|остал\w*\s+(?:прежн|без\s+измен)|не\s+меня", re.IGNORECASE)
+QUALITY_SHARE, QUALITY_MIN = 0.25, 5  # of the cases of the batch: C1 61 %, v07 c3-B 36 % above; every accepted run of live/ ≤ 18 %
+QUALITY_FIX = ("в этих кейсах ожидание обещает, что запись не создана или не изменилась, а шага проверки нет: один раз попроси генератора дописать "
+               "после отказа шаг чтения или поиска (тот же запрос стадии, его прежний ответ и этот перечень), положи новый ответ в слот, "
+               "повтори --dry-run, затем submit; без прохода — сразу submit")
+QUALITY_HUMAN = ("Код нашёл кейсы, где ожидание обещает «запись не создана» или «не изменилась», а шага, который это проверяет, нет: {found} из {cases} "
+                 "кейсов пачки. Агент один раз попросит генератор дописать проверку до ревью.")
+
+
+def quality_pass(fragment: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``quality`` of a batch: the refused writes whose expectation claims the state with no check of it, when they are in at least
+    ``QUALITY_SHARE`` of the cases of the batch and ``QUALITY_MIN`` cases; None otherwise."""
+    steps = {(case.get("case_id"), step.get("step_id")): step for case in fragment.get("test_cases") or [] for step in case.get("steps") or []}
+    found = [hint for hint in expectation_hints(fragment) if hint["code"] == "TD_NEGATIVE_NO_STATE_CHECK" and any(
+        _STATE_CLAIM.search(str(expectation.get("text") or "")) for expectation in steps[(hint["case_id"], hint["step_id"])].get("expectations") or [])]
+    cases = len(fragment.get("test_cases") or [])
+    named = sorted({hint["case_id"] for hint in found})
+    if len(named) < QUALITY_MIN or len(named) < QUALITY_SHARE * cases:
+        return None
+    return {"code": "TD_NEGATIVE_NO_STATE_CHECK", "cases": [{"case_id": hint["case_id"], "step_id": hint["step_id"]} for hint in found], "fix": QUALITY_FIX,
+            "human": QUALITY_HUMAN.format(found=len(named), cases=cases)}

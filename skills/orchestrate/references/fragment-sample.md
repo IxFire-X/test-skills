@@ -148,4 +148,5 @@ From the row — as is: `title`, `objective`, `preconditions`, `priority`, for a
 2. The answer is a data file: build it in parts, case by case; write no scripts that import or call the package. Append to one file, JSON without indentation; do not read the `tools` source for the format — the form above and the schemas are enough.
 3. Put the file into the stage's `answer_slot` and check it: `python -m tools.api submit --run-root <run> --stage tc-generator:<batch> --dry-run`;
    a refusal names what to fix. The fixed file is the only repeat of the stage; after `submit` the answer does not change.
+   An answer with `quality` is no refusal: ask the generator once to fix the listed cases (the same request of the stage, its answer and `quality`), put the new answer into the slot and check it again; no `quality`, or that one pass made — step 4.
 4. Accept the answer with the same call without `--dry-run`; the last batch itself checks the assembly of the whole set, no candidate files are needed.

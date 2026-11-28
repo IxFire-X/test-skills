@@ -987,3 +987,15 @@ def test_an_import_with_documents_refuses_an_answer_without_the_links_of_the_cas
     before = _events(root)
     code, out = _call(capsys, "submit", root, REQUIREMENTS)
     assert code == 2 and out["code"] == "IMPORT_CASE_LINKS" and _events(root) == before
+
+
+def test_a_dry_run_of_a_batch_says_quality_and_the_submit_writes_as_before(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    quality = {"code": "TD_NEGATIVE_NO_STATE_CHECK", "cases": [{"case_id": "TC-x", "step_id": "STEP-x"}], "fix": "f", "human": "h"}
+    monkeypatch.setattr(stage_steps, "quality_pass", lambda _value: quality)
+    run = _generator(tmp_path)
+    _call(capsys, "prepare", run["root"], run["stages"][0])
+    _put(run["root"], run["stages"][0], run["values"][0])
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0], "--dry-run")
+    assert code == 0 and out["result"]["quality"] == quality
+    code, out = _call(capsys, "submit", run["root"], run["stages"][0])
+    assert code == 0 and "quality" not in out["result"] and "dry_run" not in out["result"]

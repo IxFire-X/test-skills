@@ -19,6 +19,7 @@ from tools.json_cli import spent_stages
 from tools.project_inventory import read_inventory_receipt
 from tools.revision_selection import REWORK_REVIEW_STAGE, REWORK_STAGE
 from tools.run_store import project_of
+from tools.test_design_hints import quality_pass
 
 SLOT_DIR = "incoming"
 
@@ -117,17 +118,19 @@ def _candidate(root: Path, document: Mapping[str, Any], receipt: Mapping[str, An
                           "warnings": sorted({*(row["code"] for row in receipt["warnings"]), *([share["code"]] if share else [])}), **({"manual_share": share} if share else {})}}
 
 
-def _assemble(root: Path, stage: str, value: Mapping[str, Any], _dry_run: bool, _extra: Any) -> dict[str, Any] | None:
+def _assemble(root: Path, stage: str, value: Mapping[str, Any], dry_run: bool, _extra: Any) -> dict[str, Any] | None:
     """Before the write of the last answer of the generator: the candidate of all the batches — a refusal leaves the answer unwritten, so the one retry is
-    still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``)."""
+    still there.  The same ``assemble_candidate`` the review reads from the journal (``journal_assembly``).  A dry run of any batch also says
+    ``quality`` (``test_design_hints.quality_pass``): never a refusal — the agent may ask the generator once before the batch is written."""
     state = pilot_state.derive_state(root)
     attempt_id = str(state["attempts"][-1]["attempt_id"])
     _stand_address(root, state, value)
     plan, header = (pilot_state.generator_input(project_of(root), root, state, attempt_id, kind) for kind in ("plan", "header"))
+    quality = {"quality": found} if dry_run and (found := quality_pass(value)) else {}
     if stage != _batch_stage(max(plan["batches"], key=pilot_state.batch_ordinal)):
-        return None
+        return quality or None
     earlier = pilot_state.accepted_earlier_fragments(project_of(root), root, state, attempt_id, plan, stage.split(":", 1)[1])
-    return _candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)]))
+    return {**_candidate(root, *batch_assembly.assemble_candidate(dict(header), dict(plan), [*earlier, dict(value)])), **quality}
 
 
 def _modes(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, summary: Mapping[str, Any]) -> tuple[str, ...]:
