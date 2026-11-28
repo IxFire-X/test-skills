@@ -228,6 +228,8 @@ def test_dry_run_changes_nothing_byte_for_byte(tmp_path: Path, verdict: str) -> 
 
 
 def test_dry_run_of_a_wrong_verdict_refuses_and_still_writes_nothing(tmp_path: Path) -> None:
+    """Nothing of the run changes — no journal, no refusals.jsonl, no answer; the refusal of the check is a line of dry-run-refusals.jsonl
+    (campaign v0.8 C1, finding 5), the one file the dry run adds."""
     run = _generated_run(tmp_path)
     assert _open(run)[0] == 0
     bad = _wrong_verdict(run)
@@ -235,7 +237,10 @@ def test_dry_run_of_a_wrong_verdict_refuses_and_still_writes_nothing(tmp_path: P
     before = _tree(run["run_root"]), _tree(run["project"])
     code, refused = _select_verdict(run, bad, "--dry-run")
     assert code == 2 and "REVIEW_DECISION_INVALID" in refused["message"], refused
-    assert _tree(run["run_root"]) == before[0] and _tree(run["project"]) == before[1]  # not even refusals.jsonl
+    line = "dry-run-refusals.jsonl"
+    after = _tree(run["run_root"]), _tree(run["project"])
+    assert {key: value for key, value in after[0].items() if key != line} == before[0] and line in after[0]
+    assert {key: value for key, value in after[1].items() if not key.endswith(line)} == before[1]
 
 
 def test_dry_run_after_the_selection_writes_nothing_either(tmp_path: Path) -> None:
