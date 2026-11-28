@@ -104,7 +104,7 @@ def test_mode_b_text_and_its_roles_are_in_the_registry_and_not_in_the_cases_only
 ANCHORS = (
     "`context_receipt` and the digest fields", "are put by the code, do not write them",
     "fragment-sample.md", "schemas/candidate-fragment.schema.json", "<run>/published",
-    "evidence:", "`for_human`", "REVIEW_ONLY_CANARY_FIXES", "REVIEW_CANARY_MISMATCH", "REVIEW_UNRELIABLE",
+    "evidence:", "`for_human`", "REVIEW_CANARY_MISMATCH", "REVIEW_UNRELIABLE",
     "details.self_review_scan", "`SCOPE_PENDING`",
 )
 

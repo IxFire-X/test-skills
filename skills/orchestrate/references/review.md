@@ -5,7 +5,7 @@ The stage — §4 of `skills/orchestrate/SKILL.md`, the consent to a review in t
 **Fresh session.** The reviewer's `--model-id` is a label for the report, as for the generator; a repeated `prepare` — with the same one. `prepare --stage tc-reviewer:canonical` prints `for_human` — the instruction to the human (a new session or `/clear`, paste «проведи ревью test-skills
 <run_id>», the reviewer's answer is a file in `answer_slot`): show it as is and wait for the file, then `submit`. If the reviewer is a subagent (below): do not show `for_human` to the human and do not wait for a file, the subagent writes the answer into `answer_slot` itself. The code put the control errors into the reviewer's view:
 do not read the canary map and do not show it to the reviewer. The case reviewer names in `codeword_seen` any word from the generator's tasks that is in its context (with SELF — the word of any batch), otherwise `null`; `submit` reports `review_canaries` and
-`codeword`. The refusal `REVIEW_ONLY_CANARY_FIXES` — the edits rest on control errors: the reviewer leaves them as `INFO` findings; `REVIEW_CANARY_MISMATCH` — do not substitute your own files, repeat `prepare`. «Ревью слабое: пропущено N из M» and
+`codeword`. An answer whose edits all rest on control errors is accepted as is (`ПРИНЯТО`, the set unchanged), nothing to repeat; `REVIEW_CANARY_MISMATCH` — do not substitute your own files, repeat `prepare`. «Ревью слабое: пропущено N из M» and
 `REVIEW_UNRELIABLE` — tell the human to reread the set themself.
 
 **Reviewer subagent.** In the task name `answer_slot` and `reviewer_view` (the view of the cases) and allow it to read the project files. Do not give it: the generator's dialogue and reasoning, the canary map,

@@ -46,8 +46,10 @@ def effective_review_is_bound(
     candidate: Any = None,
     canaries: Sequence[Any] = (),
     rework: Any = None,
+    canary_only: bool = False,
 ) -> bool:
-    """Bind one accepted durable effective document to the reviewer decision."""
+    """Bind one accepted durable effective document to the reviewer decision.  ``canary_only``: an ``AUTO_FIX_APPLIED`` whose edits all stood
+    on canaries — the effective document is the candidate itself (``review_canaries.canary_only_fix``); the verdict is bound as recorded."""
     if (
         not isinstance(candidate_digest, str)
         or not isinstance(effective_document, dict)
@@ -55,6 +57,9 @@ def effective_review_is_bound(
         or not reviewer_verdict_is_bound(report, verdict_event)
     ):
         return False
+    if canary_only:
+        return (report.get("verdict") == "AUTO_FIX_APPLIED" and successor is None and verdict_event.get("verdict") == "ACCEPTED"
+                and isinstance(report.get("candidate"), dict) and report["candidate"].get("document_sha256") == candidate_digest == document_sha256(effective_document))
     if report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted by the code: ACCEPTED in the ledger, and the set is exactly the reviewer's
         return (isinstance(candidate, dict) and document_sha256(candidate) == candidate_digest and verdict_event.get("verdict") == "ACCEPTED"
                 and successor is None and partial_is_bound(candidate, report, canaries, effective_document, rework))

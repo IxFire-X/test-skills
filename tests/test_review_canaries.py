@@ -511,14 +511,27 @@ def test_a_trial_run_does_not_tell_what_the_canaries_and_the_word_caught(tmp_pat
     assert {"review_canaries", "codeword"} <= set(_select(run, answer))  # the count and the word are for the real call
 
 
-def test_an_answer_whose_only_edits_act_on_canaries_is_refused_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fixes_on_canaries_alone_accept_the_set_as_is_through_finish_and_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    """AUTO_FIX_APPLIED whose edits all stand on canaries: no refusal, no retry — the candidate is the set (as a ТРЕБУЕТ ДОРАБОТКИ on canaries
+    alone is).  The ledger binds the recorded answer, the effective canonical is the candidate, finish and the report agree."""
+    from tests.test_finish import _finish
+    from tools.canonical_document import document_sha256
+    from tools.run_report import build_report
+
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
-    before = (run["run_root"] / "events.jsonl").read_bytes()
     answer = _answer(run, "AUTO_FIX_APPLIED", edits=[_canary_edit(run)], corrections=[_correction("FIX-1")])
-    with pytest.raises(ValueError, match="REVIEW_ONLY_CANARY_FIXES"):
-        _select(run, answer)
-    assert (run["run_root"] / "events.jsonl").read_bytes() == before
+    done = _select(run, answer)
+    assert done["status"] == "EFFECTIVE_SELECTED" and done["review_canaries"]["caught"] >= 1, done  # the edit on a canary is a catch
+    effective = pilot_state.read_effective_canonical(run["run_root"], run["attempt_id"])["document"]  # the receipt check binds it
+    assert document_sha256(effective) == document_sha256(_candidate(run))
+    assert pilot_state.terminal_reviewer_evidence(run["run_root"], run["attempt_id"])["authoritative_verdict"] == "ACCEPTED"
+    _code, finished = _finish(run["project"], run["run_root"], capsys)  # cases-only: MANUAL_ONLY, accepted=false is the norm (as for ПРИНЯТО)
+    assert finished["completion"] == "COMPLETE" and [path.name for path in (run["run_root"] / "published").glob("*.zephyr-scale.csv")] == [
+        f"{effective['document_id']}.r1.zephyr-scale.csv"], finished  # the candidate itself is the published set
+    acceptance = build_report(run["project"], run["run_root"].name)[0]["acceptance"]
+    assert (acceptance["verdict_given"], acceptance["outcome"]) == ("AUTO_FIX_APPLIED", "ACCEPTED_WHOLE")
 
 
 def _boundary_and_removed(run: dict) -> tuple[dict, dict]:
@@ -829,8 +842,8 @@ def test_a_boundary_canary_flips_the_operator_of_a_comparison() -> None:
 def test_a_whole_successor_document_is_refused_when_errors_are_seeded_and_the_refusal_names_none() -> None:
     answer = {"artifacts": {"validation_report": {"verdict": "AUTO_FIX_APPLIED"}, "successor_document": {"revision": 2}}}
     with pytest.raises(ValueError) as refused:
-        review_canaries.refuse_if_only_canaries([{"canary_id": "CAN-1", "class": "boundary"}], answer, [])
+        review_canaries.answer_over_canaries([{"canary_id": "CAN-1", "class": "boundary"}], answer, {})
     assert str(refused.value) == ("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимается — только правки; "
                                   "fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; "
                                   "отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")  # approved 27.11
-    review_canaries.refuse_if_only_canaries([], answer, [])  # no errors seeded: the document goes on to its own checks
+    assert review_canaries.answer_over_canaries([], answer, {}) is None  # no errors seeded: the document goes on to its own checks

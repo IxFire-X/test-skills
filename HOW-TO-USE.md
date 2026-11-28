@@ -328,7 +328,6 @@ CSV проверяется до создания прогона. Частые о
 | `FRESH_CONTEXT_REQUIRED` | модель открыла ревью, не сказав, свежий ли контекст у ревьюера | модель повторяет `prepare --stage tc-reviewer:canonical` с `--fresh-context yes` (отдельный проверяющий) или вы разрешаете ревью в той же сессии: модель повторяет `prepare` с `--fresh-context no --accept-self-review` (или `scan --accept-self-review`), либо `review: {"self": true}` в `.skillsrc` |
 | `REVIEW_ALREADY_OPEN` | ревью уже открыто другим проверяющим | повторить `prepare` с теми же `--invocation-id` и `--fresh-context` или идти дальше: ответ в слот и `submit` |
 | `REVIEWER_RESPONSE_MISSING` | ответ проверяющего ещё не записан | ответ проверяющего в слот `incoming/tc-reviewer-canonical.json` и `submit`; проверяющего ещё не вызывали — `prepare` |
-| `REVIEW_ONLY_CANARY_FIXES` | правки ревью держатся на контрольных ошибках, которые код вставил в вид ревьюера | проверяющий оставляет их находками `INFO` и даёт вердикт по остальному; затем `submit` ещё раз |
 | `REVIEW_CANARY_MISMATCH` | файлы пакета ревью не совпали с журналом | модель повторяет `prepare`, своих файлов не подставляет |
 | `INTERNAL` | неожиданная ошибка пакета | передать разработчикам вывод команды |
 

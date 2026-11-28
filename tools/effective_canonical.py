@@ -55,13 +55,16 @@ def _review_is_bound(project: Path, root: Path, state: Mapping[str, Any], attemp
     report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
     successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
     edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
+    canary_only = False
     if edits is not None:
         # the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
         # the edits of a canary text were dropped before the successor was made — they are dropped here too.
-        from tools.review_canaries import filter_edits, verify as verify_canaries
+        from tools.review_canaries import canary_only_fix, filter_edits, verify as verify_canaries
         from tools.review_edits import edits_rebuild
 
-        edits = filter_edits(verify_canaries(root, str(attempt["attempt_id"])) or [], {"successor_edits": edits})[0].get("successor_edits")
+        canaries = verify_canaries(root, str(attempt["attempt_id"])) or []
+        canary_only = canary_only_fix(canaries, reviewer_output)  # the fixes stood on canaries alone: the candidate was accepted as is
+        edits = filter_edits(canaries, {"successor_edits": edits})[0].get("successor_edits")
 
         successor = document if (
             edits is not None and isinstance(document, Mapping) and isinstance(package_binding, Mapping)
@@ -71,7 +74,7 @@ def _review_is_bound(project: Path, root: Path, state: Mapping[str, Any], attemp
         (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
         None,
     ) if isinstance(ledger, Mapping) else None
-    partial: dict[str, Any] = {}
+    partial: dict[str, Any] = {"canary_only": True} if canary_only else {}
     if isinstance(report, Mapping) and report.get("verdict") == "ТРЕБУЕТ ДОРАБОТКИ":  # sent back and subtracted: bound to the candidate and the canaries of the journal
         from tools.orchestrate_test_case_revision import journal_assembly
         from tools.review_canaries import verify as verify_canaries

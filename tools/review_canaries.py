@@ -600,27 +600,32 @@ def canary_finding(canaries: Sequence[Mapping[str, Any]], finding: Mapping[str, 
     return any(row["class"] != TWIN and finding_hits(row, finding, strict=True) and cases <= {row["case_id"]} for row in canaries)
 
 
-def refuse_if_only_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any], edits_dropped: Sequence[str]) -> None:
-    """The refusal before the answer is written (and in ``--dry-run``): fixes that stand on canaries alone.  A blocking finding on a canary rejects nothing."""
+def canary_only_fix(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) -> bool:
+    """An ``AUTO_FIX_APPLIED`` whose edits all act on canaries, with no whole document: the candidate stands as is.  The set is accepted the
+    way a ``ТРЕБУЕТ ДОРАБОТКИ`` whose blocking findings stand on canaries alone is (``review_outcome``) — no refusal, no retry, nothing said
+    of the errors.  The recorded answer stays the reviewer's: the count of the canaries reads it (an edit on a canary is a catch)."""
+    artifacts = answer.get("artifacts") or {}
+    return (bool(canaries) and (artifacts.get("validation_report") or {}).get("verdict") == "AUTO_FIX_APPLIED"
+            and artifacts.get("successor_document") is None and bool(artifacts.get("successor_edits"))
+            and "successor_edits" not in filter_edits(canaries, artifacts)[0])
+
+
+def answer_over_canaries(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Before the answer is written (and in ``--dry-run``): the refusal of a whole document, or the report the selection reads when the
+    fixes stand on canaries alone (``ПРИНЯТО``, the candidate as the effective document); None — the answer as it is."""
+    from tools.canonical_document import document_sha256
+
     report = (answer.get("artifacts") or {}).get("validation_report") or {}
-    verdict = report.get("verdict")
-    tail = ("этих ошибок нет в кандидате, их поставил код в вид ревьюера; оставь эти находки с severity INFO, правки по ним убери, "
-            "вердикт вынеси по остальному (ПРИНЯТО, если больше ничего); отдай ответ единственным повтором стадии (--transport-attempts 2), "
-            "ничего не записано")
     # a whole document would carry the seeded text into the set: with errors seeded, edits only (filter_edits sees them).  The words never name
     # the errors — the refusal must not confirm that this view holds them (approved 27.11, texts-approval п. 11).
     if canaries and (answer.get("artifacts") or {}).get("successor_document") is not None:
         raise ValueError("REVIEW_SUCCESSOR_DOCUMENT: в этом ревью целый документ (successor_document) не принимается — только правки; "
                          "fix: дай исправления правками artifacts.successor_edits (SKILL tc-reviewer, AUTO_FIX), целый документ убери; "
                          "отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано")
-    if verdict == "AUTO_FIX_APPLIED" and edits_dropped and "successor_edits" not in _filtered(canaries, answer) \
-            and "successor_document" not in (answer.get("artifacts") or {}):
-        named = ", ".join(sorted(set(edits_dropped)))
-        raise ValueError(f"REVIEW_ONLY_CANARY_FIXES: все правки ответа — по контрольным ошибкам ({named}); fix: {tail}")
-
-
-def _filtered(canaries: Sequence[Mapping[str, Any]], answer: Mapping[str, Any]) -> dict[str, Any]:
-    return filter_edits(canaries, answer.get("artifacts") or {})[0]
+    if not canary_only_fix(canaries, answer):
+        return None
+    reference = {"document_id": candidate["document_id"], "revision": candidate["revision"], "document_sha256": document_sha256(dict(candidate))}
+    return {**report, "verdict": "ПРИНЯТО", "effective": reference, "corrections": []}
 
 
 # --- outcome (derived on demand from the journal; nothing is stored) -------------------------------
