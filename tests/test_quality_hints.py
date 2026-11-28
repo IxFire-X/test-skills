@@ -469,3 +469,8 @@ def test_the_agent_is_told_what_to_do_with_quality() -> None:
     text = (PACK_ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
     assert ("An answer with `quality` is no refusal: ask the generator once to fix the listed cases (the same request of the stage, its answer and "
             "`quality`), put the new answer into the slot and check it again; no `quality`, or that one pass made — step 4.") in text
+
+
+def test_the_tester_reads_what_the_quality_pass_found() -> None:  # approved 28.11 (QUALITY_HUMAN, state-check-hint plan p. 5), word for word
+    assert _quality(5, 15)["human"] == ("Код нашёл кейсы, где ожидание обещает «запись не создана» или «не изменилась», а шага, который это проверяет, нет: "
+                                        "5 из 20 кейсов пачки. Агент один раз попросит генератор дописать проверку до ревью.")
