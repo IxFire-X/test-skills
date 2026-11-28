@@ -24,7 +24,7 @@ def test_release_manifest_binds_exact_runtime_bytes_and_stays_unverified(pack_ro
     Draft202012Validator(schema).validate(manifest)
     contract = json.loads((runtime / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
     contract_row = next(row for row in manifest["registry"] if row["path"] == "contracts/pipeline.json")
-    assert manifest["package_version"] == "0.7.2"
+    assert manifest["package_version"] == "0.8.0-dev"
     assert manifest["pipeline_contract"] == {"version": "4.0", "path": "contracts/pipeline.json", "digest": contract_row["digest"]}
     assert manifest["stage_registry"] == contract["stage_registry"]
     assert manifest["projection_profiles"] == contract["projection_profiles"]
