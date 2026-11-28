@@ -1174,7 +1174,7 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
     if canaries:  # an edit of a canary text has the mutated text as ``old`` — the canon holds the original, so it never applies
         from tools import review_canaries
 
-        artifacts, dropped = review_canaries.filter_edits(canaries, artifacts)
+        artifacts = review_canaries.filter_edits(canaries, artifacts)[0]
         report = review_canaries.answer_over_canaries(canaries, review_value, candidate_value) or report  # fixes on canaries alone: ПРИНЯТО as is
     try:
         successor = reviewer_successor(candidate_value, artifacts)  # a document or exact edits

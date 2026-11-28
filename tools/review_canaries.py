@@ -646,8 +646,8 @@ def outcome(canaries: Sequence[Mapping[str, Any]] | None, answer: Mapping[str, A
     missed = [row for row in canaries if row["canary_id"] not in hits]
     classes = sorted({row["class"] for row in missed})
     allowed = (seeded - 1) // THIRD  # misses that are no sign of a weak review: none up to 3 errors, a third of the rest
-    # UNRELIABLE (and accepted false) needs a machine error: in v0.8 text errors alone count towards WEAK and the report, not towards
-    # the acceptance — the flipped outcome and the dropped state were caught as BLOCKING 0 of 4 (R&D-13); the user decides on a measure
+    # UNRELIABLE needs a machine error: in v0.8 text errors alone count towards WEAK and the report, not towards
+    # UNRELIABLE — the flipped outcome and the dropped state were caught as BLOCKING 0 of 4 (R&D-13); the user decides on a measure
     machine = [row for row in canaries if row["class"] in CLASSES]
     # beside text errors 1–2 machine ones are too few to decide alone: then the share of all the errors caught decides, as in v0.7 —
     # the text ones can save a small machine set (1 machine missed, 5 text caught), never soften a review that caught almost nothing
