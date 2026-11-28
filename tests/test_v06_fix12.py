@@ -48,11 +48,13 @@ def test_a_cases_delivery_refuses_a_run_of_the_full_delivery_with_a_way_out(tmp_
     out = json.loads(capsys.readouterr().out)
     assert code == 2 and out["reason"] == "MODE_B_NOT_IN_PACKAGE", out
     assert out["fix"] and "--new-run" in out["fix"] and not re.search(r"(status|report|finish)", out["fix"]), out
-    # nothing but the journal of refusals is written: its line and one event COMMAND_REFUSED; no report, nothing published
+    # nothing but the journal of refusals is written — its line and one event COMMAND_REFUSED — and by finish only: status and report only
+    # read and leave the run as it was (external review 9b3d1d20, item 2); no report, nothing published
     after = _tree(run_root)
-    assert {name for name in after if name not in before} == {"refusals.jsonl", f"events/{len(events) + 1:010d}.json"}, set(after) - set(before)
-    assert [name for name in before if after[name] != before[name]] == ["events.jsonl"]
-    assert [event["event_type"] for event in _events(run_root)[len(events):]] == ["COMMAND_REFUSED"]
+    written = command == "finish"
+    assert {name for name in after if name not in before} == ({"refusals.jsonl", f"events/{len(events) + 1:010d}.json"} if written else set()), set(after) - set(before)
+    assert [name for name in before if after[name] != before[name]] == (["events.jsonl"] if written else [])
+    assert [event["event_type"] for event in _events(run_root)[len(events):]] == (["COMMAND_REFUSED"] if written else [])
     assert not any(name.startswith(("report", "published")) for name in after)
 
 

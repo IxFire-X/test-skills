@@ -97,14 +97,14 @@ def test_the_basis_says_the_journal(tmp_path: Path) -> None:
     assert "по журналу" in render_markdown(report)
 
 
-def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_the_line_stays(tmp_path: Path) -> None:
+def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_no_line(tmp_path: Path) -> None:
     run = build_generated_run(tmp_path)
     copy = run["run_root"] / "events" / "0000000003.json"
     copy.write_bytes(copy.read_bytes() + b" ")  # the journal no longer passes its checks
     before = _raw(run["run_root"])
     code, refused = submit_stage(run["run_root"], "tc-unknown:x")
     assert code == 2
-    assert _raw(run["run_root"]) == before and len(_rows(run["run_root"])) == 1  # the line is there, no event was written into a broken journal
+    assert _raw(run["run_root"]) == before and not (run["run_root"] / "refusals.jsonl").exists()  # the event is written first: a broken journal takes none, so no line is alone
 
 
 def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
