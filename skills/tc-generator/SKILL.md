@@ -3,7 +3,7 @@ name: tc-generator
 description: Use when a 5.0.0 source-requirement context batch must become one canonical candidate fragment without inventing technical behavior.
 permissions:
   read: "step inputs from the controller"
-  write: "role answer in <run>/tmp/ only"
+  write: "role answer in <run>/incoming/ only"
   network: "none"
   external_delivery: "none"
   dependencies: "none"

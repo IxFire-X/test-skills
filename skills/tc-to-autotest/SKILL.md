@@ -3,7 +3,7 @@ name: tc-to-autotest
 description: Use when the selected effective canonical test-case document must be translated into one project-native automation version with explicit operation and assertion coverage.
 permissions:
   read: "step inputs from the controller"
-  write: "role answer in <run>/tmp/ only"
+  write: "role answer in <run>/incoming/ only"
   network: "none"
   external_delivery: "none"
   dependencies: "none"

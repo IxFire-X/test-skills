@@ -65,6 +65,13 @@ def test_the_declared_network_of_every_skill_is_none() -> None:
             assert "publication directory: <run>/published" in permissions["write"]
 
 
+@pytest.mark.parametrize("path", [path for path in SKILLS if path.parent.name != "orchestrate"], ids=lambda path: path.parent.name)
+def test_a_role_declares_the_write_of_its_answer_in_the_slot_of_the_code(path: Path) -> None:  # external review 2, p. 5: not <run>/tmp/
+    from tools.stage_steps import SLOT_DIR
+
+    assert frontmatter(path)["permissions"]["write"] == f"role answer in <run>/{SLOT_DIR}/ only", path
+
+
 ROLE_BLOCK_LIMIT = 230  # bytes: a role file is counted whole into the step input (step_size), the campaign budget test has ~300 B of slack
 
 

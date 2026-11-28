@@ -3,7 +3,7 @@ name: tc-reviewer
 description: Use when a complete canonical test-case candidate requires one review session (INDEPENDENT: fresh and role-isolated; SELF: the same session, never called independent), a bounded evidence retrieval, an effective selection, or rework.
 permissions:
   read: "step inputs from the controller"
-  write: "role answer in <run>/tmp/ only"
+  write: "role answer in <run>/incoming/ only"
   network: "none"
   external_delivery: "none"
   dependencies: "none"

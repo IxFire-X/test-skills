@@ -3,7 +3,7 @@ name: autotest-reviewer
 description: Use when selected effective canonical test cases and generated automation require a static, role-isolated completeness and traceability review before execution.
 permissions:
   read: "step inputs from the controller"
-  write: "role answer in <run>/tmp/ only"
+  write: "role answer in <run>/incoming/ only"
   network: "none"
   external_delivery: "none"
   dependencies: "none"
