@@ -282,7 +282,7 @@ def _automation_check(root: Path, stage: str, value: Mapping[str, Any]) -> None:
         raise pilot_state.ModelStageArtifactInvalid(
             f"invalid model stage artifact: {stage}: " + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in rows[:3]) + (f" and {len(rows) - 3} more" if len(rows) > 3 else "")
             + "; fix: " + (own + "; " if own else "") + "исправь ответ в слоте по этим строкам и повтори submit (--dry-run проверяет, ничего не записывая); ничего не записано, "
-            "единственный повтор стадии — submit --transport-attempts 2")
+            "единственный повтор стадии — submit --transport-attempts 2", row_codes=[str(row["code"]) for row in rows])
 
 
 def boundary_of_revision(root: Path, attempt_id: str, revision: int) -> dict[str, Any]:

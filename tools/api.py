@@ -15,7 +15,7 @@ import hashlib
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from tools import canonical_document, output_guard, stage_steps, step_size
 from tools.fixes import RETRY_SPENT
@@ -193,12 +193,14 @@ def _print(payload: Mapping[str, Any]) -> None:
     emit_json(payload)  # a reader that went away is no fault of the command: the refusal is still recorded and returned
 
 
-def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:
+def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any], row_codes: Sequence[str] = ()) -> None:
     rows = envelope.get("diagnostics")
     if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
         return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
-    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), spent=str(envelope.get("fix") or "").startswith(RETRY_SPENT))
+    codes = [*(row.get("code") for row in rows if isinstance(row, Mapping)), *row_codes] if isinstance(rows, list) else list(row_codes)
+    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), spent=str(envelope.get("fix") or "").startswith(RETRY_SPENT),
+                   codes=codes)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -216,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
                     **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})}
         _print(envelope)
         if not dry_run:  # a dry run leaves no file behind, a refusal line included
-            _record_refusal(args, envelope)  # <run>/refusals.jsonl, when the command names its run
+            _record_refusal(args, envelope, getattr(error, "row_codes", ()))  # <run>/refusals.jsonl, when the command names its run
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}

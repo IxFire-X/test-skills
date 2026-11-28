@@ -80,7 +80,9 @@ def _journal_refusal(payload: Mapping[str, Any]) -> None:
     run, project = getattr(args, "run", None), getattr(args, "project", None)
     run = run if isinstance(run, str) and run else payload.get("run_id")
     if isinstance(run, str) and re.fullmatch(r"[0-9a-f]{32}", run) and project and local_path_text(str(project)):  # a run id, never a path
-        record_refusal(Path(str(project)).resolve() / ".pilot-runs" / run, args.command, payload.get("code") or payload.get("reason"), payload.get("stage"))
+        rows = payload.get("diagnostics")
+        record_refusal(Path(str(project)).resolve() / ".pilot-runs" / run, args.command, payload.get("code") or payload.get("reason"), payload.get("stage"),
+                       codes=[row.get("code") for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else ())
 
 
 def _print(payload: dict[str, Any]) -> None:

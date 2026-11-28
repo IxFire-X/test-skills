@@ -520,12 +520,11 @@ REFUSALS_BASIS = "по журналу (событие COMMAND_REFUSED); подр
 
 
 def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
-    """«Отказы»: the refusals are COUNTED BY THE JOURNAL — one ``COMMAND_REFUSED`` event per refusal, its digest the sha256 of the
-    line ``<run>/refusals.jsonl`` got (``{at, command, code, stage, batch}``, written by ``tools.api``).  The line gives the detail
-    (command, code, stage, batch) of the event it is bound to; an event whose line is gone or changed is counted all the same and
-    its detail is ``details_lost``; a line no event confirms is not counted and is named in ``mismatch`` (the agent can edit the file,
-    not the journal).  ``None`` when the run has no event, no file and no step measurements of v0.2 (no way to tell a clean run from one
-    before v0.2)."""
+    """«Отказы»: the refusals are COUNTED BY THE JOURNAL — one ``COMMAND_REFUSED`` event per refusal, its digest the sha256 of the line
+    ``<run>/refusals.jsonl`` got (``{at, command, code, stage, batch[, codes]}``, written by ``tools.api``).  The line gives the detail (command,
+    code, stage, batch, the codes of the rows) of the event it is bound to; an event whose line is gone or changed is counted all the same and its
+    detail is ``details_lost``; a line no event confirms is not counted and is named in ``mismatch`` (the agent can edit the file, not the journal).
+    ``None`` when the run has no event, no file and no step measurements of v0.2 (no way to tell a clean run from one before v0.2)."""
     import hashlib
 
     if events is None:
@@ -573,6 +572,8 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
             if value is not None:
                 counts[value] = counts.get(value, 0) + 1
         summary[name] = dict(sorted(counts.items()))
+    if found := [value for row in rows if isinstance(row.get("codes"), list) for value in row["codes"] if _identifier(value)]:  # R&D-29: the codes of the rows a bag code hides
+        summary["row_codes"] = {value: found.count(value) for value in sorted(set(found))}  # a run whose lines carry none (every run before) has no key
     pairs: dict[tuple[str, str], int] = {}
     for row in rows:
         pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")

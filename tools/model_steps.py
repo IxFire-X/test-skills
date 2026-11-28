@@ -172,7 +172,7 @@ def openspec_marker_requirements(run_root: Path, attempt_id: str) -> Mapping[str
     try:  # before the request is written: a refusal leaves no orphan request behind
         check_model_stage_artifact(stage, artifact)
     except ModelStageArtifactInvalid as error:  # the code wrote this answer: no answer of a model mends it
-        raise ModelStageArtifactInvalid(str(error).split("; fix: ", 1)[0] + "; fix: " + CODE_ANSWER_FIX) from None
+        raise ModelStageArtifactInvalid(str(error).split("; fix: ", 1)[0] + "; fix: " + CODE_ANSWER_FIX, error.row_codes) from None
     publish_code_step_request(run_root, attempt_id, stage, model_id=OPENSPEC_MODEL_ID, invocation_id=f"openspec-{attempt_id[:12]}", input_digests=head)
     return publish_model_stage_artifact(run_root, attempt_id, stage, artifact)
 

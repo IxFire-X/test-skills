@@ -132,9 +132,11 @@ def jsonl_lines(path: Path) -> list[bytes] | None:
     except OSError:
         return None
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")  # a stage or a batch id; anything else is not a label of the run
+_ROW_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")  # a code of a diagnostic row: an identifier, never a text, a path or a message
 
 
-def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None, spent: bool = False) -> None:
+def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None, spent: bool = False,
+                   codes: Iterable[object] = ()) -> None:
     """One line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
     invalid) of a command that names its run; the run report counts the file.  No content, no paths, no messages — the code
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
@@ -157,8 +159,10 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
             return
         stage = stage if isinstance(stage, str) and _LABEL.fullmatch(stage) else None
         batch = batch if isinstance(batch, str) and _LABEL.fullmatch(batch) else (stage.split(":", 1)[1] if stage and stage.startswith("tc-generator:") else None)
+        rows = sorted({str(item) for item in codes if isinstance(item, str) and _ROW_CODE.fullmatch(item)})  # the codes of the rows a bag code hides (R&D-29)
         row = {"at": utc_now_z(), "command": str(command),
-               "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent else {})}  # spent: the one retry of the stage was refused (a bool, no text)
+               "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent else {}),  # spent: the one retry of the stage was refused (a bool, no text)
+               **({"codes": rows} if rows else {})}
         path, project = root / _REFUSALS, root.parent.parent  # = run_store.project_of: this leaf does not load run_store
         line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8")
         from tools import pilot_state, run_lock

@@ -441,7 +441,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             + (f" and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else "")
             + "; fix: " + cause + "give the role its original input and this retry_prompt, then submit --transport-attempts 2 — "
             "nothing is written; retry_prompt:\n"
-            + retry_prompt(dict(value), diagnostics, "python -m tools.validate_artifact schemas/" + schema_name + " <файл ответа>")  # the name is one of the closed list above
+            + retry_prompt(dict(value), diagnostics, "python -m tools.validate_artifact schemas/" + schema_name + " <файл ответа>"),  # the name is one of the closed list above
+            row_codes=[str(row["code"]) for row in diagnostics],
         )
 
 
@@ -586,9 +587,14 @@ def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_dig
 
 
 class ModelStageArtifactInvalid(ValueError):
-    """A model answer that does not pass its schema; the message carries the retry_prompt."""
+    """A model answer that does not pass its schema; the message carries the retry_prompt, ``row_codes`` the codes of its rows (for the
+    journal of refusals only: identifiers, no text)."""
 
     code = "MODEL_STAGE_ARTIFACT_INVALID"
+
+    def __init__(self, message: str = "", row_codes: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.row_codes = tuple(row_codes)
 
 
 # public names of the same objects: what the modules above and ``pilot_state``'s callers take from here (П1 of the cut
