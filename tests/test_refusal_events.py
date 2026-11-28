@@ -108,11 +108,13 @@ def test_a_journal_that_does_not_pass_its_checks_takes_no_event_and_no_line(tmp_
 
 
 def test_a_dry_run_refusal_leaves_no_line_and_no_event(tmp_path: Path) -> None:
+    """A check writes neither the journal nor refusals.jsonl; its refusal is a line of dry-run-refusals.jsonl (campaign v0.8 C1)."""
     run = build_generated_run(tmp_path)
     before = _raw(run["run_root"])
     code, refused = _cycle("submit", run, "--dry-run")  # no prepare yet: a refusal
     assert code == 2
     assert _raw(run["run_root"]) == before and not (run["run_root"] / "refusals.jsonl").exists()
+    assert (run["run_root"] / "dry-run-refusals.jsonl").is_file()
 
 
 def test_the_events_between_the_others_change_no_reader_of_the_order(tmp_path: Path) -> None:

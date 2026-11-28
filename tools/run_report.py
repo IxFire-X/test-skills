@@ -532,15 +532,14 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
 
         events = pilot_state.derive_state(Path(root))["events"]
     confirmed = [event.get("artifact_digest") for event in events if event.get("event_type") == "COMMAND_REFUSED"]
-    from tools.json_cli import jsonl_lines
-
-    raw_lines = jsonl_lines(Path(root) / "refusals.jsonl")
+    from tools.json_cli import dry_run_refusals, jsonl_lines
+    raw_lines, dry = jsonl_lines(Path(root) / "refusals.jsonl"), dry_run_refusals(Path(root))  # the checks of --dry-run: counted apart, by their own file
     if raw_lines is None:
         # The file is created by the first refusal, so a clean run of v0.2 has none.  What only v0.2 writes is ``step-sizes.jsonl`` (it measures
         # every step it sends to the model): with it the run is v0.2 and had no refusal; without it there is no way to tell, and the report says so.
         from tools.step_size import RECORD
 
-        if not confirmed and not (Path(root) / RECORD).is_file():
+        if not confirmed and not dry and not (Path(root) / RECORD).is_file():
             return None
         raw_lines = []
     by_digest: dict[str, list[bytes]] = {}
@@ -579,6 +578,7 @@ def refusals(root: Path, events: Sequence[Mapping[str, Any]] | None = None) -> d
         pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")
         pairs[pair] = pairs.get(pair, 0) + 1
     summary["by_command_code"] = [{"command": command, "code": code, "count": count} for (command, code), count in sorted(pairs.items())]
+    summary.update({"dry_run": dry} if dry else {})  # only a run whose checks were refused has the key (every run before keeps its report)
     # a second request of a generator batch (the refusal MODEL_REQUEST_DUPLICATE of the old command, or the mark a repeated prepare leaves — no refusal) — the word of the first one is not shown again
     from tools.stage_steps import LOST_WORD_MARK
 

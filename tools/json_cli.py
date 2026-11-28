@@ -12,6 +12,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any, Iterable
 
 from tools.clock import utc_now_z
 from tools.fixes import CODE_ANSWER_FIX, CODE_ANSWER_HUMAN, RETRY_SPENT, SPENT_HUMAN, fix_for, human_for
@@ -86,6 +87,7 @@ _MODEL_REQUEST_FLAGS = ("--model-id", "--invocation-id", "--input-digest", "--re
 
 
 _REFUSALS = "refusals.jsonl"
+DRY_RUN_REFUSALS = "dry-run-refusals.jsonl"  # the refusals of ``submit --dry-run``: a line each, no event — the journal is not touched by a check
 
 
 def emit_json(payload: object, *, indent: int | None = None, sort_keys: bool = True, separators: tuple[str, str] | None = (",", ":")) -> None:
@@ -136,13 +138,15 @@ _ROW_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")  # a code of a diagnostic row:
 
 
 def record_refusal(run_root: object, command: str, code: object, stage: object = None, batch: object = None, spent: bool = False,
-                   codes: Iterable[object] = ()) -> None:
+                   codes: Iterable[object] = (), dry_run: bool = False) -> None:
     """One line ``{at, command, code, stage, batch}`` in ``<run>/refusals.jsonl`` for a refusal envelope (status error or
     invalid) of a command that names its run; the run report counts the file.  No content, no paths, no messages — the code
     of the refusal and where in the run it was met; without a known run nothing is written; a line that cannot be written
     never changes the refusal the agent gets. The line goes with a ``COMMAND_REFUSED`` event of the journal whose digest is the sha256 of
     the line's bytes — the report counts the events, the line only carries the detail.  Both under the lock of the run (2 s at most: a run
-    another command keeps longer gets neither), the event first: a journal that takes no event gets no line, so no line is ever alone."""
+    another command keeps longer gets neither), the event first: a journal that takes no event gets no line, so no line is ever alone.
+    ``dry_run`` (``submit --dry-run``, campaign v0.8 C1): the same line, without ``spent``, into ``DRY_RUN_REFUSALS`` and with no event — a check
+    writes neither the answer nor the journal; the report counts these lines apart (``refusals.dry_run``)."""
     from pathlib import Path
 
     from tools.confined_output import atomic_write_confined_bytes_at_root, read_confined_bytes
@@ -161,17 +165,30 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
         batch = batch if isinstance(batch, str) and _LABEL.fullmatch(batch) else (stage.split(":", 1)[1] if stage and stage.startswith("tc-generator:") else None)
         rows = sorted({str(item) for item in codes if isinstance(item, str) and _ROW_CODE.fullmatch(item)})  # the codes of the rows a bag code hides (R&D-29)
         row = {"at": utc_now_z(), "command": str(command),
-               "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent else {}),  # spent: the one retry of the stage was refused (a bool, no text)
+               "code": str(code or "INVALID"), "stage": stage, "batch": batch, **({"spent": True} if spent and not dry_run else {}),  # spent: the one retry of the stage was refused (a bool, no text)
                **({"codes": rows} if rows else {})}
-        path, project = root / _REFUSALS, root.parent.parent  # = run_store.project_of: this leaf does not load run_store
+        path, project = root / (DRY_RUN_REFUSALS if dry_run else _REFUSALS), root.parent.parent  # = run_store.project_of: this leaf does not load run_store
         line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8")
         from tools import pilot_state, run_lock
 
-        with run_lock.for_one_read(project, root, wait=2.0):  # the fact is the event, bound to its line by the digest: written first
-            pilot_state.append_event(root, "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
+        with run_lock.for_one_read(project, root, wait=2.0):  # the fact is the event, bound to its line by the digest: written first (a check has none)
+            if not dry_run:
+                pilot_state.append_event(root, "COMMAND_REFUSED", actor="controller", artifact_digest="sha256:" + hashlib.sha256(line).hexdigest())
             atomic_write_confined_bytes_at_root(project, root, path, (read_confined_bytes(project, root, path) or b"") + line + b"\n")
     except (OSError, ValueError, KeyError, TypeError):
         return
+
+
+def dry_run_refusals(root: Path) -> dict[str, Any] | None:
+    """``refusals.dry_run`` of report.json: the refusals of ``submit --dry-run`` by their file — ``total``, ``by_code`` and, when a line carries
+    them, ``row_codes`` (lines per code).  No event stands behind them: the count is the file's.  None when the run has no such line."""
+    rows = [row for row in jsonl_rows(Path(root) / DRY_RUN_REFUSALS) if isinstance(row, dict)]
+    if not rows:
+        return None
+    count = lambda values: {value: values.count(value) for value in sorted(set(values))}  # noqa: E731
+    found = [str(code) for row in rows if isinstance(row.get("codes"), list) for code in row["codes"] if isinstance(code, str) and _ROW_CODE.fullmatch(code)]
+    return {"total": len(rows), "by_code": count([str(row["code"]) for row in rows if isinstance(row.get("code"), str) and _ROW_CODE.fullmatch(row["code"])]),
+            **({"row_codes": count(found)} if found else {})}
 
 
 def spent_stages(run_root: object) -> set[str]:

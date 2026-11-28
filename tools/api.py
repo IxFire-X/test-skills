@@ -156,7 +156,7 @@ _HELP = {  # what ``--help`` says of the flags of the two commands of the cycle 
     ("submit", "run_root"): "папка прогона: .pilot-runs/<run_id> (её печатает scan)",
     ("submit", "stage"): "стадия, ответ которой лежит в answer_slot после prepare",
     ("submit", "transport_attempts"): "1 (по умолчанию) или 2: единственный повтор стадии после отказа ответа",
-    ("submit", "dry_run"): "проверить ответ и ничего не записать",
+    ("submit", "dry_run"): "проверить ответ, не записывая его (отказ попадёт в отчёт)",
     ("submit", "abort"): "завершить стадию без ответа: REVIEW_CONTEXT_LIMIT или REVIEW_UNUSABLE (ревью), REWORK_UNUSABLE (доработка)",
 }
 
@@ -193,14 +193,14 @@ def _print(payload: Mapping[str, Any]) -> None:
     emit_json(payload)  # a reader that went away is no fault of the command: the refusal is still recorded and returned
 
 
-def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any], row_codes: Sequence[str] = ()) -> None:
+def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any], row_codes: Sequence[str] = (), dry_run: bool = False) -> None:
     rows = envelope.get("diagnostics")
     if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
         return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
     codes = [*(row.get("code") for row in rows if isinstance(row, Mapping)), *row_codes] if isinstance(rows, list) else list(row_codes)
     record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), spent=str(envelope.get("fix") or "").startswith(RETRY_SPENT),
-                   codes=codes)
+                   codes=codes, dry_run=dry_run)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -217,8 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         envelope = {**error_envelope(error), "command": args.command,
                     **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})}
         _print(envelope)
-        if not dry_run:  # a dry run leaves no file behind, a refusal line included
-            _record_refusal(args, envelope, getattr(error, "row_codes", ()))  # <run>/refusals.jsonl, when the command names its run
+        # <run>/refusals.jsonl with its event, when the command names its run; a dry run: a line of dry-run-refusals.jsonl, no event, no answer written
+        _record_refusal(args, envelope, getattr(error, "row_codes", ()), dry_run)
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     payload["result"] = plain(result)
     _print(payload)
     if status == "invalid":
-        _record_refusal(args, payload)
+        _record_refusal(args, payload, dry_run=dry_run)
     return 1 if status == "invalid" else 0
 
 
