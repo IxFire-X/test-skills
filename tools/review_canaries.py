@@ -713,7 +713,8 @@ def summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any] | None = 
 
 
 def status_fields(run_root: Path, attempt_id: str, status: Mapping[str, Any]) -> dict[str, Any]:
-    """The fields ``status`` adds once the reviewer's answer is recorded: the outcome, REVIEW_UNRELIABLE and, then, ``accepted`` false."""
+    """The fields ``status`` adds once the reviewer's answer is recorded: the outcome and REVIEW_UNRELIABLE — a warning with the numbers;
+    ``accepted`` stays the sealed result's (the canaries are a sampled measure, no gate of acceptance)."""
     try:
         answer = recorded_answer(run_root, attempt_id)
     except (OSError, KeyError, TypeError, ValueError):
@@ -726,8 +727,6 @@ def status_fields(run_root: Path, attempt_id: str, status: Mapping[str, Any]) ->
         fields["warnings"] = [*(status.get("warnings") or []), found["warning"]]
     if found["status"] == "UNRELIABLE":
         fields["review_unreliable"] = True
-        if "accepted" in status:
-            fields["accepted"] = False
     return fields
 
 

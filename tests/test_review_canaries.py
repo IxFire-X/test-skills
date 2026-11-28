@@ -5,8 +5,8 @@
 - the map ``<sha>.canaries.json`` is read through the receipt ``review-canaries`` (a journal event pair): a map, a view or a
   receipt that does not match is ``REVIEW_CANARY_MISMATCH``, never «0 hits»; a run without the receipt is NOT_SEEDED;
 - a finding (any severity) or an edit of a canary text is a hit; an edit whose ``old`` is the mutated text never reaches the canon;
-- a verdict that stands on canaries alone is refused before the answer is written;
-- the soft threshold: under a third caught — REVIEW_UNRELIABLE and accepted=false in report and status, more than (n−1)//3 missed — weak,
+- fixes that stand on canaries alone accept the set as is (no refusal, no retry);
+- the soft threshold: under a third caught — REVIEW_UNRELIABLE, a warning (accepted as sealed everywhere), more than (n−1)//3 missed — weak,
   fewer — mostly caught, all — fine (up to three errors this is "0 — unreliable, 1..n-1 — weak, all — fine").
 
 The flow tests seed fixed canaries (``_fake_seed``): the generator fixture of these tests has no assertions to mutate."""
@@ -643,7 +643,10 @@ def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_pa
 # the report and the status
 # --------------------------------------------------------------------------------------
 
-def test_zero_hits_make_the_review_unreliable_in_the_report_and_the_status_and_not_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_zero_hits_make_the_review_unreliable_and_finish_the_result_the_status_and_the_report_say_one_accepted(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_finish import _finish
+
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
     done = _select(run, _answer(run))  # ПРИНЯТО, no finding: the verdict stands
@@ -651,12 +654,22 @@ def test_zero_hits_make_the_review_unreliable_in_the_report_and_the_status_and_n
     assert "REVIEW_UNRELIABLE" in done["review_warnings"]
     report, _warnings = build_report(run["project"], run["run_root"].name)
     assert report["review_canaries"] == {**done["review_canaries"]} and "REVIEW_UNRELIABLE" in report["warnings"]
-    assert report["counts"]["accepted"] is False
     text = render_markdown(report)
     assert "REVIEW_UNRELIABLE" in text and "сигнал качества ревью, не защита" in text
     assert "delta = 1" not in json.dumps(report, ensure_ascii=False)  # the map itself is not in the report
     status = _status_result(run["project"], run["run_root"].name)
     assert status["review_unreliable"] is True and status["review_canaries"]["caught"] == 0 and "REVIEW_UNRELIABLE" in status["warnings"]
+    _code, finished = _finish(run["project"], run["run_root"], capsys)
+    sealed = json.loads((run["run_root"] / "terminal-results" / f"{run['attempt_id']}.json").read_text(encoding="utf-8"))["accepted"]
+    after = (_status_result(run["project"], run["run_root"].name)["accepted"], build_report(run["project"], run["run_root"].name)[0]["counts"]["accepted"])
+    assert (finished["accepted"], *after) == (sealed, sealed, sealed)  # one truth: the warning never rewrites accepted
+
+
+def test_an_unreliable_review_leaves_accepted_as_it_is(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(review_canaries, "recorded_answer", lambda *_args: {"artifacts": {}})
+    monkeypatch.setattr(review_canaries, "summary", lambda *_args: {"status": "UNRELIABLE", "warning": "REVIEW_UNRELIABLE"})
+    fields = review_canaries.status_fields(Path("."), "a" * 32, {"accepted": True, "warnings": []})
+    assert fields["review_unreliable"] is True and "accepted" not in fields
 
 
 def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

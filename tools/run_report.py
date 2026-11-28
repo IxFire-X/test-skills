@@ -641,7 +641,7 @@ RECEIPT_WARNINGS = {"RUN_OF_OTHER_VERSION": "прогон сделан друг�
                     "RECEIPTS_UNREADABLE": "квитанции прогона не прочитаны — часть итогов в отчёте может быть пустой"}
 _WARNING_TEXT = {**RECEIPT_WARNINGS, "CODEWORD_LOST": "запрос генератора повторяли (prepare): слово первого запроса показывают один раз — если вывод потерян, генератор шёл без слова, и «слово не названо» у ревьюера ничего не доказывает",
                  "refusals.mismatch": "файл refusals.jsonl и журнал расходятся (строка без события или событие без строки) — число отказов взято из журнала, подробности смотри в отчёте",
-                 "REVIEW_UNRELIABLE": "ревью ненадёжно, accepted=false",
+                 "REVIEW_UNRELIABLE": "ревью ненадёжно: перед импортом в Zephyr просмотрите кейсы сами",
                  "REVIEW_WEAK": "ревью слабое",
                  "REVIEW_UNMEASURED": "ревью не измерено канарейками (прогон открыт до P7)",
                  "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией журнала",
@@ -1114,7 +1114,6 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
     reviewed_from = next((str(call.get("reused_from") or "")[:8] for call in calls if call.get("stage") == "tc-reviewer:canonical" and call.get("by") == "reuse"), None)
     if reviewed_from:  # the review is the source's: the word of this run's generator was never compared with it
         codeword = "reused"
-    unreliable = canaries is not None and canaries.get("status") == "UNRELIABLE"
     if codeword == "named":
         review = "ревью в той же сессии (SELF): ревьюер назвал контрольное слово генератора"
     elif terminal.get("review_independence") == "SELF":
@@ -1174,7 +1173,7 @@ def build_report(project: Path, run_id: str, kept: dict[int, Any] | None = None)
             "execution": execution.get("verdict") or terminal.get("verification"),
             "execution_duration_sec": (execution.get("stats") or {}).get("duration_sec"),
             "completion": terminal.get("completion"), "coverage": terminal.get("coverage"),
-            "accepted": False if unreliable else terminal.get("accepted"),  # REVIEW_UNRELIABLE — not accepted (the sealed result is the terminal's)
+            "accepted": terminal.get("accepted"),  # the sealed result's; REVIEW_UNRELIABLE is a warning of its own
             # calls a model made, and answers reused from an earlier run with the input bytes not sent
             "model_calls": sum(1 for call in calls if call.get("by") == "model"),
             "code_steps": sum(1 for call in calls if call.get("by") == "code"),
