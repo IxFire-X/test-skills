@@ -441,6 +441,16 @@ def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence
                                                                      "input_digests": list(input_digests)}, value)
 
 
+def _fragment_fix(own: str | None, retry: str) -> str:
+    """The fix of a refused fragment at submit: the check's own fix and the way to the one retry — named once.  A fix that names the
+    retry already gets only its flag and the tail (campaign v0.8 C1, finding 3: «…единственным повтором стадии; отдай … единственным повтором стадии»)."""
+    once = "единственным повтором стадии"
+    if not own or once not in own:
+        return (own + "; " if own else "исправь фрагмент и ") + retry
+    fix = own if "--transport-attempts 2" in own else own.replace(once, once + " (--transport-attempts 2)", 1)
+    return fix if "ничего не записано" in fix else fix + ", ничего не записано"
+
+
 def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     """The checks of an answer that need no journal — the requirement order and the schema of the stage — for code
     that builds an answer itself (the import of cases), before it writes the request."""
@@ -682,8 +692,7 @@ def _publish_model_stage_artifact(
         except BatchAssemblyError as error:
             retry = "отдай исправленный фрагмент единственным повтором стадии (--transport-attempts 2), ничего не записано"
             rows = getattr(error, "diagnostics", ())  # the whole list, each row with its fix
-            raise BatchAssemblyError(error.code, error.detail + "; fix: исправь фрагмент и " + retry, rows,
-                                     (getattr(error, "fix", None) + "; " if getattr(error, "fix", None) else "исправь фрагмент и ") + retry) from error
+            raise BatchAssemblyError(error.code, error.detail + "; fix: исправь фрагмент и " + retry, rows, _fragment_fix(getattr(error, "fix", None), retry)) from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     labels_note = None

@@ -445,6 +445,14 @@ def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, 
     return value
 
 
+def _group_input(item: dict[str, Any], positions: dict[str, int]) -> dict[str, Any]:
+    """An input as the group compares it: its source by ``_group_value``; of a literal also without ``semantic_type`` — the type of a
+    literal is the type of its value (SEMANTIC_TYPE_MISMATCH binds the two in each case), and the value is what the variants differ in:
+    «null» and «""» of one parameter are one group, not a loop of two fixes that pull apart (campaign v0.8 C1)."""
+    left = {"input_id", "semantic_type"} if item["source"]["kind"] == "literal" else {"input_id"}
+    return {**{key: value for key, value in item.items() if key not in left}, "source": _group_value(item["source"], positions)}
+
+
 def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]:
     """The case without what its variants may differ in — literal values, human texts and document-global ids; of a group with an imported case also the fields each such case has of its own."""
     positions = {step["step_id"]: index for index, step in enumerate(case["steps"])}
@@ -452,8 +460,7 @@ def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]
     steps = []
     for step in case["steps"]:
         shape = {key: value for key, value in step.items() if key not in {"step_id", "action", "test_data"}}
-        shape["inputs"] = [{**{key: value for key, value in item.items() if key != "input_id"}, "source": _group_value(item["source"], positions)}
-                           for item in step["inputs"]]
+        shape["inputs"] = [_group_input(item, positions) for item in step["inputs"]]
         shape["automation_blockers"] = [{key: value for key, value in item.items() if key != "blocker_id"} for item in step["automation_blockers"]]
         # step references inside a case: input sources, assertion actual and expected (exists/not_exists has no expected)
         shape["expectations"] = [{"display_order": expectation["display_order"], "assertions": [
@@ -465,7 +472,7 @@ def _group_shape(case: dict[str, Any], imported: bool = False) -> dict[str, Any]
     shape = {**{key: value for key, value in case.items() if key not in free}, "steps": steps}
     if "setup" in case:  # 1.2.0: the setup of the members is one — the same operations, its ids and literal values aside
         shape["setup"] = [{**{key: value for key, value in item.items() if key != "setup_id"},
-                           "inputs": [{**{key: value for key, value in row.items() if key != "input_id"}, "source": _group_value(row["source"], positions)} for row in item["inputs"]]}
+                           "inputs": [_group_input(row, positions) for row in item["inputs"]]}
                           for item in case["setup"]]
     return shape
 
