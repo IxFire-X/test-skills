@@ -15,8 +15,8 @@ import re
 import uuid
 from typing import Any, Mapping, Sequence
 
-from tools import execution_gate
-from tools.confined_output import is_reparse as _is_reparse
+from tools import execution_gate, run_lock
+from tools.confined_output import is_reparse as _is_reparse, read_confined_bytes
 from tools.digests import digest_bytes as _digest_bytes, json_digest
 from tools.existing_tests import own_tests
 from tools.fixes import fix_for
@@ -790,23 +790,25 @@ def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path]
     for root in sorted(path for path in runs.iterdir() if path.is_dir()):
         if root in skip:  # a cut run the scan could not finish - the caller named it
             continue
-        try:
-            stored = pilot.read_run(root)["manifest"].get("scan_request")
+        try:  # the manifest is never rewritten: its request is read without the lock, so only a run of the same request is taken (and waited for)
+            manifest = json.loads(read_confined_bytes(project, root, root / "run-manifest.json") or b"{}")
+            stored = manifest.get("scan_request") if isinstance(manifest, dict) else None
             if not isinstance(stored, Mapping) or _request_key(project, stored) != key:
                 continue
-            state = pilot.derive_state(root)
-            if not state["attempts"]:
-                continue
-            attempt = state["attempts"][-1]
-            selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
-                           for event in state["events"])
-            if not selected and attempt.get("state") != "TERMINAL":  # a scan cut before its first context batch
-                abandoned.append(f"{root.name} (scan оборван до первой пачки контекста)")
-            if selected and attempt.get("state") != "TERMINAL":
-                why = _left_mark(root) or _abandoned(project, root, attempt)
-                if why is None:
-                    return root, abandoned
-                abandoned.append(f"{root.name} ({why})")
+            with run_lock.for_one_read(project, root.resolve()):  # for this look only, not to the end of the scan (the journal checks the manifest)
+                state = pilot.derive_state(root)
+                if not state["attempts"]:
+                    continue
+                attempt = state["attempts"][-1]
+                selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
+                               for event in state["events"])
+                if not selected and attempt.get("state") != "TERMINAL":  # a scan cut before its first context batch
+                    abandoned.append(f"{root.name} (scan оборван до первой пачки контекста)")
+                if selected and attempt.get("state") != "TERMINAL":
+                    why = _left_mark(root) or _abandoned(project, root, attempt)
+                    if why is None:
+                        return root, abandoned
+                    abandoned.append(f"{root.name} ({why})")
         except (OSError, KeyError, TypeError, ValueError):
             continue
     return None, abandoned

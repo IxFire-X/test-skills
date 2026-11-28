@@ -171,15 +171,18 @@ def truncated_message(byte_count: int) -> str:
 
 
 def record_output(project: Path, root: Path, step: str, response_digest: str, raw_bytes: int) -> None:
-    """The raw answer size by its journal digest, for the report (only sizes; never fails the step)."""
-    from tools.confined_output import atomic_write_confined_bytes_at_root
+    """The raw answer size by its journal digest, for the report (only sizes; never fails the step); under the lock of the run."""
+    from tools import run_lock
+    from tools.confined_output import atomic_write_confined_bytes_at_root, read_confined_bytes
 
     try:
-        path = Path(root) / OUTPUT_SIZES
-        before = path.read_bytes() if path.is_file() else b""
+        project, root = Path(project).resolve(), Path(root).resolve()
+        path = root / OUTPUT_SIZES
         row = {"step": step, "response_digest": response_digest, "raw_bytes": int(raw_bytes),
                "at": utc_now_z()}
-        atomic_write_confined_bytes_at_root(Path(project), Path(root), path, before + json.dumps(row, sort_keys=True).encode("utf-8") + b"\n")
+        with run_lock.for_one_read(project, root):  # a submit holds its run already: no wait there
+            before = read_confined_bytes(project, root, path) or b""
+            atomic_write_confined_bytes_at_root(project, root, path, before + json.dumps(row, sort_keys=True).encode("utf-8") + b"\n")
     except (OSError, ValueError):
         pass
 
@@ -1038,8 +1041,9 @@ def measure(project: Path, files: Iterable[Path], role: str | None = None, *, to
 
 
 def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str:
-    """Append one measurement to ``<run>/step-sizes.jsonl`` (only the step, sizes and the code)."""
-    from tools.confined_output import atomic_write_confined_bytes_at_root
+    """Append one measurement to ``<run>/step-sizes.jsonl`` (only the step, sizes and the code), under the lock of the run."""
+    from tools import run_lock
+    from tools.confined_output import atomic_write_confined_bytes_at_root, read_confined_bytes
 
     project = Path(project).resolve()
     try:
@@ -1052,9 +1056,9 @@ def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str
                                         "fits", "warning")}
     row.update(step=step, at=utc_now_z())
     path = root / RECORD
-    before = path.read_bytes() if path.is_file() else b""
     line = json.dumps(row, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
-    atomic_write_confined_bytes_at_root(project, root, path, before + line)
+    with run_lock.for_one_read(project, root.resolve()):  # the command step_size holds no run: it waits for the one that writes it, as any command
+        atomic_write_confined_bytes_at_root(project, root, path, (read_confined_bytes(project, root, path) or b"") + line)
     return str(path)
 
 

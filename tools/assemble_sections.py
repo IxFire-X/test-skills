@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools import output_guard
+from tools import output_guard, run_lock
 from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser
 from tools.run_lock import JournalRefusal
@@ -175,7 +175,8 @@ def where(project: Path, doc: str) -> dict[str, Any]:
     for item in sorted((project / ".pilot-runs").iterdir()) if (project / ".pilot-runs").is_dir() else []:
         if re.fullmatch(r"[0-9a-f]{32}", item.name) and item.is_dir():
             try:
-                runs.append(_facts(project, item.name))
+                with run_lock.for_one_read(project, item.resolve()):  # for this read only: the command does not keep every run of the project
+                    runs.append(_facts(project, item.name))
             except (AssembleRefused, JournalRefusal) as error:  # a run that cannot be read now (busy, damaged) may have been the answer to a section: said, with its code
                 unreadable.append({"run_id": item.name, "code": str(getattr(error, "code", "ASSEMBLE_RUN"))})
     runs.sort(key=lambda fact: fact["started"])

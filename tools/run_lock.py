@@ -60,12 +60,12 @@ def hold(project: Path, root: Path) -> None:
         _HELD[key] = descriptor
 
 
-def _take(project: Path, root: Path) -> int | None:
-    """The locked descriptor of the run, after a wait of up to ``WAIT_SECONDS``; None for a run without its manifest."""
+def _take(project: Path, root: Path, wait: float | None = None) -> int | None:
+    """The locked descriptor of the run, after a wait of up to ``wait`` (``WAIT_SECONDS``); None for a run without its manifest."""
     descriptor = open_confined_lock_descriptor(project, root, Path(root) / "run-manifest.json")
     if descriptor is None:
         return None
-    deadline = time.monotonic() + WAIT_SECONDS
+    deadline = time.monotonic() + (WAIT_SECONDS if wait is None else wait)
     while not _try_lock(descriptor):
         if time.monotonic() >= deadline:
             os.close(descriptor)
@@ -93,14 +93,14 @@ class for_one_read:  # noqa: N801 — used as a function: ``with run_lock.for_on
     """The lock of another run for one read only (the receipts of the earlier runs of the project): taken as ``hold`` takes it — a short
     command of another process is waited for, a run busy past ``WAIT_SECONDS`` is ``CONCURRENT_WRITER`` and the reader counts it unread
     — and given back after the read, so a scan does not keep every old run of the project.  A run this process already holds stays held
-    (``hold`` inside is a no-op)."""
+    (``hold`` inside is a no-op).  ``wait`` — shorter for a look that may skip a busy run (a suggestion), None for ``WAIT_SECONDS``."""
 
-    def __init__(self, project: Path, root: Path) -> None:
-        self._project, self._key, self._descriptor = project, str(root), None
+    def __init__(self, project: Path, root: Path, wait: float | None = None) -> None:
+        self._project, self._key, self._descriptor, self._wait = project, str(root), None, wait
 
     def __enter__(self) -> None:
         if _ENABLED and self._key not in _HELD:
-            self._descriptor = _take(self._project, Path(self._key))
+            self._descriptor = _take(self._project, Path(self._key), self._wait)
             if self._descriptor is not None:
                 _HELD[self._key] = self._descriptor
 

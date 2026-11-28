@@ -75,6 +75,8 @@ def _journal_refusal(payload: Mapping[str, Any]) -> None:
     from tools.output_guard import local_path_text
 
     args = _ARGS[0] if _ARGS else None
+    if getattr(args, "command", None) in ("status", "report"):  # a command that only reads leaves the run as it found it, its refusal included
+        return
     run, project = getattr(args, "run", None), getattr(args, "project", None)
     run = run if isinstance(run, str) and run else payload.get("run_id")
     if isinstance(run, str) and re.fullmatch(r"[0-9a-f]{32}", run) and project and local_path_text(str(project)):  # a run id, never a path

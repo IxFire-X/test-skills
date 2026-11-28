@@ -16,7 +16,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
-from tools import execution_gate
+from tools import execution_gate, run_lock
 from tools.confined_output import OutputConfinementError, read_confined_bytes
 from tools.fixes import CLOSE_RUN_FIX, REVIEW_CHAIN
 from tools.schema_validation import StrictJsonError, loads_json_strict
@@ -590,35 +590,35 @@ def _strict(run_id: str, name: str, read: Callable[[], Any]) -> Any:
         raise ReuseSourceInvalid(f"REUSE_SOURCE_INVALID: {name} прогона {run_id}: {str(error)[:200]}") from error
 
 
-def _run_source(project: Path, run_id: str, whole: bool = True) -> dict[str, Any]:
+def _run_source(project: Path, run_id: str, whole: bool = True, wait: float | None = None) -> dict[str, Any]:
     """The earlier run with a recorded context marker: attempt, verdict, drift and every model stage it answered (request, answer digest), the whole journal
-    and every answer read strictly (``whole``; the scan looks at the markers of every earlier run and reads the rest of one).  Reads only: a run with pending
-    journal events is refused, so nothing is recovered or written in the source run."""
+    and every answer read strictly (``whole``; the scan looks at the markers of every earlier run and reads the rest of one).  Reads only, under the lock of that
+    run for this read only (``wait``: a suggestion skips a busy run): a run with pending journal events is refused, nothing is recovered or written there."""
     root = project / ".pilot-runs" / run_id
     if not re.fullmatch(r"[0-9a-f]{32}", run_id) or not (root / "events.jsonl").is_file():
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: нет прогона {run_id} в {project / '.pilot-runs'}")
     if (root / "pending-events").is_dir() and any((root / "pending-events").glob("*.json")):
         raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: журнал прогона {run_id} не закрыт")
-    _project, root = _strict(run_id, "run-manifest.json", lambda: _run_root(root))
-    state = _strict(run_id, "events.jsonl", lambda: derive_state(root))
-    for attempt in reversed(state["attempts"]):
-        attempt_id = str(attempt["attempt_id"])
-        stages: dict[str, tuple[Mapping[str, Any], str]] = {}
-        for event in state["events"]:
-            stage = str(event.get("stage_instance_id") or "")
-            if event.get("attempt_id") != attempt_id or not stage or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or not (whole or stage.startswith("context-marker:")):
-                continue
-            asked = next((item for item in state["events"] if item.get("attempt_id") == attempt_id and item["event_type"] == "MODEL_REQUESTED"
-                          and item.get("stage_instance_id") == stage), None)
-            stages[stage] = (_strict(run_id, f"model-requests ({stage})", lambda: _read_model_request_with_state(project, root, state, attempt_id, stage, str(asked["artifact_digest"]))),
-                             str(event["artifact_digest"]))
-        if "context-marker:baseline" in stages:
-            for stage, (_request, response) in (stages.items() if whole else ()):  # bytes = digest, every answer of the source
-                _strict(run_id, f"model-stage-artifacts ({stage})", lambda: _read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, response))
-            return {"run_id": run_id, "root": root, "state": state, "attempt": attempt, "stages": stages, "pack": stages["context-marker:baseline"][0].get("skill_pack_digest"),
-                    "verdict": _strict(run_id, "model-stage-artifacts (tc-reviewer:canonical)", lambda: _review_verdict(project, root, state, attempt_id)),
-                    "drift": _has_drifted(root, attempt_id)}
-    raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {_REUSE_FREE} — в прогоне {run_id} нет записанной разметки")
+    with run_lock.for_one_read(project, root.resolve(), wait):
+        _project, root = _strict(run_id, "run-manifest.json", lambda: _run_root(root))
+        state = _strict(run_id, "events.jsonl", lambda: derive_state(root))
+        for attempt in reversed(state["attempts"]):
+            attempt_id = str(attempt["attempt_id"])
+            stages: dict[str, tuple[Mapping[str, Any], str]] = {}
+            for event in state["events"]:
+                stage = str(event.get("stage_instance_id") or "")
+                if event.get("attempt_id") != attempt_id or not stage or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or not (whole or stage.startswith("context-marker:")):
+                    continue
+                asked = next((item for item in state["events"] if item.get("attempt_id") == attempt_id and item["event_type"] == "MODEL_REQUESTED" and item.get("stage_instance_id") == stage), None)
+                stages[stage] = (_strict(run_id, f"model-requests ({stage})", lambda: _read_model_request_with_state(project, root, state, attempt_id, stage, str(asked["artifact_digest"]))),
+                                 str(event["artifact_digest"]))
+            if "context-marker:baseline" in stages:
+                for stage, (_request, response) in (stages.items() if whole else ()):  # bytes = digest, every answer of the source
+                    _strict(run_id, f"model-stage-artifacts ({stage})", lambda: _read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, response))
+                return {"run_id": run_id, "root": root, "state": state, "attempt": attempt, "stages": stages, "pack": stages["context-marker:baseline"][0].get("skill_pack_digest"),
+                        "verdict": _strict(run_id, "model-stage-artifacts (tc-reviewer:canonical)", lambda: _review_verdict(project, root, state, attempt_id)),
+                        "drift": _has_drifted(root, attempt_id)}
+        raise ModelReuseRefused(f"MODEL_REUSE_REFUSED: {_REUSE_FREE} — в прогоне {run_id} нет записанной разметки")
 
 
 def _source_refusal(source: Mapping[str, Any], module: str, family: str = "marker") -> str | None:
@@ -961,7 +961,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     runs = [path for path in (project / ".pilot-runs").iterdir() if path.name != root.name and (path / "events.jsonl").is_file()]
     for path in sorted(runs, key=lambda item: (item / "events.jsonl").stat().st_mtime, reverse=True):
         try:
-            source = _run_source(project, path.name, whole=False)
+            source = _run_source(project, path.name, whole=False, wait=1.0)  # a busy run is not offered this time
             refusal = _source_refusal(source, str(attempt.get("module")))  # a run whose files do not read is skipped, the search goes on
         except (ValueError, OSError, KeyError, TypeError, StopIteration):
             continue
@@ -993,7 +993,7 @@ def _marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
                 rows.append({"stage": stage, "response_digest": source["stages"][stage][1],
                              "command": f"python -m tools.api prepare --run-root {printed(root)} --stage {stage} --reuse-from {path.name}"})
             try:
-                whole = _run_source(project, path.name)  # the one source offered is read whole, for its cases
+                whole = _run_source(project, path.name, wait=1.0)  # the one source offered is read whole, for its cases
             except ValueError as error:
                 more, flag = [], {"cases": {"reused": False, "reason": str(error)}}
             else:
