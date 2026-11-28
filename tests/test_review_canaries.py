@@ -390,6 +390,35 @@ def test_the_report_says_how_many_blocking_findings_were_on_canaries_and_that_th
     assert "блокирующих замечаний" not in "\n".join(_canary_lines({"review_canaries": {**base, "blocking": 0}}))
 
 
+UNRELIABLE_TEXT = "ревью ненадёжно: перед импортом в Zephyr просмотрите кейсы сами"  # approved 28.11
+PACK = Path(__file__).resolve().parents[1]
+
+
+def _flat(name: str) -> str:
+    return " ".join((PACK / name).read_text(encoding="utf-8").split())
+
+
+def test_the_line_of_an_unreliable_review_is_the_approved_one() -> None:
+    from tools.run_report import _WARNING_TEXT
+
+    assert _WARNING_TEXT["REVIEW_UNRELIABLE"] == UNRELIABLE_TEXT
+    assert _warning_line("REVIEW_UNRELIABLE", {"review_canaries": {"seeded": 3, "caught": 0}}) == (
+        f"- REVIEW_UNRELIABLE: поймано 0 из 3 контрольных ошибок (канареек) в виде ревьюера — {UNRELIABLE_TEXT}")
+
+
+def test_usage_says_an_unreliable_review_leaves_the_set_accepted() -> None:
+    assert "`REVIEW_UNRELIABLE` (вердикт стоит, набор принят; перед импортом просмотрите кейсы сами)" in _flat("USAGE.md")  # approved 28.11
+
+
+def test_usage_says_fixes_on_control_errors_alone_are_accepted_as_is() -> None:
+    assert ("ответ ревью, чьи правки держались только на контрольных ошибках, принимается как есть (набор не меняется, повтора нет)"
+            in _flat("USAGE.md"))  # approved 28.11
+
+
+def test_the_stops_of_how_to_use_have_no_refusal_of_fixes_on_control_errors() -> None:
+    assert "REVIEW_ONLY_CANARY_FIXES" not in (PACK / "HOW-TO-USE.md").read_text(encoding="utf-8")  # the row is gone, approved 28.11
+
+
 def test_the_warning_of_an_unreliable_review_names_how_many_control_errors_were_caught() -> None:
     line = _warning_line("REVIEW_UNRELIABLE", {"review_canaries": {"seeded": 8, "caught": 2}})
     assert "поймано 2 из 8" in line and "ни одна" not in line
